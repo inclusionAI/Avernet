@@ -69,9 +69,26 @@ def relay_routes(prefix: str) -> tuple[str, ...]:
     return (prefix, f"{prefix}/{{full_path:path}}")
 
 
-#: A WebSocket handshake is an HTTP ``GET``; route security is resolved for it
-#: the same way it is for any other request.
-_HANDSHAKE_METHOD = "GET"
+#: The method a handshake is authenticated under.
+#:
+#: A WebSocket handshake *is* an HTTP ``GET`` on the wire, and this used to say
+#: so. It cannot any longer: the route-security table is plane-blind, so a rule
+#: written for the socket also governs an ordinary request to the same path, and
+#: a socket prefix now sits **inside** an authenticated HTTP prefix rather than
+#: beside it as its own top-level domain.
+#:
+#: Authenticating under ``GET`` there would mean the socket's deliberate "no
+#: identity required" exemption — the credential rides in the handshake query,
+#: because a browser's WebSocket API can attach no headers — silently applied to
+#: HTTP requests on that prefix too. Those no longer 404: they fall through to
+#: the broader domain and reach its upstream, so the exemption would let an
+#: unauthenticated caller forward a request there.
+#:
+#: A distinct method keeps the exemption to the plane it was written for. The
+#: table's keys already carry an optional method qualifier, so this is expressed
+#: as ``WEBSOCKET /path`` and an HTTP ``GET`` to the same path simply does not
+#: match it — falling to whatever rule governs the prefix above.
+_HANDSHAKE_METHOD = "WEBSOCKET"
 
 # Refusals, all of them *before* the client is accepted. A close code is not
 # transmitted on a handshake that never completed — a real client sees an HTTP

@@ -73,9 +73,13 @@ domains is the point.
       socket — and that declaration participates in *selecting* the domain, not
       only in checking one already selected. A path claimed for one plane must
       leave the other plane's resolution of that same path untouched.
-- [ ] The socket prefix requires no caller identity; every other path under
-      `/openapi/v1/bots/**` still requires an authenticated user. The exemption
-      is written down explicitly rather than inferred.
+- [ ] A **handshake** to the socket prefix requires no caller identity; every
+      other path under `/openapi/v1/bots/**` still requires an authenticated
+      user. The exemption is written down explicitly rather than inferred.
+- [ ] The exemption reaches the socket plane **only**. An ordinary HTTP request
+      to the socket prefix — including one whose path carries `..` segments that
+      normalise outside it — still requires an authenticated user, because it is
+      forwarded to the backend rather than refused.
 - [ ] `GET /openapi/v1/bots/connection/{bot_id}` publishes socket URLs at the new
       address. Its own path, name, and response shape are unchanged.
 - [ ] The existing evasion guards still hold at the longer prefix: a handshake
@@ -151,6 +155,27 @@ domains is the point.
 was written: ownership rather than process decides the prefix; the auth-exemption
 precedence already ranks the longer literal prefix higher; and hiding the engine
 was never the goal.)*
+
+> **Correction, found during implementation.** The second of those answers was
+> wrong, and the acceptance criteria above have been amended accordingly.
+> Precedence does rank the longer prefix higher, but that was never the issue:
+> **the route-security table is plane-blind.** An unqualified rule governs every
+> request to a path, whichever entrypoint serves it — so the socket's deliberate
+> "no identity required" exemption would cover ordinary HTTP requests to the same
+> prefix. Those no longer 404 the way they did when the socket was its own
+> top-level domain; they fall through to `bots` and are forwarded to the backend,
+> with any `..` in the path normalising away en route. `GET
+> /openapi/v1/bots/messages/../../admin/keys` would have reached the backend as
+> `/openapi/v1/admin/keys`, unauthenticated.
+>
+> The move is exactly what makes the exemption reachable on the HTTP plane; it
+> was harmless only while the exempt prefix was both socket-only *and*
+> top-level, with nothing beneath it to fall through to. The exemption is
+> therefore **qualified by plane** — the socket entrypoint authenticates under a
+> distinct method and the rule is written `WEBSOCKET /openapi/v1/bots/messages/**`,
+> so an HTTP `GET` there falls to `/openapi/v1/bots/**` and requires a user. That
+> is also the right answer for the future HTTP endpoint the prefix is reserved
+> for.
 
 One coordination item, informational rather than blocking: the owner of
 `src/bcs/docs/plans/2026-08-03-bcn-collaboration-prefix-design.md` should be told

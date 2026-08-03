@@ -115,11 +115,23 @@ user_config:
     # description of what the gateway requires, and makes tightening the prefix
     # a config edit rather than a code change.
     #
-    # It sits INSIDE the authenticated "/openapi/v1/bots/**" prefix above, and
-    # wins there by being more specific: rules are ranked by literal segment
-    # count, and this one has four to that one's three. Only this exact prefix
-    # is exempt; every other path under /openapi/v1/bots still requires a user.
-    "/openapi/v1/bots/messages/**": {}
+    # QUALIFIED BY PLANE, and that is load-bearing rather than decorative.
+    #
+    # This table is plane-blind: an unqualified rule governs every request to the
+    # path, whichever entrypoint serves it. The exemption sits INSIDE the
+    # authenticated "/openapi/v1/bots/**" prefix above and outranks it on literal
+    # segment count — four to three — so unqualified it would exempt ordinary
+    # HTTP requests here too. Those do not 404: a socket domain is not a
+    # candidate on the HTTP plane, so they fall through to `bots` and are
+    # forwarded to the backend. An unauthenticated caller could therefore reach
+    # the backend through this prefix, and a `..` in the path normalises out on
+    # the way, landing anywhere under /openapi/v1.
+    #
+    # `WEBSOCKET` is the method the relay entrypoint authenticates under, so this
+    # rule matches a handshake and nothing else. An HTTP GET to the same path
+    # does not match it and falls to "/openapi/v1/bots/**" above — user required,
+    # which is exactly right for the HTTP endpoint this prefix is reserved for.
+    "WEBSOCKET /openapi/v1/bots/messages/**": {}
 
   # Domain → upstream-server map for the gateway.
   #

@@ -131,17 +131,19 @@ class _FixedSigner:
         return f"signed-for-{audience}"
 
 
-_ENGINE_DOMAIN = {
+#: The shipped socket domain: nested beneath `bots`, on a different upstream.
+_SOCKET_DOMAIN = {
+    "match": "/openapi/v1/bots/messages/**",
     "server": "engine_proxy",
     "protocols": ["websocket"],
-    "rewrite": {"from": "/openapi/v1/engine", "to": "/proxypass"},
+    "rewrite": {"from": "/openapi/v1/bots/messages", "to": "/proxypass"},
 }
 
 
 def _build(
     *,
     forwarder: _StubForwarder | None = None,
-    engine_configured: bool = True,
+    socket_configured: bool = True,
 ) -> tuple[FastAPI, _FakeAuth, _StubForwarder]:
     app = FastAPI()
     ws_forwarder = forwarder or _StubForwarder()
@@ -151,8 +153,8 @@ def _build(
     app.state.ws_forwarder = ws_forwarder
 
     domains: dict[str, object] = {"bots": {"server": "up"}}
-    if engine_configured:
-        domains["engine"] = _ENGINE_DOMAIN
+    if socket_configured:
+        domains["bots-messages-ws"] = _SOCKET_DOMAIN
     domain_map = DomainMap.from_config(
         {
             "domains": domains,
@@ -180,7 +182,9 @@ def _build(
     return app, auth, ws_forwarder
 
 
-_PATH = "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws?x-proxypass-token=t.o.k"
+_PATH = (
+    "/openapi/v1/bots/messages/ARCA_x@0:20003/api/openclaw/ws?x-proxypass-token=t.o.k"
+)
 
 
 # ── the happy path ───────────────────────────────────────────────────────────
@@ -214,7 +218,9 @@ def test_the_prefix_is_rewritten_onto_proxypass_verbatim() -> None:
 def test_an_encoded_target_is_not_decoded_on_the_way_through() -> None:
     app, _, forwarder = _build()
     with TestClient(app) as client:
-        with client.websocket_connect("/openapi/v1/engine/a%2Fb/api/openclaw/ws") as ws:
+        with client.websocket_connect(
+            "/openapi/v1/bots/messages/a%2Fb/api/openclaw/ws"
+        ) as ws:
             ws.close(1000)
             _settled(forwarder)
     # %2F must not become a path separator on the upstream.
@@ -270,7 +276,11 @@ def test_route_security_is_consulted_for_the_handshake() -> None:
         with client.websocket_connect(_PATH) as ws:
             ws.close(1000)
             _settled(forwarder)
-    assert auth.calls == [("GET", "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")]
+    # Authenticated under WEBSOCKET, not GET: the table is plane-blind, so a
+    # handshake must not resolve to the same rule an ordinary request would.
+    assert auth.calls == [
+        ("WEBSOCKET", "/openapi/v1/bots/messages/ARCA_x@0:20003/api/openclaw/ws")
+    ]
 
 
 # ── closing ──────────────────────────────────────────────────────────────────
@@ -320,7 +330,7 @@ def test_an_upstream_close_noticed_while_sending_is_carried_to_the_client() -> N
 
 
 def test_a_domain_that_is_not_configured_refuses_the_handshake() -> None:
-    app, auth, forwarder = _build(engine_configured=False)
+    app, auth, forwarder = _build(socket_configured=False)
     with TestClient(app) as client:
         with pytest.raises(WebSocketDisconnect) as caught:
             with client.websocket_connect(_PATH):
@@ -354,32 +364,49 @@ def test_an_unreachable_upstream_refuses_the_handshake() -> None:
 # ── the prefix publishes a socket and nothing else ───────────────────────────
 
 
-def test_http_on_a_socket_only_domain_is_an_unknown_route() -> None:
-    """The domain resolves, but it does not answer this plane."""
-    app, _, forwarder = _build()
+def test_http_on_the_socket_prefix_falls_through_to_the_broader_domain() -> None:
+    """The socket domain is not a candidate on this plane, so `bots` serves it.
+
+    Deliberate, and the reason `messages` can be reserved here at all: a future
+    HTTP endpoint at this address must stay reachable. What must NOT happen is
+    the socket domain winning the path and then refusing the plane — that would
+    make the reserved address unreachable the day it is implemented.
+    """
+    app, auth, ws_forwarder = _build()
+    # Stopped at the auth seam, which is past domain resolution: a 404 here would
+    # mean no HTTP domain claimed the path, and the request never got that far.
+    auth.fail = True
     with TestClient(app) as client:
-        response = client.get("/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
-    assert response.status_code == 404
-    assert response.json()["code"] == 404001
-    assert forwarder.opened == []  # never dialled the upstream
+        response = client.get("/openapi/v1/bots/messages/some-bot")
+    assert response.status_code == 401
+    # Authenticated as an ordinary request, not as a handshake.
+    assert auth.calls == [("GET", "/openapi/v1/bots/messages/some-bot")]
+    assert ws_forwarder.opened == []  # the socket upstream was never dialled
 
 
-def test_a_traversal_under_the_socket_domain_never_reaches_http() -> None:
-    """`%2e%2e` decodes to `..`, which httpx would collapse — but the HTTP
-    plane refuses this domain outright, so there is nothing to collapse."""
-    app, _, forwarder = _build()
+def test_an_unauthenticated_http_request_to_the_socket_prefix_is_refused() -> None:
+    """The socket's exemption must not reach the plane that forwards upstream.
+
+    The table is plane-blind, so an unqualified rule here would exempt ordinary
+    requests too — and those no longer 404 the way they did when the socket was
+    its own top-level domain: they fall through to `bots` and are forwarded to
+    the backend, with any `..` normalising away en route. That is an
+    unauthenticated caller reaching an arbitrary backend path, so the exemption
+    is qualified by plane and this request must be challenged.
+    """
+    app, auth, _ = _build()
+    auth.fail = True
     with TestClient(app) as client:
-        response = client.get("/openapi/v1/engine/%2e%2e/%2e%2e/admin/keys")
-    assert response.status_code == 404
-    assert forwarder.opened == []
+        response = client.get("/openapi/v1/bots/messages/%2e%2e/%2e%2e/admin/keys")
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize(
     "decoded_path",
     [
-        "/openapi/v1/engine/../../admin",
-        "/openapi/v1/engine/./admin",
-        "/openapi/v1/engine/a/../../admin",
+        "/openapi/v1/bots/messages/../../admin",
+        "/openapi/v1/bots/messages/./admin",
+        "/openapi/v1/bots/messages/a/../../admin",
     ],
 )
 def test_the_traversal_guard_matches_decoded_dot_segments(decoded_path: str) -> None:
@@ -395,10 +422,10 @@ def test_the_traversal_guard_matches_decoded_dot_segments(decoded_path: str) -> 
 @pytest.mark.parametrize(
     "decoded_path",
     [
-        "/openapi/v1/engine/a.b/ws",  # a dot inside a name is not a dot segment
-        "/openapi/v1/engine/%2e/ws",  # what `%252e` decodes to: a filename
-        "/openapi/v1/engine/.../ws",
-        "/openapi/v1/engine/..a/ws",
+        "/openapi/v1/bots/messages/a.b/ws",  # a dot inside a name is not a dot segment
+        "/openapi/v1/bots/messages/%2e/ws",  # what `%252e` decodes to: a filename
+        "/openapi/v1/bots/messages/.../ws",
+        "/openapi/v1/bots/messages/..a/ws",
     ],
 )
 def test_the_traversal_guard_leaves_ordinary_paths_alone(decoded_path: str) -> None:
@@ -408,10 +435,10 @@ def test_the_traversal_guard_leaves_ordinary_paths_alone(decoded_path: str) -> N
 @pytest.mark.parametrize(
     "path",
     [
-        "/openapi/v1/engine/%2e%2e/%2e%2e/admin",
-        "/openapi/v1/engine/%2E%2E/admin",  # encoding is case-insensitive
-        "/openapi/v1/engine/.%2e/admin",  # half-encoded
-        "/openapi/v1/engine/%2e%2e%2Fadmin",  # an encoded slash hiding the boundary
+        "/openapi/v1/bots/messages/%2e%2e/%2e%2e/admin",
+        "/openapi/v1/bots/messages/%2E%2E/admin",  # encoding is case-insensitive
+        "/openapi/v1/bots/messages/.%2e/admin",  # half-encoded
+        "/openapi/v1/bots/messages/%2e%2e%2Fadmin",  # an encoded slash hiding the boundary
     ],
 )
 def test_a_traversal_on_the_socket_plane_is_refused_before_dialling(path: str) -> None:
@@ -436,10 +463,13 @@ def test_a_traversal_on_the_socket_plane_is_refused_before_dialling(path: str) -
 @pytest.mark.parametrize(
     "path",
     [
-        "/openapi/v1/%65ngine/t/ws",  # 'e' encoded — decodes to the domain
-        "/openapi/v1/engin%65/t/ws",
-        "/openapi/v1/engine%2Ft/ws",  # the separator itself encoded
-        "/openapi%2Fv1/engine/t/ws",
+        # Every segment of the routing prefix, not merely the first: the
+        # prefix is four segments deep now and nested inside another domain's.
+        "/openapi/v1/%62ots/messages/t/ws",  # 'b' encoded — decodes to the domain
+        "/openapi/v1/bots/%6dessages/t/ws",  # 'm' encoded
+        "/openapi/v1/bots/message%73/t/ws",  # trailing 's' encoded
+        "/openapi/v1/bots/messages%2Ft/ws",  # the separator itself encoded
+        "/openapi%2Fv1/bots/messages/t/ws",
     ],
 )
 def test_an_encoded_routing_prefix_is_refused(path: str) -> None:
@@ -472,15 +502,15 @@ def test_the_bare_domain_prefix_is_mounted_too() -> None:
     """
     app, _, _ = _build()
     mounted = {getattr(route, "path", None) for route in app.routes}
-    assert "/openapi/v1/engine" in mounted
-    assert "/openapi/v1/engine/{full_path:path}" in mounted
+    assert "/openapi/v1/bots/messages" in mounted
+    assert "/openapi/v1/bots/messages/{full_path:path}" in mounted
 
 
 def test_relay_routes_returns_both_forms_together() -> None:
     """Returned as one tuple so a caller cannot mount one and forget the other."""
-    assert relay_routes("/openapi/v1/engine") == (
-        "/openapi/v1/engine",
-        "/openapi/v1/engine/{full_path:path}",
+    assert relay_routes("/openapi/v1/bots/messages") == (
+        "/openapi/v1/bots/messages",
+        "/openapi/v1/bots/messages/{full_path:path}",
     )
 
 
@@ -495,10 +525,14 @@ def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
     domain_map = DomainMap.from_config(
         {
             "domains": {
-                "engine": {
+                "bots-messages-ws": {
+                    "match": "/openapi/v1/bots/messages/**",
                     "server": "p",
                     "protocols": ["websocket"],
-                    "rewrite": {"from": "/openapi/v1/engine/v2", "to": "/proxypass"},
+                    "rewrite": {
+                        "from": "/openapi/v1/bots/messages/v2",
+                        "to": "/proxypass",
+                    },
                 }
             },
             "servers": {"p": {"base_url": "wss://proxy.internal"}},
@@ -519,15 +553,15 @@ def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
 @pytest.mark.parametrize(
     "path",
     [
-        "/openapi/v1/engine/%76%32/T/ws",  # 'v2' encoded — clears the domain prefix
-        "/openapi/v1/engine/v%32/T/ws",
-        "/openapi/v1/engine/other/T/ws",  # simply not under the declared `from`
+        "/openapi/v1/bots/messages/%76%32/T/ws",  # 'v2' encoded — clears the domain prefix
+        "/openapi/v1/bots/messages/v%32/T/ws",
+        "/openapi/v1/bots/messages/other/T/ws",  # simply not under the declared `from`
     ],
 )
 def test_a_raw_path_that_misses_a_nested_rewrite_is_refused(path: str) -> None:
     """The rewrite's own `from` is what decided the upstream path, so it governs.
 
-    `/openapi/v1/engine/%76%32/...` decodes to `/openapi/v1/engine/v2/...`, so it
+    `/openapi/v1/bots/messages/%76%32/...` decodes to `/openapi/v1/bots/messages/v2/...`, so it
     resolves and authenticates as the anonymous domain and clears the *domain*
     prefix — but the raw path no longer carries the literal `from`, the
     substitution misses, and the dial lands outside `/proxypass`. Checking only
@@ -546,7 +580,7 @@ def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
     """The tightening must not close the configuration it is guarding."""
     forwarder = _StubForwarder()
     with TestClient(_nested_rewrite_app(forwarder)) as client:
-        with client.websocket_connect("/openapi/v1/engine/v2/T%40x/ws") as ws:
+        with client.websocket_connect("/openapi/v1/bots/messages/v2/T%40x/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
         _settled(forwarder)
@@ -562,7 +596,7 @@ def test_an_encoded_tail_still_relays_verbatim() -> None:
     app, _, forwarder = _build()
     with TestClient(app) as client:
         with client.websocket_connect(
-            "/openapi/v1/engine/ARCA_x%400%3A20003/api/ws"
+            "/openapi/v1/bots/messages/ARCA_x%400%3A20003/api/ws"
         ) as ws:
             ws.send_text("ping")
             ws.receive_text()
@@ -582,7 +616,7 @@ def test_a_dot_inside_a_name_still_relays() -> None:
     """
     app, _, forwarder = _build()
     with TestClient(app) as client:
-        with client.websocket_connect("/openapi/v1/engine/a.b/c..d/ws") as ws:
+        with client.websocket_connect("/openapi/v1/bots/messages/a.b/c..d/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
         _settled(forwarder)

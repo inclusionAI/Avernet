@@ -126,7 +126,7 @@
   - [x] The `domains:` block comment documents the new `match:` key.
 - **Depends on:** Task 5
 
-## Task 7: Re-point the gateway test suites at the new address
+## [x] Task 7: Re-point the gateway test suites at the new address
 
 - **Goal:** Every gateway test that pins the socket address moves with it, and the
   old address is pinned as *no longer resolving*.
@@ -136,15 +136,19 @@
   - `src/gateway/tests/test_domain_map.py`
   - `src/gateway/tests/test_log_redaction.py`
 - **Done when:**
-  - [ ] Relay integration cases run against `/openapi/v1/bots/messages/…`; the
+  - [x] Relay integration cases run against `/openapi/v1/bots/messages/…`; the
         rewrite still lands on `/proxypass/<target><path>` byte for byte.
-  - [ ] The encoded-prefix matrix moves to the new prefix (the `%62ots` /
+  - [x] The encoded-prefix matrix moves to the new prefix (the `%62ots` /
         `%6dessages` spellings) rather than being dropped, and still refuses.
-  - [ ] The dot-segment matrix still refuses at the new prefix.
-  - [ ] A handshake to `/openapi/v1/engine/**` no longer resolves.
-  - [ ] An HTTP request to `/openapi/v1/bots/messages/x` reaches **backend**.
-  - [ ] `test_route_security.py` asserts the exemption at the new prefix **and**
+  - [x] The dot-segment matrix still refuses at the new prefix.
+  - [x] A handshake to `/openapi/v1/engine/**` no longer resolves.
+  - [x] An HTTP request to `/openapi/v1/bots/messages/x` reaches **backend**.
+  - [x] `test_route_security.py` asserts the exemption at the new prefix **and**
         that it beats the `/openapi/v1/bots/**` user requirement.
+  - [x] **Security fix, not in the plan:** the route-security exemption is
+        qualified by plane (`WEBSOCKET /openapi/v1/bots/messages/**`). Unqualified,
+        it exempted HTTP requests that now fall through to the backend — see
+        `spec.md`'s corrected answer to objection 2.
 - **Depends on:** Task 6
 
 ## Task 8: Publish the new address from the backend
