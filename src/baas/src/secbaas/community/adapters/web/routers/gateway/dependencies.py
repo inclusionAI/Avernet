@@ -14,10 +14,15 @@ from dataclasses import dataclass
 from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, Header, HTTPException, status
 
+from secbaas.community.adapters.web.routers.open_api.dependencies import (
+    _normalize_bot_id,
+)
+from secbaas.community.api.api_gateway import (
+    ResourceKeyRepository,
+    verify_jwt_token,
+)
 from secbaas.community.api.bot_runtime import BotChatContext
 from secbaas.community.bootstrap import ApplicationContainer
-from secbaas.community.core.repository.resource_key import ResourceKeyRepository
-from secbaas.community.core.utils.secret_utils import verify_jwt_token
 from secbaas.community.spi.secret import SecretStorePlugin
 
 
@@ -156,15 +161,3 @@ def check_bot_access(
         )
 
     return normalized
-
-
-def _normalize_bot_id(bot_id: str) -> str:
-    """Normalize bot_id by stripping leading zeros from entity_id."""
-    if ":" in bot_id:
-        real_bot_id, entity_id = bot_id.rsplit(":", 1)
-        entity_id = entity_id.lstrip("0") or "0"
-        return f"{real_bot_id}:{entity_id}"
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail={"code": 40001, "message": "bot_id format must be bot_id:staff_no"},
-    )

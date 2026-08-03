@@ -4,9 +4,7 @@ import hmac
 import json
 import os
 import time
-from typing import Any
 
-import jwt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -39,35 +37,6 @@ def generate_jwt_token(target: str, secret_key: str, ttl: int = 300) -> str:
         secret_key.encode(), signing_input.encode(), hashlib.sha256
     ).digest()
     return f"{header}.{payload}.{_b64url_encode(signature)}"
-
-
-def verify_jwt_token(
-    token: str, secret_key: str
-) -> tuple[bool, str | None, dict[str, Any] | None]:
-    """验证 JWT token（兼容标准 HS256 JWT，如 PyJWT / jjwt 生成的 token）。
-
-    Args:
-        token: JWT token 字符串
-        secret_key: 签名密钥
-
-    Returns:
-        tuple[bool, Optional[str], Optional[dict]]: (是否验证通过, 错误信息, payload字典)
-    """
-    try:
-        payload = jwt.decode(
-            token,
-            secret_key,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
-        return True, None, payload
-
-    except jwt.ExpiredSignatureError:
-        return False, "Token expired", None
-    except jwt.InvalidTokenError as e:
-        return False, f"Token invalid: {e}", None
-    except Exception as e:
-        return False, f"Token verification failed: {e}", None
 
 
 def symmetric_encrypt(plaintext: str, secret_key: str) -> str:

@@ -3,8 +3,7 @@
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.community.logger import get_logger
 
-from ._orm_model import ResourceKeyModel
-from ._orm_model import ResourceKeyBotMappingModel
+from ._orm_model import ResourceKeyBotMappingModel, ResourceKeyModel
 from ._protocol import ResourceKeyRepository
 from ._record import ResourceKeyRecord
 

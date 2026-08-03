@@ -1,19 +1,11 @@
-"""Resource key records."""
+"""Resource key records — canonical definitions live in api.api_gateway."""
 
 from dataclasses import dataclass
 from datetime import datetime
 
+from secbaas.community.api.api_gateway import ResourceKeyRecord
 
-@dataclass(slots=True)
-class ResourceKeyRecord:
-    """baas_resource_key table record."""
-
-    id: int
-    gmt_create: datetime
-    gmt_modified: datetime
-    tenant: str
-    resource_key: str
-    app: str
+__all__ = ["ResourceKeyRecord", "ResourceKeyBotMappingRecord"]
 
 
 @dataclass(slots=True)

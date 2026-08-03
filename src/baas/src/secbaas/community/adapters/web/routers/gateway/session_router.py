@@ -14,7 +14,6 @@ from secbaas.community.adapters.web.routers.gateway.dependencies import (
     get_bot_chat_context,
     validate_jwt_token,
 )
-from secbaas.community.core.repository.resource_key import ResourceKeyRepository
 from secbaas.community.adapters.web.routers.open_api.model import (
     MessageItem,
     SessionMessagesResponse,
@@ -22,6 +21,7 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     SessionQueryResponse,
     SessionQueryResponseData,
 )
+from secbaas.community.api.api_gateway import ResourceKeyRepository
 from secbaas.community.api.bot_runtime import (
     BotBindingNotFoundError,
     BotChatContext,

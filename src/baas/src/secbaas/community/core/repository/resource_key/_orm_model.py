@@ -24,9 +24,7 @@ class ResourceKeyModel(Base):
     resource_key = Column(String(128), nullable=False)
     app = Column(String(128), nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("resource_key", name="uk_resource_key"),
-    )
+    __table_args__ = (UniqueConstraint("resource_key", name="uk_resource_key"),)
 
     def to_record(self) -> ResourceKeyRecord:
         return ResourceKeyRecord(

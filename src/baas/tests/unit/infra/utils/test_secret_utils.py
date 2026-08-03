@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from secbaas.community.api.api_gateway import verify_jwt_token
 from secbaas.community.core.utils import secret_utils
 
 
@@ -51,7 +52,7 @@ class TestVerifyJwtToken:
         target = "test-target"
         secret_key = "my-secret-key"
         token = secret_utils.generate_jwt_token(target, secret_key, ttl=3600)
-        is_valid, error, payload = secret_utils.verify_jwt_token(token, secret_key)
+        is_valid, error, payload = verify_jwt_token(token, secret_key)
         assert is_valid is True
         assert error is None
         assert payload is not None
@@ -59,7 +60,7 @@ class TestVerifyJwtToken:
 
     def test_verify_jwt_token_rejects_invalid_signature(self):
         token = secret_utils.generate_jwt_token("test-target", "correct-key")
-        is_valid, error, payload = secret_utils.verify_jwt_token(token, "wrong-key")
+        is_valid, error, payload = verify_jwt_token(token, "wrong-key")
         assert is_valid is False
         assert "invalid" in error.lower()
         assert payload is None
@@ -70,13 +71,13 @@ class TestVerifyJwtToken:
         with patch("time.time", return_value=1000000000):
             token = secret_utils.generate_jwt_token(target, secret_key, ttl=60)
         with patch("time.time", return_value=1000001000):
-            is_valid, error, payload = secret_utils.verify_jwt_token(token, secret_key)
+            is_valid, error, payload = verify_jwt_token(token, secret_key)
         assert is_valid is False
         assert "expired" in error.lower()
 
     def test_verify_jwt_token_rejects_malformed_token(self):
         invalid_token = "header.payload"
-        is_valid, error, payload = secret_utils.verify_jwt_token(
+        is_valid, error, payload = verify_jwt_token(
             invalid_token, "secret"
         )
         assert is_valid is False
@@ -84,7 +85,7 @@ class TestVerifyJwtToken:
 
     def test_verify_jwt_token_rejects_token_with_more_parts(self):
         invalid_token = "a.b.c.d"
-        is_valid, error, payload = secret_utils.verify_jwt_token(
+        is_valid, error, payload = verify_jwt_token(
             invalid_token, "secret"
         )
         assert is_valid is False

@@ -29,6 +29,7 @@ from secbaas.community.adapters.web.routers.open_api.model import (
     MessageResultResponseData,
     StreamMessageRequest,
 )
+from secbaas.community.api.api_gateway import ResourceKeyRepository
 from secbaas.community.api.bot_runtime import (
     BotChatContext,
     BotNotAvailableError,
@@ -45,7 +46,6 @@ from secbaas.community.api.sse import (
     with_sse_heartbeat,
 )
 from secbaas.community.bootstrap import ApplicationContainer
-from secbaas.community.core.repository.resource_key import ResourceKeyRepository
 from secbaas.community.logger import get_logger
 
 logger = get_logger("router-gateway")
