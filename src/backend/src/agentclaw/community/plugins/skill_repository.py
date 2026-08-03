@@ -715,18 +715,37 @@ class SkillRepository:
                 ).delete(synchronize_session=False)
             return count
 
-    def list_skill_set_references(self, skill_id: str) -> list[dict]:
-        """List all SkillSet associations, regardless of activation state."""
+    def list_skill_set_references(
+        self,
+        skill_id: str,
+        skill_uuid: str | None = None,
+    ) -> list[dict]:
+        """List live SkillSet associations, regardless of activation state."""
         from agentclaw.community.core.models import SkillSetSkill
 
+        identity_filter = SkillSetSkill.skill_id == int(skill_id)
+        if skill_uuid:
+            identity_filter = or_(
+                identity_filter,
+                SkillSetSkill.skill_uuid == skill_uuid,
+            )
         with self._db.orm_session() as db:
             rows = (
                 db.query(SkillSetSkill.skill_set_id)
-                .filter(
-                    SkillSetSkill.skill_id == int(skill_id),
-                    SkillSetSkill.env == get_current_env(),
+                .join(
+                    self.SkillSet,
+                    SkillSetSkill.skill_set_id == self.SkillSet.id,
                 )
-                .order_by(SkillSetSkill.id)
+                .filter(
+                    identity_filter,
+                    SkillSetSkill.env == get_current_env(),
+                    or_(
+                        self.SkillSet.env == get_current_env(),
+                        self.SkillSet.env.is_(None),
+                    ),
+                )
+                .distinct()
+                .order_by(SkillSetSkill.skill_set_id)
                 .all()
             )
             return [{"skill_set_id": str(row[0])} for row in rows]

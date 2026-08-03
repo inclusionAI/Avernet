@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -39,7 +39,7 @@ class _SkillServiceFactory:
             device_fs_factory=lambda _bot_id, _owner_id: self._device_fs,
             git_sync_service_factory=MagicMock(),
             local_skill_path_adapter=kwargs.get("local_skill_path_adapter"),
-            runtime_uses_pool_paths=True,
+            runtime_uses_pool_paths=bool(kwargs.get("bot_id")),
         )
 
 
@@ -65,9 +65,12 @@ def _bot_record() -> dict:
     }
 
 
-async def _call_delete(*, device_fs, skill_repo):
+async def _call_delete(
+    *, device_fs, skill_repo, engine_type=None, current_user_id=OWNER_ID
+):
     bot_repo = MagicMock()
     bot_repo.get_by_id_and_owner.return_value = _bot_record()
+    bot_repo.get_unique_by_id.return_value = _bot_record()
 
     path_factory = MagicMock()
     path_factory.get_bot_skills_dir.return_value = ACTIVE_ROOT
@@ -85,11 +88,11 @@ async def _call_delete(*, device_fs, skill_repo):
     endpoint = getattr(delete_skill, "__wrapped__", delete_skill)
     response = await endpoint(
         skill_id=SKILL_ID,
-        user_id=OWNER_ID,
+        user_id=current_user_id,
         entity_id=None,
         entity_type=None,
         bot_id=None,
-        engine_type=None,
+        engine_type=engine_type,
         ctx=RequestContext(user_id=OWNER_ID, bot_id="default"),
         bot_repo=bot_repo,
         path_factory=path_factory,
@@ -177,3 +180,115 @@ async def test_delete_rejects_skill_referenced_by_any_skill_set():
     skill_repo.delete.assert_not_called()
     device_fs.exists.assert_not_awaited()
     device_fs.delete_tree.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_bot_owner_when_skill_was_authored_by_collaborator():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        **_skill_record(),
+        "user_id": "405935",
+    }
+    skill_repo.list_skill_set_references.return_value = []
+    skill_repo.delete.return_value = True
+    device_fs = MagicMock()
+    device_fs.exists = AsyncMock(return_value=True)
+    device_fs.delete_tree = AsyncMock(return_value=True)
+
+    response, path_factory, _ = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+        current_user_id="405935",
+    )
+
+    assert response.success is True
+    path_factory.get_bot_skills_dir.assert_called_once_with(
+        OWNER_ID, BOT_ID, "hermes", "staff"
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_malformed_skill_id_with_400():
+    endpoint = getattr(delete_skill, "__wrapped__", delete_skill)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            skill_id="not-a-number",
+            user_id=OWNER_ID,
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=RequestContext(user_id=OWNER_ID, bot_id="default"),
+            skill_repo=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            skill_service_factory=MagicMock(),
+            resolver=MagicMock(),
+            edit_guard=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_engine_override_that_differs_from_bot():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    device_fs = MagicMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_delete(
+            device_fs=device_fs,
+            skill_repo=skill_repo,
+            engine_type="openclaw",
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+        "message": "删除技能必须使用 Bot 当前的生效引擎",
+        "active_engine": "hermes",
+    }
+    skill_repo.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_admin_can_delete_unreferenced_shared_market_skill():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "market-skill",
+        "git_path": "git://business/market-skill",
+        "bolt_id": "default",
+        "user_id": None,
+    }
+    skill_repo.list_skill_set_references.return_value = []
+    skill_repo.delete.return_value = True
+    device_fs = MagicMock()
+    factory = _SkillServiceFactory(skill_repo=skill_repo, device_fs=device_fs)
+    endpoint = getattr(delete_skill, "__wrapped__", delete_skill)
+
+    with patch(
+        "agentclaw.community.core.skill_center.services.skill_service.skill_admin",
+        return_value=[OWNER_ID],
+    ):
+        response = await endpoint(
+            skill_id=SKILL_ID,
+            user_id=OWNER_ID,
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=RequestContext(user_id=OWNER_ID, bot_id="default"),
+            skill_repo=skill_repo,
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            skill_service_factory=factory,
+            resolver=MagicMock(),
+            edit_guard=MagicMock(),
+        )
+
+    assert response.success is True
+    skill_repo.delete.assert_called_once_with(SKILL_ID)
+    device_fs.exists.assert_not_called()
