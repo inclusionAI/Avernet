@@ -616,24 +616,30 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：Track B 已定案）· `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（6 个端点：Track B 已定案）· `openapi_v1/skills/router.py`
 Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上传和生命周期属于指定 Bot。
 
 > **已与 totalfrank 定案。** 现有 Local Skill 由 Bot 的设备文件系统存储，不是可在租户内复用的
 > 全局资产。因此 Track B 采用 per-bot **上传** → **激活/停用** → **删除**
 > 的生命周期，不暴露独立的“安装”概念。租户级可复用 Skill 延后到 Skill Center 具备独立存储和分发能力后再设计。
-> 公开 API 不提供跨 Bot 的 Skill 目录；列表、上传和激活列表都必须通过查询参数携带 `bot_id`。
+> 公开 API 不提供跨 Bot 的 Skill 目录；列表和上传必须通过查询参数携带 `bot_id`，
+> 列表通过可选的 `active` 过滤条件区分状态，不再设独立的 Active Skill 列表路由。
 > `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；针对具体 Skill 的请求无需重复携带 `bot_id`。
+
+上传接受一个原始 `application/zip` 请求体，创建时默认为 Inactive。同名上传会在该 Bot
+范围内更新原 Skill，保持 Skill ID 和期望的 Active/Inactive 状态。针对服务 Bot，
+列表和上传可选携带 `owner_entity_id`，但它只能在权限校验后用于定位 owner 范围：
+Local Skill 仍归 Bot owner 所有，有权限的协作者只记录为操作人。读取使用数据库期望状态，
+Bot 离线时仍可用；变更操作要求 Bot ready，运行时同步失败时必须补偿。
 
 **状态**列中，`桩内` 表示路径和语义与当前路由桩一致；`已定案（待同步桩）`
 表示 Track B 契约已确认，但当前路由桩仍需在实现 PR 中新增或替换。
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填，`keyword`、分页；包含 Active 和 Inactive） | `Envelope[Page[Skill]]` | 已定案（待同步桩） |
+| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` | 已定案（待同步桩） |
 | GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/upload` | 向指定 Bot 上传 Local Skill（`bot_id` 必填；默认 Inactive） | `Envelope[Skill]` | 已定案（待同步桩） |
-| GET | `/openapi/v1/bots/skills/active` | 列出指定 Bot 当前 Active 的 Skill（`bot_id` 必填） | `Envelope[list[BotSkill]]` | 已定案（待同步桩） |
+| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[Skill]` | 已定案（待同步桩） |
 | POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
 | POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 已定案（待同步桩） |
@@ -924,7 +930,6 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
-
 - **2026-08-03** —— **`/openapi/v1/bots` 路径规范化 + 删除 channels。**
   每个组件的路由现在都位于 `/openapi/v1/bots/<component>/…` 之下，`{bot_id}` 作为组件
   **之内**的第一段 —— 见新增的**寻址规则**一节，新增组件前应先读它。此前并存三种形态，而
@@ -940,3 +945,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   `tests/…/openapi_v1/test_path_convention.py` 针对生成的文档断言该规则以及本文的保留名
   清单，使两者都在测试而非评审中失败。SDD：
   `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`。
+- **2026-08-04** —— **Track B Skills 契约最终定为 6 个端点。** 删除独立的
+  `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
+  原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，
+  以及运行时同步失败时的补偿。Skill Center 发布和租户级可复用 Skill 仍属于后续契约。

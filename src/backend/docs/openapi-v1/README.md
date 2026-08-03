@@ -693,7 +693,7 @@ _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: Track B contract ratified) · `openapi_v1/skills/router.py`
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (6 endpoints: Track B contract ratified) · `openapi_v1/skills/router.py`
 The Skills public API uses the `/openapi/v1/bots/skills` route group. Local
 Skill upload and lifecycle operations belong to a specific bot.
 
@@ -703,9 +703,19 @@ Skill upload and lifecycle operations belong to a specific bot.
 > lifecycle and does not expose a separate installation concept. Reusable
 > tenant-level Skills are deferred until Skill Center provides independent
 > storage and distribution. The public API does not expose a cross-bot Skill
-> catalog: list, upload, and active-list operations require `bot_id` as a query
-> parameter. `skill_id` maps to `ac_skill.id` and uniquely identifies a Skill,
-> so operations on a specific Skill do not repeat `bot_id`.
+> catalog: list and upload require `bot_id` as a query parameter, and list uses
+> the optional `active` filter instead of a separate active-list route.
+> `skill_id` maps to `ac_skill.id` and uniquely identifies a Skill, so operations
+> on a specific Skill do not repeat `bot_id`.
+
+Upload accepts one raw `application/zip` body and creates an Inactive Skill.
+A same-name upload updates the existing Skill in that Bot scope while preserving
+its ID and desired Active/Inactive state. For a service Bot, the optional
+`owner_entity_id` on list/upload locates the owner scope only after permission
+verification: the Bot owner remains the Local Skill owner, while an authorized
+collaborator is recorded only as the operation actor. Reads use database desired
+state and remain available while the Bot is offline; mutations require a ready
+Bot and must compensate on runtime synchronization failure.
 
 In the **Status** column, `in stub` means the current router stub already has
 the ratified path and semantics. `ratified (stub update pending)` means the
@@ -714,10 +724,9 @@ current stub.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required, `keyword`, paged; includes Active and Inactive) | `Envelope[Page[Skill]]` | ratified (stub update pending) |
+| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` | ratified (stub update pending) |
 | GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST | `/openapi/v1/bots/skills/upload` | Upload a Local Skill (`bot_id` required; Inactive by default) | `Envelope[Skill]` | ratified (stub update pending) |
-| GET | `/openapi/v1/bots/skills/active` | List a bot's Active Skills (`bot_id` required) | `Envelope[list[BotSkill]]` | ratified (stub update pending) |
+| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[Skill]` | ratified (stub update pending) |
 | POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
 | POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | ratified (stub update pending) |
@@ -1076,7 +1085,6 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
-
 - **2026-08-03** — **`/openapi/v1/bots` path normalization + channels removed.**
   Every component's routes now live under `/openapi/v1/bots/<component>/…` with
   `{bot_id}` as the first segment *inside* the component — see the new
@@ -1099,3 +1107,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   file's reserved-name list — against the generated document, so both fail here
   rather than in review. SDD:
   `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`.
+- **2026-08-04** — **Track B Skills contract finalized at six endpoints.** Removed
+  the separate `/skills/active` route in favor of the collection's optional
+  `active` filter. Pinned Bot-scoped raw ZIP upload, same-name replacement,
+  owner-versus-collaborator semantics, offline reads, ready-Bot mutation gating,
+  and compensation on runtime synchronization failure. Skill Center publication
+  and reusable tenant-level Skills remain a later contract.
