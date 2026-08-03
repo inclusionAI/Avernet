@@ -131,6 +131,10 @@ bcs-secret-local = { workspace = true }
 ding-logger  = { workspace = true }
 bcs-http      = { workspace = true }
 bcs-api-http  = { workspace = true }
+bcs-app-bot = { workspace = true }
+bcs-app-group = { workspace = true }
+bcs-app-session = { workspace = true }
+bcs-app-invitation = { workspace = true }
 bcs-provider-http = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
@@ -185,3 +189,4 @@ bcs-test-support = { workspace = true }
 serial_test = "3"
 bcs-jwt = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
+jsonwebtoken = { workspace = true }

@@ -37,8 +37,12 @@ use crate::plugins::{
     build_registered_llm_provider, build_registered_security_gateway,
     build_registered_user_directory,
 };
-use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
-use bcs_api_http::PrincipalVerifier;
+use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
+use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
+use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
+use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
+use bcs_api_http::{ApiState, PrincipalVerifier};
+use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_api_http::v1::gateway_principal::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
 };
@@ -94,7 +98,7 @@ use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotActor, BotDeliveryPort, BotDeliveryTarget,
-    BotRegistryCoreService, CallerContext,
+    BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
     BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelBindingCleanupPort,
     ChannelService, CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
@@ -103,10 +107,12 @@ use bcs_service_api::{
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
     HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
-    ProviderBotBindingRepoPort, ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
+    FriendCoreService, FriendRequestCoreService, InviteService, ProviderBotBindingRepoPort,
+    ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
     ProviderCredentialRepoPort, ProviderManagementService, ProviderRepoPort, ProviderStreamGrayList,
     ServiceResult, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
-    SessionManagementService, StateMachineResultPublishCommand, StateMachineResultPublisherPort,
+    RelationCoreService, SessionManagementService, StateMachineResultPublishCommand,
+    StateMachineResultPublisherPort, SystemMessageService,
     StateMachineTerminalEvent, WebSendCommand, WsCloseReason, WsErrorKind,
     WsLifecycleInstrumentationHook, WsPeer, RoutingCoreService,
     port::repo::{
@@ -933,6 +939,9 @@ pub struct BcsServerState {
     /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
     pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
 
+    /// Completed V1 HTTP adapter state assembled from the same runtime services as legacy HTTP.
+    pub openapi_v1: ApiState,
+
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
@@ -969,6 +978,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("auth_chain", &"<AuthPluginChain>")
             .field("auth_config", &self.auth_config)
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
+            .field("openapi_v1", &"<ApiState>")
             .field("outbound_url_guard", &self.outbound_url_guard)
             .finish()
     }
@@ -1236,6 +1246,106 @@ fn build_gateway_principal_verifier_from_process(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+fn build_openapi_v1_state(
+    config: &BcsConfig,
+    control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
+    provider_repos: &ProviderRepoBundle,
+    registry: Arc<dyn BotRegistryCoreService>,
+    groups: Arc<dyn GroupCoreService>,
+    friends: Arc<dyn FriendCoreService>,
+    friend_requests: Arc<dyn FriendRequestCoreService>,
+    relation: Arc<dyn RelationCoreService>,
+    sessions: Arc<dyn SessionManagementService>,
+    group_management: Arc<dyn GroupManagementService>,
+    collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
+    session_repo: Arc<dyn SessionRepoPort>,
+    message_repo: Arc<dyn MessageRepoPort>,
+    system_message: Arc<dyn SystemMessageService>,
+    principal_verifier: Arc<dyn PrincipalVerifier>,
+) -> ApiState {
+    let relation_env = crate::env::resolve_env();
+    let control_plane = Arc::new(BotControlPlaneCore::new(
+        control_plane_repo,
+        provider_repos.provider_repo.clone(),
+        provider_repos.provider_bindings.clone(),
+    ));
+    let bot_service = Arc::new(BotServiceImpl::new(
+        control_plane,
+        registry.clone(),
+        friends.clone(),
+        BotServiceConfig {
+            env: relation_env.clone(),
+        },
+    ));
+    let group_service = Arc::new(
+        GroupServiceImpl::new(
+            groups.clone(),
+            registry.clone(),
+            friends.clone(),
+            relation.clone(),
+            sessions.clone(),
+            group_management,
+            GroupServiceConfig {
+                relation_env: relation_env.clone(),
+            },
+        )
+        .with_collaboration_runtime(collaboration_runtime),
+    );
+    let session_service = Arc::new(SessionServiceImpl::new(
+        sessions.clone(),
+        groups.clone(),
+        registry.clone(),
+        friends.clone(),
+        relation,
+        session_repo,
+        message_repo,
+        SessionServiceConfig { relation_env },
+    ));
+    let token_secret = config
+        .invite
+        .token_secret
+        .as_deref()
+        .map(str::as_bytes)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| (0..32).map(|_| fastrand::u8(..)).collect());
+    let invitation_groups = groups.clone();
+    let invitation_sessions = sessions.clone();
+    let invite: Arc<dyn InviteService> = Arc::new(bcs_group::application::invite::InviteServiceImpl {
+        registry: registry.clone(),
+        group: groups,
+        session: sessions,
+        system_message,
+        token_secret: token_secret.clone(),
+        default_ttl_seconds: config.invite.default_ttl_seconds,
+        base_url: config.invite.base_url.clone(),
+        group_link_url: config.invite.group_link_url.clone(),
+        session_link_url: config.invite.session_link_url.clone(),
+    });
+    let invitation_service = Arc::new(InvitationFriendshipServiceImpl::new(
+        friends,
+        friend_requests,
+        invitation_groups,
+        invitation_sessions,
+        registry,
+        invite,
+        token_secret,
+        InvitationFriendshipServiceConfig {
+            default_ttl_seconds: config.invite.default_ttl_seconds,
+        },
+    ));
+
+    ApiState::new(
+        group_service,
+        session_service.clone(),
+        session_service,
+        invitation_service.clone(),
+        invitation_service,
+        principal_verifier,
+    )
+    .with_bot_service(bot_service)
+}
+
 #[cfg(test)]
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
     build_gateway_principal_verifier(&GatewayPrincipalConfig::default(), RuntimeEnv::Dev, None)
@@ -1327,6 +1437,7 @@ impl Default for BcsServerState {
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc: Arc<BotCore> = Arc::new(BotCore::with_provider_repos(
             bot_repo,
@@ -1365,6 +1476,13 @@ impl Default for BcsServerState {
             Arc::new(FriendCore::with_repo(friend_repo).with_relation(
                 relation_store.clone() as Arc<dyn bcs_service_api::RelationCoreService>
             ));
+        let friend_request_store: Arc<FriendRequestCore> = Arc::new(
+            FriendRequestCore::with_repo(
+                Arc::new(MemoryFriendRequestRepo::new()),
+                friend_store.clone(),
+                bot_registry.clone(),
+            ),
+        );
         let bot_connections = Arc::new(BotConnectionRegistry::new());
         let mut bot_use_cases = Bot::new_with_friend(bot_registry.clone(), friend_store.clone())
             .with_bot_core(bot_core_arc.clone())
@@ -1573,6 +1691,23 @@ impl Default for BcsServerState {
                 collaboration_runtime.clone(),
             )),
         );
+        let openapi_v1 = build_openapi_v1_state(
+            &config,
+            control_plane_repo,
+            &provider_repos,
+            bot_registry.clone(),
+            sessions.clone(),
+            friend_store.clone(),
+            friend_request_store,
+            relation_store.clone(),
+            session_management.clone(),
+            group_management.clone(),
+            collaboration_runtime.clone(),
+            session_repo.clone(),
+            message_repo.clone(),
+            system_message.clone(),
+            gateway_principal_verifier.clone(),
+        );
         let channel_runtime = build_channel_runtime(
             &config,
             channel_slot,
@@ -1694,6 +1829,7 @@ impl Default for BcsServerState {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            openapi_v1,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -2560,6 +2696,7 @@ impl BcsServer {
         // Create service implementations (synchronous, in-memory mode)
         let provider_repos = memory_provider_repos();
         let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(config.bots_base_dir.clone()));
+        let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc: Arc<BotCore> = Arc::new(BotCore::with_provider_repos(
             bot_repo,
@@ -2791,6 +2928,23 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let openapi_v1 = build_openapi_v1_state(
+            &config,
+            control_plane_repo,
+            &provider_repos,
+            bot_registry.clone(),
+            sessions.clone(),
+            friend_store.clone(),
+            friend_request_store,
+            relation_store.clone(),
+            session_management.clone(),
+            group_management.clone(),
+            collaboration_runtime.clone(),
+            session_repo.clone(),
+            message_repo.clone(),
+            use_cases.system_message.clone(),
+            gateway_principal_verifier.clone(),
+        );
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
@@ -2912,6 +3066,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            openapi_v1,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
@@ -2995,6 +3150,7 @@ impl BcsServer {
             db_flavor,
             cache_key_prefix,
         ));
+        let control_plane_repo: Arc<dyn BotControlPlaneRepoPort> = bot_repo.clone();
         let bot_metrics_snapshot: Arc<dyn BotMetricsSnapshotPort> = bot_repo.clone();
         let bot_core_arc = Arc::new(BotCore::with_provider_repos(
             bot_repo,
@@ -3343,6 +3499,23 @@ impl BcsServer {
                 collaboration_runtime.clone(),
             )),
         );
+        let openapi_v1 = build_openapi_v1_state(
+            &config,
+            control_plane_repo,
+            &provider_repos,
+            bot_registry.clone(),
+            sessions.clone(),
+            friend_svc.clone(),
+            friend_request_svc,
+            relation_svc.clone(),
+            session_management.clone(),
+            group_management.clone(),
+            collaboration_runtime.clone(),
+            session_repo.clone(),
+            message_repo.clone(),
+            use_cases.system_message.clone(),
+            gateway_principal_verifier.clone(),
+        );
 
         // Build services bundle
         let message_flow = maybe_wrap_message_flow(&config, message_flow);
@@ -3480,6 +3653,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            openapi_v1,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -3599,7 +3773,10 @@ impl BcsServer {
             router = router.route(&metrics.endpoint_path, get(metrics_handler));
         }
 
-        let mut router = router.with_state(Arc::clone(&self.state)).merge(api_router);
+        let mut router = router
+            .with_state(Arc::clone(&self.state))
+            .merge(api_router)
+            .merge(bcs_api_http::router(self.state.openapi_v1.clone()));
 
         if let Some(oauth_router) = self.build_auth_router() {
             router = router.merge(oauth_router);
