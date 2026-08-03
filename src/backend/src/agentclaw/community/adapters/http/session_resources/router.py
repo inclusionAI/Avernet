@@ -48,7 +48,13 @@ def _domain_error(exc: ValueError) -> HTTPException:
         return HTTPException(status_code=502, detail=code)
     if code == "resource_not_found":
         return HTTPException(status_code=404, detail=code)
-    if code in {"materialize_state_conflict", "transfer_id_mismatch"}:
+    if code in {"target_bot_access_denied"}:
+        return HTTPException(status_code=403, detail=code)
+    if code in {
+        "bot_device_unavailable",
+        "materialize_state_conflict",
+        "transfer_id_mismatch",
+    }:
         return HTTPException(status_code=409, detail=code)
     if code in {"resource_not_ready", "resource_materializing", "resource_missing", "resource_changed"}:
         return HTTPException(status_code=409, detail=code)
@@ -91,6 +97,8 @@ async def create_upload_intents(
                 scope_type=body.scope_type,
                 engine_type=body.engine_type,
                 filename=item.filename,
+                target_entity_id=body.target_entity_id,
+                binding_id=body.binding_id,
                 size_bytes=item.size_bytes,
                 content_hash=item.content_hash,
             )

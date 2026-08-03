@@ -18,6 +18,7 @@ from agentclaw.community.core.session_resources.types import (
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterStreamResponse,
 )
+from agentclaw.community.adapters.http.session_resources.router import _domain_error
 
 
 class _Repo:
@@ -121,8 +122,18 @@ class _Resolver:
             "tenant": "tenant-1",
             "bot_uuid": "bot-uuid-1",
         }
+        self.bot_calls = []
+        self.binding_calls = []
 
     def resolve_for_bot(self, bot_id, owner_id):
+        self.bot_calls.append((bot_id, owner_id))
+        return self._context()
+
+    def resolve_for_binding(self, binding_id, operator_id, *, bot_id):
+        self.binding_calls.append((binding_id, operator_id, bot_id))
+        return self._context()
+
+    def _context(self):
         return type(
             "Context",
             (),
@@ -131,6 +142,35 @@ class _Resolver:
                 "conn_info": self._conn_info,
             },
         )()
+
+
+class _BotRepository:
+    def __init__(self, binding_id=42) -> None:
+        self.binding_id = binding_id
+        self.calls = []
+
+    def get_by_id_and_owner(self, bot_id, owner_id):
+        self.calls.append((bot_id, owner_id))
+        if self.binding_id is None:
+            return None
+        return {"binding_id": self.binding_id}
+
+
+class _BotFriendRepository:
+    def __init__(self, relation=None) -> None:
+        self.relation = relation
+        self.calls = []
+
+    def get_by_entity_ids(
+        self,
+        requester_entity_id,
+        target_entity_id,
+        target_bot_id,
+    ):
+        self.calls.append(
+            (requester_entity_id, target_entity_id, target_bot_id)
+        )
+        return self.relation
 
 
 class _Queue:
@@ -174,6 +214,8 @@ def _service(
     transport=None,
     resolver=None,
     default_tenant="configured-tenant",
+    bot_repository=None,
+    bot_friend_repository=None,
 ):
     repo = _Repo()
     http = _HttpClient(complete_status=complete_status)
@@ -185,6 +227,8 @@ def _service(
         token_vault=TokenVault(master_key="test-master-key"),
         adapter_transport=transport or _Transport(),
         default_tenant=default_tenant,
+        bot_repository=bot_repository or _BotRepository(),
+        bot_friend_repository=bot_friend_repository or _BotFriendRepository(),
     )
     return service, repo, http
 
@@ -218,6 +262,121 @@ def test_upload_intent_uses_session_api_and_persists_encrypted_session_key():
     assert repo.value.session_key_ciphertext != "session/raw value"
     assert repo.value.session_key_hash != "session/raw value"
     assert repo.value.transfer_api_version.value == "session_v2"
+    assert repo.value.binding_id == 42
+
+
+def test_upload_intent_routes_friend_request_to_target_bot_binding():
+    resolver = _Resolver()
+    bot_repository = _BotRepository(binding_id=77)
+    friend_repository = _BotFriendRepository({"status": "ACCEPTED"})
+    service, repo, http = _service(
+        resolver=resolver,
+        bot_repository=bot_repository,
+        bot_friend_repository=friend_repository,
+    )
+
+    intent = service.create_upload_intent(
+        owner_id="requester-1",
+        bot_id="default",
+        session_key="friend-session",
+        scope_type="friend_bot_chat",
+        engine_type="openclaw",
+        filename="report.txt",
+        target_entity_id="target-owner-1",
+        size_bytes=4,
+    )
+
+    assert intent.resource.owner_id == "requester-1"
+    assert intent.resource.binding_id == 77
+    assert friend_repository.calls == [
+        ("requester-1", "target-owner-1", "default")
+    ]
+    assert bot_repository.calls == [("default", "target-owner-1")]
+    assert resolver.binding_calls == [(77, "requester-1", "default")]
+    assert resolver.bot_calls == []
+    assert http.calls[0][1]["json"]["operator"] == "requester-1"
+    assert repo.value == intent.resource
+
+
+def test_upload_intent_uses_frontend_binding_without_target_lookup():
+    resolver = _Resolver()
+    bot_repository = _BotRepository(binding_id=None)
+    friend_repository = _BotFriendRepository({"status": "PENDING"})
+    service, repo, http = _service(
+        resolver=resolver,
+        bot_repository=bot_repository,
+        bot_friend_repository=friend_repository,
+    )
+
+    intent = service.create_upload_intent(
+        owner_id="requester-1",
+        bot_id="default",
+        session_key="friend-session",
+        scope_type="friend_bot_chat",
+        engine_type="openclaw",
+        filename="report.txt",
+        target_entity_id="target-owner-1",
+        binding_id=91,
+        size_bytes=4,
+    )
+
+    assert intent.resource.binding_id == 91
+    assert resolver.binding_calls == [(91, "requester-1", "default")]
+    assert bot_repository.calls == []
+    assert friend_repository.calls == []
+    assert repo.value == intent.resource
+    assert len(http.calls) == 1
+
+
+def test_upload_intent_rejects_unapproved_target_before_baas_call():
+    bot_repository = _BotRepository(binding_id=77)
+    friend_repository = _BotFriendRepository({"status": "PENDING"})
+    service, repo, http = _service(
+        bot_repository=bot_repository,
+        bot_friend_repository=friend_repository,
+    )
+
+    with pytest.raises(ValueError, match="target_bot_access_denied"):
+        service.create_upload_intent(
+            owner_id="requester-1",
+            bot_id="default",
+            session_key="friend-session",
+            scope_type="friend_bot_chat",
+            engine_type="openclaw",
+            filename="report.txt",
+            target_entity_id="target-owner-1",
+            size_bytes=4,
+        )
+
+    assert repo.value is None
+    assert http.calls == []
+    assert bot_repository.calls == []
+
+
+def test_target_routing_errors_use_client_actionable_http_statuses():
+    assert _domain_error(ValueError("target_bot_access_denied")).status_code == 403
+    assert _domain_error(ValueError("bot_device_unavailable")).status_code == 409
+
+
+def test_friend_upload_without_target_entity_uses_requester_binding_and_logs_warning(caplog):
+    caplog.set_level("WARNING", logger="session_resource.service")
+    resolver = _Resolver()
+    service, _, _ = _service(resolver=resolver)
+
+    _intent = service.create_upload_intent(
+        owner_id="requester-1",
+        bot_id="default",
+        session_key="friend-session",
+        scope_type="friend_bot_chat",
+        engine_type="openclaw",
+        filename="report.txt",
+        size_bytes=4,
+    )
+
+    assert resolver.binding_calls == [(42, "requester-1", "default")]
+    assert "target.fallback" in caplog.text
+    assert "requester-1" not in caplog.text
+    assert "friend-session" not in caplog.text
 
 
 def test_upload_intent_defaults_missing_arca_identity_without_logging_raw_values(caplog):
@@ -509,7 +668,8 @@ def test_upload_complete_enqueue_failure_compensates_to_failed():
 @pytest.mark.asyncio
 async def test_content_streams_from_engine_without_baas_download_call():
     transport = _Transport()
-    service, repo, http = _service(transport=transport)
+    resolver = _Resolver()
+    service, repo, http = _service(transport=transport, resolver=resolver)
     intent = _intent(service)
     repo.value = replace(intent.resource, status=SessionResourceStatus.READY)
 
@@ -523,6 +683,7 @@ async def test_content_streams_from_engine_without_baas_download_call():
 
     assert record.resource_id == intent.resource.resource_id
     assert transport.calls[0][2].endswith(f"/{intent.resource.resource_id}/content")
+    assert resolver.binding_calls[-1] == (42, "owner-1", "bot-1")
     assert len(http.calls) == 1
     assert [chunk async for chunk in response.body] == [b"materialized bytes"]
     await response.close()

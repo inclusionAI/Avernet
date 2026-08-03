@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,7 @@ def _write_ready_file(root: Path, session_key: str, content: bytes = b"report") 
             observed_size=observed.st_size,
             observed_mtime_ns=observed.st_mtime_ns,
             observed_inode=observed.st_ino,
+            uploaded_at=datetime(2026, 8, 3, 10, 20, 30, tzinfo=UTC),
         )
     )
     return target
@@ -94,6 +96,7 @@ def test_list_and_content_are_scoped_to_manifest_session(client):
                 "display_name": "report.txt",
                 "size_bytes": target.stat().st_size,
                 "availability": "ready",
+                "uploaded_at": "2026-08-03T10:20:30Z",
             }
         ]
     }
@@ -101,6 +104,22 @@ def test_list_and_content_are_scoped_to_manifest_session(client):
     assert content.content == b"report"
     assert content.headers["content-disposition"].startswith("attachment;")
     assert cross_session.status_code == 404
+
+
+def test_list_returns_null_upload_time_for_legacy_manifest(client):
+    test_client, root = client
+    _write_ready_file(root, "session-a")
+    entry = ManifestStore(root).get("sr_001")
+    assert entry is not None
+    ManifestStore(root).upsert(entry.model_copy(update={"uploaded_at": None}))
+
+    response = test_client.get(
+        "/api/session-files",
+        params={"sessionKey": "session-a"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["files"][0]["uploaded_at"] is None
 
 
 def test_changed_and_missing_files_are_not_streamed(client):
@@ -130,7 +149,9 @@ def test_changed_and_missing_files_are_not_streamed(client):
     assert changed.status_code == 409
     assert changed.json()["detail"] == "resource_changed"
     assert changed_list.json()["files"][0]["availability"] == "changed"
+    assert changed_list.json()["files"][0]["uploaded_at"] == "2026-08-03T10:20:30Z"
     assert listed.json()["files"][0]["availability"] == "missing"
+    assert listed.json()["files"][0]["uploaded_at"] == "2026-08-03T10:20:30Z"
     assert missing.status_code == 409
     assert missing.json()["detail"] == "resource_missing"
 
