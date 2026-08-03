@@ -16,10 +16,16 @@ from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import build_served_openapi
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bots.openapi.json"
-_BAAS_ARTIFACT = Path(__file__).resolve().parents[1] / "configs" / "schemas" / "baas.openapi.json"
-_BCN_ARTIFACT = Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bcn.openapi.json"
+_BAAS_ARTIFACT = (
+    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "baas.openapi.json"
+)
+_BCN_ARTIFACT = (
+    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bcn.openapi.json"
+)
+_SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
+_SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
 
 
 def _served() -> dict[str, Any]:
@@ -76,7 +82,7 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     document = build_served_openapi(
         ["bots", "sessions", "collaboration"],
         descriptions.__getitem__,
-        _RULES,
+        _SHIPPED_RULES,
         title="gateway",
         version="0.1.0",
     )
@@ -85,6 +91,11 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert "/openapi/v1/bots" in paths
     assert "/openapi/v1/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
+    assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
+    assert "get" in paths["/openapi/v1/collaboration/group/ws"]
     assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
         "x-avernet-security"
     ] == {"user": "required"}
+    assert (
+        paths["/openapi/v1/collaboration/group/ws"]["get"]["x-avernet-security"] == {}
+    )

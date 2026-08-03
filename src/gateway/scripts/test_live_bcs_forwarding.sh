@@ -13,6 +13,7 @@ bcs_url="http://127.0.0.1:${port}"
 bcs_pid=""
 watchdog_pid=""
 development_signing_key="avernet-dev-signing-key-NOT-FOR-PROD"
+group_session_signing_key="gateway-live-group-session-key-at-least-32-bytes"
 
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 
@@ -58,6 +59,7 @@ sed \
 env -u SERVER_ENV -u REAL_SERVER_ENV -u ALIPAY_APP_ENV \
     SERVER_ENV=local \
     AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${development_signing_key}" \
+    BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${group_session_signing_key}" \
     "${bcs_dir}/target/debug/bcs" --config-dir "${config_file}" > "${log_file}" 2>&1 &
 bcs_pid=$!
 
