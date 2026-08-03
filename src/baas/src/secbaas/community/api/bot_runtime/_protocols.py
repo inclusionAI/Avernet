@@ -417,3 +417,22 @@ class BotRunner(Protocol):
             KeyError: run_id 不存在
         """
         ...
+
+    async def cancel_run(self, run_id: str) -> Any:
+        """按 run_id 中止对话执行
+
+        校验 run 存在且未终态 → 经 BotService.abort_run 向引擎发 chat.abort →
+        落库为 ABORTED。归属校验由调用方（router）通过 ``get_result`` 完成。
+
+        Args:
+            run_id: 运行 ID
+
+        Returns:
+            BotRunRecord: 中止后的运行记录（status=ABORTED）
+
+        Raises:
+            KeyError: run_id 不存在
+            BotRunStatusConflictError: run 已处于终态，不可中止
+            BotServiceError: 引擎不可达或 ack 失败
+        """
+        ...

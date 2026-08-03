@@ -578,3 +578,63 @@ class TestCreateSessionFullFlow:
         )
         assert session.session_id == SESSION_ID
         assert session.status == "active"
+
+
+# ==================== TestAbortRun ====================
+
+
+class TestAbortRun:
+    """abort_run tests for ClawBotService."""
+
+    @pytest.mark.asyncio
+    async def test_abort_run_success(self, service, arca_binding, mock_pool):
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock(
+            return_value={"ok": True, "payload": {"aborted": True}}
+        )
+        mock_pool.get.return_value = mock_client
+
+        result = await service.abort_run(
+            run_id="run-001",
+            session_id=SESSION_ID,
+            binding_info=arca_binding,
+        )
+
+        assert result["ok"] is True
+        mock_client.chat_abort.assert_awaited_once()
+        call_kw = mock_client.chat_abort.call_args.kwargs
+        assert call_kw["session_key"] == SESSION_ID
+        assert call_kw["run_id"] == "run-001"
+
+    @pytest.mark.asyncio
+    async def test_abort_run_engine_error_raises(
+        self, service, arca_binding, mock_pool
+    ):
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock(
+            return_value={
+                "ok": False,
+                "error": {"code": "ALREADY_DONE", "message": "finished"},
+            }
+        )
+        mock_pool.get.return_value = mock_client
+
+        with pytest.raises(BotServiceError, match="chat.abort failed"):
+            await service.abort_run(
+                run_id="run-001",
+                session_id=SESSION_ID,
+                binding_info=arca_binding,
+            )
+
+    @pytest.mark.asyncio
+    async def test_abort_run_requires_sandbox_id(
+        self, service, baas_binding, mock_pool
+    ):
+        """baas_binding has sandbox_id=None → BotServiceError."""
+        with pytest.raises(BotServiceError, match="requires sandbox_id"):
+            await service.abort_run(
+                run_id="run-001",
+                session_id=SESSION_ID,
+                binding_info=baas_binding,
+            )
+        mock_pool.get.assert_not_called()

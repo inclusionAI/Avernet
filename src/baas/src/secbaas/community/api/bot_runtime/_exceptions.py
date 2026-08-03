@@ -197,3 +197,38 @@ class TransferStateConflictError(BotServiceError):
     def __init__(self, message: str = ""):
         self.message = message
         super().__init__(message)
+
+
+class BotRunNotFoundError(BotServiceError):
+    """Run 记录不存在。
+
+    由 cancel_run 等按 run_id 操作的入口在仓库层未命中时抛出，
+    router 映射为 404（不泄漏 run 存在性）。
+    """
+
+    error_code = "BOT_RUN_NOT_FOUND"
+    http_status = 404
+
+    def __init__(self, run_id: str = ""):
+        self.run_id = run_id
+        super().__init__(f"Run not found: {run_id}")
+
+
+class BotRunStatusConflictError(BotServiceError):
+    """Run 已处于终态，无法中止。
+
+    由 BotRunRepository.update_aborted 在 row-affected==0（run 已终态或不存在）时抛出，
+    router 映射为 409。终态包括 COMPLETED / FAILED / TIME_OUT / ABORTED。
+    """
+
+    error_code = "BOT_RUN_STATUS_CONFLICT"
+    http_status = 409
+
+    def __init__(self, run_id: str = "", status: str = ""):
+        self.run_id = run_id
+        self.status = status
+        super().__init__(
+            f"Run {run_id} is in a terminal state: {status}"
+            if status
+            else f"Run {run_id} is in a terminal state"
+        )

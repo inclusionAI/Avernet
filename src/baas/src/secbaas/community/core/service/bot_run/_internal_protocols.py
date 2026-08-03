@@ -140,6 +140,33 @@ class BotService(Protocol):
         """
         ...
 
+    async def abort_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> dict[str, Any]:
+        """向引擎发送 chat.abort，请求中止指定 run 的对话执行
+
+        与 send_message 不同，abort_run 不消费流式事件，仅同步等待引擎 ack。
+        引擎未 ack 或 ack 失败时抛 ``BotServiceError``，由调用方决定是否落库。
+
+        Args:
+            run_id: 运行 ID
+            session_id: 会话 ID（作为 sessionKey 路由到引擎）
+            binding_info: 已解析的 binding 信息（用于创建底层 WS 连接）
+            context: 可选的请求上下文
+
+        Returns:
+            引擎 ack 响应字典。
+
+        Raises:
+            BotServiceError: 引擎不可达或 ack 失败。
+        """
+        ...
+
     async def get_session(
         self,
         *,

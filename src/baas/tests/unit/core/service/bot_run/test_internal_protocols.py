@@ -23,6 +23,7 @@ class TestBotServiceProtocol:
             "create_session",
             "send_message",
             "inject_message",
+            "abort_run",
             "get_messages",
         }
         protocol_methods = {

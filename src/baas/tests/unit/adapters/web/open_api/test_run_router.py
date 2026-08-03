@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 
 from secbaas.community.adapters.web.routers.open_api.model import RunRequest
 from secbaas.community.adapters.web.routers.open_api.run_router import (
+    cancel_run,
     get_run_result,
     run_chat,
 )
@@ -488,3 +489,145 @@ class TestGetRunResult:
         assert exc.value.status_code == status.HTTP_404_NOT_FOUND
         assert exc.value.detail["code"] == 40401
         assert "run-404" in exc.value.detail["message"]
+
+
+# ── cancel_run ───────────────────────────────────────────────
+
+
+class TestCancelRun:
+    """Tests for the POST /runs/{run_id}/cancel endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_success(self):
+        """Happy path: owned run aborted → 200 with status=ABORTED."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(status="RUNNING")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        aborted_record = _make_run_record(status="ABORTED")
+        mock_runner.cancel_run = AsyncMock(return_value=aborted_record)
+
+        result = await cancel_run(
+            run_id="run-001",
+            api_key_record=api_key,
+            bot_runner=mock_runner,
+        )
+
+        assert result.code == 0
+        assert result.message == "success"
+        assert result.data.run_id == "run-001"
+        assert result.data.status == "ABORTED"
+        assert result.data.aborted_at is not None
+        mock_runner.cancel_run.assert_awaited_once_with("run-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_not_found_returns_404(self):
+        """get_result raises KeyError → 404."""
+        api_key = _make_api_key_record()
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(side_effect=KeyError("run-404"))
+        mock_runner.cancel_run = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-404",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        mock_runner.cancel_run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_ownership_mismatch_returns_404(self):
+        """bot_id mismatch → 404 (does not leak run existence)."""
+        api_key = _make_api_key_record(app_id="bot-other:entity-2")
+        record = _make_run_record(bot_id="bot-1:entity-1", api_key_prefix="kp-001")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.cancel_run = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+        mock_runner.cancel_run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_api_key_prefix_mismatch_returns_404(self):
+        """api_key_prefix mismatch → 404."""
+        api_key = _make_api_key_record(api_key_prefix="kp-999")
+        record = _make_run_record(api_key_prefix="kp-001")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.cancel_run = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_404_NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_cancel_terminal_returns_409(self):
+        """BotRunStatusConflictError → 409."""
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        api_key = _make_api_key_record()
+        record = _make_run_record(status="COMPLETED")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.cancel_run = AsyncMock(
+            side_effect=BotRunStatusConflictError("run-001", "COMPLETED")
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_409_CONFLICT
+        assert exc.value.detail["code"] == 40901
+
+    @pytest.mark.asyncio
+    async def test_cancel_engine_error_returns_503(self):
+        """BotServiceError from cancel_run → 503."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(status="RUNNING")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.cancel_run = AsyncMock(
+            side_effect=BotServiceError("engine unreachable")
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert exc.value.detail["code"] == OpenAPICode.BUSINESS_ERROR
+
+    @pytest.mark.asyncio
+    async def test_cancel_unexpected_error_returns_500(self):
+        """Unexpected Exception → 500."""
+        api_key = _make_api_key_record()
+        record = _make_run_record(status="RUNNING")
+        mock_runner = MagicMock()
+        mock_runner.get_result = MagicMock(return_value=record)
+        mock_runner.cancel_run = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(HTTPException) as exc:
+            await cancel_run(
+                run_id="run-001",
+                api_key_record=api_key,
+                bot_runner=mock_runner,
+            )
+        assert exc.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert "Internal server error" in exc.value.detail["message"]

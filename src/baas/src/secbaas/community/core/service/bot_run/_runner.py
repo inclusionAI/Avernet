@@ -32,6 +32,7 @@ from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotBindingNotFoundError,
     BotChatContext,
+    BotRunStatusConflictError,
     MessageInfo,
     SessionInfo,
 )
@@ -450,6 +451,71 @@ class BotRunner:
         if record is None:
             raise KeyError(f"Run not found: {run_id}")
         return record
+
+    async def cancel_run(self, run_id: str) -> Any:
+        """按 run_id 中止对话执行
+
+        流程：
+          1. ``get_by_run_id`` 取记录 → 不存在抛 ``KeyError``（router 映射 404）。
+          2. 终态判定（COMPLETED/FAILED/TIME_OUT/ABORTED）→ 抛
+             ``BotRunStatusConflictError``（router 映射 409）。
+          3. 解析 binding → 选择 BotService。
+          4. 从记录提取 session_id（缺失时回退默认 ``agent:main:default``）。
+          5. ``BotService.abort_run`` 向引擎发 chat.abort 等待 ack。
+          6. ack 成功后 ``update_aborted`` 落库（rowcount==0 抛冲突，按 409 处理）。
+          7. 回读记录返回。
+
+        以 DB 状态机为权威：引擎 ack 成功但 DB 已终态时，``update_aborted`` 抛
+        ``BotRunStatusConflictError``（409）；引擎 ack 失败不落 ABORTED，避免漂移。
+
+        Args:
+            run_id: 运行 ID
+
+        Returns:
+            BotRunRecord: 中止后的运行记录
+
+        Raises:
+            KeyError: run_id 不存在
+            BotRunStatusConflictError: run 已终态
+            BotServiceError: 引擎 ack 失败
+        """
+        logger.info("[runner.cancel_run] run_id=%s", run_id)
+
+        record = self._run_repository.get_by_run_id(run_id=run_id)
+        if record is None:
+            raise KeyError(f"Run not found: {run_id}")
+
+        # 终态判定：DB 状态机为权威
+        if record.status in ("COMPLETED", "FAILED", "TIME_OUT", "ABORTED"):
+            logger.warning(
+                "[runner.cancel_run] run already terminal: run_id=%s, status=%s",
+                run_id,
+                record.status,
+            )
+            raise BotRunStatusConflictError(run_id=run_id, status=record.status)
+
+        # 解析 binding → 选择 BotService（cancel 不需要 lifecycle_stage，沿用 online）
+        route = await self._resolve_bot_route(record.bot_id, {})
+
+        # 从记录提取 session_id，缺失时回退默认 sessionKey
+        session_id = extract_session_id_from_record(record)
+        if not session_id:
+            session_id = "agent:main:default"
+
+        # 向引擎发 chat.abort，等待 ack；失败抛 BotServiceError，不落 ABORTED
+        await route.bot_service.abort_run(
+            run_id=run_id,
+            session_id=session_id,
+            binding_info=route.binding_info,
+            context=None,
+        )
+
+        # 引擎 ack 成功 → 落库 ABORTED；rowcount==0 表示并发自然结束，按 409
+        self._run_repository.update_aborted(run_id=run_id)
+
+        aborted_record = self._run_repository.get_by_run_id(run_id=run_id)
+        logger.info("[runner.cancel_run] aborted: run_id=%s", run_id)
+        return aborted_record if aborted_record is not None else record
 
     # ── 私有方法：步骤提取 ──────────────────────────────────────────────
 

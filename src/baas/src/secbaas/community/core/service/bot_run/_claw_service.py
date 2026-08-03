@@ -342,6 +342,56 @@ class ClawBotService(BotService):
         except Exception as e:
             raise BotServiceError(f"Failed to inject message: {e}") from e
 
+    async def abort_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> dict[str, Any]:
+        """向引擎发送 chat.abort，请求中止指定 run
+
+        通过连接池获取已握手的 AsyncChatClient，调用其 chat_abort 发送
+        ``{sessionKey, runId}`` 帧并等待引擎 ack。
+
+        Args:
+            run_id: 运行 ID
+            session_id: 会话 ID（作为 sessionKey）
+            binding_info: Binding info for WS connection.
+            context: 可选的请求上下文（未使用，abort 不需要 auth_token）
+
+        Returns:
+            引擎 ack 响应字典。
+
+        Raises:
+            BotServiceError: binding_info 缺失 sandbox_id 或引擎 ack 失败。
+        """
+        sandbox_id = binding_info.sandbox_id
+        engine_type = binding_info.engine_type
+        if sandbox_id is None:
+            raise BotServiceError("ClawBotService requires sandbox_id in binding_info.")
+
+        url = self._build_ws_url(sandbox_id, engine_type or "openclaw")
+        headers = self._get_headers(sandbox_id)
+
+        client = await self._client_pool.get(sandbox_id, url, headers)
+        try:
+            result = await client.chat_abort(
+                session_key=session_id,
+                run_id=run_id,
+            )
+            if not result.get("ok", False):
+                error = result.get("error", {})
+                raise BotServiceError(
+                    f"chat.abort failed: {error.get('code')} - {error.get('message')}"
+                )
+            return result
+        except BotServiceError:
+            raise
+        except Exception as e:
+            raise BotServiceError(f"Failed to abort run: {e}") from e
+
     async def get_messages(
         self,
         *,

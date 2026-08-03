@@ -1,6 +1,7 @@
 import json
 from typing import Any
 
+from secbaas.community.api.bot_runtime import BotRunStatusConflictError
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.community.logger import get_logger
 
@@ -159,6 +160,34 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             )
         else:
             log.info("[bot-run:update_timeout] result: done")
+
+    @with_orm_session
+    def update_aborted(self, run_id: str) -> None:
+        log.info("update_aborted: run_id=%s", run_id)
+        from sqlalchemy import func
+
+        updated = (
+            self._session.query(BotRunModel)
+            .filter(
+                BotRunModel.run_id == run_id,
+                BotRunModel.status.in_(("PENDING", "RUNNING")),
+            )
+            .update(
+                {
+                    "status": "ABORTED",
+                    "completed_at": func.now(),
+                    "gmt_modified": func.now(),
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated == 0:
+            log.warning(
+                "[bot-run:update_aborted] conflict (already terminal or not found) run_id=%s",
+                run_id,
+            )
+            raise BotRunStatusConflictError(run_id=run_id)
+        log.info("[bot-run:update_aborted] result: done")
 
     @with_orm_session
     def update_session_id(self, run_id: str, session_id: str) -> None:

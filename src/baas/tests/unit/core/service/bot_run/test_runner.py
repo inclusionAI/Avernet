@@ -2048,3 +2048,169 @@ class _DummyConverter:
         result = self._results[self._idx]
         self._idx += 1
         return result
+
+
+# ==================== Tests: cancel_run ====================
+
+
+class TestCancelRun:
+    """Tests for BotRunner.cancel_run — abort flow + state transitions."""
+
+    def _make_record(self, **overrides):
+        from datetime import datetime
+
+        from secbaas.community.core.repository.bot_run import BotRunRecord
+
+        defaults = dict(
+            id=1,
+            gmt_create=datetime.now(),
+            gmt_modified=datetime.now(),
+            run_id="run-cancel-1",
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            api_key_prefix=API_KEY_PREFIX,
+            message="hi",
+            message_long="hi",
+            metadata={"session_id": "agent:main:sess-1"},
+            status="RUNNING",
+            result_content=None,
+            result_content_long=None,
+            result_extra={"session_id": "agent:main:sess-1"},
+            error=None,
+            completed_at=None,
+        )
+        defaults.update(overrides)
+        return BotRunRecord(**defaults)
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_success(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        running_record = self._make_record(status="RUNNING")
+        aborted_record = self._make_record(
+            status="ABORTED",
+            completed_at=__import__("datetime").datetime.now(),
+        )
+        mock_run_repo.get_by_run_id = MagicMock(
+            side_effect=[running_record, aborted_record]
+        )
+        mock_run_repo.update_aborted = MagicMock()
+        mock_bot_service.abort_run = AsyncMock(
+            return_value={"ok": True, "payload": {"aborted": True}}
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run("run-cancel-1")
+
+        assert result.status == "ABORTED"
+        mock_bot_service.abort_run.assert_awaited_once()
+        call_kw = mock_bot_service.abort_run.call_args.kwargs
+        assert call_kw["run_id"] == "run-cancel-1"
+        assert call_kw["session_id"] == "agent:main:sess-1"
+        assert call_kw["binding_info"].bot_id == BOT_ID
+        mock_run_repo.update_aborted.assert_called_once_with(run_id="run-cancel-1")
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_not_found_raises_keyerror(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        mock_run_repo.get_by_run_id = MagicMock(return_value=None)
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(KeyError):
+            await runner.cancel_run("nope")
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_terminal_raises_conflict(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        record = self._make_record(status="COMPLETED")
+        mock_run_repo.get_by_run_id = MagicMock(return_value=record)
+        mock_run_repo.update_aborted = MagicMock()
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(BotRunStatusConflictError):
+            await runner.cancel_run("run-cancel-1")
+        # Must NOT call engine abort or DB update when already terminal
+        mock_bot_service.abort_run.assert_not_called()
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_already_aborted_raises_conflict(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        record = self._make_record(status="ABORTED")
+        mock_run_repo.get_by_run_id = MagicMock(return_value=record)
+        mock_run_repo.update_aborted = MagicMock()
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(BotRunStatusConflictError):
+            await runner.cancel_run("run-cancel-1")
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_engine_failure_skips_db(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+    ):
+        """Engine ack failure must NOT mark ABORTED (no state drift)."""
+        from secbaas.community.api.bot_runtime import BotServiceError
+
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        record = self._make_record(status="RUNNING")
+        mock_run_repo.get_by_run_id = MagicMock(return_value=record)
+        mock_run_repo.update_aborted = MagicMock()
+        mock_bot_service.abort_run = AsyncMock(
+            side_effect=BotServiceError("engine down")
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(BotServiceError):
+            await runner.cancel_run("run-cancel-1")
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_falls_back_default_session(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+    ):
+        """When record has no session_id, abort_run uses agent:main:default."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        record = self._make_record(metadata=None, result_extra=None, status="PENDING")
+        mock_run_repo.get_by_run_id = MagicMock(return_value=record)
+        mock_run_repo.update_aborted = MagicMock()
+        mock_bot_service.abort_run = AsyncMock(return_value={"ok": True})
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        await runner.cancel_run("run-cancel-1")
+
+        call_kw = mock_bot_service.abort_run.call_args.kwargs
+        assert call_kw["session_id"] == "agent:main:default"

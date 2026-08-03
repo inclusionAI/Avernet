@@ -14,6 +14,8 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     ExtraInfo,
+    RunCancelResponse,
+    RunCancelResponseData,
     RunRequest,
     RunResponse,
     RunResponseData,
@@ -28,6 +30,7 @@ from secbaas.community.api.bot_runtime import (
     BotNotAvailableError,
     BotNotFoundError,
     BotRunner,
+    BotRunStatusConflictError,
     BotServiceError,
     TooManyRequestsError,
 )
@@ -242,4 +245,113 @@ async def get_run_result(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": 40401, "message": f"Run not found: {run_id}"},
+        )
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=RunCancelResponse,
+    summary="Cancel a conversation by run_id",
+    description="Abort an in-progress Bot conversation identified by run_id. "
+    "Only the API Key holder that owns the run may cancel it; runs in a "
+    "terminal state (COMPLETED / FAILED / TIME_OUT / ABORTED) return 409.",
+    responses={
+        200: {"description": "Run aborted successfully"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Run not found or not owned by this API Key"},
+        409: {"description": "Run is already in a terminal state"},
+        503: {"description": "Bot / engine unavailable"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def cancel_run(
+    run_id: str,
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> RunCancelResponse:
+    """Cancel (abort) an in-progress conversation by run_id
+
+    Args:
+        run_id: Run ID to abort
+        api_key_record: Record from API Key validation
+        bot_runner: BotRunner instance
+
+    Returns:
+        RunCancelResponse: Cancel response with aborted run info
+    """
+    try:
+        logger.info(
+            f"cancel_run: run_id={run_id}, bot_id={api_key_record.app_id}, "
+            f"api_key_prefix={api_key_record.api_key_prefix}"
+        )
+
+        # 1. 取 run 记录并校验归属（不泄漏 run 存在性 → 一律 404）
+        try:
+            run_info = bot_runner.get_result(run_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": 40401, "message": f"Run not found: {run_id}"},
+            )
+
+        if (
+            run_info.api_key_prefix != api_key_record.api_key_prefix
+            or run_info.bot_id != api_key_record.app_id
+        ):
+            logger.warning(
+                f"cancel_run ownership mismatch: run_id={run_id}, "
+                f"expected api_key_prefix={api_key_record.api_key_prefix}/bot_id={api_key_record.app_id}, "
+                f"actual api_key_prefix={run_info.api_key_prefix}/bot_id={run_info.bot_id}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": 40401, "message": f"Run not found: {run_id}"},
+            )
+
+        # 2. 中止 run（引擎 chat.abort + 落库 ABORTED）
+        aborted_info = await bot_runner.cancel_run(run_id)
+
+        logger.info(
+            f"cancel_run success: run_id={run_id}, status={aborted_info.status}"
+        )
+
+        return RunCancelResponse(
+            code=0,
+            message="success",
+            data=RunCancelResponseData(
+                run_id=aborted_info.run_id,
+                status=aborted_info.status,
+                aborted_at=aborted_info.completed_at,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except BotRunStatusConflictError as e:
+        logger.warning(f"cancel_run status conflict: run_id={run_id}, error={e}")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": 40901, "message": str(e)},
+        )
+    except BotNotAvailableError as e:
+        logger.warning(f"cancel_run bot not available: run_id={run_id}, error={e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": 60001, "message": str(e)},
+        )
+    except BotServiceError as e:
+        logger.warning(f"cancel_run bot service error: run_id={run_id}, error={e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": OpenAPICode.BUSINESS_ERROR, "message": str(e)},
+        )
+    except Exception as e:
+        logger.error(
+            f"cancel_run unexpected error: run_id={run_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )

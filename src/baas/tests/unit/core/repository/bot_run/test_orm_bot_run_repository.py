@@ -286,3 +286,40 @@ class TestUpdateError:
         repository.update_error("run-003", "late error")
 
         mock_session.query.return_value.filter.return_value.update.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestUpdateAborted
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateAborted:
+    def test_sets_aborted(self, repository, mock_session):
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+        repository.update_aborted("run-001")
+
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()
+        call_kwargs = (
+            mock_session.query.return_value.filter.return_value.update.call_args
+        )
+        update_dict = call_kwargs[0][0]
+        assert update_dict["status"] == "ABORTED"
+        assert "completed_at" in update_dict
+        assert "gmt_modified" in update_dict
+
+    def test_raises_conflict_when_already_terminal(self, repository, mock_session):
+        """rowcount==0 (terminal or not found) -> BotRunStatusConflictError."""
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+        with pytest.raises(BotRunStatusConflictError):
+            repository.update_aborted("run-terminal")
+
+    def test_raises_conflict_when_not_found(self, repository, mock_session):
+        from secbaas.community.api.bot_runtime import BotRunStatusConflictError
+
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+        with pytest.raises(BotRunStatusConflictError) as exc:
+            repository.update_aborted("nonexistent")
+        assert exc.value.run_id == "nonexistent"
+        assert exc.value.http_status == 409

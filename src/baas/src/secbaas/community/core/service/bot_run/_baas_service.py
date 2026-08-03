@@ -542,6 +542,62 @@ class BaasBotService(BotService):
                 f"Failed to inject message: {_safe_client_msg(e)}"
             ) from e
 
+    async def abort_run(
+        self,
+        *,
+        run_id: str,
+        session_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> dict[str, Any]:
+        """向引擎发送 chat.abort，请求中止指定 run
+
+        通过 binding_info 解析 WS 连接，从连接池获取 AsyncChatClient，
+        调用其 chat_abort 发送 ``{sessionKey, runId}`` 帧并等待引擎 ack。
+
+        Args:
+            run_id: 运行 ID
+            session_id: 会话 ID（作为 sessionKey）
+            binding_info: Binding info for WS connection.
+            context: 可选的请求上下文（用于 tenant 解析）
+
+        Returns:
+            引擎 ack 响应字典。
+
+        Raises:
+            BotServiceError: WS 连接解析失败或引擎 ack 失败。
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        pool_key = conn_info.target
+        headers = {"x-proxypass-token": conn_info.token}
+
+        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        try:
+            result = await client.chat_abort(
+                session_key=session_id,
+                run_id=run_id,
+            )
+            if not result.get("ok", False):
+                error = result.get("error", {})
+                raise BotServiceError(
+                    f"chat.abort failed: {error.get('code')} - {error.get('message')}"
+                )
+            return result
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to abort run: %s", e)
+            raise BotServiceError(f"Failed to abort run: {_safe_client_msg(e)}") from e
+
     async def get_messages(
         self,
         *,

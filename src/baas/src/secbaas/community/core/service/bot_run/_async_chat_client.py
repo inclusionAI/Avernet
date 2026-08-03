@@ -542,6 +542,63 @@ class AsyncChatClient:
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
+    async def chat_abort(
+        self,
+        session_key: str,
+        run_id: str | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109
+    ) -> dict[str, Any]:
+        """向引擎发送 chat.abort 帧，请求中止指定 run 的对话执行。
+
+        与 send_message 不同，chat_abort 不注册 _SessionState、不消费流式事件，
+        仅同步等待引擎的 RPC ack（``{success, payload|error}``）。底层
+        ``BotWebSocketClient.chat_abort`` 发送 method=chat.abort，入参与 corp
+        ``moltis_client.chat_abort`` 一致：``{sessionKey, runId}``。
+
+        受并发信号量约束（max_concurrent_sessions），提供背压；不占用同一
+        sessionKey 排队槽（abort 不等待 chat_complete，无会话状态竞争）。
+
+        Args:
+            session_key: 会话 key（adapter session_id）。
+            run_id: 运行 ID，用于引擎侧精确定位要中止的 run。
+            timeout: RPC ack 超时（秒），None 表示使用底层默认。
+
+        Returns:
+            引擎 ack 响应字典（``{"ok": bool, "payload": ..., "error": ...}``）。
+
+        Raises:
+            NotConnectedError: 连接未建立或已断开。
+        """
+        if not self.is_connected:
+            raise NotConnectedError(
+                "Not connected. Call connect() first or wait for reconnection."
+            )
+
+        if self._concurrency_sem is not None:
+            await self._concurrency_sem.acquire()
+
+        try:
+            logger.info(
+                "[abort] Sending chat.abort: session_key=%s, run_id=%s",
+                session_key,
+                run_id,
+            )
+            assert self._client is not None
+            result = await self._client.chat_abort(
+                session_key=session_key,
+                run_id=run_id,
+            )
+            logger.info(
+                "[abort] chat.abort ack: session_key=%s, run_id=%s, ok=%s",
+                session_key,
+                run_id,
+                result.get("ok"),
+            )
+            return result
+        finally:
+            if self._concurrency_sem is not None:
+                self._concurrency_sem.release()
+
     async def close(self) -> None:
         """关闭连接并清理所有 session state。"""
         self._closed_intentionally = True

@@ -67,6 +67,24 @@ class RunResponse(ApiResponse[RunResponseData]):
     data: RunResponseData | None = Field(default=None, description="Response data")
 
 
+class RunCancelResponseData(BaseModel):
+    """Run cancel response data"""
+
+    run_id: str = Field(..., description="Run ID")
+    status: str = Field(..., description="Run status after cancel: ABORTED")
+    aborted_at: datetime | None = Field(
+        default=None, description="Abort completion time"
+    )
+
+
+class RunCancelResponse(ApiResponse[RunCancelResponseData]):
+    """Run cancel standard response"""
+
+    data: RunCancelResponseData | None = Field(
+        default=None, description="Run cancel data"
+    )
+
+
 class RunResultResponse(ApiResponse[RunResultResponseData]):
     """Run result query response"""
 

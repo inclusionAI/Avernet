@@ -450,6 +450,70 @@
         "title": "RunResponseData",
         "type": "object"
       },
+      "RunCancelResponseData": {
+        "description": "Run cancel response data",
+        "properties": {
+          "run_id": {
+            "description": "Run ID",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Run status after cancel: ABORTED",
+            "title": "Status",
+            "type": "string"
+          },
+          "aborted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Abort completion time",
+            "title": "Aborted At"
+          }
+        },
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "RunCancelResponseData",
+        "type": "object"
+      },
+      "RunCancelResponse": {
+        "description": "Run cancel standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunCancelResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run cancel data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "RunCancelResponse",
+        "type": "object"
+      },
       "RunResultData": {
         "description": "Conversation result data",
         "properties": {
@@ -1173,6 +1237,80 @@
           }
         },
         "summary": "Query conversation result",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/openapi/v1/runs/{run_id}/cancel": {
+      "post": {
+        "description": "Abort an in-progress Bot conversation identified by run_id. Only the API Key holder that owns the run may cancel it; runs in a terminal state (COMPLETED / FAILED / TIME_OUT / ABORTED) return 409.",
+        "operationId": "cancel_run_openapi_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            },
+            "description": "Run aborted successfully"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Run not found or not owned by this API Key"
+          },
+          "409": {
+            "description": "Run is already in a terminal state"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "503": {
+            "description": "Bot / engine unavailable"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel a conversation by run_id",
         "tags": [
           "runs"
         ]

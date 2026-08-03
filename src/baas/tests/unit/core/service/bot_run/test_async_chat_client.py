@@ -1423,3 +1423,82 @@ class TestInjectMessageSemaphore:
             client.inject_message("m3", session_key="s3"),
         )
         assert call_count == 3
+
+
+# ==================== chat_abort tests ====================
+
+
+class TestChatAbort:
+    @pytest.mark.asyncio
+    async def test_chat_abort_success(self, mock_bot_ws, mock_bot_ws_instance):
+        """chat_abort sends chat.abort and returns engine ack."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        ack = {"ok": True, "payload": {"aborted": True}}
+        mock_bot_ws_instance.chat_abort = AsyncMock(return_value=ack)
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        result = await client.chat_abort(
+            session_key="agent:main:sess-1", run_id="run-001"
+        )
+
+        assert result == ack
+        mock_bot_ws_instance.chat_abort.assert_awaited_once()
+        call_kw = mock_bot_ws_instance.chat_abort.call_args.kwargs
+        assert call_kw["session_key"] == "agent:main:sess-1"
+        assert call_kw["run_id"] == "run-001"
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_raises_not_connected(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort raises NotConnectedError when not connected."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            NotConnectedError,
+        )
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        with pytest.raises(NotConnectedError, match="Not connected"):
+            await client.chat_abort(session_key="s1", run_id="r1")
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_without_run_id(self, mock_bot_ws, mock_bot_ws_instance):
+        """chat_abort works with run_id=None (session-only abort)."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        ack = {"ok": True, "payload": {}}
+        mock_bot_ws_instance.chat_abort = AsyncMock(return_value=ack)
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        result = await client.chat_abort(session_key="s1")
+        assert result == ack
+        call_kw = mock_bot_ws_instance.chat_abort.call_args.kwargs
+        assert call_kw["run_id"] is None
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_propagates_engine_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort returns the engine error ack (caller decides raise)."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        ack = {"ok": False, "error": {"code": "ALREADY_FINISHED", "message": "done"}}
+        mock_bot_ws_instance.chat_abort = AsyncMock(return_value=ack)
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        result = await client.chat_abort(session_key="s1", run_id="r1")
+        assert result["ok"] is False
+        assert result["error"]["code"] == "ALREADY_FINISHED"

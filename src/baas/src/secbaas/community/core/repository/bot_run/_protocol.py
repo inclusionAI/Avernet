@@ -91,6 +91,21 @@ class BotRunRepository(Protocol):
         """
         ...
 
+    def update_aborted(self, run_id: str) -> None:
+        """中止运行记录（标记为 ABORTED 状态）
+
+        仅允许 PENDING/RUNNING → ABORTED 转移；当 run 已处于终态
+        （COMPLETED/FAILED/TIME_OUT/ABORTED）或不存在时，row-affected==0，
+        抛出 ``BotRunStatusConflictError``（409）。
+
+        Args:
+            run_id: 运行ID
+
+        Raises:
+            BotRunStatusConflictError: run 已终态或不存在
+        """
+        ...
+
     def update_session_id(self, run_id: str, session_id: str) -> None:
         """更新运行记录的会话 ID
 

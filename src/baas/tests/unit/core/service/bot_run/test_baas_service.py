@@ -2168,3 +2168,79 @@ class _ANY:
 
 
 ANY: _ANY = _ANY()
+
+
+# ==================== TestAbortRun ====================
+
+
+class TestAbortRun:
+    """abort_run tests for BaasBotService."""
+
+    @pytest.mark.asyncio
+    async def test_abort_run_success(self, service, wss_resolver, mock_pool):
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock(
+            return_value={"ok": True, "payload": {"aborted": True}}
+        )
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            result = await service.abort_run(
+                run_id="run-001",
+                session_id=SESSION_ID,
+                binding_info=binding,
+            )
+
+        assert result["ok"] is True
+        mock_client.chat_abort.assert_awaited_once()
+        call_kw = mock_client.chat_abort.call_args.kwargs
+        assert call_kw["session_key"] == SESSION_ID
+        assert call_kw["run_id"] == "run-001"
+        mock_pool.get.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_abort_run_engine_error_raises(
+        self, service, wss_resolver, mock_pool
+    ):
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock(
+            return_value={"ok": False, "error": {"code": "BUSY", "message": "busy"}}
+        )
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            with pytest.raises(BotServiceError, match="chat.abort failed"):
+                await service.abort_run(
+                    run_id="run-001",
+                    session_id=SESSION_ID,
+                    binding_info=binding,
+                )
+
+    @pytest.mark.asyncio
+    async def test_abort_run_ws_resolution_failure_raises(
+        self, service, wss_resolver, mock_pool
+    ):
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            side_effect=RuntimeError("dns fail"),
+        ):
+            with pytest.raises(BotServiceError, match="Failed to resolve WS"):
+                await service.abort_run(
+                    run_id="run-001",
+                    session_id=SESSION_ID,
+                    binding_info=binding,
+                )
+        mock_pool.get.assert_not_called()
