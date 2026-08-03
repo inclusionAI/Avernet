@@ -30,6 +30,48 @@ def _make_service(device_fs, *, runtime_uses_pool_paths=False):
 
 class TestDeleteSkillStep1:
     @pytest.mark.asyncio
+    async def test_legacy_delete_keeps_metadata_only_fallback_without_device(self):
+        """Legacy deletion preserves its historical behavior without a binding."""
+        svc, _ = _make_service(MagicMock())
+        svc._device_fs_factory = MagicMock(side_effect=RuntimeError("not bound"))
+        skill = {
+            "id": "sk-1",
+            "name": "x",
+            "git_path": "local:///oss-view/.../skills-local/x",
+            "bolt_id": "bolt-1",
+            "user_id": "u-1",
+        }
+
+        with patch.object(svc, "get_skill", return_value=skill), patch.object(
+            svc, "_can_delete_skill", return_value=True
+        ), patch.object(svc._skill_repo, "delete", return_value=True):
+            assert await svc.delete_skill("sk-1", user_id="u-1") is True
+
+    @pytest.mark.asyncio
+    async def test_pool_delete_fails_closed_without_device(self):
+        from agentclaw.community.core.skill_center.errors import (
+            SkillDeleteConsistencyError,
+        )
+
+        svc, _ = _make_service(MagicMock(), runtime_uses_pool_paths=True)
+        svc._device_fs_factory = MagicMock(side_effect=RuntimeError("not bound"))
+        skill = {
+            "id": "sk-1",
+            "name": "x",
+            "git_path": "local:///oss-view/.../skills-local/x",
+            "bolt_id": "bolt-1",
+            "user_id": "u-1",
+        }
+
+        with patch.object(svc, "get_skill", return_value=skill), patch.object(
+            svc, "_can_delete_skill", return_value=True
+        ):
+            with pytest.raises(SkillDeleteConsistencyError):
+                await svc.delete_skill("sk-1", user_id="u-1")
+
+        svc._skill_repo.delete.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_delete_tolerates_nullable_git_path(self):
         """Historical metadata with a NULL locator must not crash deletion."""
         device_fs = MagicMock()
