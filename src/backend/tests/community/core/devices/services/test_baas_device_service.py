@@ -266,6 +266,46 @@ class TestUpdateDeviceHeaders:
         baas.list_devices_by_bot_uuid.assert_called_once_with("BOT-fallback")
         baas.update_device_outbound_rule.assert_not_called()
 
+    def test_batch_mode_active_only_updates_only_active_devices(self):
+        baas = MagicMock()
+        rule = MagicMock()
+        baas._build_outbound_operation_rule.return_value = rule
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "D-active", "provider_device_id": "P-active", "status": "ACTIVE"},
+            {"device_uuid": "D-failed", "provider_device_id": "P-failed", "status": "FAILED"},
+            {"device_uuid": "D-released", "provider_device_id": "P-released", "status": "RELEASED"},
+        ]
+        svc = _make_service(baas_service=baas)
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"bolt_id": "bot-1", "entity_id": "owner-1"},
+        )
+
+        result = svc.update_device_headers(device=device, active_only=True)
+
+        assert result == [
+            {"device_uuid": "D-active", "paas_device_id": "P-active"},
+        ]
+        baas.update_device_outbound_rule.assert_called_once_with("P-active", rule)
+
+    def test_batch_mode_active_only_returns_empty_when_no_active_devices(self):
+        baas = MagicMock()
+        baas._build_outbound_operation_rule.return_value = MagicMock()
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "D-failed", "provider_device_id": "P-failed", "status": "FAILED"},
+            {"device_uuid": "D-released", "provider_device_id": "P-released", "status": "RELEASED"},
+        ]
+        svc = _make_service(baas_service=baas)
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"bolt_id": "bot-1", "entity_id": "owner-1"},
+        )
+
+        assert svc.update_device_headers(device=device, active_only=True) == []
+        baas.update_device_outbound_rule.assert_not_called()
+
 
 class TestGetDeviceConnection:
     def _ws_info(self):

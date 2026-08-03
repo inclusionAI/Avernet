@@ -11,6 +11,7 @@ import shutil
 import string
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List, Tuple, TYPE_CHECKING
@@ -66,9 +67,7 @@ from agentclaw.community.core.workspace.path_factory import (
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import (
-    DEFAULT_AVERNET_TENANT,
     bind_current_avernet_tenant,
-    get_current_avernet_tenant,
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.devices.errors import (
@@ -83,6 +82,7 @@ from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository,
     OssToNasRecordRepository,
 )
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.passport import PassportError
@@ -98,6 +98,11 @@ logger = get_logger()
 # and is reaped on the next restart attempt so a bot is never permanently
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
+
+# Passport refresh is callback-driven and retryable. Keep caller-instance
+# fan-out bounded while still attempting every instance before reporting an
+# aggregate failure.
+_CALLER_REFRESH_MAX_WORKERS = 5
 
 
 def _compose_operator_context(user_id: str, nick_name: str) -> OperatorContext:
@@ -4624,7 +4629,10 @@ class BotService:
 
         new_token = token
         token_prefix = new_token[:20]
-        logger.info(f"[bot_service.refresh_passport_token] Got new token for bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, token_prefix={token_prefix}...")
+        logger.info(
+            f"[bot_service.refresh_passport_token] Got new token for "
+            f"bot_id={bot_id}, user_id={user_id}, bot_type={bot_type}, has_token=yes"
+        )
 
         # 提取 agent_code
         from agentclaw.community.core.bot_management.utils import resolve_agent_code
@@ -4744,8 +4752,10 @@ class BotService:
     ) -> list[dict]:
         """Service Bot Passport Token 热更新入口。
 
-        同时更新草稿态和已发布态的 binding（如果存在）。
+        同时更新草稿态、已发布态和 ACTIVE caller 实例 binding（如果存在）。
         草稿态复用 `_hot_update_by_device_binding`，已发布态调用 `_hot_update_by_publish_binding`。
+        caller 实例使用同一份 owner Passport token；caller 自己的
+        ``x-caller-token`` 属于独立链路，不在这里处理。
 
         Args:
             bot_id: Bot ID
@@ -4754,10 +4764,12 @@ class BotService:
             bot: bot 字典（用于获取草稿态 binding_id）
 
         Returns:
-            成功更新的 binding 列表，每项为 {"binding_id": int, "type": "draft"|"online"|"verify"}
+            成功更新的 binding 列表，每项为
+            {"binding_id": int, "type": "draft"|"online"|"verify"|"caller"}
 
         Raises:
-            BotServiceError: 草稿态和发布态均无可用的设备 binding 时抛出
+            BotServiceError: 任一目标失败，或所有目标均不存在时抛出。所有
+                已发现目标都会先 best-effort 尝试完毕，再聚合失败。
         """
         updated_bindings: list[dict] = []
         errors: list[str] = []
@@ -4781,7 +4793,7 @@ class BotService:
                     "device_count": len(devices),
                     "devices": devices,
                 })
-            except BotServiceError as e:
+            except Exception as e:
                 logger.warning(
                     f"[_hot_update_service_bot_passport_token] Draft binding update failed: "
                     f"bot_id={bot_id}, user_id={user_id}, binding_id={draft_binding_id}, error={e}"
@@ -4804,10 +4816,18 @@ class BotService:
         has_publish_record = False
 
         for status, binding_key in _PUBLISHED_STATUS_BINDINGS:
-            publish_record = publish_repo.get_by_publish_bot_id(
-                publish_bot_id=bot_id, owner_id=user_id, env=env,
-                publish_status=status,
-            )
+            try:
+                publish_record = publish_repo.get_by_publish_bot_id(
+                    publish_bot_id=bot_id, owner_id=user_id, env=env,
+                    publish_status=status,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[_hot_update_service_bot_passport_token] {binding_key} publish query failed: "
+                    f"bot_id={bot_id}, user_id={user_id}, status={status}, error={e}"
+                )
+                errors.append(f"{binding_key}: 发布记录查询失败: {e}")
+                continue
             if not publish_record:
                 continue
             has_publish_record = True
@@ -4838,7 +4858,7 @@ class BotService:
                     "device_count": len(devices),
                     "devices": devices,
                 })
-            except BotServiceError as e:
+            except Exception as e:
                 logger.warning(
                     f"[_hot_update_service_bot_passport_token] {binding_key} binding update failed: "
                     f"bot_id={bot_id}, user_id={user_id}, binding_id={binding_id}, error={e}"
@@ -4848,6 +4868,70 @@ class BotService:
         if not has_publish_record:
             logger.info(
                 f"[_hot_update_service_bot_passport_token] No publish record: "
+                f"bot_id={bot_id}, user_id={user_id}, env={env}"
+            )
+
+        # ========== 步骤 3: 并发更新 ACTIVE caller 实例 ==========
+        try:
+            caller_bindings = self._device_binding_repo.list_active_caller_instance_bindings(
+                bot_id=bot_id,
+                owner_id=user_id,
+                env=env,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[_hot_update_service_bot_passport_token] Caller binding query failed: "
+                f"bot_id={bot_id}, user_id={user_id}, env={env}, error={e}"
+            )
+            errors.append(f"caller: binding 查询失败: {e}")
+            caller_bindings = []
+
+        if caller_bindings:
+            logger.info(
+                f"[_hot_update_service_bot_passport_token] Updating caller bindings: "
+                f"bot_id={bot_id}, user_id={user_id}, caller_count={len(caller_bindings)}, "
+                f"max_workers={_CALLER_REFRESH_MAX_WORKERS}"
+            )
+            update_caller = bind_current_avernet_tenant(
+                self._hot_update_by_caller_binding
+            )
+            try:
+                with ThreadPoolExecutor(
+                    max_workers=_CALLER_REFRESH_MAX_WORKERS
+                ) as executor:
+                    future_to_binding = {
+                        executor.submit(
+                            update_caller,
+                            bot_id=bot_id,
+                            user_id=user_id,
+                            token=token,
+                            binding=binding,
+                            agent_code=agent_code,
+                        ): binding
+                        for binding in caller_bindings
+                    }
+                    for future in as_completed(future_to_binding):
+                        binding = future_to_binding[future]
+                        try:
+                            updated_bindings.append(future.result())
+                        except Exception as e:
+                            logger.warning(
+                                f"[_hot_update_service_bot_passport_token] Caller binding update failed: "
+                                f"bot_id={bot_id}, user_id={user_id}, binding_id={binding.id}, "
+                                f"device_id={binding.device_id}, error={e}"
+                            )
+                            errors.append(
+                                f"caller(binding_id={binding.id}): {e}"
+                            )
+            except Exception as e:
+                logger.warning(
+                    f"[_hot_update_service_bot_passport_token] Caller fan-out failed: "
+                    f"bot_id={bot_id}, user_id={user_id}, error={e}"
+                )
+                errors.append(f"caller: 并发更新失败: {e}")
+        else:
+            logger.info(
+                f"[_hot_update_service_bot_passport_token] No active caller binding: "
                 f"bot_id={bot_id}, user_id={user_id}, env={env}"
             )
 
@@ -4863,6 +4947,48 @@ class BotService:
             f"bot_id={bot_id}, user_id={user_id}, updated_bindings={updated_bindings}"
         )
         return updated_bindings
+
+    def _hot_update_by_caller_binding(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        token: str,
+        binding: DeviceBindingRecord,
+        agent_code: str = "",
+    ) -> dict:
+        """用 owner Passport token 更新一个 caller BaaS Bot 的 ACTIVE 设备。"""
+        service = self._device_service_provider()
+        device = AllocatedDevice(
+            device_id=binding.device_id,
+            device_provider=binding.device_provider,
+            device_props={
+                **(binding.device_props or {}),
+                "bolt_id": bot_id,
+                "entity_id": user_id,
+            },
+        )
+        update_result = service.update_device_headers(
+            device=device,
+            agent_pass_token=token,
+            agent_code=agent_code,
+            active_only=True,
+        )
+        devices = update_result if isinstance(update_result, list) else []
+        if not devices:
+            raise BotServiceError("caller 实例没有 ACTIVE 物理设备")
+
+        logger.info(
+            f"[_hot_update_by_caller_binding] Hot-update succeeded: "
+            f"bot_id={bot_id}, user_id={user_id}, binding_id={binding.id}, "
+            f"device_id={binding.device_id}, updated_devices={len(devices)}"
+        )
+        return {
+            "binding_id": binding.id,
+            "type": "caller",
+            "device_count": len(devices),
+            "devices": devices,
+        }
 
     def _hot_update_by_publish_binding(
         self, bot_id: str, user_id: str, token: str, binding_id: int, agent_code: str = ""
