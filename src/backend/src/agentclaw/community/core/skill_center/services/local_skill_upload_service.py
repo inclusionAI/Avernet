@@ -198,7 +198,10 @@ class LocalSkillUploadService:
             total += info.file_size
             if len(seen) > _MAX_FILES or total > _MAX_EXPANDED:
                 raise LocalSkillTooLargeError()
-            files.append((path, archive.read(info)))
+            try:
+                files.append((path, archive.read(info)))
+            except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+                raise LocalSkillInvalidPackageError() from exc
         skill_files = [item for item in files if item[0].split("/")[-1] == "SKILL.md"]
         if len(skill_files) != 1:
             raise LocalSkillInvalidPackageError()
@@ -207,7 +210,10 @@ class LocalSkillUploadService:
         wrapper = skill_path.split("/")[0] if "/" in skill_path else None
         if wrapper is not None and len(roots) != 1:
             raise LocalSkillInvalidPackageError()
-        text = markdown.decode("utf-8", errors="strict")
+        try:
+            text = markdown.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise LocalSkillInvalidPackageError() from exc
         name_match = re.search(r"(?m)^name:\s*([^\n]+)\s*$", text)
         desc_match = re.search(r"(?m)^description:\s*([^\n]+)\s*$", text)
         if not name_match or not desc_match:

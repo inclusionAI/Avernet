@@ -107,6 +107,18 @@ def _seed_uploadable_bot(world) -> None:
         )
         world.get(SkillSetRepository).create(
             {
+                "name": "Other Bot Default",
+                "description": "Must not receive this upload",
+                "user_id": _OWNER,
+                "bolt_id": "other-bot",
+                "is_default": True,
+                "is_builtin": False,
+                "is_active": False,
+                "engine_type": "openclaw",
+            }
+        )
+        world.get(SkillSetRepository).create(
+            {
                 "name": "Default",
                 "description": "Default Skill Set",
                 "user_id": _OWNER,
@@ -134,6 +146,20 @@ def _seed_uploadable_bot(world) -> None:
     )
 
 
+def _assert_associated_to_owning_bot_default(response, world) -> None:
+    skill_id = response.json()["data"]["skill"]["skill_id"]
+    with avernet_tenant_scope(_TENANT):
+        default_set = world.get(SkillSetRepository).get_default(
+            user_id=_OWNER, bolt_id=_BOT_ID, engine_type="openclaw"
+        )
+        assert default_set is not None
+        assert default_set["bolt_id"] == _BOT_ID
+        assert skill_id in {
+            skill["id"]
+            for skill in world.get(SkillSetRepository).get_skills_in_set(default_set["id"])
+        }
+
+
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/skills/upload",
@@ -144,6 +170,7 @@ def _seed_uploadable_bot(world) -> None:
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
+    extra_assertions=(_assert_associated_to_owning_bot_default,),
     expect=ExpectSuccess(
         status=201,
         json_contains={
