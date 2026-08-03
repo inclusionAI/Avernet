@@ -9,8 +9,8 @@ pub const FRONTEND_WS_ENDPOINT: &str = "/ws";
 pub use auth::WorkbenchConnectionAuth;
 pub use connection_registry::WorkbenchConnectionRegistry;
 pub use dispatcher::{
-    WebClientConnectionState, WebDispatchOutcome, WebDispatchState, WebWsDispatchError,
-    dispatch_client_frame,
+    WebClientConnectionState, WebConnectionPhase, WebDispatchOutcome, WebDispatchState,
+    WebWsDispatchError, dispatch_client_frame,
 };
 pub use frontend_delivery::WorkbenchFrontendDelivery;
 pub use handler::handle_client_connection;

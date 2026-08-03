@@ -619,6 +619,7 @@ fn chat_abort_cmd() -> ChatAbortCommand {
     ChatAbortCommand {
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
+        session_id: None,
         run_id: Some("run-wrapper".to_string()),
     }
 }
