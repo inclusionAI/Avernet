@@ -33,6 +33,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillRepoSyncPlugin"
+  - "LocalSkillCleanupRepository"
 internal_dependencies:
   - agentclaw.community.core.access
   - agentclaw.community.core.base
@@ -50,6 +51,8 @@ internal_dependencies:
   - agentclaw.community.kernel
   - agentclaw.community.log
   - agentclaw.community.plugin_api.cache
+  - agentclaw.community.plugin_api.local_skill_cleanup
+  - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.device_adapter_transport
   - agentclaw.community.plugin_api.devices
   - agentclaw.community.plugin_api.mcp_center
@@ -66,3 +69,13 @@ internal_dependencies:
 ### Change impact
 
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
+
+Local Skill replacement stages a complete package before switching the existing
+Skill metadata.  Failed post-switch obsolete-byte deletion is recorded through
+`LocalSkillCleanupRepository` in the exact deployment-wide Bot scope
+`(env, owner_id, bot_id)`.  The next serialized Local Skill mutation retries
+pending work; it marks successful work `cleaned` and retains failures with an
+attempt count and a stable operator-safe error.  A task that follows a failed
+Active rollback retains its staged bytes and restores the old runtime mapping
+before it attempts byte cleanup.  Apply
+`sql/2026_08_04_local_skill_cleanup_work.sql` before deploying this behavior.

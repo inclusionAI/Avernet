@@ -147,9 +147,7 @@ from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
-from agentclaw.community.core.skill_center.local_skill_cleanup import (
-    LocalSkillCleanupRepository,
-)
+from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )

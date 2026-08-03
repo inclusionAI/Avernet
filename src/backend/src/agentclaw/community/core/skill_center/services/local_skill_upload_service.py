@@ -1,4 +1,4 @@
-"""First-upload lifecycle for a Bot-owned Local Skill.
+"""Create-or-replace lifecycle for a Bot-owned Local Skill.
 
 The service owns validation and compensation; the HTTP adapter only translates
 the raw request body and maps the public response.
@@ -34,9 +34,7 @@ from agentclaw.community.core.skill_center.services.repositories import (
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.local_skill_cleanup import (
-    LocalSkillCleanupRepository,
-)
+from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
@@ -95,6 +93,7 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
+            await self._retry_pending_cleanup(bot=bot, owner_id=owner_id, bot_id=bot_id)
             name, description, files = self._unpack(package)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
@@ -275,6 +274,15 @@ class LocalSkillUploadService:
             if restored is None:
                 raise LocalSkillStorageError()
             if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
+                # Runtime may have switched partway before reporting failure.
+                # Keep the complete staged package until a later serialized
+                # mutation can restore the old mapping before deleting it.
+                if not self._record_cleanup(
+                    bot=bot, owner_id=owner_id, bot_id=bot_id,
+                    skill_id=str(skill["id"]), locator=staged_locator,
+                    requires_runtime_restore=True,
+                ):
+                    raise LocalSkillStorageError()
                 raise LocalSkillRuntimeSyncError()
         await self._discard_or_record(
             bot=bot, owner_id=owner_id, bot_id=bot_id, skill_id=str(skill["id"]),
@@ -290,21 +298,71 @@ class LocalSkillUploadService:
         if not self._record_cleanup(bot, owner_id, bot_id, skill_id, locator):
             raise LocalSkillStorageError()
 
-    def _record_cleanup(self, bot: dict[str, Any], owner_id: str, bot_id: str, skill_id: str, locator: str) -> bool:
+    def _record_cleanup(
+        self,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+        locator: str,
+        *,
+        requires_runtime_restore: bool = False,
+    ) -> bool:
         return bool(self._cleanup_repo.record_pending(
             env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id,
             skill_id=skill_id, package_locator=locator,
+            requires_runtime_restore=requires_runtime_restore,
         ))
+
+    async def _retry_pending_cleanup(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> None:
+        """Retry durable obsolete-byte work on a later serialized Bot mutation."""
+        for work in self._cleanup_repo.list_pending(env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id):
+            if bool(work.get("requires_runtime_restore")) and not self._sync_runtime(
+                bot, owner_id, bot_id
+            ):
+                self._cleanup_repo.mark_failed(
+                    work_id=int(work["id"]),
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    error="runtime restore before cleanup failed",
+                )
+                continue
+            storage = self._skill_service_factory.local_skill_package_storage_for_locator(
+                owner_id=owner_id, bot_id=bot_id, engine_type=bot.get("active_engine"),
+                locator=str(work["package_locator"]),
+            )
+            try:
+                cleaned = await storage.cleanup()
+            except Exception:
+                cleaned = False
+            if cleaned:
+                self._cleanup_repo.mark_cleaned(
+                    work_id=int(work["id"]),
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                )
+            else:
+                self._cleanup_repo.mark_failed(
+                    work_id=int(work["id"]),
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    error="obsolete package cleanup failed",
+                )
 
     def _same_name_matches(self, *, bot_id: str, owner_id: str, name: str) -> list[dict[str, Any]]:
         rows = self._skill_repo.list_bot_local_by_name(bot_id=bot_id, name=name)
-        if bot_id != "default":
-            return rows
-        unknown = [row for row in rows if not row.get("user_id")]
-        if unknown:
+        owned = [row for row in rows if str(row.get("user_id")) == owner_id]
+        unowned = [row for row in rows if not row.get("user_id")]
+        # Only an absent owner is ambiguous legacy data.  A foreign owner is
+        # known and belongs to another exact Bot scope, so it is never a
+        # replacement candidate and never changes this caller's zero-match.
+        if unowned:
             from agentclaw.community.core.skill_center.errors import LocalSkillOwnerAmbiguousError
             raise LocalSkillOwnerAmbiguousError()
-        return [row for row in rows if str(row.get("user_id")) == owner_id]
+        return owned
 
     def _sync_runtime(self, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:
