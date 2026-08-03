@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export storage config contract types for convenience.
 pub use bcs_config_api::{
-    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, MistConfig, RedisCacheConfig,
+    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, RedisCacheConfig,
 };
 
 // Re-export config contract types from bcs-config-api.
@@ -317,18 +317,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub database: DatabaseConfig,
 
-    /// Mist (secret management) configuration. Disabled by default; when
-    /// enabled the BCS process talks to the configured local secret sidecar to
-    /// fetch secrets via the SecretService/SecretAccessPort stack. Use the
-    /// `GET /admin/secret/:name` route for end-to-end verification on dev
-    /// machines.
-    #[serde(default)]
-    pub mist: MistConfig,
-
     /// Provider-neutral secret backend selector.
     ///
-    /// Defaults to `noop` for public/local builds. Internal builds can select
-    /// providers registered by linked crates, for example `mist`.
+    /// Defaults to `noop` for public/local builds. Product binaries can select
+    /// additional providers registered by linked crates.
     #[serde(default)]
     pub secret: SecretConfig,
 
@@ -751,7 +743,6 @@ impl Default for BcsConfig {
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
-            mist: MistConfig::default(),
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             collaboration: CollaborationConfig::default(),
@@ -1563,6 +1554,18 @@ x-collector-route = "collector-local"
         }"#;
 
         let err = serde_json::from_str::<BcsConfig>(json).expect_err("unknown key rejected");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_config_rejects_mist_section() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            [mist]
+            enabled = true
+        "#;
+
+        let err = toml::from_str::<BcsConfig>(toml).expect_err("public BCS rejects Ant-only mist config");
         assert!(err.to_string().contains("unknown field"));
     }
 

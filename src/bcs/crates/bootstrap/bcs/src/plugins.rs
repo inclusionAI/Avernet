@@ -16,7 +16,6 @@ use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
 use bcs_llm_api::LlmChatCompletionPort;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_service_api::LeaderElectionPort;
-use bcs_service_api::port::secret::SecretAccessPort;
 use bcs_service_api::lifecycle::ServiceLifecycle;
 use bcs_service_api::port::repo::ChannelBindingRepoPort;
 use bcs_user_directory_api::UserDirectoryPlugin;
@@ -149,22 +148,6 @@ pub struct UserDirectoryFactory {
 inventory::collect!(UserDirectoryFactory);
 
 #[derive(Clone)]
-pub struct SecretPluginRegistration {
-    pub provider: String,
-    pub access: Arc<dyn SecretAccessPort>,
-}
-
-pub type SecretPluginBuild =
-    fn(BcsConfig, SecretProviderConfig) -> BoxFuture<'static, crate::Result<SecretPluginRegistration>>;
-
-pub struct SecretPluginFactory {
-    pub name: &'static str,
-    pub build: SecretPluginBuild,
-}
-
-inventory::collect!(SecretPluginFactory);
-
-#[derive(Clone)]
 pub struct ChannelProviderBuildContext {
     pub config: BcsConfig,
     pub provider_name: String,
@@ -259,16 +242,25 @@ pub fn build_registered_user_directory(
 }
 
 pub async fn build_registered_secret_plugin(
-    config: &BcsConfig,
     provider: &str,
     provider_config: SecretProviderConfig,
-) -> crate::Result<Option<SecretPluginRegistration>> {
-    for factory in inventory::iter::<SecretPluginFactory> {
+) -> crate::Result<Option<bcs_secret_api::SecretPluginRegistration>> {
+    for factory in inventory::iter::<bcs_secret_api::SecretPluginFactory> {
         if factory.name == provider {
-            return Ok(Some((factory.build)(config.clone(), provider_config).await?));
+            return (factory.build)(provider_config)
+                .await
+                .map(Some)
+                .map_err(map_secret_plugin_error);
         }
     }
     Ok(None)
+}
+
+fn map_secret_plugin_error(err: bcs_secret_api::SecretPluginError) -> crate::BcsError {
+    match err {
+        bcs_secret_api::SecretPluginError::InvalidConfig(msg) => crate::BcsError::InvalidConfig(msg),
+        bcs_secret_api::SecretPluginError::Init(msg) => crate::BcsError::StorageInitError(msg),
+    }
 }
 
 pub fn build_registered_channel_provider(

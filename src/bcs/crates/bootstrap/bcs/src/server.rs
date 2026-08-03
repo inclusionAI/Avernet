@@ -131,10 +131,9 @@ fn is_debug_enabled() -> bool {
 
 /// Build a default `SecretService` for the `ServicesBuilder` step.
 ///
-/// At builder time we don't yet know if mist is enabled — wiring there happens
-/// in `http_adapter::build_http_app_state`, which is async. We seed every
-/// `Services` instance with a Noop so the builder's required-field invariant
-/// is satisfied; the real backend (Mist when enabled) is swapped in alongside
+/// At builder time we do not perform async provider initialization. We seed
+/// every `Services` instance with a Noop so the builder's required-field
+/// invariant is satisfied; the configured backend is swapped in alongside
 /// `HttpAppState` construction.
 fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService> {
     use bcs_secret::DefaultSecretService;
