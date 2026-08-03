@@ -1,4 +1,5 @@
 """Service API Protocol for bot-chat session listing + health."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -54,5 +55,13 @@ class BotChatServiceProtocol(Protocol):
     ) -> SessionListResponse: ...
 
     async def get_open_session(self, trace_id: str) -> ConversationDetail: ...
+
+    async def list_open_user_bot_traces(
+        self,
+        user_id: str,
+        bot_id: str,
+        page: int = 1,
+        limit: int = 100,
+    ) -> SessionListResponse: ...
 
     async def health_check(self) -> HealthCheckData: ...

@@ -1,22 +1,25 @@
 """Open exact-query service entry points for bot-chat embeds."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from agentclaw.community.core.bot_chat.query_support import QueryScope
+from agentclaw.community.core.bot_chat.open_repository import OpenBotChatRepository
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
     SessionListResponse,
 )
 
 _OPEN_PAGE_SIZE = 100
+_USER_BOT_TIME_RANGE_HOURS = 72
 
 
 class OpenBotChatServiceMixin:
-    """Expose narrow cross-owner reads while reusing the standard DB pipeline."""
+    """Expose narrow OpenAPI reads without product-route authorization."""
 
     _list_sessions_db: Any
     _get_session_db: Any
+    _db: Any
 
     async def list_open_sessions(
         self,
@@ -68,3 +71,33 @@ class OpenBotChatServiceMixin:
         if not trace_id:
             raise ValueError("trace_id must not be empty")
         return await self._get_session_db(trace_id, owner_id=None)
+
+    async def list_open_user_bot_traces(
+        self,
+        user_id: str,
+        bot_id: str,
+        page: int = 1,
+        limit: int = _OPEN_PAGE_SIZE,
+    ) -> SessionListResponse:
+        """List the recent traces for one explicit user-and-Bot pair.
+
+        This is a query boundary, not caller authorization: the open Gateway
+        surface currently permits an authenticated caller to name the pair.
+        """
+        user_id = user_id.strip()
+        bot_id = bot_id.strip()
+        if not user_id:
+            raise ValueError("user_id must not be empty")
+        if not bot_id:
+            raise ValueError("bot_id must not be empty")
+
+        now = datetime.now(timezone.utc)
+        from_date = now - timedelta(hours=_USER_BOT_TIME_RANGE_HOURS)
+        return OpenBotChatRepository(self._db).list_user_bot_traces(
+            user_id=user_id,
+            bot_id=bot_id,
+            from_ms=int(from_date.timestamp() * 1000),
+            to_ms=int(now.timestamp() * 1000),
+            page=max(1, page),
+            limit=min(max(1, limit), _OPEN_PAGE_SIZE),
+        )

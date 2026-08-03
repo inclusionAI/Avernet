@@ -124,6 +124,12 @@ user_config:
     # session-token issuance, on the required User Principal boundary above.
     "WEBSOCKET /openapi/v1/collaboration/messages/ws": {}
 
+    # Read-only Bot Chat trace lookups. "Open" denotes the external integration
+    # surface, not anonymous access: these exact-identifier queries intentionally
+    # cross owner boundaries, so they retain the fail-closed user requirement.
+    "/openapi/v1/bot-chats/**":
+      user: required
+
     # The tenant bot socket, and the FIRST rule under /openapi/v1 that
     # requires no identity at all. Deliberate: the credential is already in the
     # handshake's query string and is checked by the proxypass hop behind the
@@ -229,7 +235,31 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
-
+      # Bot Chat already serves these operations in Backend under
+      # `/api/v1/open/bot-chats`. Keep that implementation path stable and use
+      # the Gateway's existing prefix rewrite to publish the v1 external path.
+      bot-chats:
+        server: backend
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/bot-chats
+          to: /api/v1/open/bot-chats
+        schema:
+          source: file
+          path: schemas/bot-chats.openapi.json
+          refresh_seconds: 300
+      sessions:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+      messages:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
       chat:
         server: baas
         schema:

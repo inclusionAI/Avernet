@@ -86,3 +86,37 @@ async def test_open_detail_maps_missing_trace_to_existing_error_envelope():
 
     assert result.success is False
     assert result.error_code == 4004
+
+
+@pytest.mark.asyncio
+async def test_open_user_bot_list_forwards_explicit_pair():
+    from agentclaw.community.adapters.http.bot_chat.open_router import (
+        list_open_user_bot_traces,
+    )
+
+    service = MagicMock()
+    service.list_open_user_bot_traces = AsyncMock(
+        return_value=SessionListResponse(
+            sessions=[],
+            total=0,
+            page=1,
+            limit=100,
+            has_more=False,
+        )
+    )
+
+    result = await list_open_user_bot_traces(
+        user_id=" user_fixture ",
+        bot_id=" bot_fixture ",
+        page=1,
+        limit=100,
+        service=service,
+    )
+
+    assert result.success is True
+    service.list_open_user_bot_traces.assert_awaited_once_with(
+        user_id=" user_fixture ",
+        bot_id=" bot_fixture ",
+        page=1,
+        limit=100,
+    )
