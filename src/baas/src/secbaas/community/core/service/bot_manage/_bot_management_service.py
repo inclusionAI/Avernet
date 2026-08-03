@@ -692,12 +692,17 @@ class DefaultBotManagementService(BotManageService):
         operator: str,
         request_id: str,
         auto_approve_publish: bool = False,
+        bot_config: BotConfig | None = None,
     ) -> ScaleBotResponse:
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN).
 
         Creates appropriate publish for capacity adjustment:
         - target_count > current: SCALE_UP adding devices
         - target_count < current: SCALE_DOWN removing devices
+
+        When ``bot_config`` is provided, its non-None fields are merged with
+        the bot's existing extra_config and consumed by the publish workflow
+        (not persisted to DB). This matches the update_devices merge pattern.
 
         Per D-03: Explicit tenant and env parameters
         Per D-04: Flat structure (not nested config)
@@ -711,6 +716,8 @@ class DefaultBotManagementService(BotManageService):
             operator: User performing the scaling operation
             auto_approve_publish: When True, auto-approve all publish stage gates
                                   without manual intervention (default: False)
+            bot_config: Optional bot configuration to merge with existing
+                        config for the scale publish workflow
 
         Returns:
             ScaleBotResponse with bot info, target_count and publish_id
@@ -763,12 +770,50 @@ class DefaultBotManagementService(BotManageService):
         else:
             publish_type = PublishType.SCALE_DOWN
 
+        # Resolve config for PublishConfig
+        # Pattern matches update_devices merge at lines 1133-1151:
+        # read existing extra_config → merge non-None fields from bot_config → build PublishConfig
+        record = self._get_bot_record_by_uuid(bot_uuid, tenant)
+        existing_config = (
+            BotConfig.model_validate(record.extra_config)
+            if record and record.extra_config
+            else BotConfig()
+        )
+
+        if bot_config is not None:
+            # Merge provided config fields into existing (non-None = override)
+            if bot_config.share_policy is not None:
+                existing_config.share_policy = bot_config.share_policy
+            if bot_config.deploy_config is not None:
+                existing_config.deploy_config = bot_config.deploy_config
+            if bot_config.entity_id:
+                existing_config.entity_id = bot_config.entity_id
+            if bot_config.entity_type:
+                existing_config.entity_type = bot_config.entity_type
+            if bot_config.sla_grade:
+                existing_config.sla_grade = bot_config.sla_grade
+            if bot_config.auto_approve_publish is not None:
+                existing_config.auto_approve_publish = bot_config.auto_approve_publish
+            if bot_config.callback_timeout_seconds is not None:
+                existing_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
+
+        # Determine effective auto_approve: merged config takes priority over parameter
+        effective_auto_approve = (
+            existing_config.auto_approve_publish or auto_approve_publish
+        )
+
         # Create publish via PublishService
         scale_amount = abs(target_count - current_count)
         scale_config = PublishConfig(
             replica_desired=target_count,
             batch_capacity=min(10, scale_amount),
-            auto_approve=auto_approve_publish,
+            auto_approve=effective_auto_approve,
+            deploy_config=existing_config.deploy_config,
+            callback_timeout_seconds=resolve_callback_timeout(
+                existing_config.callback_timeout_seconds, self._system_config_repo
+            ),
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -785,7 +830,7 @@ class DefaultBotManagementService(BotManageService):
         )
 
         # Auto-approve publish stage gates when requested
-        if auto_approve_publish:
+        if effective_auto_approve:
             logger.info(
                 f"[scale_bot] auto_approve_publish=True, "
                 f"starting auto-approval loop for publish_id={publish.id}"
@@ -892,7 +937,9 @@ class DefaultBotManagementService(BotManageService):
             if bot_config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = bot_config.auto_approve_publish
             if bot_config.callback_timeout_seconds is not None:
-                stored_config.callback_timeout_seconds = bot_config.callback_timeout_seconds
+                stored_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
