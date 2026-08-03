@@ -2296,7 +2296,10 @@ class SkillService:
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")
 
-        references = self._skill_repo.list_skill_set_references(skill_id)
+        references = self._skill_repo.list_skill_set_references(
+            skill_id,
+            skill_uuid=skill.get("skill_uuid"),
+        )
         if references:
             raise SkillReferencedBySkillSetError(
                 [str(ref["skill_set_id"]) for ref in references]
@@ -2304,21 +2307,29 @@ class SkillService:
 
         # 获取技能名称和路径
         skill_name = skill.get('name')
-        git_path = skill.get('git_path', '')
+        git_path = skill.get('git_path') or ''
         bolt_id = skill.get('bolt_id')
         skill_user_id = skill.get('user_id') or user_id
+        is_shared_source = (
+            not skill.get('user_id')
+            and git_path.startswith(("git://", "center://"))
+        )
 
         logger.info(f"[SkillService] Deleting skill: id={skill_id}, name={skill_name}, git_path={git_path}")
         logger.info(f"[SkillService] local_dir: {self.local_dir}, active_dir: {self.active_dir}")
 
-        device_fs = self._device_fs_factory(bolt_id, skill_user_id)
+        device_fs = (
+            None
+            if is_shared_source
+            else self._device_fs_factory(bolt_id, skill_user_id)
+        )
 
         # 1. 先收敛 active entry。已激活 Skill 的 entry 删除失败时必须 fail closed，
         # 否则继续删除 source/DB 会把它变成 dangling link。未激活时 entry
         # 本来就不存在，仍保持幂等成功。
         link_name = self.get_link_name(skill_name) if skill_name else None
         logger.info(f"[SkillService] link_name: {link_name}")
-        if link_name:
+        if link_name and device_fs is not None:
             active_link = self.active_dir / link_name
             try:
                 active_entry_exists = await device_fs.exists(str(active_link))

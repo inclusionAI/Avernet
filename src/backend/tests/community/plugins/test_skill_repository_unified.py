@@ -230,6 +230,40 @@ def test_list_skill_set_references_includes_active_and_inactive_sets(
     ]
 
 
+def test_list_skill_set_references_ignores_orphans_and_matches_center_uuid(
+    skills, sets, db
+):
+    center = skills.create(
+        {
+            "name": "center",
+            "git_path": "center://center",
+            "skill_uuid": "center-uuid",
+        }
+    )
+    live_set = sets.create({"name": "live", "is_active": False})
+    deleted_set = sets.create({"name": "deleted", "is_active": False})
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(live_set["id"]),
+                skill_id=0,
+                skill_uuid="center-uuid",
+            )
+        )
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(deleted_set["id"]),
+                skill_id=int(center["id"]),
+            )
+        )
+    assert sets.delete(deleted_set["id"]) is True
+
+    assert skills.list_skill_set_references(
+        center["id"],
+        skill_uuid="center-uuid",
+    ) == [{"skill_set_id": live_set["id"]}]
+
+
 def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     local = skills.create(
         {

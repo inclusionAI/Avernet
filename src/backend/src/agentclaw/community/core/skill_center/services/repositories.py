@@ -54,7 +54,11 @@ class SkillRepository(Protocol):
     def delete(self, skill_id: str) -> bool:
         ...
 
-    def list_skill_set_references(self, skill_id: str) -> list[dict]:
+    def list_skill_set_references(
+        self,
+        skill_id: str,
+        skill_uuid: str | None = None,
+    ) -> list[dict]:
         """Return every current-environment SkillSet association for a Skill."""
         ...
 
