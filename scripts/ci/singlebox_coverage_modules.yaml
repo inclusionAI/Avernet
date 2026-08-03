@@ -126,6 +126,11 @@ modules:
         - GET /api/v1/bot-chats
         - GET /api/v1/bot-chats/{trace_id}
         - GET /api/v1/open/bot-chats/users/{user_id}/bots/{bot_id}/traces
+        - GET /openapi/v1/bots/logs/sessions/{session_key}/traces
+        - GET /openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces
+        - GET /openapi/v1/bots/logs/groups/{group_id}/traces
+        - GET /openapi/v1/bots/logs/traces
+        - GET /openapi/v1/bots/logs/traces/{trace_id}
     plugin_api:
       status: not_applicable
       reason: Bot chat currently has no independently attributable Plugin API boundary.

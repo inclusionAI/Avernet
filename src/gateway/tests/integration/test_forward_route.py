@@ -73,6 +73,20 @@ async def _stub_upstream(scope: Scope, receive: Receive, send: Send) -> None:
             }
         )
         await send({"type": "http.response.body", "body": b'{"code":200000}'})
+    elif path == "/openapi/v1/bots/logs/traces" and method == "GET":
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": scope.get("query_string", b""),
+            }
+        )
     elif path == "/openapi/v1/bots/sse" and method == "GET":
         await send(
             {
@@ -187,6 +201,18 @@ def test_successful_forward_streams_body_and_preserves_cookies() -> None:
     assert resp.status_code == 200
     assert resp.json() == {"code": 200000}
     assert resp.headers.get_list("set-cookie") == ["session=1", "csrf=2"]
+
+
+def test_bot_logs_path_and_query_forwarded_verbatim() -> None:
+    app, auth = _build()
+    with TestClient(app) as client:
+        resp = client.get(
+            "/openapi/v1/bots/logs/traces",
+            params={"user_id": "u-1", "bot_id": "b-1"},
+        )
+    assert resp.status_code == 200
+    assert resp.text == "user_id=u-1&bot_id=b-1"
+    assert ("GET", "/openapi/v1/bots/logs/traces") in auth.calls
 
 
 def test_sse_streaming_forward() -> None:

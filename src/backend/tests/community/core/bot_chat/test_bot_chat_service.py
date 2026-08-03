@@ -1837,7 +1837,6 @@ class TestBotChatServiceOpenQueries:
             "trace_fixture", owner_id=None
         )
 
-
     @pytest.mark.asyncio
     async def test_open_user_bot_query_uses_dedicated_repository(self, service):
         result = MagicMock()

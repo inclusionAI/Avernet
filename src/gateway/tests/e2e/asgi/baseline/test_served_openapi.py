@@ -22,19 +22,24 @@ class TestServedOpenAPI:
         bots = [p for p in paths if p.startswith("/openapi/v1/bots")]
         assert len(bots) > 0, "bots.openapi.json must be loaded by schema catalog"
 
-    def test_bot_chats_domain_served(self, app_no_lifespan: FastAPI) -> None:
+    def test_bot_logs_are_served_under_bots_domain(
+        self, app_no_lifespan: FastAPI
+    ) -> None:
         schema = app_no_lifespan.openapi()
         paths = schema.get("paths", {})
         expected = {
-            "/openapi/v1/bot-chats",
-            "/openapi/v1/bot-chats/{trace_id}",
-            "/openapi/v1/bot-chats/users/{user_id}/bots/{bot_id}/traces",
+            "/openapi/v1/bots/logs/sessions/{session_key}/traces",
+            "/openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces",
+            "/openapi/v1/bots/logs/groups/{group_id}/traces",
+            "/openapi/v1/bots/logs/traces",
+            "/openapi/v1/bots/logs/traces/{trace_id}",
         }
         assert expected <= set(paths), (
-            "bot-chats.openapi.json must publish both Bot Chat operations"
+            "bots.openapi.json must publish both Bot Logs operations"
         )
         for path in expected:
             assert paths[path]["get"]["x-avernet-security"] == {"user": "required"}
+        assert not any(path.startswith("/openapi/v1/bot-chats") for path in paths)
 
     def test_baas_domain_served(self, app_no_lifespan: FastAPI) -> None:
         schema = app_no_lifespan.openapi()

@@ -105,24 +105,19 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert websocket_requirement == {}
 
 
-def test_shipped_config_rewrites_bot_chats_to_existing_backend_route() -> None:
+def test_shipped_config_forwards_bot_logs_through_bots_domain() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
 
-    domain = dm.domain_for("/openapi/v1/bot-chats/trace-1")
+    path = "/openapi/v1/bots/logs/traces/trace-1"
+    domain = dm.domain_for(path)
 
     assert domain is not None
     assert domain.server.name == "backend"
     assert domain.serves_http
-    assert domain.schema.location == "schemas/bot-chats.openapi.json"
-    assert (
-        domain.upstream_path("/openapi/v1/bot-chats/trace-1")
-        == "/api/v1/open/bot-chats/trace-1"
-    )
-    assert (
-        domain.upstream_path("/openapi/v1/bot-chats/users/user-1/bots/bot-1/traces")
-        == "/api/v1/open/bot-chats/users/user-1/bots/bot-1/traces"
-    )
+    assert domain.schema.location == "schemas/bots.openapi.json"
+    assert domain.upstream_path(path) == path
+    assert dm.domain_for("/openapi/v1/bot-chats/trace-1") is None
 
 
 # ── protocols ────────────────────────────────────────────────────────────────

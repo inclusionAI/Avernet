@@ -26,6 +26,13 @@ Local to the bot-chat flow. Changes here affect the single-user chat path; group
 
 ## Query contract
 
+The external read contract is exposed by the thin Public API adapter under
+`/openapi/v1/bots/logs`: separate Session, Task, Group and user-Bot Trace-list
+operations plus a Trace-detail operation. The adapter only translates HTTP;
+query semantics remain in this package. The internal `/api/v1/open/bot-chats`
+routes remain registered for compatibility and Singlebox coverage, but are not
+published by Gateway.
+
 `GET /api/v1/bot-chats` keeps exact matching and the existing 72-hour default
 window for backward compatibility. Optional product-query capabilities are:
 

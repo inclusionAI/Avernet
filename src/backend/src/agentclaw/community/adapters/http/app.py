@@ -630,7 +630,7 @@ app.include_router(yuque_router)
 app.include_router(device_router)
 app.include_router(expert_chats_router)  # 新增：用户与专家Bot对话管理
 app.include_router(bot_chat_router)  # 个人对话（Langfuse trace 查询）
-app.include_router(bot_chat_open_router)  # embed 精确日志查询（不按 owner 过滤）
+app.include_router(bot_chat_open_router)  # internal compatibility + singlebox coverage seam
 app.include_router(bot_chat_otel_router)  # bot-chat OTLP 日志写入
 app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写入
 app.include_router(whitelist_router)

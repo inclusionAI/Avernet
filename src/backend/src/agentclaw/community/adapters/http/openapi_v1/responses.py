@@ -49,6 +49,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_chat.errors import (
+    InvalidBotLogQueryError,
+    SessionNotFoundError,
+)
 from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
 )
@@ -157,6 +161,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # entry covers a handler that calls ``verify_principal_token`` directly, so
     # the error cannot escape the envelope as a 500.
     PrincipalVerificationError: (401, "Unauthorized"),
+    InvalidBotLogQueryError: (400, "Invalid log query"),
+    SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),

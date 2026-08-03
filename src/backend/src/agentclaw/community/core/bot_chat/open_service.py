@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from agentclaw.community.core.bot_chat.errors import InvalidBotLogQueryError
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.open_repository import OpenBotChatRepository
 from agentclaw.community.core.bot_chat.schemas import (
@@ -40,11 +41,13 @@ class OpenBotChatServiceMixin:
         task_mode = biz_scene is not None or biz_task_id is not None
         group_mode = group_id is not None
         if sum((session_mode, task_mode, group_mode)) != 1:
-            raise ValueError(
+            raise InvalidBotLogQueryError(
                 "provide exactly one of session_key, biz_scene+biz_task_id, or group_id"
             )
         if task_mode and (biz_scene is None or biz_task_id is None):
-            raise ValueError("biz_scene and biz_task_id must be provided together")
+            raise InvalidBotLogQueryError(
+                "biz_scene and biz_task_id must be provided together"
+            )
 
         return await self._list_sessions_db(
             owner_id=None,
@@ -69,7 +72,7 @@ class OpenBotChatServiceMixin:
         """Get an exact trace detail without applying owner access filters."""
         trace_id = trace_id.strip()
         if not trace_id:
-            raise ValueError("trace_id must not be empty")
+            raise InvalidBotLogQueryError("trace_id must not be empty")
         return await self._get_session_db(trace_id, owner_id=None)
 
     async def list_open_user_bot_traces(
@@ -87,9 +90,9 @@ class OpenBotChatServiceMixin:
         user_id = user_id.strip()
         bot_id = bot_id.strip()
         if not user_id:
-            raise ValueError("user_id must not be empty")
+            raise InvalidBotLogQueryError("user_id must not be empty")
         if not bot_id:
-            raise ValueError("bot_id must not be empty")
+            raise InvalidBotLogQueryError("bot_id must not be empty")
 
         now = datetime.now(timezone.utc)
         from_date = now - timedelta(hours=_USER_BOT_TIME_RANGE_HOURS)
