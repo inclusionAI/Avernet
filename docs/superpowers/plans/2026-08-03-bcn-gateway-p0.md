@@ -63,6 +63,8 @@
 - Modify: `src/gateway/tests/test_domain_map.py`
 - Modify: `src/gateway/tests/test_gate_and_publish.py`
 - Modify: `src/gateway/tests/test_served_openapi.py`
+- Modify: `src/gateway/tests/integration/test_forward_route.py`
+- Modify: `src/gateway/tests/integration/test_forward_signs_principal.py`
 
 **Interfaces:**
 - Consumes: Task 1 CLI output and existing `gate_and_publish_openapi.py`.
@@ -73,11 +75,14 @@
   Assert the shipped config resolves a collaboration path to server `bcs`,
   uses HTTP without rewrite, points to `schemas/bcn.openapi.json`, resolves
   `${bcs_server_url}`, and aggregates a representative BCN path alongside
-  existing Backend and BaaS paths.
+  existing Backend and BaaS paths. Extend the ASGI forwarding stub with a
+  collaboration GET and body-carrying PATCH/POST, assert paths and bodies are
+  forwarded verbatim, and assert the signed Principal uses audience `bcs`
+  after any forged inbound Principal is removed.
 
 - [ ] **Step 2: Verify RED**
 
-  Run `uv run pytest -q tests/test_domain_map.py tests/test_gate_and_publish.py tests/test_served_openapi.py` from `src/gateway` with proxy variables unset.
+  Run `uv run pytest -q tests/test_domain_map.py tests/test_gate_and_publish.py tests/test_served_openapi.py tests/integration/test_forward_route.py tests/integration/test_forward_signs_principal.py` from `src/gateway` with proxy variables unset.
   Expected: failures for missing collaboration domain/artifact.
 
 - [ ] **Step 3: Add publication and config**
@@ -99,22 +104,22 @@
 - Modify: `src/bcs/crates/bootstrap/bcs/src/server.rs`
 - Modify: `src/bcs/configs/bcs-config-example.toml`
 - Modify: `src/bcs/configs/bcs-config-local.toml`
-- Create: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
+- Test: focused bootstrap config/trust unit tests beside the composition helper
 
 **Interfaces:**
 - Consumes: `GatewayPrincipalTrust::new` and `GatewayPrincipalTokenVerifier::new` from `bcs-api-http`.
 - Produces: validated `GatewayPrincipalConfig` and one injected `Arc<dyn PrincipalVerifier>` using `iss=gateway`, `aud=bcs`, `kid=bare`.
 
-- [ ] **Step 1: Write failing configuration/auth tests**
+- [ ] **Step 1: Write failing configuration/trust tests**
 
-  Assert default local trust accepts the documented dev key, a signed
-  `aud=bcs` request reaches a representative V1 route, missing/bad Principal is
-  401, and strict deployment environments reject absent or empty key material.
+  Assert default local trust resolves the documented dev key, explicit secret
+  material is preferred, and pre/gray/prod reject absent or empty key material.
 
 - [ ] **Step 2: Verify RED**
 
-  Run `cargo test -p bcs --test openapi_v1_mount` from `src/bcs`.
-  Expected: failure because the V1 Router and verifier are not composed.
+  Run the focused bootstrap unit tests from `src/bcs`.
+  Expected: compile/test failure because Gateway Principal bootstrap config and
+  trust construction do not exist.
 
 - [ ] **Step 3: Implement trust construction**
 
@@ -131,17 +136,20 @@
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/tests/boundary_contract.rs`
 - Modify: `src/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md`
 - Modify: `src/bcs/crates/bootstrap/bcs/CONTEXT.md`
-- Test: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
+- Create: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
 
 **Interfaces:**
 - Consumes: existing `BotServiceImpl`, `GroupServiceImpl`, `SessionServiceImpl`, `InvitationFriendshipServiceImpl`, stores, core services, and Task 3 verifier.
 - Produces: one `bcs_api_http::ApiState` stored in bootstrap state and merged by `build_router()`.
 
-- [ ] **Step 1: Update the boundary test to require the approved mount**
+- [ ] **Step 1: Write failing mount/auth tests and update the boundary contract**
 
   Replace the preparatory "must not depend" assertion with assertions that the
   bootstrap depends on `bcs-api-http` and all four V1 Application crates while
-  the adapter itself still has no concrete-service dependency.
+  the adapter itself still has no concrete-service dependency. Start a real
+  in-memory `BcsServer`, assert a correctly signed `aud=bcs` Principal reaches
+  a representative collaboration GET, and assert missing/invalid Principal is
+  401.
 
 - [ ] **Step 2: Compose V1 services in the composition root**
 
@@ -171,15 +179,19 @@
 - Consumes: configured Gateway domain map and mounted BCS Router.
 - Produces: regression evidence for verbatim GET/body forwarding, `aud=bcs`, served documentation, old-path absence, and unaffected existing domains.
 
-- [ ] **Step 1: Add failing forwarding assertions**
+- [ ] **Step 1: Complete cross-component assertions not already added in Task 2**
 
-  Extend the ASGI upstream stub with a collaboration GET and body-carrying
-  PATCH/POST; assert verbatim paths and bodies. Decode the signed Principal with
-  audience `bcs`. Assert forged inbound Principal removal.
+  Task 2 must already extend the ASGI upstream stub with a collaboration GET
+  and body-carrying PATCH/POST, assert verbatim paths/bodies, decode the signed
+  Principal with audience `bcs`, and assert forged inbound Principal removal.
+  Here, add only the live BCS-backed assertion or coverage inventory needed to
+  prove those Gateway requests reach the mounted Router; do not duplicate
+  lower-level Gateway tests.
 
 - [ ] **Step 2: Verify RED then GREEN**
 
-  Run the two focused integration files before and after configuration/wiring.
+  Run the live BCS-backed test before and after its harness/wiring change. The
+  lower-level Gateway tests retain their Task 2 RED/GREEN evidence.
 
 - [ ] **Step 3: Run final focused regression**
 
