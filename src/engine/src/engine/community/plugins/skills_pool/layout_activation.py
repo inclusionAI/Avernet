@@ -732,6 +732,57 @@ def _active_entry_inventory(
     return managed, tuple(external), tuple(occupied)
 
 
+def _trusted_active_repo_bridge_rewrite_retry(*, layout: _Layout) -> bool:
+    """判定已激活 AICoding Bot 能否将旧 repo bridge 映射重发为 Pool 直链。
+
+    早期 Pool-active 运行时会把已激活的 repo Skill 指向稳定的
+    ``repo_bridge``。该 bridge 最终解析到 Pool repo，因而当时可用；新版
+    probe 则要求 active root 中的受管入口词法上直接指向 Pool。这里仅为
+    已提交布局的前滚收敛放行这一种旧格式，不能把 Legacy、dangling 或
+    未知路径当作可信映射。
+    """
+
+    active_root = Path(os.path.abspath(layout.active_root))
+    pool_local = Path(os.path.abspath(layout.pool_local))
+    pool_repo = Path(os.path.abspath(layout.pool_repo))
+    repo_bridge = Path(os.path.abspath(layout.repo_bridge))
+    retired_roots = (
+        Path(os.path.abspath(layout.legacy_local)),
+        Path(os.path.abspath(layout.legacy_repo)),
+        Path(os.path.abspath(layout.local_bridge)),
+    )
+    saw_bridge_mapping = False
+
+    try:
+        for entry in active_root.iterdir():
+            if not entry.is_symlink():
+                # Relay/AIX own real directories; they are not Pool mappings.
+                continue
+            target = _lexical_target(entry)
+            if target.is_relative_to(pool_local) or target.is_relative_to(pool_repo):
+                try:
+                    if not entry.is_dir():
+                        return False
+                except OSError:
+                    return False
+                continue
+            if target.is_relative_to(repo_bridge):
+                try:
+                    resolved = target.resolve(strict=True)
+                except OSError:
+                    return False
+                if not resolved.is_relative_to(pool_repo) or not resolved.is_dir():
+                    return False
+                saw_bridge_mapping = True
+                continue
+            if any(target.is_relative_to(root) for root in retired_roots):
+                return False
+            # External symlinks predate Pool and must remain outside its scope.
+    except OSError:
+        return False
+    return saw_bridge_mapping
+
+
 def _mapping_plan(
     *,
     layout: _Layout,
@@ -1263,7 +1314,20 @@ def _activate_pool(
         and inspection.preparation_id == preparation_id
         and inspection.evidence.get("reason") == "active_repo_corpus_present"
     )
-    if not layout_ready and not trusted_finalizing_retirement_retry:
+    trusted_active_repo_bridge_rewrite_retry = (
+        engine == "aicoding"
+        and active_marker is not None
+        and active_marker.get("activation_state") == "active"
+        and inspection.status is RuntimeLayoutInspectionStatus.INVALID
+        and inspection.preparation_id == preparation_id
+        and inspection.evidence.get("reason") == "active_managed_entry_invalid"
+        and _trusted_active_repo_bridge_rewrite_retry(layout=layout)
+    )
+    if not (
+        layout_ready
+        or trusted_finalizing_retirement_retry
+        or trusted_active_repo_bridge_rewrite_retry
+    ):
         return _invalid(
             "runtime_layout_not_ready",
             probe_status=inspection.status.value,
