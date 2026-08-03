@@ -3001,8 +3001,18 @@ impl BcsClient {
         if bytes.iter().all(|b| b.is_ascii()) {
             return None;
         }
+        // chardetng is a byte-pattern detector that never reports UTF-16.
+        // Excel "Unicode CSV" exports carry a UTF-16LE/BE BOM, so sniff it
+        // explicitly before falling back to statistical detection.
+        if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+            return Some("utf-16".to_string());
+        }
         let mut detector = chardetng::EncodingDetector::new();
-        detector.feed(bytes, true);
+        // Only the first `max_bytes` were read, so this is NOT the end of the
+        // stream. Passing `last = true` would make chardetng treat a truncated
+        // multi-byte sequence at the cut point as malformed and permanently
+        // rule out UTF-8, misdetecting large CJK files as windows-1252.
+        detector.feed(bytes, false);
         let label = detector.guess(None, true).name().to_ascii_lowercase();
         // chardetng may report windows-1252 for ambiguous Latin text; that is
         // still a valid, useful label for browsers. Only suppress empty labels.
@@ -3240,6 +3250,61 @@ mod tests {
             "expected a CJK/legacy label, got {cs_gbk}"
         );
         assert!(!cs_gbk.contains("utf-8"), "GBK must not be misdetected as utf-8: {cs_gbk}");
+    }
+
+    #[tokio::test]
+    async fn guess_charset_detects_large_utf8_truncated() {
+        // Regression guard for finding #1: a >64KB UTF-8 Chinese file read as a
+        // 64KB prefix must still be detected as utf-8, not windows-1252. Chinese
+        // chars are 3 bytes in UTF-8, so the 64KB cut almost always lands mid-char.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large-utf8.md");
+        let unit = "你好世界中文测试";
+        let mut content = String::new();
+        while content.len() < 80_000 {
+            content.push_str(unit);
+        }
+        tokio::fs::write(&path, content.into_bytes()).await.unwrap();
+        let cs = BcsClient::guess_charset(path.to_str().unwrap(), 64 * 1024)
+            .await
+            .expect("utf-8 should be detected for a large truncated file");
+        assert!(
+            cs.contains("utf-8"),
+            "large truncated UTF-8 must not be misdetected as {cs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn guess_charset_handles_utf16_bom() {
+        // Regression guard for finding #2: chardetng never reports UTF-16. Excel
+        // "Unicode CSV" exports carry a UTF-16LE/BE BOM that must be sniffed.
+        let dir = tempfile::tempdir().unwrap();
+
+        // UTF-16LE with BOM (FF FE).
+        let le_path = dir.path().join("utf16le.csv");
+        let mut le_bytes = vec![0xFF, 0xFE];
+        for w in "你好世界".encode_utf16().collect::<Vec<u16>>() {
+            le_bytes.push((w & 0xFF) as u8);
+            le_bytes.push((w >> 8) as u8);
+        }
+        tokio::fs::write(&le_path, &le_bytes).await.unwrap();
+        let cs_le = BcsClient::guess_charset(le_path.to_str().unwrap(), 4096)
+            .await
+            .expect("utf-16 should be detected via BOM");
+        assert!(cs_le.contains("utf-16"), "expected utf-16, got {cs_le}");
+
+        // UTF-16BE with BOM (FE FF).
+        let be_path = dir.path().join("utf16be.csv");
+        let mut be_bytes = vec![0xFE, 0xFF];
+        for w in "你好世界".encode_utf16().collect::<Vec<u16>>() {
+            be_bytes.push((w >> 8) as u8);
+            be_bytes.push((w & 0xFF) as u8);
+        }
+        tokio::fs::write(&be_path, &be_bytes).await.unwrap();
+        let cs_be = BcsClient::guess_charset(be_path.to_str().unwrap(), 4096)
+            .await
+            .expect("utf-16 should be detected via BOM");
+        assert!(cs_be.contains("utf-16"), "expected utf-16, got {cs_be}");
     }
 
     #[tokio::test]
