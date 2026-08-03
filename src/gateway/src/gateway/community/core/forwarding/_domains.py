@@ -253,10 +253,11 @@ class Domain:
     name: str
     server: Server
     schema: SchemaSource
-    #: The paths this domain claims. Defaults to the domain's own name under the
-    #: version base, which is exactly the leading-segment match every domain had
-    #: before patterns existed.
-    pattern: PathPattern = field(default_factory=lambda: PathPattern(()))
+    #: The paths this domain claims. Required: parsing supplies the implicit
+    #: ``{base_path}/{name}/**`` when the config declares no ``match``, so there
+    #: is no such thing as a domain that claims nothing, and a default here could
+    #: only be a value that silently matches the wrong set of paths.
+    pattern: PathPattern
     protocols: frozenset[str] = _DEFAULT_PROTOCOLS
     #: ``None`` when the path forwards verbatim, which is the default and the
     #: case for every domain that does not declare otherwise.
