@@ -2222,7 +2222,14 @@ async def delete_skill(
             )
         )
         try:
-            success = await service.delete_skill(skill_id, user_id=current_user_id)
+            # 路由已先通过 CollaboratorPermissionInterceptor；仍把持久化
+            # Bot owner 显式传给 Service 做 scope 双重校验，不能把协作者当成
+            # Skill metadata owner。
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+                authorized_bot_owner_id=str(bot.get("owner_id") or ""),
+            )
         finally:
             edit_guard.release(edit_lease)
         if not success:
