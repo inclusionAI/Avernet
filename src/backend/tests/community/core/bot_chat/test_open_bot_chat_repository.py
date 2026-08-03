@@ -117,8 +117,8 @@ def test_user_bot_query_is_exact_and_enriches_owned_task_labels() -> None:
         "scene-fixture",
         "task-fixture",
     )
-    assert row.group_id is None
-    assert row.session_kind is None
+    assert row.group_id == "group-fixture"
+    assert row.session_kind == "chat"
 
 
 def test_user_bot_query_falls_back_to_legacy_only_when_otel_is_empty() -> None:

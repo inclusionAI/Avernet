@@ -49,7 +49,7 @@ def _principal_headers() -> dict[str, str]:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": "default",
+                    "tenant": "bot-logs-endpoint-test",
                     "subject": {
                         "id": "endpoint-user",
                         "username": "endpoint-user@example.com",
