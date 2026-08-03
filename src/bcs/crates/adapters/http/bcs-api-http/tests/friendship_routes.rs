@@ -396,7 +396,7 @@ async fn list_friendships_returns_page_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/friendships?offset=5&limit=10",
+            "/openapi/v1/collaboration/bots/bot-1/friendships?offset=5&limit=10",
             Value::Null,
         ))
         .await
@@ -429,7 +429,7 @@ async fn list_friendships_uses_default_pagination_when_omitted() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/friendships",
+            "/openapi/v1/collaboration/bots/bot-1/friendships",
             Value::Null,
         ))
         .await
@@ -451,7 +451,7 @@ async fn remove_friendship_returns_deleted_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/bots/collaboration/bot-1/friendships/bot-2",
+            "/openapi/v1/collaboration/bots/bot-1/friendships/bot-2",
             Value::Null,
         ))
         .await
@@ -477,7 +477,7 @@ async fn create_friend_request_returns_created_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/bots/collaboration/bot-1/friend-requests",
+            "/openapi/v1/collaboration/bots/bot-1/friend-requests",
             json!({"to_bot_uuid": "bot-2"}),
         ))
         .await
@@ -510,7 +510,7 @@ async fn list_friend_requests_returns_page_and_forwards_filters() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/friend-requests?offset=3&limit=5&direction=sent&status=pending",
+            "/openapi/v1/collaboration/bots/bot-1/friend-requests?offset=3&limit=5&direction=sent&status=pending",
             Value::Null,
         ))
         .await
@@ -545,7 +545,7 @@ async fn list_friend_requests_defaults_direction_to_received() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/friend-requests",
+            "/openapi/v1/collaboration/bots/bot-1/friend-requests",
             Value::Null,
         ))
         .await
@@ -572,7 +572,7 @@ async fn accept_friend_request_returns_ok_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/friend-requests/req-1/accept",
+            "/openapi/v1/collaboration/friend-requests/req-1/accept",
             Value::Null,
         ))
         .await
@@ -602,7 +602,7 @@ async fn reject_friend_request_returns_ok_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/friend-requests/req-1/reject",
+            "/openapi/v1/collaboration/friend-requests/req-1/reject",
             Value::Null,
         ))
         .await
@@ -632,7 +632,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/bots/collaboration/bot-1/friend-requests",
+            "/openapi/v1/collaboration/bots/bot-1/friend-requests",
             json!({"to_bot_uuid": "bot-2", "extra": 1}),
         ))
         .await
@@ -649,7 +649,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
     let unknown_query = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1/friendships?bogus=1",
+            "/openapi/v1/collaboration/bots/bot-1/friendships?bogus=1",
             Value::Null,
         ))
         .await
@@ -667,7 +667,7 @@ async fn missing_principal_returns_unauthenticated() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/bots/collaboration/bot-1/friendships")
+                .uri("/openapi/v1/collaboration/bots/bot-1/friendships")
                 .body(Body::empty())
                 .expect("request"),
         )

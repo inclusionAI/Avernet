@@ -1,5 +1,8 @@
 # BCN Collaboration Paths Implementation Plan
 
+> **Superseded:** Do not execute this two-prefix plan. It is replaced by
+> [`2026-08-03-bcn-collaboration-prefix.md`](./2026-08-03-bcn-collaboration-prefix.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move BCN Bot control-plane and global Session operations onto Gateway-safe public prefixes without changing operation behavior.

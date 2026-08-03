@@ -6,15 +6,18 @@ evolve without creating one monolithic file.
 
 The current contract contains 32 approved operations across Bot, Group,
 GroupParticipant, Session, SessionParticipant, Invitation, Friendship, and
-FriendRequest resources.
+FriendRequest resources. Every operation is published below the single BCN
+ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
+served by BCN and intended for future Gateway aggregation; no path rewrite is
+required.
 
 The Human control-plane Bot batch contains exactly five operations:
 
-- `GET /openapi/v1/bots/collaboration/{bot_id}/candidates`
-- `POST /openapi/v1/bots/collaboration/query`
-- `GET /openapi/v1/bots/collaboration/{bot_id}`
-- `PATCH /openapi/v1/bots/collaboration/{bot_id}`
-- `GET /openapi/v1/bots/collaboration/mine`
+- `GET /openapi/v1/collaboration/bots/{bot_id}/candidates`
+- `POST /openapi/v1/collaboration/bots/query`
+- `GET /openapi/v1/collaboration/bots/{bot_id}`
+- `PATCH /openapi/v1/collaboration/bots/{bot_id}`
+- `GET /openapi/v1/collaboration/bots/mine`
 
 These operations deliberately do not add generic `GET /bots`, legacy
 `/actors/**` aliases, runtime discovery, or a separate descriptor patch route.
@@ -22,10 +25,12 @@ All five require a Human Principal. The Bot domain object is discriminated by
 `kind=bot|human`; omission of a `kind` query filter means both kinds rather
 than a synthetic `all` enum value.
 
-Global collaboration Session resources use the distinct
-`/openapi/v1/group-sessions/{session_id}/**` prefix so they do not collide with
-the Gateway's general `/openapi/v1/sessions/**` surface. Creating and listing a
-Group's Sessions remains nested at `/openapi/v1/groups/{group_id}/sessions`.
+Global collaboration Session resources use
+`/openapi/v1/collaboration/sessions/{session_id}/**`. Creating and listing a
+Group's Sessions remains nested at
+`/openapi/v1/collaboration/groups/{group_id}/sessions`. The shared ownership
+prefix separates both resources from Backend and BaaS paths while preserving
+their natural names.
 
 Validate the contract:
 

@@ -21,29 +21,29 @@ use crate::v1::openapi::dto::session::{
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
-            "/openapi/v1/groups/{group_id}/sessions",
+            "/groups/{group_id}/sessions",
             get(list_sessions).post(create_session),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}",
+            "/sessions/{session_id}",
             get(get_session)
                 .patch(update_session)
                 .delete(delete_session),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}/completion",
+            "/sessions/{session_id}/completion",
             post(complete_session),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}/messages",
+            "/sessions/{session_id}/messages",
             get(list_session_messages),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}/participants",
+            "/sessions/{session_id}/participants",
             post(add_session_participant),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}/participants/{bot_uuid}",
+            "/sessions/{session_id}/participants/{bot_uuid}",
             patch(update_session_participant).delete(remove_session_participant),
         )
 }

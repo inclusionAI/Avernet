@@ -19,23 +19,23 @@ use crate::v1::openapi::dto::friendship::{
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
-            "/openapi/v1/bots/collaboration/{bot_uuid}/friendships",
+            "/bots/{bot_uuid}/friendships",
             get(list_bot_friendships),
         )
         .route(
-            "/openapi/v1/bots/collaboration/{bot_uuid}/friendships/{friend_bot_uuid}",
+            "/bots/{bot_uuid}/friendships/{friend_bot_uuid}",
             delete(delete_bot_friendship),
         )
         .route(
-            "/openapi/v1/bots/collaboration/{bot_uuid}/friend-requests",
+            "/bots/{bot_uuid}/friend-requests",
             post(create_bot_friend_request).get(list_bot_friend_requests),
         )
         .route(
-            "/openapi/v1/friend-requests/{request_id}/accept",
+            "/friend-requests/{request_id}/accept",
             post(accept_friend_request),
         )
         .route(
-            "/openapi/v1/friend-requests/{request_id}/reject",
+            "/friend-requests/{request_id}/reject",
             post(reject_friend_request),
         )
 }

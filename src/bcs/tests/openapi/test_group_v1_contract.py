@@ -14,6 +14,9 @@ from scripts.validate_openapi_contract import (  # noqa: E402
     validate_contract,
 )
 
+GROUPS_PATH = "/openapi/v1/collaboration/groups"
+GROUP_PATH = "/openapi/v1/collaboration/groups/{group_id}"
+
 
 def test_contract_obeys_bcn_openapi_rules() -> None:
     contract = load_contract(CONTRACT_ROOT)
@@ -31,7 +34,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert "sender_routes" not in serialized
     assert "routing_policy" not in serialized
 
-    list_operation = contract["paths"]["/openapi/v1/groups"]["get"]
+    list_operation = contract["paths"][GROUPS_PATH]["get"]
     assert list_operation["operationId"] == "list_groups"
     query_names = {
         parameter["name"]
@@ -56,29 +59,29 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert view_actor.get("required", False) is False
 
     assert (
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["201"]["content"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
             "application/json"
         ]["schema"]["properties"]["code"]["const"]
         == 20_100
     )
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["200"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["200"][
             "content"
         ]["application/json"]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["404"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["404"][
             "x-error-codes"
         ]
     ) == {"bot_not_found", "collaboration_definition_not_found"}
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["409"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
         ]
     ) == {"conflict", "non_public_participant"}
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["400"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["400"][
             "x-error-codes"
         ]
     ) == {
@@ -87,23 +90,23 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "invalid_participant_binding",
     }
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["409"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["409"][
             "x-error-codes"
         ]
     ) == {"state_machine_definition_missing"}
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["400"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["400"][
             "x-error-codes"
         ]
         == ["invalid_request"]
     )
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+        contract["paths"][GROUP_PATH]["patch"]["responses"][
             "404"
         ]["x-error-codes"]
     ) == {"group_not_found", "bot_not_found"}
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+        contract["paths"][GROUP_PATH]["patch"]["responses"][
             "409"
         ]["x-error-codes"]
     ) == {
@@ -112,13 +115,13 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "state_machine_definition_missing",
     }
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["delete"]["responses"][
+        contract["paths"][GROUP_PATH]["delete"]["responses"][
             "400"
         ]["x-error-codes"]
         == ["invalid_request"]
     )
     assert (
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["200"]["content"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]["properties"]["code"]["const"]
         == 20_000
@@ -127,7 +130,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
 
 def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
     contract = load_contract(CONTRACT_ROOT)
-    operation = contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]
+    operation = contract["paths"][GROUP_PATH]["get"]
 
     assert "view_bot_id" not in {
         parameter["name"]

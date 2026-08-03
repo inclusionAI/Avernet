@@ -378,7 +378,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/groups?view_bot_id=bot-1&offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
+            "/openapi/v1/collaboration/groups?view_bot_id=bot-1&offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
             Value::Null,
         ))
         .await
@@ -402,7 +402,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups",
+            "/openapi/v1/collaboration/groups",
             json!({
                 "group_kind": "normal",
                 "name": "Planning",
@@ -441,7 +441,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/groups/group-1",
+            "/openapi/v1/collaboration/groups/group-1",
             Value::Null,
         ))
         .await
@@ -452,7 +452,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/groups/group-1",
+            "/openapi/v1/collaboration/groups/group-1",
             json!({
                 "name": "Renamed",
                 "delivery_policy": {"bot_final_delivery": "inject_observers"}
@@ -466,7 +466,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/groups/group-1",
+            "/openapi/v1/collaboration/groups/group-1",
             Value::Null,
         ))
         .await
@@ -479,7 +479,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/participants",
+            "/openapi/v1/collaboration/groups/group-1/participants",
             json!({ "actor_id": "bot-2", "role": "consultant" }),
         ))
         .await
@@ -501,7 +501,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/groups/group-1/participants/bot-2",
+            "/openapi/v1/collaboration/groups/group-1/participants/bot-2",
             json!({ "mode": "muted" }),
         ))
         .await
@@ -522,7 +522,7 @@ async fn group_routes_forward_the_verified_caller() {
     let remove_participant_response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/groups/group-1/participants/bot-2",
+            "/openapi/v1/collaboration/groups/group-1/participants/bot-2",
             Value::Null,
         ))
         .await
@@ -549,7 +549,7 @@ async fn missing_principal_and_unknown_request_fields_use_the_common_error_envel
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/groups/group-1")
+                .uri("/openapi/v1/collaboration/groups/group-1")
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -562,7 +562,7 @@ async fn missing_principal_and_unknown_request_fields_use_the_common_error_envel
     let unknown_field = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups",
+            "/openapi/v1/collaboration/groups",
             json!({
                 "group_kind": "dm",
                 "target_actor_id": "bot-2",
@@ -592,7 +592,7 @@ async fn patch_rejects_explicit_null_for_every_mutable_field() {
             .clone()
             .oneshot(authenticated_request(
                 "PATCH",
-                "/openapi/v1/groups/group-1",
+                "/openapi/v1/collaboration/groups/group-1",
                 body,
             ))
             .await
@@ -611,13 +611,13 @@ async fn malformed_percent_encoded_paths_use_the_common_error_envelope() {
     let app = test_router(service);
 
     for (method, uri, body) in [
-        ("GET", "/openapi/v1/groups/%FF", Value::Null),
+        ("GET", "/openapi/v1/collaboration/groups/%FF", Value::Null),
         (
             "PATCH",
-            "/openapi/v1/groups/%FF",
+            "/openapi/v1/collaboration/groups/%FF",
             json!({"name": "Renamed"}),
         ),
-        ("DELETE", "/openapi/v1/groups/%FF", Value::Null),
+        ("DELETE", "/openapi/v1/collaboration/groups/%FF", Value::Null),
     ] {
         let response = app
             .clone()
@@ -639,7 +639,7 @@ async fn state_machine_definition_version_must_be_positive_at_the_http_boundary(
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups",
+            "/openapi/v1/collaboration/groups",
             json!({
                 "group_kind": "normal",
                 "driver_bot_uuid": "bot-1",
@@ -673,7 +673,7 @@ async fn state_machine_binding_actor_ids_must_not_be_empty_at_the_http_boundary(
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups",
+            "/openapi/v1/collaboration/groups",
             json!({
                 "group_kind": "normal",
                 "driver_bot_uuid": "bot-1",
@@ -711,7 +711,7 @@ async fn reused_dm_returns_ok_instead_of_created() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups",
+            "/openapi/v1/collaboration/groups",
             json!({
                 "group_kind": "dm",
                 "target_actor_id": "bot-2"
@@ -734,7 +734,7 @@ async fn add_group_participant_returns_participant() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/participants",
+            "/openapi/v1/collaboration/groups/group-1/participants",
             json!({ "actor_id": "bot-2", "role": "consultant" }),
         ))
         .await
@@ -754,7 +754,7 @@ async fn update_group_participant_returns_updated_mode() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/groups/group-1/participants/bot-2",
+            "/openapi/v1/collaboration/groups/group-1/participants/bot-2",
             json!({ "mode": "muted" }),
         ))
         .await
@@ -772,7 +772,7 @@ async fn remove_group_participant_returns_deleted() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/groups/group-1/participants/bot-2",
+            "/openapi/v1/collaboration/groups/group-1/participants/bot-2",
             Value::Null,
         ))
         .await
@@ -790,7 +790,7 @@ async fn add_group_participant_rejects_unknown_field() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/participants",
+            "/openapi/v1/collaboration/groups/group-1/participants",
             json!({ "actor_id": "bot-2", "role": "consultant", "extra": 1 }),
         ))
         .await

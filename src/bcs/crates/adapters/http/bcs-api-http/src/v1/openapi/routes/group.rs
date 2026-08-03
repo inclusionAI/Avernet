@@ -19,17 +19,17 @@ use crate::v1::openapi::dto::group::{
 
 pub fn router() -> Router<ApiState> {
     Router::new()
-        .route("/openapi/v1/groups", get(list_groups).post(create_group))
+        .route("/groups", get(list_groups).post(create_group))
         .route(
-            "/openapi/v1/groups/{group_id}",
+            "/groups/{group_id}",
             get(get_group).patch(update_group).delete(delete_group),
         )
         .route(
-            "/openapi/v1/groups/{group_id}/participants",
+            "/groups/{group_id}/participants",
             post(add_group_participant),
         )
         .route(
-            "/openapi/v1/groups/{group_id}/participants/{actor_id}",
+            "/groups/{group_id}/participants/{actor_id}",
             patch(update_group_participant).delete(remove_group_participant),
         )
 }

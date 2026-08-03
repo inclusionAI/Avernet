@@ -344,7 +344,7 @@ async fn create_group_invitation_returns_created_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/invitations",
+            "/openapi/v1/collaboration/groups/group-1/invitations",
             json!({"expires_in_seconds": 3600}),
         ))
         .await
@@ -376,7 +376,7 @@ async fn create_group_invitation_allows_omitted_expires_in_seconds() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/invitations",
+            "/openapi/v1/collaboration/groups/group-1/invitations",
             json!({}),
         ))
         .await
@@ -399,7 +399,7 @@ async fn create_group_invitation_rejects_zero_expires_in_seconds() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/invitations",
+            "/openapi/v1/collaboration/groups/group-1/invitations",
             json!({"expires_in_seconds": 0}),
         ))
         .await
@@ -425,7 +425,7 @@ async fn create_group_invitation_allows_one_second_expires_in_seconds() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/invitations",
+            "/openapi/v1/collaboration/groups/group-1/invitations",
             json!({"expires_in_seconds": 1}),
         ))
         .await
@@ -446,7 +446,7 @@ async fn create_session_invitation_returns_created_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/group-sessions/session-1/invitations",
+            "/openapi/v1/collaboration/sessions/session-1/invitations",
             json!({}),
         ))
         .await
@@ -467,19 +467,21 @@ async fn create_session_invitation_returns_created_and_forwards_principal() {
 }
 
 #[tokio::test]
-async fn legacy_session_invitation_path_is_not_mounted() {
+async fn legacy_session_invitation_paths_are_not_mounted() {
     let service = Arc::new(FakeInvitationService::default());
     let app = test_router(service.clone());
 
-    let response = app
-        .oneshot(authenticated_request(
-            "POST",
-            "/openapi/v1/sessions/session-1/invitations",
-            json!({}),
-        ))
-        .await
-        .expect("legacy session invitation response");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    for uri in [
+        "/openapi/v1/sessions/session-1/invitations",
+        "/openapi/v1/group-sessions/session-1/invitations",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request("POST", uri, json!({})))
+            .await
+            .expect("legacy session invitation response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
     assert!(
         service
             .created_session
@@ -497,7 +499,7 @@ async fn accept_invitation_returns_ok_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/invitations/token-1/accept",
+            "/openapi/v1/collaboration/invitations/token-1/accept",
             json!({}),
         ))
         .await
@@ -528,7 +530,7 @@ async fn accept_invitation_allows_empty_body() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/invitations/token-1/accept",
+            "/openapi/v1/collaboration/invitations/token-1/accept",
             json!({}),
         ))
         .await
@@ -550,7 +552,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/invitations",
+            "/openapi/v1/collaboration/groups/group-1/invitations",
             json!({"expires_in_seconds": 3600, "extra": 1}),
         ))
         .await
@@ -570,7 +572,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/invitations/token-1/accept",
+            "/openapi/v1/collaboration/invitations/token-1/accept",
             json!({"bot_uuid": "bot-2"}),
         ))
         .await
@@ -590,7 +592,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
     let extra_response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/invitations/token-1/accept",
+            "/openapi/v1/collaboration/invitations/token-1/accept",
             json!({"extra": 1}),
         ))
         .await
@@ -609,7 +611,7 @@ async fn missing_principal_returns_unauthenticated() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/openapi/v1/groups/group-1/invitations")
+                .uri("/openapi/v1/collaboration/groups/group-1/invitations")
                 .header("content-type", "application/json")
                 .body(Body::from(json!({}).to_string()))
                 .expect("request"),

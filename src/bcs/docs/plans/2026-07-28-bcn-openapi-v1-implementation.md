@@ -1,5 +1,11 @@
 # BCN OpenAPI V1 Implementation Plan
 
+> **Path exposure update (2026-08-03):** This historical plan's resource
+> paths are superseded by
+> [`2026-08-03-bcn-collaboration-prefix-design.md`](./2026-08-03-bcn-collaboration-prefix-design.md).
+> The authoritative contract and Axum adapter now use
+> `/openapi/v1/collaboration/**` for every BCN V1 operation.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add the first BCN OpenAPI V1 surface for Group, Session, Participant, Invitation, Friendship, and Session message history while preserving every Legacy BCS endpoint unchanged.

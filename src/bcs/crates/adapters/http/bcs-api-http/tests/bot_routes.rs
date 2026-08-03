@@ -282,7 +282,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "GET",
-            "/openapi/v1/bots/collaboration/acting/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            "/openapi/v1/collaboration/bots/acting/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
             Value::Null,
         ))
         .await
@@ -297,7 +297,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "POST",
-            "/openapi/v1/bots/collaboration/query",
+            "/openapi/v1/collaboration/bots/query",
             json!({"bot_ids": ["bot-2", "bot-1", "bot-2"]}),
         ))
         .await
@@ -308,7 +308,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "GET",
-            "/openapi/v1/bots/collaboration/bot-1",
+            "/openapi/v1/collaboration/bots/bot-1",
             Value::Null,
         ))
         .await
@@ -319,7 +319,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
         .clone()
         .oneshot(request(
             "PATCH",
-            "/openapi/v1/bots/collaboration/bot-1",
+            "/openapi/v1/collaboration/bots/bot-1",
             json!({
                 "name": "Renamed",
                 "visibility": "protected",
@@ -334,7 +334,7 @@ async fn all_five_bot_routes_forward_verified_human_and_contract_inputs() {
     let mine = app
         .oneshot(request(
             "GET",
-            "/openapi/v1/bots/collaboration/mine?kind=human&name=vin&status=online&reachability=unreachable&offset=2&limit=3",
+            "/openapi/v1/collaboration/bots/mine?kind=human&name=vin&status=online&reachability=unreachable&offset=2&limit=3",
             Value::Null,
         ))
         .await
@@ -391,7 +391,7 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
         .clone()
         .oneshot(request(
             "PATCH",
-            "/openapi/v1/bots/collaboration/bot-1",
+            "/openapi/v1/collaboration/bots/bot-1",
             json!({"name": "Bot", "created_by": "forged"}),
         ))
         .await
@@ -405,7 +405,7 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
     let missing = app
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/bots/collaboration/bot-1")
+                .uri("/openapi/v1/collaboration/bots/bot-1")
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -415,11 +415,19 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
 }
 
 #[tokio::test]
-async fn legacy_bot_control_plane_paths_are_not_mounted() {
+async fn previous_bcn_path_families_are_not_mounted() {
     let service = Arc::new(FakeBotService::default());
     let app = test_router(service.clone());
 
-    for uri in ["/openapi/v1/bots/bot-1", "/openapi/v1/bots/mine"] {
+    for uri in [
+        "/openapi/v1/bots/bot-1",
+        "/openapi/v1/bots/mine",
+        "/openapi/v1/bots/collaboration/bot-1",
+        "/openapi/v1/groups",
+        "/openapi/v1/group-sessions/session-1",
+        "/openapi/v1/friend-requests/request-1/accept",
+        "/openapi/v1/invitations/token-1/accept",
+    ] {
         let response = app
             .clone()
             .oneshot(request("GET", uri, Value::Null))
