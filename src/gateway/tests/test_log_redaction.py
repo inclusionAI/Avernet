@@ -26,6 +26,10 @@ from gateway.community.adapters.web._log_redaction import (
             "/openapi/v1/engine/T/api/ws?x-proxypass-token=eyJhbGciOi.J9.sig",
             "/openapi/v1/engine/T/api/ws?x-proxypass-token=<redacted>",
         ),
+        (
+            "/openapi/v1/collaboration/group/ws?token=bcn.session.jwt",
+            "/openapi/v1/collaboration/group/ws?token=<redacted>",
+        ),
         ("/x?a=1&token=abc&b=2", "/x?a=1&token=<redacted>&b=2"),
         ("/x?password=p&secret=s", "/x?password=<redacted>&secret=<redacted>"),
         ("/x?api_key=k", "/x?api_key=<redacted>"),

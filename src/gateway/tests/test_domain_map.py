@@ -82,6 +82,7 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert collaboration.server.name == "bcs"
     assert collaboration.server.base_url == "http://bcs:8081"
     assert collaboration.serves_http
+    assert collaboration.serves_websocket
     assert collaboration.rewrite is None
     assert collaboration.upstream_path("/openapi/v1/collaboration/groups/group-1") == (
         "/openapi/v1/collaboration/groups/group-1"
@@ -92,6 +93,11 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
     assert requirement is not None
     assert requirement[PrincipalType.USER] is Presence.REQUIRED
+
+    websocket_requirement = security.resolve(
+        "GET", "/openapi/v1/collaboration/group/ws"
+    )
+    assert websocket_requirement == {}
 
 
 # ── protocols ────────────────────────────────────────────────────────────────

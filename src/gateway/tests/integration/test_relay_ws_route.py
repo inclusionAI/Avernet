@@ -180,6 +180,31 @@ def _build(
     return app, auth, ws_forwarder
 
 
+def _build_collaboration() -> tuple[FastAPI, _FakeAuth, _StubForwarder]:
+    app = FastAPI()
+    auth = _FakeAuth()
+    forwarder = _StubForwarder()
+    app.state.authenticator = auth
+    app.state.principal_signer = _FixedSigner()
+    app.state.ws_forwarder = forwarder
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "collaboration": {
+                    "server": "bcs",
+                    "protocols": ["http", "websocket"],
+                }
+            },
+            "servers": {"bcs": {"base_url": "http://bcs:8081"}},
+        },
+        variables={},
+    )
+    app.state.domain_map = domain_map
+    for route in relay_routes(domain_map.base_path, "collaboration"):
+        app.add_api_websocket_route(route, forward_websocket)
+    return app, auth, forwarder
+
+
 _PATH = "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws?x-proxypass-token=t.o.k"
 
 
@@ -209,6 +234,28 @@ def test_the_prefix_is_rewritten_onto_proxypass_verbatim() -> None:
         "wss://proxy.internal/proxypass/ARCA_x@0:20003/api/openclaw/ws"
         "?x-proxypass-token=t.o.k"
     )
+
+
+def test_bcn_session_websocket_relays_verbatim_without_forged_identity() -> None:
+    app, auth, forwarder = _build_collaboration()
+    path = (
+        "/openapi/v1/collaboration/group/ws"
+        "?token=sensitive.bcn.jwt&trace=keep%2Fencoded"
+    )
+    with TestClient(app) as client:
+        with client.websocket_connect(
+            path,
+            headers={"x-avernet-principal": "forged-by-caller"},
+        ) as ws:
+            ws.close(1000)
+            _settled(forwarder)
+
+    request = forwarder.opened[0].request
+    assert request.url == f"ws://bcs:8081{path}"
+    assert "x-avernet-principal" not in {
+        name.lower(): value for name, value in request.headers.items()
+    }
+    assert auth.calls == [("GET", "/openapi/v1/collaboration/group/ws")]
 
 
 def test_an_encoded_target_is_not_decoded_on_the_way_through() -> None:
@@ -549,6 +596,7 @@ def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
         with client.websocket_connect("/openapi/v1/engine/v2/T%40x/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
+            ws.close(1000)
         _settled(forwarder)
     assert forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/T%40x/ws"
 
@@ -566,6 +614,7 @@ def test_an_encoded_tail_still_relays_verbatim() -> None:
         ) as ws:
             ws.send_text("ping")
             ws.receive_text()
+            ws.close(1000)
         _settled(forwarder)
     assert forwarder.opened[0].request.url == (
         "wss://proxy.internal/proxypass/ARCA_x%400%3A20003/api/ws"
@@ -585,6 +634,7 @@ def test_a_dot_inside_a_name_still_relays() -> None:
         with client.websocket_connect("/openapi/v1/engine/a.b/c..d/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
+            ws.close(1000)
         _settled(forwarder)
     assert (
         forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/a.b/c..d/ws"

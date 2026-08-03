@@ -107,6 +107,11 @@ user_config:
     "/openapi/v1/collaboration/**":
       user: required
 
+    # BCN verifies the short-lived session credential carried by this exact
+    # WebSocket handshake. Keep every other collaboration operation, including
+    # session-token issuance, on the required User Principal boundary above.
+    "GET /openapi/v1/collaboration/group/ws": {}
+
     # The tenant engine socket, and the FIRST rule under /openapi/v1 that
     # requires no identity at all. Deliberate: the credential is already in the
     # handshake's query string and is checked by the proxypass hop behind the
@@ -169,6 +174,7 @@ user_config:
           refresh_seconds: 300
       collaboration:
         server: bcs
+        protocols: [http, websocket]
         schema:
           source: file
           path: schemas/bcn.openapi.json
