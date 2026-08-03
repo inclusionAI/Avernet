@@ -193,14 +193,23 @@ class _Guard:
 class _Cleanup:
     def __init__(self):
         self.rows = []
+        self.cancelled: list[int] = []
 
     def record_pending(self, **kwargs):
         self.rows.append(kwargs)
-        return True
+        return len(self.rows)
 
     def list_pending(self, **_kwargs): return []
     def mark_cleaned(self, **_kwargs): return True
     def mark_failed(self, **_kwargs): return True
+    def cancel_pending(self, *, work_id, **_kwargs):
+        self.cancelled.append(work_id)
+        return True
+
+
+class _CleanupRecordFailure(_Cleanup):
+    def record_pending(self, **_kwargs):
+        return None
 
 
 class _PendingCleanup(_Cleanup):
@@ -230,6 +239,14 @@ class _RuntimeRestoreCleanup(_PendingCleanup):
                 "requires_runtime_restore": True,
             }
         ]
+
+
+class _UnwritableCleanupProgress(_PendingCleanup):
+    def mark_cleaned(self, **_kwargs):
+        return False
+
+    def mark_failed(self, **_kwargs):
+        return False
 
 
 class _RuntimeFactory:
@@ -548,8 +565,11 @@ async def test_active_replacement_restore_sync_failure_keeps_original_authority_
             package=_zip({"SKILL.md": b"name: upload-skill\ndescription: new description\n"}),
         )
     assert old["git_path"] == "local:///private/skills-local/upload-skill"
-    assert "replacement-" in cleanup.rows[0]["package_locator"]
-    assert cleanup.rows[0]["requires_runtime_restore"] is True
+    staged_work = next(
+        row for row in cleanup.rows if "replacement-" in row["package_locator"]
+    )
+    assert staged_work["requires_runtime_restore"] is True
+    assert cleanup.cancelled == [1]
     assert filesystem.deleted == []
 
 
@@ -600,6 +620,25 @@ async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_
 
 
 @pytest.mark.asyncio
+async def test_cleanup_registration_failure_restores_old_authority_before_runtime_or_purge():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    old = _existing_skill(active=True)
+    runtime = _ReplacementRuntime([True])
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, _ReplacementRepo([old]), runtime, _CleanupRecordFailure(),
+        ).upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: new description\n"}),
+        )
+    assert old["git_path"] == "local:///private/skills-local/upload-skill"
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == b"old"
+    assert runtime.calls == 0
+    assert not any("replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
 async def test_later_serialized_upload_retries_durable_cleanup_work():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/obsolete/SKILL.md"] = b"obsolete"
@@ -612,8 +651,24 @@ async def test_later_serialized_upload_retries_durable_cleanup_work():
         package=_zip({"SKILL.md": b"name: upload-skill\ndescription: new description\n"}),
     )
     assert result["operation"] == "updated"
-    assert cleanup.completed == [12]
+    assert 12 in cleanup.completed
     assert cleanup.failed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_results", [None, [False]])
+async def test_cleanup_progress_write_failure_blocks_the_next_replacement(cleanup_results):
+    filesystem = _Filesystem(cleanup_results=cleanup_results)
+    filesystem.files["/private/skills-local/obsolete/SKILL.md"] = b"obsolete"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True]), _UnwritableCleanupProgress(),
+        ).upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: new description\n"}),
+        )
+    assert repo.updates == []
 
 
 @pytest.mark.asyncio
@@ -629,7 +684,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
         package=_zip({"SKILL.md": b"name: upload-skill\ndescription: new description\n"}),
     )
     assert runtime.calls == 1
-    assert cleanup.completed == [12]
+    assert 12 in cleanup.completed
     assert "/private/skills-local/staged/SKILL.md" not in filesystem.files
 
 

@@ -1,5 +1,12 @@
 """Conformance coverage for durable Local Skill cleanup persistence."""
 
+from hashlib import sha256
+from pathlib import Path
+
+import pytest
+
+from agentclaw.community.core.skill_center.local_skill_cleanup import LocalSkillCleanupWorkModel
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
 
 
@@ -40,3 +47,64 @@ def test_cleanup_repository_isolated_by_the_full_deployment_wide_bot_scope(world
     assert not repo.mark_cleaned(
         work_id=owner_a[0]["id"], env="dev", owner_id="owner-b", bot_id="shared-bot-id"
     )
+
+
+def test_cleanup_upsert_reopens_work_and_monotonically_requires_runtime_restore(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    locator = "pool/local/replacement-version"
+    assert repo.record_pending(
+        **scope, skill_id="9", package_locator=locator,
+        requires_runtime_restore=False,
+    )
+    pending = repo.list_pending(**scope)
+    assert repo.mark_failed(
+        work_id=pending[0]["id"], error="cleanup failed", **scope
+    )
+    assert repo.record_pending(
+        **scope, skill_id="9", package_locator=locator,
+        requires_runtime_restore=True,
+    )
+    pending = repo.list_pending(**scope)
+    assert len(pending) == 1
+    assert pending[0]["requires_runtime_restore"] is True
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.status == "pending"
+        assert row.last_error is None
+
+
+def test_cleanup_uses_full_locator_hash_and_rejects_a_hash_collision(world, monkeypatch) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    locator = "pool/" + "a" * 1019
+    assert repo.record_pending(
+        **scope, skill_id="9", package_locator=locator,
+        requires_runtime_restore=False,
+    )
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.package_locator_hash == sha256(locator.encode("utf-8")).hexdigest()
+
+    monkeypatch.setattr(repo, "_locator_hash", lambda _locator: "f" * 64)
+    first = "pool/first"
+    second = "pool/second"
+    assert repo.record_pending(
+        **scope, skill_id="9", package_locator=first,
+        requires_runtime_restore=False,
+    )
+    with pytest.raises(ValueError, match="hash collision"):
+        repo.record_pending(
+            **scope, skill_id="9", package_locator=second,
+            requires_runtime_restore=False,
+        )
+
+
+def test_cleanup_ddl_uses_a_bounded_full_locator_digest_as_its_unique_key() -> None:
+    sql = (
+        Path(__file__).parents[3]
+        / "src/agentclaw/community/core/skill_center/sql/2026_08_04_local_skill_cleanup_work.sql"
+    ).read_text()
+    assert "`package_locator_hash` CHAR(64) NOT NULL" in sql
+    assert "`uk_local_skill_cleanup_scope_locator_hash` (`env`, `owner_id`, `bot_id`, `package_locator_hash`)" in sql
+    assert "`uk_local_skill_cleanup_scope_locator` (`env`, `owner_id`, `bot_id`, `package_locator`)" not in sql

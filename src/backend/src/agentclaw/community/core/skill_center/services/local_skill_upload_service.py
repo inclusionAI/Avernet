@@ -217,6 +217,8 @@ class LocalSkillUploadService:
             "user_id": skill.get("user_id"),
         }
         switched = False
+        old_cleanup_work_id: int | None = None
+        runtime_sync_attempted = False
         try:
             await staged.write(files)
             updated = self._skill_repo.update(
@@ -226,6 +228,14 @@ class LocalSkillUploadService:
             if updated is None:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
+            # Register deletion before runtime sync makes the committed switch
+            # recoverable even if a later obsolete-byte purge cannot start.
+            old_cleanup_work_id = self._record_cleanup(
+                bot, owner_id, bot_id, str(skill["id"]), old_locator
+            )
+            if old_cleanup_work_id is None:
+                raise LocalSkillStorageError()
+            runtime_sync_attempted = bool(skill["active"])
             if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
@@ -236,6 +246,8 @@ class LocalSkillUploadService:
             await self._restore_replacement(
                 skill=skill, old_metadata=old_metadata, bot=bot, owner_id=owner_id,
                 bot_id=bot_id, staged=staged, staged_locator=new_locator, switched=switched,
+                old_cleanup_work_id=old_cleanup_work_id,
+                runtime_sync_attempted=runtime_sync_attempted,
             )
             raise
         except Exception as exc:
@@ -243,6 +255,8 @@ class LocalSkillUploadService:
                 await self._restore_replacement(
                     skill=skill, old_metadata=old_metadata, bot=bot, owner_id=owner_id,
                     bot_id=bot_id, staged=staged, staged_locator=new_locator, switched=True,
+                    old_cleanup_work_id=old_cleanup_work_id,
+                    runtime_sync_attempted=runtime_sync_attempted,
                 )
             else:
                 await self._discard_or_record(
@@ -250,14 +264,19 @@ class LocalSkillUploadService:
                     storage=staged, locator=new_locator,
                 )
             raise LocalSkillStorageError() from exc
-        # The new authority is committed.  Old bytes are now garbage, never a
-        # reason to undo a working replacement.  A failed purge is durable work.
+        # The old locator already has durable work.  Its purge is never a
+        # reason to undo a working replacement.
         try:
             cleaned = await old_storage.cleanup()
         except Exception:
             cleaned = False
-        if not cleaned:
-            if not self._record_cleanup(bot, owner_id, bot_id, str(skill["id"]), old_locator):
+        if cleaned:
+            if not self._cleanup_repo.mark_cleaned(
+                work_id=old_cleanup_work_id,
+                env=str(bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+            ):
                 raise LocalSkillStorageError()
         return {
             "operation": "updated",
@@ -268,22 +287,29 @@ class LocalSkillUploadService:
     async def _restore_replacement(
         self, *, skill: dict[str, Any], old_metadata: dict[str, Any], bot: dict[str, Any],
         owner_id: str, bot_id: str, staged, staged_locator: str, switched: bool,
+        old_cleanup_work_id: int | None, runtime_sync_attempted: bool,
     ) -> None:
         if switched:
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
+            if runtime_sync_attempted and bool(skill["active"]) and not self._sync_runtime(
+                bot, owner_id, bot_id
+            ):
                 # Runtime may have switched partway before reporting failure.
                 # Keep the complete staged package until a later serialized
                 # mutation can restore the old mapping before deleting it.
-                if not self._record_cleanup(
+                if self._record_cleanup(
                     bot=bot, owner_id=owner_id, bot_id=bot_id,
                     skill_id=str(skill["id"]), locator=staged_locator,
                     requires_runtime_restore=True,
-                ):
+                ) is None:
                     raise LocalSkillStorageError()
+                self._cancel_cleanup_if_registered(
+                    old_cleanup_work_id, bot, owner_id, bot_id
+                )
                 raise LocalSkillRuntimeSyncError()
+            self._cancel_cleanup_if_registered(old_cleanup_work_id, bot, owner_id, bot_id)
         await self._discard_or_record(
             bot=bot, owner_id=owner_id, bot_id=bot_id, skill_id=str(skill["id"]),
             storage=staged, locator=staged_locator,
@@ -295,7 +321,7 @@ class LocalSkillUploadService:
                 return
         except Exception:
             pass
-        if not self._record_cleanup(bot, owner_id, bot_id, skill_id, locator):
+        if self._record_cleanup(bot, owner_id, bot_id, skill_id, locator) is None:
             raise LocalSkillStorageError()
 
     def _record_cleanup(
@@ -307,26 +333,47 @@ class LocalSkillUploadService:
         locator: str,
         *,
         requires_runtime_restore: bool = False,
-    ) -> bool:
-        return bool(self._cleanup_repo.record_pending(
+    ) -> int | None:
+        return self._cleanup_repo.record_pending(
             env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id,
             skill_id=skill_id, package_locator=locator,
             requires_runtime_restore=requires_runtime_restore,
-        ))
+        )
+
+    def _cancel_cleanup_if_registered(
+        self,
+        work_id: int | None,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+    ) -> None:
+        if work_id is not None and not self._cleanup_repo.cancel_pending(
+            work_id=work_id,
+            env=str(bot["env"]),
+            owner_id=owner_id,
+            bot_id=bot_id,
+        ):
+            raise LocalSkillStorageError()
 
     async def _retry_pending_cleanup(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> None:
         """Retry durable obsolete-byte work on a later serialized Bot mutation."""
         for work in self._cleanup_repo.list_pending(env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id):
+            if self._cleanup_target_is_authoritative(work):
+                self._cancel_cleanup_if_registered(
+                    int(work["id"]), bot, owner_id, bot_id
+                )
+                continue
             if bool(work.get("requires_runtime_restore")) and not self._sync_runtime(
                 bot, owner_id, bot_id
             ):
-                self._cleanup_repo.mark_failed(
+                if not self._cleanup_repo.mark_failed(
                     work_id=int(work["id"]),
                     env=str(bot["env"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
                     error="runtime restore before cleanup failed",
-                )
+                ):
+                    raise LocalSkillStorageError()
                 continue
             storage = self._skill_service_factory.local_skill_package_storage_for_locator(
                 owner_id=owner_id, bot_id=bot_id, engine_type=bot.get("active_engine"),
@@ -337,20 +384,32 @@ class LocalSkillUploadService:
             except Exception:
                 cleaned = False
             if cleaned:
-                self._cleanup_repo.mark_cleaned(
+                if not self._cleanup_repo.mark_cleaned(
                     work_id=int(work["id"]),
                     env=str(bot["env"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
-                )
+                ):
+                    raise LocalSkillStorageError()
             else:
-                self._cleanup_repo.mark_failed(
+                if not self._cleanup_repo.mark_failed(
                     work_id=int(work["id"]),
                     env=str(bot["env"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
                     error="obsolete package cleanup failed",
-                )
+                ):
+                    raise LocalSkillStorageError()
+
+    def _cleanup_target_is_authoritative(self, work: dict[str, Any]) -> bool:
+        skill_id = work.get("skill_id")
+        if skill_id is None:
+            return False
+        skill = self._skill_repo.get_by_id(str(skill_id))
+        return bool(
+            skill
+            and skill.get("git_path") == f"local://{work['package_locator']}"
+        )
 
     def _same_name_matches(self, *, bot_id: str, owner_id: str, name: str) -> list[dict[str, Any]]:
         rows = self._skill_repo.list_bot_local_by_name(bot_id=bot_id, name=name)
