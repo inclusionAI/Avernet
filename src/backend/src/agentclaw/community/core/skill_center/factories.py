@@ -81,6 +81,8 @@ class LocalSkillPackageStorage:
 
     async def prepare(self) -> None:
         """Remove an orphaned failed upload before writing a first package."""
+        if not await self._filesystem.exists(self._device_directory):
+            return
         if not await self._filesystem.delete_tree(self._device_directory):
             raise OSError("unable to clear prior Local Skill upload")
 
