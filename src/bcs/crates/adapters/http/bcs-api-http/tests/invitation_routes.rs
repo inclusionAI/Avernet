@@ -446,7 +446,7 @@ async fn create_session_invitation_returns_created_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/sessions/session-1/invitations",
+            "/openapi/v1/group-sessions/session-1/invitations",
             json!({}),
         ))
         .await
@@ -464,6 +464,29 @@ async fn create_session_invitation_returns_created_and_forwards_principal() {
         assert_eq!(caller_user_id(&created.caller), "staff-1");
         assert_eq!(created.session_id, "session-1");
     }
+}
+
+#[tokio::test]
+async fn legacy_session_invitation_path_is_not_mounted() {
+    let service = Arc::new(FakeInvitationService::default());
+    let app = test_router(service.clone());
+
+    let response = app
+        .oneshot(authenticated_request(
+            "POST",
+            "/openapi/v1/sessions/session-1/invitations",
+            json!({}),
+        ))
+        .await
+        .expect("legacy session invitation response");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(
+        service
+            .created_session
+            .lock()
+            .expect("create session lock")
+            .is_none()
+    );
 }
 
 #[tokio::test]

@@ -4,13 +4,13 @@ info:
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
 paths:
-  /openapi/v1/bots/mine:
+  /openapi/v1/bots/collaboration/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath
-  /openapi/v1/bots/query:
+  /openapi/v1/bots/collaboration/query:
     $ref: ./openapi/bots.yaml#/QueryBotsPath
-  /openapi/v1/bots/{bot_id}:
+  /openapi/v1/bots/collaboration/{bot_id}:
     $ref: ./openapi/bots.yaml#/BotPath
-  /openapi/v1/bots/{bot_id}/candidates:
+  /openapi/v1/bots/collaboration/{bot_id}/candidates:
     $ref: ./openapi/bots.yaml#/BotCandidatesPath
   /openapi/v1/bots/collaboration/{bot_uuid}/friendships:
     $ref: ./openapi/friendships.yaml#/ListFriendshipsPath
@@ -34,17 +34,17 @@ paths:
     $ref: ./openapi/sessions.yaml#/GroupSessionsPath
   /openapi/v1/groups/{group_id}/invitations:
     $ref: ./openapi/invitations.yaml#/CreateGroupInvitationPath
-  /openapi/v1/sessions/{session_id}:
+  /openapi/v1/group-sessions/{session_id}:
     $ref: ./openapi/sessions.yaml#/SessionPath
-  /openapi/v1/sessions/{session_id}/completion:
+  /openapi/v1/group-sessions/{session_id}/completion:
     $ref: ./openapi/sessions.yaml#/SessionCompletionPath
-  /openapi/v1/sessions/{session_id}/messages:
+  /openapi/v1/group-sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
-  /openapi/v1/sessions/{session_id}/participants:
+  /openapi/v1/group-sessions/{session_id}/participants:
     $ref: ./openapi/sessions.yaml#/AddSessionParticipantPath
-  /openapi/v1/sessions/{session_id}/participants/{bot_uuid}:
+  /openapi/v1/group-sessions/{session_id}/participants/{bot_uuid}:
     $ref: ./openapi/sessions.yaml#/SessionParticipantPath
-  /openapi/v1/sessions/{session_id}/invitations:
+  /openapi/v1/group-sessions/{session_id}/invitations:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath

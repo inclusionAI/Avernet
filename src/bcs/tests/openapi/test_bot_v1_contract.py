@@ -11,11 +11,11 @@ from scripts.validate_openapi_contract import load_contract  # noqa: E402
 
 
 BOT_OPERATIONS = {
-    ("get", "/openapi/v1/bots/{bot_id}/candidates"),
-    ("post", "/openapi/v1/bots/query"),
-    ("get", "/openapi/v1/bots/{bot_id}"),
-    ("patch", "/openapi/v1/bots/{bot_id}"),
-    ("get", "/openapi/v1/bots/mine"),
+    ("get", "/openapi/v1/bots/collaboration/{bot_id}/candidates"),
+    ("post", "/openapi/v1/bots/collaboration/query"),
+    ("get", "/openapi/v1/bots/collaboration/{bot_id}"),
+    ("patch", "/openapi/v1/bots/collaboration/{bot_id}"),
+    ("get", "/openapi/v1/bots/collaboration/mine"),
 }
 
 
@@ -43,6 +43,13 @@ def test_bot_management_operations_are_human_control_plane_only() -> None:
     for method, path in BOT_OPERATIONS:
         operation = contract["paths"][path][method]
         assert operation["x-avernet-security"] == {"user": "required"}
+
+
+def test_bot_management_operations_share_the_collaboration_prefix() -> None:
+    assert all(
+        path.startswith("/openapi/v1/bots/collaboration/")
+        for _, path in BOT_OPERATIONS
+    )
 
 
 def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
@@ -110,7 +117,9 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
 
 
 def test_candidates_contract_matches_legacy_list_semantics() -> None:
-    operation = _operation("get", "/openapi/v1/bots/{bot_id}/candidates")
+    operation = _operation(
+        "get", "/openapi/v1/bots/collaboration/{bot_id}/candidates"
+    )
     parameters = _parameters(operation)
 
     assert set(parameters) == {"bot_id", "purpose", "name", "offset", "limit"}
@@ -146,7 +155,7 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
 
 
 def test_batch_query_is_sparse_ordered_and_not_visibility_filtered() -> None:
-    operation = _operation("post", "/openapi/v1/bots/query")
+    operation = _operation("post", "/openapi/v1/bots/collaboration/query")
     request = operation["requestBody"]["content"]["application/json"]["schema"]
     bot_ids = request["properties"]["bot_ids"]
 
@@ -173,7 +182,7 @@ def test_batch_query_is_sparse_ordered_and_not_visibility_filtered() -> None:
 
 
 def test_exact_get_has_no_acting_identity_or_visibility_filter() -> None:
-    operation = _operation("get", "/openapi/v1/bots/{bot_id}")
+    operation = _operation("get", "/openapi/v1/bots/collaboration/{bot_id}")
 
     assert set(_parameters(operation)) == {"bot_id"}
     assert operation["x-avernet-behavior"] == {
@@ -185,7 +194,7 @@ def test_exact_get_has_no_acting_identity_or_visibility_filter() -> None:
 
 
 def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
-    operation = _operation("patch", "/openapi/v1/bots/{bot_id}")
+    operation = _operation("patch", "/openapi/v1/bots/collaboration/{bot_id}")
     request = operation["requestBody"]["content"]["application/json"]["schema"]
 
     assert set(_parameters(operation)) == {"bot_id"}
@@ -206,7 +215,7 @@ def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
 
 
 def test_mine_filters_both_kinds_without_an_all_enum_value() -> None:
-    operation = _operation("get", "/openapi/v1/bots/mine")
+    operation = _operation("get", "/openapi/v1/bots/collaboration/mine")
     parameters = _parameters(operation)
 
     assert set(parameters) == {"kind", "name", "status", "reachability", "offset", "limit"}

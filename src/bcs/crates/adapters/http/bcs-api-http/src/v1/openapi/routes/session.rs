@@ -25,25 +25,25 @@ pub fn router() -> Router<ApiState> {
             get(list_sessions).post(create_session),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}",
+            "/openapi/v1/group-sessions/{session_id}",
             get(get_session)
                 .patch(update_session)
                 .delete(delete_session),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}/completion",
+            "/openapi/v1/group-sessions/{session_id}/completion",
             post(complete_session),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}/messages",
+            "/openapi/v1/group-sessions/{session_id}/messages",
             get(list_session_messages),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}/participants",
+            "/openapi/v1/group-sessions/{session_id}/participants",
             post(add_session_participant),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}/participants/{bot_uuid}",
+            "/openapi/v1/group-sessions/{session_id}/participants/{bot_uuid}",
             patch(update_session_participant).delete(remove_session_participant),
         )
 }
