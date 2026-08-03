@@ -95,7 +95,8 @@ _dump_upstream() {
             export ${env_vars//,/ }
         fi
         if [[ "$name" == "bcn" ]]; then
-            python3 "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
+            uv run --project "$GATEWAY_DIR" --locked \
+                python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
         else
             uv run python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
         fi
