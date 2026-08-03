@@ -6,10 +6,10 @@
 
 ## Goal
 
-Expose the existing contract-first BCN V1 HTTP API through Gateway at the
-identical `/openapi/v1/collaboration/**` paths, publish its OpenAPI description
-through Gateway's existing compatibility-gated schema catalog, and verify the
-Gateway Principal at the BCS boundary.
+Expose the existing contract-first BCN V1 HTTP and session-bound WebSocket APIs
+through Gateway at identical `/openapi/v1/collaboration/**` paths, publish their
+OpenAPI description through Gateway's existing compatibility-gated schema
+catalog, and enforce each route's approved authentication boundary in BCS.
 
 ## Scope boundary
 
@@ -24,25 +24,43 @@ P0 contains only the work required for a usable, fail-closed integration:
 4. Resolve the shared Gateway Principal signing key once in the BCS composition
    root and inject `GatewayPrincipalTokenVerifier` with `iss=gateway`,
    `aud=bcs`, and `kid=bare`.
-5. Configure Gateway domain `collaboration` to server `bcs`, with no rewrite,
-   and require a User Principal for the prefix.
-6. Add focused contract, mount, forwarding, authentication, and served-OpenAPI
-   tests.
+5. Complete and mount PR #697's session-bound connection flow:
+   `POST /openapi/v1/collaboration/sessions/{session_id}/token` and
+   `GET /openapi/v1/collaboration/group/ws?token=...`.
+6. Resolve the dedicated group-session WebSocket JWT key once in bootstrap and
+   inject the shared connection service into the HTTP and WebSocket adapters.
+7. Configure Gateway domain `collaboration` for both HTTP and WebSocket relay,
+   with no rewrite. Require a User Principal for normal collaboration routes
+   while leaving the WebSocket handshake anonymous at Gateway because BCN
+   verifies its query credential.
+8. Add focused contract, mount, forwarding, authentication, Upgrade, and
+   served-OpenAPI tests. WebSocket message-protocol parity is not duplicated.
 
-The current contract has 32 operations. PR #697's standalone session token
-Router is not part of this P0 branch and is not added to the contract or mount.
-If that PR merges first, its public operation must be added to the contract and
-explicitly composed in a follow-up/rebase rather than becoming an undocumented
-33rd route.
+The public contract has 34 operations: the original 32 collaboration
+operations plus the session-token POST and the WebSocket Upgrade GET.
 
 ## Approaches considered
 
-### Selected: contract-first artifact plus explicit runtime composition
+### Selected: complete contract-first HTTP and WebSocket integration
 
 Keep `src/bcs/api-contracts/v1/openapi.yaml` and its fragments authoritative.
 The exporter resolves references and emits deterministic JSON. Bootstrap
-constructs the existing V1 Application implementations and mounts the existing
-Axum Router. This is the smallest change that preserves current architecture.
+constructs the existing V1 Application implementations and mounts the HTTP and
+WebSocket delivery routers. Gateway relays both planes without rewriting. This
+keeps the public contract, runtime mount, and deployment route aligned.
+
+### Rejected: publish the two operations without runtime integration
+
+Adding the operations only to OpenAPI would advertise routes that production
+BCS does not mount and would recreate the contract/runtime drift this P0 is
+intended to remove.
+
+### Rejected: duplicate the full Workbench message-protocol suite
+
+The new WebSocket route reuses the existing Workbench handler and dispatcher.
+This integration verifies Upgrade authentication, immutable session binding,
+and connect-time authorization; chat, streaming, attachments, abort, and event
+delivery remain owned by the existing `/ws` and PR #697 tests.
 
 ### Deferred: generate Axum routes and route inventory from one Rust manifest
 
@@ -68,19 +86,28 @@ BCS YAML contract
 
 Client
   -> Gateway /openapi/v1/collaboration/**
-  -> authenticate User
-  -> sign X-Avernet-Principal (aud=bcs)
+  -> authenticate User for normal HTTP routes
+  -> sign X-Avernet-Principal (aud=bcs) for the token POST
   -> forward path verbatim to BCS
   -> BCS verifies JWT and creates AuthenticatedCaller
   -> existing bcs-api-http Router
   -> existing V1 Application facade
   -> existing core/store services
+
+Browser
+  -> POST /openapi/v1/collaboration/sessions/{session_id}/token
+  -> receive five-minute, single-session BCN JWT
+  -> GET /openapi/v1/collaboration/group/ws?token=...
+  -> Gateway relays anonymously and preserves path/query
+  -> BCS verifies the BCN JWT before Upgrade
+  -> shared Workbench handler revalidates the bound session on connect
 ```
 
 Gateway selects the upstream from the first segment after `/openapi/v1`.
 Therefore one `collaboration -> bcs` domain entry covers bots, groups, sessions,
-friend requests, and invitations. Gateway and BCS paths remain identical; no
-proxy rewrite or handwritten Gateway operation is added.
+friend requests, invitations, and the two session-bound connection routes.
+Gateway and BCS paths remain identical; no proxy rewrite or handwritten Gateway
+operation is added.
 
 ## OpenAPI publication
 
@@ -94,6 +121,16 @@ The BCS exporter:
 - emits UTF-8 JSON with sorted keys, stable separators, and one trailing
   newline;
 - never includes unresolved `$ref` values to external files.
+
+The WebSocket endpoint is represented as its HTTP Upgrade handshake rather than
+as a message protocol. Its OpenAPI operation is a `GET` with a required,
+sensitive `token` query parameter, `x-avernet-protocol: websocket`, an explicit
+empty Gateway security requirement, and a `101` response. The contract does not
+attempt to describe Workbench frames.
+
+The token POST returns the existing standard success envelope containing only
+`token: string` and `expires_at: integer/int64` (Unix timestamp), and documents
+the `Cache-Control: no-store` and `Pragma: no-cache` response headers.
 
 Gateway's existing compatibility gate remains the publication authority. The
 initial committed `bcn.openapi.json` establishes the single-box published
@@ -123,6 +160,23 @@ The V1 Router is merged directly into the existing Axum application. Legacy
 routes remain mounted unchanged. The mount must not add another
 `/openapi/v1/collaboration` prefix.
 
+PR #697 provides the session-token application service, dedicated JWT port and
+implementation, HTTP delivery slice, and session-bound Workbench dispatcher
+foundation. Bootstrap completes the composition and mounts both public routes.
+The WebSocket adapter verifies the query JWT before Upgrade, creates one
+immutable tenant/User/Group/Session binding, and delegates the upgraded socket
+to the existing Workbench handler.
+
+The group-session JWT uses a dedicated secret:
+
+```text
+BCS_SECRET_BCN_GROUP_SESSION_WS_JWT
+```
+
+It is not the Gateway Principal or OAuth signing key. Missing or empty material
+fails startup; adapters never read environment variables or select concrete
+token implementations.
+
 ## Gateway configuration
 
 Add:
@@ -134,11 +188,13 @@ upstream_vars:
 route_security:
   /openapi/v1/collaboration/**:
     user: required
+  "GET /openapi/v1/collaboration/group/ws": {}
 
 upstreams:
   domains:
     collaboration:
       server: bcs
+      protocols: [http, websocket]
       schema:
         source: file
         path: schemas/bcn.openapi.json
@@ -148,7 +204,9 @@ upstreams:
 ```
 
 The server name is deliberately `bcs`: Gateway uses it as the signed Principal
-audience, matching the BCS verifier contract.
+audience, matching the BCS verifier contract. Gateway forwards the WebSocket
+token query unchanged but must redact its value from logs. It does not parse or
+verify the BCN session JWT.
 
 ## Error handling
 
@@ -160,24 +218,39 @@ audience, matching the BCS verifier contract.
   verifier.
 - Invalid request Principals fail with 401 before any V1 Application service is
   invoked.
+- Missing, malformed, forged, expired, or wrong-purpose session JWTs fail the
+  WebSocket handshake with 401 before Upgrade. An unavailable verifier fails
+  with 503.
+- A valid token whose session scope no longer matches current authorization is
+  rejected during the Workbench connect phase and the socket is closed.
 - Unknown Gateway domains remain 404 and are never forwarded.
 
 ## Verification
 
 Focused automated evidence must cover:
 
-- deterministic JSON bytes, 32 operations, collaboration-only paths, and no
+- deterministic JSON bytes, 34 operations, collaboration-only paths, and no
   external references;
 - dump/gate/publish of the BCN artifact;
 - `collaboration` domain resolution to server `bcs` without rewrite;
 - Gateway signing with audience `bcs` and stripping forged inbound Principal
   headers;
 - BCS production Router reachability plus missing/invalid Principal 401;
+- token issuance success, no-store headers, Human-only authorization, and the
+  documented 401/403/404/500 envelopes;
+- WebSocket pre-Upgrade rejection for missing, forged, expired, and
+  wrong-purpose tokens;
+- valid WebSocket Upgrade with the exact immutable User/Group/Session binding;
+- connect-time scope mismatch and revoked-access rejection, without duplicating
+  chat, streaming, attachment, abort, or event-delivery cases;
+- Gateway WebSocket domain resolution, anonymous handshake rule, path/query
+  preservation, and token redaction;
 - one representative GET and one body-carrying POST/PATCH through Gateway;
 - Gateway `/openapi.json` contains BCN paths while Backend/BaaS paths remain;
 - old `/openapi/v1/bots/collaboration/**` and
   `/openapi/v1/group-sessions/**` paths remain absent.
 
 Full route inventory, representative schema/error serialization conformance,
-immutable compatibility baselines, component collision detection, and expanded
-live E2E remain tracked by #700.
+immutable compatibility baselines, component collision detection, and full
+Workbench message-protocol parity through the new entrypoint remain tracked by
+#700 or their existing protocol suites.
