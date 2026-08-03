@@ -2097,7 +2097,11 @@ async def delete_skill(
     """
     # 删除的物理上下文必须以已持久化 Skill 所属 Bot 为准。历史客户端
     # 不传 bot_id/entity_id，不能因此回退到 default/openclaw 并删错路径。
-    current_user_id = user_id or ctx.user_id
+    # ``user_id`` is a legacy compatibility hint supplied by the caller and
+    # must never override the authenticated actor.  In particular, shared
+    # market Skills have no owner row, so trusting the query parameter here
+    # would let any authenticated caller impersonate a configured Skill admin.
+    current_user_id = ctx.user_id
     if not current_user_id:
         raise HTTPException(status_code=401, detail="未认证用户无法删除技能")
     if not skill_id.isdigit():
@@ -2200,6 +2204,7 @@ async def delete_skill(
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
         entity_id=effective_entity_id,
+        bot_owner_id=str(bot.get("owner_id") or ""),
         bot_id=effective_bot_id,
         engine_type=effective_engine,
     )
