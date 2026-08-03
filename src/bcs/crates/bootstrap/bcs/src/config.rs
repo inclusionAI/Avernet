@@ -18,7 +18,7 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig,
     FusionProviderConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
+    LoggingConfig, ManifestConfig, LeaderElectionConfig, SecretConfig, StructuredOutputMode, SecurityConfig,
     UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
@@ -324,6 +324,13 @@ pub struct BcsConfig {
     /// machines.
     #[serde(default)]
     pub mist: MistConfig,
+
+    /// Provider-neutral secret backend selector.
+    ///
+    /// Defaults to `noop` for public/local builds. Internal builds can select
+    /// providers registered by linked crates, for example `mist`.
+    #[serde(default)]
+    pub secret: SecretConfig,
 
     /// Channel(IM bridge) configuration.
     #[serde(default)]
@@ -745,6 +752,7 @@ impl Default for BcsConfig {
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
             mist: MistConfig::default(),
+            secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),

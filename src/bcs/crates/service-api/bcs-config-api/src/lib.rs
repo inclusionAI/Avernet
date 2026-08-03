@@ -406,6 +406,40 @@ pub trait AuthSdkEnvView {
 }
 
 // ---------------------------------------------------------------------------
+// Secret backend
+// ---------------------------------------------------------------------------
+
+/// Provider-specific secret-backend options.
+pub type SecretProviderConfig = BTreeMap<String, serde_json::Value>;
+
+/// Secret backend selector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretConfig {
+    /// Secret provider to load. Public/local builds support `noop` and `env`;
+    /// linked extension crates can register additional providers such as `mist`.
+    #[serde(default = "default_secret_provider")]
+    pub provider: String,
+
+    /// Provider-specific options keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, SecretProviderConfig>,
+}
+
+impl Default for SecretConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_secret_provider(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_secret_provider() -> String {
+    "noop".to_string()
+}
+
+// ---------------------------------------------------------------------------
 // User directory
 // ---------------------------------------------------------------------------
 

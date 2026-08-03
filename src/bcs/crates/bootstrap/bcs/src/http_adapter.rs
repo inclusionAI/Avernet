@@ -8,7 +8,7 @@ use bcs_http::state::{
     HttpAppState, VisibilitySyncPort, VisibilitySyncRequest,
 };
 use bcs_secret::DefaultSecretService;
-use bcs_secret_local::NoopSecretAccess;
+use bcs_secret_local::{EnvSecretAccess, NoopSecretAccess};
 use bcs_service_api::port::secret::SecretAccessPort;
 use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort, SecretService};
 use bcs_services_container::Services;
@@ -18,6 +18,7 @@ use opentelemetry::trace::TraceContextExt;
 use tokio::sync::mpsc;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::plugins::build_registered_secret_plugin;
 use crate::server::BcsServerState;
 
 pub struct BotRuntimeTokenResolverBuildContext {
@@ -62,7 +63,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
     } else {
         0
     };
-    let secret_service = build_secret_service(&config.mist).await;
+    let secret_service = build_secret_service(&config).await;
     let services_with_secret = Services {
         secret: secret_service,
         ..state.services.clone()
@@ -150,14 +151,72 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         ))
 }
 
-async fn build_secret_service(cfg: &bcs_config_api::MistConfig) -> Arc<dyn SecretService> {
-    if cfg.enabled {
-        tracing::warn!("mist config is ignored in the public build; using NoopSecretAccess");
-    } else {
-        tracing::info!("mist disabled in config; using NoopSecretAccess");
-    }
-    let access: Arc<dyn SecretAccessPort> = Arc::new(NoopSecretAccess);
+async fn build_secret_service(config: &crate::config::BcsConfig) -> Arc<dyn SecretService> {
+    let access = build_secret_access(config).await;
     Arc::new(DefaultSecretService::new(access))
+}
+
+async fn build_secret_access(config: &crate::config::BcsConfig) -> Arc<dyn SecretAccessPort> {
+    let provider = resolve_secret_provider(config);
+    let provider_config = config
+        .secret
+        .providers
+        .get(provider)
+        .cloned()
+        .unwrap_or_default();
+
+    match provider {
+        "noop" => {
+            if config.mist.enabled {
+                tracing::warn!(
+                    "legacy mist config is enabled but secret.provider is noop; using NoopSecretAccess"
+                );
+            } else {
+                tracing::info!("secret.provider=noop; using NoopSecretAccess");
+            }
+            Arc::new(NoopSecretAccess)
+        }
+        "env" => {
+            let prefix = provider_config
+                .get("prefix")
+                .and_then(|value| value.as_str())
+                .unwrap_or("BCS_SECRET_");
+            tracing::info!(provider = "env", "secret backend enabled");
+            Arc::new(EnvSecretAccess::new(prefix))
+        }
+        other => match build_registered_secret_plugin(config, other, provider_config).await {
+            Ok(Some(registration)) => {
+                tracing::info!(provider = %registration.provider, "registered secret backend enabled");
+                registration.access
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    provider = other,
+                    "secret provider is not available in this binary; using NoopSecretAccess"
+                );
+                Arc::new(NoopSecretAccess)
+            }
+            Err(err) => {
+                tracing::error!(
+                    provider = other,
+                    error = %err,
+                    "secret provider initialization failed; using NoopSecretAccess"
+                );
+                Arc::new(NoopSecretAccess)
+            }
+        },
+    }
+}
+
+fn resolve_secret_provider(config: &crate::config::BcsConfig) -> &str {
+    let configured = config.secret.provider.trim();
+    if configured == "noop" && config.mist.enabled {
+        "mist"
+    } else if configured.is_empty() {
+        "noop"
+    } else {
+        configured
+    }
 }
 
 struct BootstrapHealthPort {
@@ -367,6 +426,9 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
 mod tests {
     use super::*;
     use bcs_bot_store::MemoryProviderStore;
+    use bcs_secret_local::InMemorySecretAccess;
+    use crate::plugins::{SecretPluginFactory, SecretPluginRegistration};
+    use futures::future::BoxFuture;
     use bcs_leader_election::StandaloneLeaderElection;
     use bcs_route_security::OutboundUrlGuard;
     use bcs_service_api::ProviderStreamGrayList;
@@ -382,6 +444,108 @@ mod tests {
     use tokio::sync::Mutex;
     use tracing::{Instrument, info_span, instrument::WithSubscriber};
     use tracing_subscriber::prelude::*;
+
+    fn test_secret_factory(
+        _config: crate::config::BcsConfig,
+        provider_config: bcs_config_api::SecretProviderConfig,
+    ) -> BoxFuture<'static, crate::Result<SecretPluginRegistration>> {
+        Box::pin(async move {
+            let user = provider_config
+                .get("user")
+                .and_then(|value| value.as_str())
+                .unwrap_or("svc")
+                .to_string();
+            Ok(SecretPluginRegistration {
+                provider: "test-secret".to_string(),
+                access: Arc::new(InMemorySecretAccess::with_entries([(
+                    "unit_secret",
+                    user,
+                    "unit-value".to_string(),
+                )])),
+            })
+        })
+    }
+
+    inventory::submit! {
+        SecretPluginFactory {
+            name: "test-secret",
+            build: test_secret_factory,
+        }
+    }
+
+    fn test_mist_secret_factory(
+        _config: crate::config::BcsConfig,
+        _provider_config: bcs_config_api::SecretProviderConfig,
+    ) -> BoxFuture<'static, crate::Result<SecretPluginRegistration>> {
+        Box::pin(async move {
+            Ok(SecretPluginRegistration {
+                provider: "mist".to_string(),
+                access: Arc::new(InMemorySecretAccess::with_entries([(
+                    "legacy_mist_secret",
+                    "mist-user".to_string(),
+                    "mist-value".to_string(),
+                )])),
+            })
+        })
+    }
+
+    inventory::submit! {
+        SecretPluginFactory {
+            name: "mist",
+            build: test_mist_secret_factory,
+        }
+    }
+
+    #[tokio::test]
+    async fn default_secret_service_uses_noop_backend() {
+        let service = build_secret_service(&crate::config::BcsConfig::default()).await;
+
+        let err = service
+            .get_secret("unit_secret")
+            .await
+            .expect_err("noop backend should not resolve secrets");
+
+        assert!(matches!(err, bcs_service_api::application::SecretServiceError::Unavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn legacy_mist_enabled_selects_registered_mist_provider() {
+        let mut config = crate::config::BcsConfig::default();
+        config.mist.enabled = true;
+
+        let service = build_secret_service(&config).await;
+
+        let secret = service
+            .get_secret("legacy_mist_secret")
+            .await
+            .expect("legacy mist config should select registered mist provider");
+        assert_eq!(secret.user, "mist-user");
+        assert_eq!(secret.value, "mist-value");
+    }
+
+    #[tokio::test]
+    async fn configured_registered_secret_provider_backs_secret_service() {
+        let mut config = crate::config::BcsConfig::default();
+        config.secret.provider = "test-secret".to_string();
+        config.secret.providers.insert(
+            "test-secret".to_string(),
+            [(
+                "user".to_string(),
+                serde_json::Value::String("configured-user".to_string()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let service = build_secret_service(&config).await;
+
+        let secret = service
+            .get_secret("unit_secret")
+            .await
+            .expect("registered provider should resolve secret");
+        assert_eq!(secret.user, "configured-user");
+        assert_eq!(secret.value, "unit-value");
+    }
 
     #[test]
     fn health_version_uses_runtime_override_when_set() {
