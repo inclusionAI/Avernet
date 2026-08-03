@@ -7,7 +7,10 @@ from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import LangfuseAPIError, SessionNotFoundError
 from agentclaw.community.core.bot_chat.open_service import OpenBotChatServiceMixin
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.bot_chat.repository import (
+    BotChatDbRepository,
+    OpenBotChatRepository,
+)
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
@@ -326,6 +329,7 @@ class BotChatService(OpenBotChatServiceMixin):
         self._langfuse_public_key = config.langfuse_public_key
         self._langfuse_secret_key = config.langfuse_secret_key
         self._db_repo = BotChatDbRepository(db)
+        self._open_repo = OpenBotChatRepository(db)
 
     def _get_log_source(self, log_source: str | None) -> str:
         """Determine effective log source.

@@ -58,6 +58,6 @@ process.
 The OpenAPI user-and-Bot trace query is stricter than the product query: task
 label enrichment requires an exact relation `user_id` and requested `bot_id`
 (including the established `default` Bot alias). Identity-free legacy task
-relations are not used by this endpoint. Group labels are not enriched because
-`bcs_group_sessions` does not carry user or Bot identity and the OpenAPI query
-must not treat a session ID alone as an ownership source.
+relations are not used by this endpoint. Group labels are enriched through the
+environment-scoped BCS session relation; `(env, session_id)` is unique and is
+used only for display enrichment, not as user or Bot authorization evidence.

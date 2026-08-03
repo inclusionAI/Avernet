@@ -5,7 +5,7 @@ from typing import Any
 
 from agentclaw.community.core.bot_chat.errors import InvalidBotLogQueryError
 from agentclaw.community.core.bot_chat.query_support import QueryScope
-from agentclaw.community.core.bot_chat.open_repository import OpenBotChatRepository
+from agentclaw.community.core.bot_chat.repository import OpenBotChatRepository
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
     SessionListResponse,
@@ -20,7 +20,7 @@ class OpenBotChatServiceMixin:
 
     _list_sessions_db: Any
     _get_session_db: Any
-    _db: Any
+    _open_repo: OpenBotChatRepository
 
     async def list_open_sessions(
         self,
@@ -96,7 +96,7 @@ class OpenBotChatServiceMixin:
 
         now = datetime.now(timezone.utc)
         from_date = now - timedelta(hours=_USER_BOT_TIME_RANGE_HOURS)
-        return OpenBotChatRepository(self._db).list_user_bot_traces(
+        return self._open_repo.list_user_bot_traces(
             user_id=user_id,
             bot_id=bot_id,
             from_ms=int(from_date.timestamp() * 1000),

@@ -6,8 +6,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_chat.models import AwLangfuseTrace, BcsGroupSession
-from agentclaw.community.core.bot_chat.open_repository import OpenBotChatRepository
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.bot_chat.repository import (
+    BotChatDbRepository,
+    OpenBotChatRepository,
+)
 from agentclaw.community.plugin_api.models import Base
 from agentclaw.community.utils.env_utils import get_current_env
 

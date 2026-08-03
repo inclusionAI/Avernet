@@ -1,4 +1,4 @@
-"""Database reads owned exclusively by the Bot Chat OpenAPI surface."""
+"""Repository reads owned exclusively by the Bot Chat OpenAPI surface."""
 
 from __future__ import annotations
 

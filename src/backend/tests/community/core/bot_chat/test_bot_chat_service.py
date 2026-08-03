@@ -1840,18 +1840,14 @@ class TestBotChatServiceOpenQueries:
     @pytest.mark.asyncio
     async def test_open_user_bot_query_uses_dedicated_repository(self, service):
         result = MagicMock()
-        with patch(
-            "agentclaw.community.core.bot_chat.open_service.OpenBotChatRepository"
-        ) as repository_type:
-            repository_type.return_value.list_user_bot_traces.return_value = result
+        service._open_repo.list_user_bot_traces = MagicMock(return_value=result)
 
-            actual = await service.list_open_user_bot_traces(
-                " user_fixture ", " bot_fixture ", page=2, limit=200
-            )
+        actual = await service.list_open_user_bot_traces(
+            " user_fixture ", " bot_fixture ", page=2, limit=200
+        )
 
         assert actual is result
-        repository_type.assert_called_once_with(service._db)
-        kwargs = repository_type.return_value.list_user_bot_traces.call_args.kwargs
+        kwargs = service._open_repo.list_user_bot_traces.call_args.kwargs
         assert kwargs["user_id"] == "user_fixture"
         assert kwargs["bot_id"] == "bot_fixture"
         assert kwargs["page"] == 2
