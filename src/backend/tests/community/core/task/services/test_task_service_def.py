@@ -79,6 +79,94 @@ def test_amend_keeps_drafting():
     assert amended.spec.metadata.summary == "refined goal"
 
 
+def test_clarify_writes_full_task_spec_five_elements():
+    """clarify 必须把 skill 识别+澄清产出的五要素(goal/acceptances/deliverables/
+    constraints)写进 task.spec,不能只认 title/summary/tags/background 把其余丢弃。
+    否则 spawn_build_dag 挂到规划节点上的 task_spec 永远是空数组/空串。"""
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteriaKind,
+        ConstraintKind,
+        DeliverableType,
+    )
+
+    svc, _ = _service()
+    task = svc.create(title="修复 PR #1243 命名")
+    svc.clarify(task.id, {
+        "summary": "getUsrInfo 命名不符 PRD",
+        "background": "PRD §3.2 要求 getUserInfo",
+        "goal": {
+            "objective": "修复命名 + 对齐 PRD §3.2",
+            "acceptances": [
+                {"kind": "invariant", "properties": {"rule": "无 getUsrInfo 残留"}},
+                {"kind": "behavior", "properties": {"when": "调用", "then": "返回 userInfo"}},
+            ],
+        },
+        "deliverables": [
+            {"type": "code", "location": "src/foo.py"},
+            {"type": "doc", "location": "docs/prd.md"},
+        ],
+        "constraints": [
+            {"kind": "hard", "text": "不动接口签名"},
+        ],
+    })
+    spec = svc.get(task.id).spec
+    assert spec.metadata.summary == "getUsrInfo 命名不符 PRD"
+    assert spec.context.background == "PRD §3.2 要求 getUserInfo"
+    # goal
+    assert spec.goal is not None
+    assert spec.goal.objective == "修复命名 + 对齐 PRD §3.2"
+    assert [a.kind for a in spec.goal.acceptances] == [
+        AcceptanceCriteriaKind.INVARIANT, AcceptanceCriteriaKind.BEHAVIOR,
+    ]
+    assert spec.goal.acceptances[0].properties == {"rule": "无 getUsrInfo 残留"}
+    # deliverables
+    assert [d.type for d in spec.deliverables] == [DeliverableType.CODE, DeliverableType.DOC]
+    assert spec.deliverables[0].location == "src/foo.py"
+    # constraints
+    assert [c.kind for c in spec.context.constraints] == [ConstraintKind.HARD]
+    assert spec.context.constraints[0].text == "不动接口签名"
+
+
+def test_clarify_falls_back_on_unknown_enum_kinds():
+    """skill 传了非法 enum 字符串时不该 500,得回退到默认(CUSTOM/SOFT)保住文本。"""
+    svc, _ = _service()
+    task = svc.create(title="t")
+    svc.clarify(task.id, {
+        "goal": {"objective": "o", "acceptances": [{"kind": "bogus", "properties": {}}]},
+        "deliverables": [{"type": "unknown", "location": "x"}],
+        "constraints": [{"kind": "weird", "text": "c"}],
+    })
+    spec = svc.get(task.id).spec
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteriaKind, ConstraintKind, DeliverableType,
+    )
+    assert spec.goal.acceptances[0].kind is AcceptanceCriteriaKind.CUSTOM
+    assert spec.deliverables[0].type is DeliverableType.CUSTOM
+    assert spec.context.constraints[0].kind is ConstraintKind.SOFT
+
+
+def test_clarify_accepts_nested_context_form_matching_skill_curl():
+    """SKILL.md 的 clarify curl 把 background/constraints 嵌在 patch.context 下
+    (与领域模型 spec.context.* 同形),_apply_spec_patch 必须认这个嵌套形式,不能
+    只认顶层 background/constraints。"""
+    from agentclaw.community.core.task.domain.models import ConstraintKind
+
+    svc, _ = _service()
+    task = svc.create(title="t")
+    svc.clarify(task.id, {
+        "context": {
+            "background": "PRD §3.2 要求 getUserInfo",
+            "constraints": [{"kind": "hard", "text": "不动接口签名"}],
+        },
+        "goal": {"objective": "修复命名"},
+        "deliverables": [{"type": "code", "location": "src/foo.py"}],
+    })
+    spec = svc.get(task.id).spec
+    assert spec.context.background == "PRD §3.2 要求 getUserInfo"
+    assert spec.context.constraints[0].kind is ConstraintKind.HARD
+    assert spec.context.constraints[0].text == "不动接口签名"
+
+
 def test_finalize_plan_advances_drafting_to_defined():
     svc, _ = _service()
     task = svc.create(title="t")

@@ -40,6 +40,12 @@ from agentclaw.community.core.task.domain.events import (
 from agentclaw.community.core.task.domain.models import (
     AttemptOutcome,
     AttemptTrigger,
+    AcceptanceCriteria,
+    AcceptanceCriteriaKind,
+    Constraint,
+    ConstraintKind,
+    Deliverable,
+    DeliverableType,
     Edge,
     EdgeKind,
     GraphStatus,
@@ -55,6 +61,7 @@ from agentclaw.community.core.task.domain.models import (
     StateSemantics,
     Task,
     TaskExecutionGraph,
+    TaskGoal,
     TaskSource,
     TaskSpec,
     TaskSpecMetadata,
@@ -700,7 +707,60 @@ class TaskService(GraphStateOpsMixin):
             meta.tags = list(patch["tags"])
         if "background" in patch:
             task.spec.context.background = str(patch.get("background") or "")
+        # 五要素(skill 识别+澄清产出,经 clarify patch 写入 task.spec)。之前只接受
+        # title/summary/tags/background 4 个扁平字段,goal/acceptances/deliverables/
+        # constraints 被默默丢弃 → spawn_build_dag 挂到规划节点上的 task_spec 是空的。
+        # context 接受两种形式:嵌套 patch.context.{background,constraints}(SKILL
+        # 约定)与顶层 background/constraints(扁平兼容)。
+        context_patch = patch.get("context")
+        if isinstance(context_patch, dict) and context_patch:
+            if context_patch.get("background") is not None:
+                task.spec.context.background = str(context_patch["background"])
+            if isinstance(context_patch.get("constraints"), list):
+                task.spec.context.constraints = self._parse_constraints(context_patch["constraints"])
+        goal_patch = patch.get("goal")
+        if isinstance(goal_patch, dict) and goal_patch:
+            goal = task.spec.goal or TaskGoal(objective="")
+            if goal_patch.get("objective") is not None:
+                goal.objective = str(goal_patch["objective"])
+            if isinstance(goal_patch.get("acceptances"), list):
+                goal.acceptances = self._parse_acceptances(goal_patch["acceptances"])
+            task.spec.goal = goal
+        if isinstance(patch.get("deliverables"), list):
+            task.spec.deliverables = self._parse_deliverables(patch["deliverables"])
+        if isinstance(patch.get("constraints"), list):
+            task.spec.context.constraints = self._parse_constraints(patch["constraints"])
         # plan 只经 finalize_plan(/plan 端点)入库;clarify 只补 spec,不再回挂 plan。
+
+    @staticmethod
+    def _parse_acceptances(items: list) -> list[AcceptanceCriteria]:
+        out: list[AcceptanceCriteria] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            kind = _coerce_status(it.get("kind"), AcceptanceCriteriaKind) or AcceptanceCriteriaKind.CUSTOM
+            out.append(AcceptanceCriteria(kind=kind, properties=dict(it.get("properties") or {})))
+        return out
+
+    @staticmethod
+    def _parse_deliverables(items: list) -> list[Deliverable]:
+        out: list[Deliverable] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            dtype = _coerce_status(it.get("type"), DeliverableType) or DeliverableType.CUSTOM
+            out.append(Deliverable(type=dtype, location=str(it.get("location") or "")))
+        return out
+
+    @staticmethod
+    def _parse_constraints(items: list) -> list[Constraint]:
+        out: list[Constraint] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            kind = _coerce_status(it.get("kind"), ConstraintKind) or ConstraintKind.SOFT
+            out.append(Constraint(kind=kind, text=str(it.get("text") or "")))
+        return out
 
     def _find_node(self, task: Task, node_id: str) -> Optional[Node]:
         if task.execution_graph is None:
@@ -764,8 +824,11 @@ class TaskService(GraphStateOpsMixin):
         def _append(
             nt: NodeType, nid: str, spec: str, parent: Optional[str],
             done: bool = False, run_mode: Optional[RunMode] = None,
+            properties: Optional[dict] = None,
         ) -> str:
             node = Node(node_id=nid, spec=spec, node_type=nt, run_mode=run_mode)
+            if properties:
+                node.properties.update(properties)
             st = SubtaskState(node_id=nid)
             if done:
                 node.status = NodeStatus.DONE
@@ -780,15 +843,74 @@ class TaskService(GraphStateOpsMixin):
 
         # 规划链:recognition/clarify/execute_start 是已完成的历史动作(skill 在创建/
         # 澄清/批准时跑过)→ 落图即 DONE,不参与 tick 推进 / 不被 BbsExecutor 认领。
-        prev: Optional[str] = None
-        for nt in (NodeType.RECOGNITION, NodeType.CLARIFY, NodeType.EXECUTE_START):
-            prev = _append(nt, f"n_{nt.value}", nt.value, prev, done=True)
-        execute_start_id = prev
+        # spec(=display_name)与 properties 挂真实任务内容(任务明细/任务Spec/执行计划),
+        # 否则画布只见类型名(plan §1.4b 副屏读 face)。
+        tspec = task.spec
+        meta = tspec.metadata
+        goal = tspec.goal
         p = plan or task.plan
+        prev = _append(
+            NodeType.RECOGNITION, "n_recognition",
+            f"任务识别: {meta.title}" if meta.title else "任务识别",
+            None, done=True,
+            properties={
+                "phase_label": "任务识别",
+                "task_title": meta.title,
+                "task_summary": meta.summary,
+                "tags": list(meta.tags),
+            },
+        )
+        clarify_obj = (
+            (goal.objective if goal and goal.objective else meta.title)
+            or "任务明确"
+        )
+        prev = _append(
+            NodeType.CLARIFY, "n_clarify",
+            f"任务明确: {clarify_obj}"[:60],
+            prev, done=True,
+            properties={
+                "phase_label": "任务明确",
+                "task_spec": {
+                    "objective": (goal.objective if goal else ""),
+                    "background": (tspec.context.background or ""),
+                    "constraints": [
+                        {"kind": c.kind.value, "text": c.text}
+                        for c in tspec.context.constraints
+                    ],
+                    "deliverables": [
+                        {"type": d.type.value, "location": d.location}
+                        for d in tspec.deliverables
+                    ],
+                    "acceptances": [
+                        {"kind": a.kind.value, "properties": dict(a.properties)}
+                        for a in (goal.acceptances if goal else [])
+                    ],
+                },
+            },
+        )
+        execute_start_id = _append(
+            NodeType.EXECUTE_START, "n_execute_start",
+            "确认开始执行", prev, done=True,
+            properties={
+                "phase_label": "确认开始执行",
+                "plan_summary": {
+                    "sub_task_count": (len(p.sub_tasks) if p and p.sub_tasks else 0),
+                    "confidence": (p.confidence if p else 0.0),
+                    "sub_tasks": [
+                        {"node_id": s.node_id, "spec": s.spec}
+                        for s in (p.sub_tasks if p and p.sub_tasks else [])
+                    ],
+                },
+            },
+        )
         if p is not None and p.sub_tasks:
             for sub in p.sub_tasks:
                 _append(NodeType.DISPATCH, sub.node_id, sub.spec, execute_start_id, run_mode=sub.run_mode)
             for e in p.edges:
+                # 过滤空边:skill 的 finalize_plan 偶带空 edge 占位(edge_id/from/to 都空),
+                # 照搬会让画布出现 from/to 都空的野边。
+                if not e.from_node or not e.to_node:
+                    continue
                 g.edges.append(Edge(edge_id=e.edge_id, from_node=e.from_node, to_node=e.to_node, kind=e.kind))
         else:
             # 无计划 → 根 BOT_SEARCH:spec 用真实需求文本(目标/标题),让搜推与后续

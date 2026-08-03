@@ -11,6 +11,7 @@ import pytest
 
 from agentclaw.community.core.task.domain.models import (
     EdgeKind,
+    EdgeSpec,
     GraphStatus,
     Node,
     NodeStatus,
@@ -71,6 +72,59 @@ def test_spawn_build_dag_materializes_planning_chain_and_subtasks():
     subtasks = [n for n in g.nodes if n.node_type is NodeType.DISPATCH]
     assert all(n.status is NodeStatus.PENDING for n in subtasks)
     assert all(n.node_id in g.state.subtasks for n in g.nodes)
+
+
+def test_spawn_build_dag_attaches_task_content_to_planning_nodes():
+    """规划节点的 display_name/spec 与 properties 应挂真实任务内容(任务明细/任务
+    Spec/执行计划),不能只留类型名 — 否则副屏画布(plan §1.4b 读 face)只见空节点。"""
+    from agentclaw.community.core.task.domain.models import NodeType
+
+    svc = _service()
+    task = _planned_task(svc)
+    svc.spawn_build_dag(task)
+
+    rec = svc._find_node(task, "n_recognition")  # noqa: SLF001
+    cla = svc._find_node(task, "n_clarify")          # noqa: SLF001
+    exe = svc._find_node(task, "n_execute_start")    # noqa: SLF001
+
+    # recognition:任务明细(title/summary/tags)
+    assert rec.spec.startswith("任务识别:")
+    assert rec.properties.get("phase_label") == "任务识别"
+    assert rec.properties.get("task_title") == "t"
+    assert rec.properties.get("task_summary") == "s"
+
+    # clarify:任务Spec 五要素(objective/background/constraints/deliverables/acceptances)
+    assert cla.spec.startswith("任务明确:")
+    assert cla.properties.get("phase_label") == "任务明确"
+    ts = cla.properties.get("task_spec")
+    assert isinstance(ts, dict)
+    assert set(ts.keys()) >= {"objective", "background", "constraints", "deliverables", "acceptances"}
+
+    # execute_start:执行计划摘要
+    assert exe.spec == "确认开始执行"
+    assert exe.properties.get("phase_label") == "确认开始执行"
+    ps = exe.properties.get("plan_summary")
+    assert ps["sub_task_count"] == 2
+    assert ps["confidence"] == 0.7
+    assert [s["node_id"] for s in ps["sub_tasks"]] == ["n1", "n2"]
+
+
+def test_spawn_build_dag_drops_empty_plan_edges():
+    """skill 的 finalize_plan 偶带空 edge 占位(from/to 都空),spawn_build_dag 必须丢弃,
+    否则画布会出现 from/to 都空的野边。"""
+    svc = _service()
+    task = _planned_task(svc)
+    # 在已 finalize 的 plan 上追加一条空 edge + 一条正常 edge
+    task.plan.edges = [
+        EdgeSpec(edge_id="e-good", from_node="n1", to_node="n2", kind=EdgeKind.DEPENDENCY),
+        EdgeSpec(edge_id="", from_node="", to_node="", kind=EdgeKind.DEPENDENCY),
+    ]
+    svc.spawn_build_dag(task)
+    g = task.execution_graph
+    bad = [e for e in g.edges if not e.from_node or not e.to_node]
+    assert bad == []
+    # 正常 edge 保留(注:DISPATCH 叶子之间无父子,from/to=n1/n2 的依赖边应保留)
+    assert any(e.edge_id == "e-good" and e.from_node == "n1" and e.to_node == "n2" for e in g.edges)
 
 
 # --- spawn_sub_dag writes ref, never child state ---------------------------
