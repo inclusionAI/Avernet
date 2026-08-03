@@ -456,3 +456,47 @@ that baseline after PR #697 merged into `dev`.
   Review the entire range against the approved design, fix actionable
   findings, then commit publication/evidence changes as
   `test(gateway): prove BCN session connection integration`.
+
+### Task 12: Harden secret construction and restore local launchers
+
+**Files:**
+- Modify: `src/bcs/crates/bootstrap/bcs/src/server.rs`
+- Modify: BCS integration tests that construct an in-memory test server
+- Modify: `src/bcs/crates/bootstrap/bcs/tests/e2e_helpers.rs`
+- Modify: `scripts/modules/bcs.sh`
+- Modify: `src/bcs/scripts/start_bcs_bots.sh`
+- Modify: `scripts/test_singlebox_service_guards.sh`
+
+- [ ] **Step 1: Prove the public-constructor vulnerability**
+
+  Add a bootstrap test that constructs `BcsServer::new` with the noop secret
+  provider and asserts Router construction fails for missing group-session
+  signing material. Run it before implementation and confirm it fails because
+  the public constructor currently installs the fixed test key.
+
+- [ ] **Step 2: Resolve configured secrets in the public constructor**
+
+  Add a synchronous bridge around `build_secret_access(config)` using a
+  dedicated thread and Tokio runtime. Use it from `BcsServer::new`; retain the
+  fixed key only in `new_allowing_private_outbound_for_tests`. Move in-memory
+  integration tests to that explicit test constructor.
+
+- [ ] **Step 3: Prove local and external-process startup gaps**
+
+  Extend the singlebox service guard to require both shipped local launchers to
+  provide an overridable local-only key, and run the three external-process
+  HTTP integration tests to reproduce the missing-key startup failure.
+
+- [ ] **Step 4: Supply only local/test material**
+
+  Set the local-only default in both launchers only for local mode. Configure
+  the external-process test helper with the env provider and an explicit test
+  value. Do not add a fallback to BCS production code or non-local launch
+  modes.
+
+- [ ] **Step 5: Verify and publish the review fix**
+
+  Run the public-constructor test, external-process HTTP tests, launcher guard,
+  focused secret/bootstrap tests, `cargo check -p bcs --all-targets`, and the
+  live Gateway-to-BCS boundary. Commit and push the fix, then reply to and
+  resolve both original GitHub review threads with the supporting evidence.

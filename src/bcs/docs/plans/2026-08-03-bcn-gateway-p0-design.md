@@ -177,6 +177,21 @@ It is not the Gateway Principal or OAuth signing key. Missing or empty material
 fails startup; adapters never read environment variables or select concrete
 token implementations.
 
+The documented synchronous `BcsServer::new` constructor must resolve its
+`SecretAccessPort` from the configured provider; it must never install a
+repository-known signing key. The fixed signing key is confined to the
+explicit `new_allowing_private_outbound_for_tests` constructor. Because the
+configured provider builder is asynchronous, the synchronous constructor uses
+the same dedicated-thread Tokio bridge already used by other synchronous
+bootstrap dependencies.
+
+Shipped local launchers set an overridable, local-only development value for
+`BCS_SECRET_BCN_GROUP_SESSION_WS_JWT` when `SERVER_ENV=local`. They do not
+provide this fallback for dev, pre, gray, or prod. External-process tests
+select the env secret provider and inject their own test value explicitly, so
+production startup remains fail-closed while the documented local and CI
+stacks remain reproducible.
+
 ## Gateway configuration
 
 Add:
