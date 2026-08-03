@@ -179,11 +179,7 @@ class CreateBotForOthersService:
         operator_name: str,
         cookie: str,
     ) -> dict[str, Any]:
-        self._bot_service.check_create_bot_preflight(
-            user_id=target_user_id,
-            bot_id=_DEFAULT_BOT_ID,
-            engine_type=DEFAULT_ENGINE_TYPE,
-        )
+        self._bot_service.check_create_bot_preflight(user_id=target_user_id)
         readiness = self._ensure_passport(
             bot_id=bot_id,
             target_user_id=target_user_id,
