@@ -56,6 +56,9 @@ class Forwarding:
         description: str = "",
     ) -> dict[str, object]:
         """The current served OpenAPI document across all configured domains."""
+        rewrites = {
+            name: domain.rewrite for name, domain in self.domain_map.domains.items()
+        }
         return build_served_openapi(
             list(self.domain_map.domains),
             self.catalog.current,
@@ -63,4 +66,5 @@ class Forwarding:
             title=title,
             version=version,
             description=description,
+            rewrites=rewrites,
         )
