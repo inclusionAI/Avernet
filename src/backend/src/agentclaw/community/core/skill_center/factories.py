@@ -73,6 +73,11 @@ class LocalSkillPackageStorage:
         self._filesystem = filesystem
         self._device_directory = device_directory
 
+    @property
+    def directory(self) -> str:
+        """The internal device locator this storage instance owns."""
+        return self._device_directory
+
     async def write(self, files: list[tuple[str, bytes]]) -> None:
         for relative_path, content in files:
             await self._filesystem.write_file(
@@ -186,16 +191,44 @@ class SkillServiceFactory:
         )
 
     def local_skill_package_storage(
-        self, *, owner_id: str, bot_id: str, engine_type: str | None, name: str
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        name: str,
+        directory_name: str | None = None,
     ) -> tuple[str, LocalSkillPackageStorage]:
-        """Return the canonical Local Skill locator and its device-I/O port."""
+        """Return a Bot-local package storage port.
+
+        ``directory_name`` is intentionally internal.  A replacement writes a
+        complete package to an isolated versioned directory before its metadata
+        points runtime at it; first creation keeps the historical name path.
+        """
         service = self.create(
             entity_id=owner_id, bot_id=bot_id, engine_type=engine_type
         )
-        directory = str(service.local_dir / name)
+        directory = str(service.local_dir / (directory_name or name))
         return directory, LocalSkillPackageStorage(
             service._device_fs_factory(bot_id, owner_id),
             service._local_skill_path_adapter(directory),
+        )
+
+    def local_skill_package_storage_for_locator(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        locator: str,
+    ) -> LocalSkillPackageStorage:
+        """Re-open an existing internal Local package locator for cleanup."""
+        service = self.create(
+            entity_id=owner_id, bot_id=bot_id, engine_type=engine_type
+        )
+        return LocalSkillPackageStorage(
+            service._device_fs_factory(bot_id, owner_id),
+            service._local_skill_path_adapter(locator),
         )
 
 

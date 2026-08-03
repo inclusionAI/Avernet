@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -127,7 +127,7 @@ async def get_skill(
     responses={
         200: {
             "model": Envelope[SkillUpload],
-            "description": "Same-name Local Skill replaced successfully.",
+            "description": "Existing Local Skill safely replaced.",
         },
         413: {
             "model": ErrorEnvelope,
@@ -149,6 +149,7 @@ async def get_skill(
 async def upload_skill(
     principal: PrincipalDep,
     request: Request,
+    response: Response,
     package: bytes = Body(..., media_type="application/zip"),
     bot_id: str = Query(..., description="Ready Bot that owns the Local Skill."),
     owner_entity_id: str | None = Query(
@@ -171,11 +172,14 @@ async def upload_skill(
         actor_id=actor_id,
         package=package,
     )
+    operation = str(result["operation"])
+    if operation == "updated":
+        response.status_code = 200
     return envelope(
-        SkillUpload(operation="created", skill=_to_skill(result["skill"])),
+        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
         request,
-        code=201000,
-        message="Created",
+        code=201000 if operation == "created" else 200000,
+        message="Created" if operation == "created" else "OK",
     )
 
 

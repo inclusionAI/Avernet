@@ -55,6 +55,21 @@ class _StorageFactory:
         return "test-local/raw-upload", _Storage()  # type: ignore[return-value]
 
 
+class _RuntimeFactory:
+    def create(self, **_kwargs): return self
+    def sync_runtime(self): return True
+
+
+class _Guard:
+    def acquire_for_edit(self, **_kwargs): return object()
+    async def acquire_for_edit_wait(self, **kwargs): return self.acquire_for_edit(**kwargs)
+    def release(self, _lease): return True
+
+
+class _Cleanup:
+    def record_pending(self, **_kwargs): return True
+
+
 def _package() -> bytes:
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as archive:
@@ -143,7 +158,10 @@ def _seed_uploadable_bot(world) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
+            _RuntimeFactory(),
             world.get(BotCollabLogRepositoryProtocol),
+            _Guard(),
+            _Cleanup(),
         ),
         scope=None,
     )

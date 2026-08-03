@@ -17,6 +17,7 @@ provides:
   - "LocalSkillQueryService"
   - "LocalSkillUploadService"
   - "LocalSkillStateService"
+  - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -34,6 +35,7 @@ consumes:
   - "SkillRepoSyncPlugin"
 internal_dependencies:
   - agentclaw.community.core.access
+  - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config

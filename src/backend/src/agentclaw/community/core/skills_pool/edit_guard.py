@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
+import time
 
 from injector import inject
 
@@ -68,6 +70,26 @@ class SkillsPoolEditGuard:
                 "Skills are temporarily read-only during layout rollback"
             )
         return lease
+
+    async def acquire_for_edit_wait(
+        self, *, scope: BotSkillLayoutScope, timeout_seconds: float = 30.0
+    ) -> SkillsPoolEditLease:
+        """Wait for another ordinary Local Skill edit, never bypass its lock.
+
+        Layout rollback remains an immediate pause; only a held edit lease is
+        retried.  This gives concurrent same-name uploads one serialized
+        authoritative read rather than a lock-contention race.
+        """
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                return self.acquire_for_edit(scope=scope)
+            except SkillsPoolEditPausedError:
+                if self._layouts.get(scope).phase in self._ROLLBACK_PHASES:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                await asyncio.sleep(0.01)
 
     def acquire_for_rollback(
         self,
