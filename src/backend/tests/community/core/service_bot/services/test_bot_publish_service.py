@@ -38,6 +38,7 @@ def _make_service(
     quality_task_service=None,
     publish_operation_repo=None,
     task_queue_service=None,
+    bot_process_registry=None,
 ) -> BotPublishService:
     """Build a ``BotPublishService`` with MagicMock fallbacks for unused deps.
 
@@ -50,6 +51,10 @@ def _make_service(
         operation_repo.get_latest_by_kind.return_value = None
         operation_repo.max_attempt.return_value = 0
 
+    process_registry = bot_process_registry or MagicMock()
+    if bot_process_registry is None:
+        process_registry.get.return_value.get_active_runtime_engine_type.return_value = ""
+
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
         bot_repo=bot_repo or MagicMock(),
@@ -60,6 +65,7 @@ def _make_service(
         quality_task_service=quality_task_service or MagicMock(),
         publish_operation_repo=operation_repo,
         task_queue_service=task_queue_service or MagicMock(),
+        bot_process_registry=process_registry,
     )
 
 
@@ -2143,20 +2149,30 @@ class TestGetBotStageBindingInfo:
             device_provider="arca",
             device_props={"sandbox_id": "BOT-UUID-PERSONAL"},
         )
+        bot_process_registry = Mock()
+        bot_process_registry.get.return_value.get_active_runtime_engine_type.return_value = (
+            "aicoding"
+        )
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
             device_binding_repo=device_binding_repo,
+            bot_process_registry=bot_process_registry,
         )
 
         result = service.get_bot_stage_binding_info("bot_001", "user_001", "online")
 
+        bot_process_registry.get.assert_called_once_with("personal")
+        bot_process_registry.get.return_value.get_active_runtime_engine_type.assert_called_once_with(
+            "bot_001"
+        )
         assert result == {
             "bot_id": "bot_001",
             "owner_id": "user_001",
             "bot_type": "personal",
             "engine_type": "openclaw",
             "template_type": "standard",
+            "active_runtime_engine_type": "aicoding",
             "publish_id": None,
             "publish_status": None,
             "binding_id": 501,
@@ -2194,6 +2210,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "service",
             "engine_type": "teclaw",
             "template_type": "advanced",
+            "active_runtime_engine_type": "",
             "publish_id": None,
             "publish_status": None,
             "binding_id": 503,
@@ -2234,6 +2251,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "service",
             "engine_type": "teclaw",
             "template_type": "custom",
+            "active_runtime_engine_type": "",
             "publish_id": 12,
             "publish_status": PublishStatus.VALIDATING,
             "binding_id": 601,
@@ -2268,6 +2286,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "service",
             "engine_type": "teclaw",
             "template_type": "eval-type",
+            "active_runtime_engine_type": "",
             "publish_id": None,
             "publish_status": None,
             "binding_id": None,
@@ -2347,6 +2366,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "service",
             "engine_type": "teclaw",
             "template_type": "online-template",
+            "active_runtime_engine_type": "",
             "publish_id": 13,
             "publish_status": PublishStatus.SUCCESS,
             "binding_id": 602,
@@ -2612,6 +2632,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "weird",
             "engine_type": "openclaw",
             "template_type": "weird-template",
+            "active_runtime_engine_type": "",
             "publish_id": None,
             "publish_status": None,
             "binding_id": 902,
@@ -2646,6 +2667,7 @@ class TestGetBotStageBindingInfo:
             "bot_type": "weird",
             "engine_type": "openclaw",
             "template_type": "non-service-template",
+            "active_runtime_engine_type": "",
             "publish_id": None,
             "publish_status": None,
             "binding_id": 901,

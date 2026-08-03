@@ -11,6 +11,7 @@ from agentclaw.community.core.bot_management.repository.protocol import BotRepos
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+from agentclaw.community.core.service_bot.services.bot_process import BotProcessRegistry
 from agentclaw.community.core.service_bot.services.publish_draft_restore_mixin import PublishDraftRestoreMixin
 from agentclaw.community.core.service_bot.services.publish_exceptions import (
     BotAlreadyServiceTypeError,
@@ -52,6 +53,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         quality_task_service: "QualityTaskService",
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
+        bot_process_registry: BotProcessRegistry,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -63,6 +65,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._quality_task_service = quality_task_service
         self._publish_operation_repo = publish_operation_repo
         self._task_queue_service = task_queue_service
+        self._bot_process_registry = bot_process_registry
         self._env = get_current_env()
 
     def create_device_binding(
@@ -396,6 +399,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             raise BotNotFoundError(f"Bot not found: bot_id={bot_id}, owner_id={owner_id}")
 
         bot_type = bot.get("bot_type", "personal")
+        bot_process = self._bot_process_registry.get(bot_type)
+        active_runtime_engine_type = bot_process.get_active_runtime_engine_type(bot_id)
         if bot_type == "service" and stage != PublishStage.DRAFT.value:
             return self._get_service_bot_stage_binding_info(
                 bot=bot,
@@ -403,8 +408,14 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 owner_id=owner_id,
                 stage=stage,
                 task_uuid=biz_id,
+                active_runtime_engine_type=active_runtime_engine_type,
             )
-        return self._get_personal_bot_binding_info(bot=bot, bot_id=bot_id, owner_id=owner_id)
+        return self._get_personal_bot_binding_info(
+            bot=bot,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            active_runtime_engine_type=active_runtime_engine_type,
+        )
 
     def _get_personal_bot_binding_info(
         self,
@@ -412,6 +423,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         bot: Dict[str, Any],
         bot_id: str,
         owner_id: str,
+        active_runtime_engine_type: str,
     ) -> Dict[str, Any]:
         binding_id = bot.get("binding_id")
         if not binding_id:
@@ -442,6 +454,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "bot_type": bot.get("bot_type", "personal"),
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
+            "active_runtime_engine_type": active_runtime_engine_type,
             "publish_id": None,
             "publish_status": None,
             "binding_id": binding_id,
@@ -486,6 +499,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         owner_id: str,
         stage: str,
         task_uuid: Optional[str] = None,
+        active_runtime_engine_type: str = "",
     ) -> Dict[str, Any]:
         if stage == PublishStage.EVAL.value:
             task_record = self._quality_task_service.get_task_by_uuid(task_uuid)
@@ -505,6 +519,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 "bot_type": "service",
                 "engine_type": bot.get("active_engine", ""),
                 "template_type": bot.get("template_type", ""),
+                "active_runtime_engine_type": active_runtime_engine_type,
                 "publish_id": None,
                 "publish_status": None,
                 "binding_id": None,
@@ -537,6 +552,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "bot_type": "service",
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
+            "active_runtime_engine_type": active_runtime_engine_type,
             "publish_id": publish_record.id,
             "publish_status": publish_record.status,
             "binding_id": binding_id,
