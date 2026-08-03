@@ -8,6 +8,9 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.dependencies import RequestContext
 from agentclaw.community.adapters.http.skill_center.skills import delete_skill
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
 
@@ -66,11 +69,18 @@ def _bot_record() -> dict:
 
 
 async def _call_delete(
-    *, device_fs, skill_repo, engine_type=None, current_user_id=OWNER_ID
+    *,
+    device_fs,
+    skill_repo,
+    engine_type=None,
+    current_user_id=OWNER_ID,
+    entity_id=None,
+    bot_repo=None,
 ):
-    bot_repo = MagicMock()
+    bot_repo = bot_repo or MagicMock()
     bot_repo.get_by_id_and_owner.return_value = _bot_record()
     bot_repo.get_unique_by_id.return_value = _bot_record()
+    bot_repo.get_by_id_and_entity.return_value = _bot_record()
 
     path_factory = MagicMock()
     path_factory.get_bot_skills_dir.return_value = ACTIVE_ROOT
@@ -89,7 +99,7 @@ async def _call_delete(
     response = await endpoint(
         skill_id=SKILL_ID,
         user_id=current_user_id,
-        entity_id=None,
+        entity_id=entity_id,
         entity_type=None,
         bot_id=None,
         engine_type=engine_type,
@@ -249,6 +259,52 @@ async def test_delete_rejects_engine_override_that_differs_from_bot():
         "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
         "message": "删除技能必须使用 Bot 当前的生效引擎",
         "active_engine": "hermes",
+    }
+    skill_repo.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_entity_to_disambiguate_legacy_bot_id():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = []
+    skill_repo.delete.return_value = True
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_entity.return_value = _bot_record()
+    device_fs = MagicMock()
+    device_fs.exists = AsyncMock(return_value=False)
+
+    response, _, _ = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+        entity_id=OWNER_ID,
+        bot_repo=bot_repo,
+    )
+
+    assert response.success is True
+    bot_repo.get_by_id_and_entity.assert_called_once_with(BOT_ID, OWNER_ID)
+    bot_repo.get_unique_by_id.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_ambiguous_legacy_bot_without_entity():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    bot_repo = MagicMock()
+    bot_repo.get_unique_by_id.side_effect = BotLookupAmbiguousError
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_delete(
+            device_fs=MagicMock(),
+            skill_repo=skill_repo,
+            bot_repo=bot_repo,
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "error_code": "SKILL_BOT_CONTEXT_AMBIGUOUS",
+        "message": "历史 Bot ID 不唯一，请提供 entity_id 精确定位",
+        "bot_id": BOT_ID,
     }
     skill_repo.delete.assert_not_called()
 
