@@ -568,7 +568,8 @@ _story_connect_with_group_session_jwt() {
     assert_json_eq "public session update keeps the new title" \
         "$RESPONSE" "data.title" "JWT connection E2E updated"
 
-    api_request_headers GET "${public_prefix}/sessions/${session_id}/messages?limit=50" "" \
+    api_request_headers GET \
+        "${public_prefix}/sessions/${session_id}/messages?limit=50&view_bot_id=${BOT_PM_UUID}" "" \
         "X-Avernet-Principal: ${principal}"
     require_status "human reads session messages through the public API" "200" || true
 
