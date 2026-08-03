@@ -135,3 +135,24 @@ def get_test_corp_modules() -> list[Module]:
     return _test_corp_reuse_provider()
 
 
+def resolve_extra_modules(profile: DeployProfile) -> list[Module] | None:
+    """Resolve corp overlay modules for ``singlebox`` via importlib (B8).
+
+    The singlebox profile must go through the community entry point
+    (``app.py``); corp modules are loaded via ``importlib`` so the
+    community import graph stays corp-free. Returns ``None`` for
+    non-singlebox profiles, or when the corp package is absent
+    (community build / Avernet CI).
+    """
+    if profile is not DeployProfile.SINGLEBOX:
+        return None
+    try:
+        from importlib import import_module
+
+        return import_module(
+            "agentclaw.corp.di.corp_bootstrap"
+        ).get_singlebox_overlay_modules()
+    except ModuleNotFoundError:
+        return None
+
+
