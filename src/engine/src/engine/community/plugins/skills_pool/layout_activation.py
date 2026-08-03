@@ -754,6 +754,7 @@ def _trusted_active_repo_bridge_rewrite_retry(*, layout: _Layout) -> bool:
     saw_bridge_mapping = False
 
     try:
+        resolved_pool_repo = pool_repo.resolve(strict=True)
         for entry in active_root.iterdir():
             if not entry.is_symlink():
                 # Relay/AIX own real directories; they are not Pool mappings.
@@ -771,7 +772,10 @@ def _trusted_active_repo_bridge_rewrite_retry(*, layout: _Layout) -> bool:
                     resolved = target.resolve(strict=True)
                 except OSError:
                     return False
-                if not resolved.is_relative_to(pool_repo) or not resolved.is_dir():
+                if (
+                    not resolved.is_relative_to(resolved_pool_repo)
+                    or not resolved.is_dir()
+                ):
                     return False
                 saw_bridge_mapping = True
                 continue
