@@ -11,7 +11,7 @@ import time
 import zipfile
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.dependencies import (
@@ -1957,33 +1957,110 @@ async def update_skill_risk_tags(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def _extract_skill_mutation_permission(
+    skill_id: str,
+    ctx: InterceptorContext,
+) -> PermissionParams:
+    """Resolve the persisted Bot identity used for local Skill mutations."""
+    if not skill_id or ctx.injector is None:
+        return PermissionParams()
+    try:
+        service = ctx.injector.get(SkillServiceFactoryProtocol).create()
+        skill = service.get_skill(skill_id)
+    except Exception:
+        return PermissionParams()
+    if not skill:
+        return PermissionParams()
+    return PermissionParams(
+        bot_id=skill.get("bolt_id"),
+        owner_id=skill.get("user_id"),
+    )
+
+
+class _FailClosedSkillMutationPermissionInterceptor(
+    CollaboratorPermissionInterceptor,
+):
+    """Never turn a collaborator permission lookup failure into mutation access."""
+
+    def __init__(self, *args, authorization_state_key: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._authorization_state_key = authorization_state_key
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        actor_id = ctx.user.staffId if ctx.user else None
+        # Preserve the pre-existing global Skill admin capability; it is not a
+        # Bot-collaborator grant and therefore must not depend on that service.
+        if actor_id and actor_id in skill_admin():
+            ctx.metadata["permission_level"] = "SKILL_ADMIN"
+            return ctx
+
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if actor_id != owner_id:
+            if not ctx.metadata.get("permission_level"):
+                ctx.response = InterceptedResponse(
+                    success=False,
+                    message="协作者权限服务暂不可用",
+                    error_code=503,
+                )
+                return None
+            if ctx.request is not None:
+                setattr(ctx.request.state, self._authorization_state_key, True)
+            for value in ctx.route_kwargs.values():
+                if isinstance(value, RequestContext):
+                    value.metadata[self._authorization_state_key] = True
+        return result
+
+
 @router.post("/{skill_id}/mcp-dependencies", response_model=SkillDetailResponse)
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
+    params_extractor=_extract_skill_mutation_permission,
+    extractor_params={"skill_id": "$skill_id"},
+    persist_audit_log=True,
+    authorization_state_key="skill_mcp_collaborator_authorized",
+))
 async def update_skill_mcp_dependencies(
     skill_id: str,
     request: UpdateMCPDependenciesRequest,
     user: AuthenticatedUser = Depends(get_current_user),
+    http_request: Request = None,
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
 ) -> SkillDetailResponse:
     """Update skill MCP dependencies by ID.
 
     权限控制：只有技能的创建者或管理员可以修改 MCP 依赖。
     """
-    # 管理员名单校验：非管理员只能修改自己创建的技能
-    if user.staffId not in skill_admin():
-        service = skill_service_factory.create()
+    service = skill_service_factory.create()
+    try:
         existing = service.get_skill(skill_id, user_id=user.staffId)
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
         skill_owner = str(existing.get("user_id", ""))
-        if skill_owner and skill_owner != user.staffId:
-            logger.warning(
-                f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} "
-                f"尝试修改非自己创建的 skill_id={skill_id} (owner={skill_owner}) 的MCP依赖"
+        is_local_skill = str(existing.get("git_path") or "").startswith("local://")
+        collaborator_authorized = bool(
+            http_request
+            and getattr(
+                http_request.state,
+                "skill_mcp_collaborator_authorized",
+                False,
             )
-            raise HTTPException(status_code=403, detail="无权修改此技能的MCP依赖，仅技能创建者或管理员可操作")
-
-    service = skill_service_factory.create()
-    try:
+        )
+        if (
+            user.staffId not in skill_admin()
+            and skill_owner
+            and skill_owner != user.staffId
+            and not (is_local_skill and collaborator_authorized)
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="无权修改此技能的MCP依赖，仅技能创建者、已授权协作者或管理员可操作",
+            )
         # 使用认证用户ID替代请求体中的user_id，防止越权
         if request.user_id and request.user_id != user.staffId:
             logger.warning(f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} 尝试以 user_id={request.user_id} 修改 skill_id={skill_id} 的MCP依赖，已使用认证用户ID")
@@ -2069,10 +2146,11 @@ async def extract_from_skill_id(skill_id: str, ctx) -> PermissionParams:
 
 
 @router.delete("/{skill_id}", response_model=MessageResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
     params_extractor=extract_from_skill_id,
     extractor_params={"skill_id": "$skill_id"},  # 表达式：从路由参数取值
     persist_audit_log=True,  # 记录操作审计日志
+    authorization_state_key="skill_delete_collaborator_authorized",
 ))
 async def delete_skill(
     skill_id: str,
@@ -2229,6 +2307,9 @@ async def delete_skill(
                 skill_id,
                 user_id=current_user_id,
                 authorized_bot_owner_id=str(bot.get("owner_id") or ""),
+                collaborator_authorization_verified=bool(
+                    ctx.metadata.get("skill_delete_collaborator_authorized")
+                ),
             )
         finally:
             edit_guard.release(edit_lease)
