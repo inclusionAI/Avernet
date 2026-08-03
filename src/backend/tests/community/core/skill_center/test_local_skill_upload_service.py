@@ -9,9 +9,9 @@ import zipfile
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillDuplicateError,
     LocalSkillInvalidPackageError,
     LocalSkillNotReadyError,
+    LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
@@ -41,8 +41,17 @@ class _Repo:
     def get_bot_local_by_name(self, **kwargs):
         return None
 
+    def list_bot_local_by_name(self, **kwargs):
+        return []
+
     def create(self, row):
-        row = {**row, "id": "9", "gmt_created": None, "gmt_modified": None}
+        row = {
+            **row,
+            "id": "9",
+            "active": False,
+            "gmt_created": None,
+            "gmt_modified": None,
+        }
         self.created.append(row)
         return row
 
@@ -122,7 +131,11 @@ class _Filesystem:
         self.deleted.append(path)
         result = next(self.cleanup_results, True)
         if result:
-            self.files.clear()
+            self.files = {
+                file_path: content
+                for file_path, content in self.files.items()
+                if not file_path.startswith(f"{path}/")
+            }
         return result
 
     async def exists(self, path):
@@ -149,7 +162,9 @@ class _Factory:
         is_desktop,
         is_teclaw,
         name,
+        directory_name=None,
     ):
+        directory = str(self.local_dir / (directory_name or name))
         self.storage_calls.append(
             {
                 "entity_id": entity_id,
@@ -162,9 +177,10 @@ class _Factory:
                 "name": name,
             }
         )
-        return str(self.local_dir / name), _Storage(
-            self._filesystem, str(self.local_dir / name)
-        )
+        return directory, _Storage(self._filesystem, directory)
+
+    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
+        return _Storage(self._filesystem, locator)
 
     def _local_skill_path_adapter(self, path):
         return path
@@ -228,6 +244,91 @@ class _Guard:
         return True
 
 
+class _Cleanup:
+    def __init__(self):
+        self.rows = []
+
+    def record_pending(self, **kwargs):
+        self.rows.append(kwargs)
+        return True
+
+
+class _RuntimeFactory:
+    def create(self, **kwargs):
+        return self
+
+    def sync_runtime(self):
+        return True
+
+
+class _ReplacementRepo(_Repo):
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+        self.updates = []
+
+    def list_bot_local_by_name(self, **_kwargs):
+        return self.rows
+
+    def update(self, skill_id, values):
+        self.updates.append((skill_id, values))
+        row = next(row for row in self.rows if row["id"] == skill_id)
+        row.update(values)
+        return row
+
+
+class _ConcurrentRepo(_ReplacementRepo):
+    def __init__(self):
+        super().__init__([])
+
+    def create(self, row):
+        row = {
+            **row,
+            "id": "9",
+            "active": False,
+            "gmt_created": None,
+            "gmt_modified": None,
+        }
+        self.rows.append(row)
+        return row
+
+
+class _ReplacementFactory(_Factory):
+    def local_skill_package_storage(self, *, name, directory_name=None, **_kwargs):
+        directory = str(self.local_dir / (directory_name or name))
+        return directory, _Storage(self._filesystem, directory)
+
+    def local_skill_package_storage_for_locator(self, *, locator, **_kwargs):
+        return _Storage(self._filesystem, locator)
+
+
+class _ReplacementRuntime:
+    def __init__(self, results):
+        self.results = iter(results)
+        self.calls = 0
+
+    def create(self, **_kwargs):
+        return self
+
+    def sync_runtime(self):
+        self.calls += 1
+        return next(self.results)
+
+
+def _replacement_service(filesystem, repo, runtime, cleanup=None, guard=None):
+    return LocalSkillUploadService(
+        repo,
+        _Sets(),
+        _Bot(),
+        _Collaborators(),
+        _ReplacementFactory(filesystem),
+        runtime,
+        _Audit(),
+        guard or _Guard(),
+        cleanup or _Cleanup(),
+    )
+
+
 def _service(
     filesystem,
     *,
@@ -245,34 +346,11 @@ def _service(
         bot or _Bot(status),
         collaborators or _Collaborators(),
         factory or _Factory(filesystem),
+        _RuntimeFactory(),
         audit or _Audit(),
         _Guard(),
+        _Cleanup(),
     )
-
-
-@pytest.mark.asyncio
-async def test_concurrent_same_name_uploads_are_serialized_before_duplicate_check():
-    class _StatefulRepo(_Repo):
-        def get_bot_local_by_name(self, **_kwargs):
-            return self.created[-1] if self.created else None
-
-    filesystem = _Filesystem()
-    repo = _StatefulRepo()
-    service = _service(filesystem, repo=repo)
-    package = _zip({"SKILL.md": b"---\nname: upload-skill\ndescription: useful\n---\n"})
-
-    results = await asyncio.gather(
-        service.upload_local_skill(
-            bot_id="bot", owner_id="owner", actor_id="owner", package=package
-        ),
-        service.upload_local_skill(
-            bot_id="bot", owner_id="owner", actor_id="owner", package=package
-        ),
-        return_exceptions=True,
-    )
-
-    assert len(repo.created) == 1
-    assert sum(isinstance(result, LocalSkillDuplicateError) for result in results) == 1
 
 
 @pytest.mark.asyncio
@@ -623,3 +701,157 @@ async def test_existing_orphan_must_clear_before_a_retry_writes_new_files():
     assert repo.created == []
     assert filesystem.files
     assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
+
+
+def _existing_skill(*, active=True):
+    return {
+        "id": "9",
+        "name": "upload-skill",
+        "description": "old description",
+        "git_path": "local:///private/skills-local/upload-skill",
+        "user_id": "owner",
+        "bolt_id": "bot",
+        "active": active,
+        "gmt_created": None,
+        "gmt_modified": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_staging():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    result = await _replacement_service(
+        filesystem, repo, _ReplacementRuntime([True])
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="collaborator",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+    assert result["operation"] == "updated"
+    assert result["skill"]["id"] == "9"
+    assert result["skill"]["user_id"] == "owner"
+    assert result["skill"]["active"] is False
+    assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
+    assert "/private/skills-local/upload-skill" in filesystem.deleted
+    assert any("replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_runtime_failure_restores_old_metadata_and_runtime_mapping():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    old = _existing_skill(active=True)
+    repo = _ReplacementRepo([old])
+    runtime = _ReplacementRuntime([False, True])
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await _replacement_service(filesystem, repo, runtime).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+    assert old["git_path"] == "local:///private/skills-local/upload-skill"
+    assert old["description"] == "old description"
+    assert runtime.calls == 2
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == b"old"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_legacy_matches_fail_without_writing_or_selecting_a_candidate():
+    filesystem = _Filesystem()
+    repo = _ReplacementRepo([_existing_skill(), {**_existing_skill(), "id": "10"}])
+    with pytest.raises(upload_module.LocalSkillDuplicateError):
+        await _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True])
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+    assert filesystem.files == {}
+    assert repo.updates == []
+
+
+@pytest.mark.asyncio
+async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_update():
+    filesystem = _Filesystem(cleanup_results=[False])
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    cleanup = _Cleanup()
+    result = await _replacement_service(
+        filesystem, repo, _ReplacementRuntime([True]), cleanup
+    ).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+    assert result["operation"] == "updated"
+    assert cleanup.rows == [
+        {
+            "env": "test",
+            "owner_id": "owner",
+            "bot_id": "bot",
+            "skill_id": "9",
+            "package_locator": "/private/skills-local/upload-skill",
+        }
+    ]
+
+
+class _ConcurrentGuard:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+
+    async def acquire_for_edit_wait(self, **_kwargs):
+        await self.lock.acquire()
+        return object()
+
+    def release(self, _lease):
+        self.lock.release()
+        return True
+
+
+class _YieldingFilesystem(_Filesystem):
+    async def write_file(self, path, content):
+        await asyncio.sleep(0)
+        await super().write_file(path, content)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_name_uploads_serialize_then_converge_on_one_skill():
+    repo = _ConcurrentRepo()
+    filesystem = _YieldingFilesystem()
+    guard = _ConcurrentGuard()
+    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: concurrent\n"})
+    first, second = await asyncio.gather(
+        _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True]), guard=guard
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=package,
+        ),
+        _replacement_service(
+            filesystem, repo, _ReplacementRuntime([True]), guard=guard
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="collaborator",
+            package=package,
+        ),
+    )
+    assert {first["operation"], second["operation"]} == {"created", "updated"}
+    assert len(repo.rows) == 1
+    assert first["skill"]["id"] == second["skill"]["id"] == "9"

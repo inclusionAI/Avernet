@@ -142,6 +142,7 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         # matters.
         import agentclaw.community.plugin_api.models  # noqa: F401  ac_bots / ac_resource / ac_channel_config
         import agentclaw.community.core.models  # noqa: F401  ac_skill* / ac_skill_set_mcp / ac_user_mcp_config / propagation_log / center_sync_log
+        import agentclaw.community.core.skill_center.local_skill_cleanup  # noqa: F401  obsolete Local Skill package cleanup work
         import agentclaw.community.core.access.sqlite_models  # noqa: F401  ac_access_control_policy / ac_user_info
         import agentclaw.community.core.service_bot.repository.models  # noqa: F401  ac_bot_publish
         import agentclaw.community.core.bot_public.repository.models  # noqa: F401  ac_bot_friend
