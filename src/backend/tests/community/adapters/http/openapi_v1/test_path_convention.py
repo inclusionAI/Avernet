@@ -33,6 +33,13 @@ _BASE = f"{PUBLIC_API_PREFIX}/bots"
 _README = Path(__file__).resolve().parents[5] / "docs" / "openapi-v1" / "README.md"
 _RESERVED_ANCHOR = "<!-- reserved-component-names -->"
 
+#: Names claimed in the docs *before* any route publishes them — currently only
+#: where the gateway serves the address on another plane. Kept as its own list
+#: rather than folded into the one above, so the equality check there stays an
+#: equality check: a documented name with no route is otherwise indistinguishable
+#: from docs that have fallen behind the routes.
+_UNROUTED_ANCHOR = "<!-- reserved-component-names-unrouted -->"
+
 
 def _paths() -> list[str]:
     app = FastAPI()
@@ -118,13 +125,22 @@ def test_channels_is_gone():
     assert not offenders, f"channels was removed: {offenders}"
 
 
-def _documented_reserved_names() -> set[str]:
+def _fenced_names(anchor: str) -> set[str]:
+    """The first fenced block following *anchor* in the README, as a name set."""
     text = _README.read_text(encoding="utf-8")
-    anchored = text.split(_RESERVED_ANCHOR, 1)
-    assert len(anchored) == 2, f"{_RESERVED_ANCHOR} missing from {_README}"
+    anchored = text.split(anchor, 1)
+    assert len(anchored) == 2, f"{anchor} missing from {_README}"
     fenced = re.search(r"```text\n(.*?)```", anchored[1], re.DOTALL)
-    assert fenced is not None, f"no fenced block after {_RESERVED_ANCHOR}"
+    assert fenced is not None, f"no fenced block after {anchor}"
     return set(fenced.group(1).split())
+
+
+def _documented_reserved_names() -> set[str]:
+    return _fenced_names(_RESERVED_ANCHOR)
+
+
+def _documented_unrouted_names() -> set[str]:
+    return _fenced_names(_UNROUTED_ANCHOR)
 
 
 def test_the_docs_reserved_names_match_the_routes():
@@ -136,3 +152,29 @@ def test_the_docs_reserved_names_match_the_routes():
     quietly falling behind a component added later.
     """
     assert _documented_reserved_names() == _components()
+
+
+def test_names_reserved_ahead_of_their_routes_are_not_routed():
+    """A reserved name that gains a route must move to the routed list.
+
+    The two lists are asserted disjoint rather than merged, because they are
+    reserved for different reasons and only one of them can be checked against
+    the routes. Merging would force the equality check above to be relaxed to a
+    subset check, and that check is the only thing stopping the docs from
+    quietly falling behind a component added later.
+    """
+    overlap = _documented_unrouted_names() & _components()
+    assert not overlap, (
+        f"{sorted(overlap)} now has routes — move it to the routed reserved list"
+    )
+
+
+def test_the_socket_prefix_is_reserved():
+    """`messages` is claimed by the gateway on the socket plane.
+
+    Recorded here because nothing in *this* service publishes it: an HTTP
+    request to `/openapi/v1/bots/messages/...` still arrives here, so without
+    the reservation a bot could take the id and the intended component could
+    never have the address.
+    """
+    assert "messages" in _documented_unrouted_names()

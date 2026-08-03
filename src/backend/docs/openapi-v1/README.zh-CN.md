@@ -503,10 +503,30 @@ base 之下再容纳第二个 owner 的可能 —— BCS 正是从另一侧撞�
 id 恰好等于某个组件名，它在该地址上就不可达。这个集合是固定的，同一个测试会断言下面这份
 清单仍然等于路由实际发布的字面量（英文版 `README.md` 中的同名清单是被解析的那一份）：
 
+<!-- reserved-component-names -->
 ```text
 approvals  ceiling  check-name  connection  engine  identity
 mcp  models  resources  routines  sessions  skills
 ```
+
+**先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。
+它们的保留理由与上面那份**不同**：没有任何路由提供它们，因此当前也不存在"某个地址不可达"
+的问题。保留是因为该地址已被别处占用，且我们确实打算在那里放一个组件，所以在此期间不能让
+某个 Agent id 把它占走。
+
+<!-- reserved-component-names-unrouted -->
+```text
+messages
+```
+
+- `messages` —— 网关在 `/openapi/v1/bots/messages/**` 上提供 Agent 的聊天 WebSocket，
+  并中继到 engine proxy（`src/gateway/configs/application.yaml`）。该占用**只在 socket
+  平面**上成立，因此发往该地址的 HTTP 请求仍会到达本服务；这个名字是为将来要放在那里的
+  HTTP 端点保留的。参见
+  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`。
+
+一旦有路由发布了这份清单里的某个名字，就必须把它移到上面那份已路由的清单里 —— 约定测试会
+断言两份清单互不相交，因此"加了路由却没搬名字"会在测试里失败，而不是留给评审去发现。
 
 > **挂载顺序是有承重作用的。** `build_public_router()` 会先挂字面量子组，再挂 bots 组，
 > 这样 `/openapi/v1/bots/resources` 才能排在通配的 `/openapi/v1/bots/{bot_id}` 前面被

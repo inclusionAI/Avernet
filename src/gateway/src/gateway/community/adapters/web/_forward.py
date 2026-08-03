@@ -2,8 +2,8 @@
 
 One route handles every request that is not a gateway-local endpoint:
 
-1. resolve the domain from the leading path segment (unknown → 404; the gateway
-   forwards only into known domains, never as an open proxy);
+1. resolve the domain claiming this path *on the HTTP plane* (none → 404; the
+   gateway forwards only into known domains, never as an open proxy);
 2. authenticate (fail-closed) — a known domain still requires a principal;
 3. forward the path **verbatim** to the resolved server and stream the response
    back unchanged.
@@ -110,12 +110,13 @@ async def _attach_identities(
 async def forward_request(request: Request) -> Response:
     """Resolve domain → authenticate → forward verbatim, streaming the response."""
     path = request.url.path
-    domain = request.app.state.domain_map.domain_for(path)
-    # A domain that does not answer HTTP is as unknown here as one that is not
-    # configured at all. Socket domains are served by the WebSocket entrypoint
-    # and must not become an HTTP proxy into their upstream as a side effect of
-    # sharing the domain map.
-    if domain is None or not domain.serves_http:
+    # Asked for the *HTTP* domain, not for whichever domain claims the path.
+    # A socket domain is not a candidate here at all, so it can neither become an
+    # HTTP proxy into its upstream nor shadow a broader HTTP domain that also
+    # claims the path — an HTTP request beneath a socket-only prefix still
+    # resolves to the domain that serves the prefix above it.
+    domain = request.app.state.domain_map.http_domain_for(path)
+    if domain is None:
         return _error(404, 1, "no route for path")
     server = domain.server
     upstream_path = domain.upstream_path(path)
