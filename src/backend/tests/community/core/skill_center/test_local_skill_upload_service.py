@@ -32,7 +32,6 @@ def _zip(entries: dict[str, bytes], *, attrs: dict[str, int] | None = None) -> b
 class _Repo:
     def __init__(self) -> None:
         self.created: list[dict] = []
-        self.exclusions: list[tuple] = []
 
     def get_bot_local_by_name(self, **kwargs):
         return None
@@ -41,14 +40,6 @@ class _Repo:
         row = {**row, "id": "9", "gmt_created": None, "gmt_modified": None}
         self.created.append(row)
         return row
-
-    def add_default_skill_exclusion(self, *args):
-        self.exclusions.append(args)
-        return True
-
-    def remove_default_skill_exclusion(self, *args):
-        self.exclusions.remove(args)
-        return True
 
     def delete(self, skill_id):
         self.created.clear()
@@ -69,6 +60,14 @@ class _Sets:
         return True
 
     def remove_skill_from_set(self, *args):
+        return True
+
+    def add_default_skill_exclusion(self, *args):
+        if self.fail_at == "exclusion":
+            return False
+        return True
+
+    def remove_default_skill_exclusion(self, *args):
         return True
 
 
@@ -276,8 +275,6 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
     filesystem = _Filesystem(fail=stage == "write")
     repo = _FailRepo() if stage == "create" else _Repo()
     sets = _Sets(fail_at=stage)
-    if stage == "exclusion":
-        repo.add_default_skill_exclusion = lambda *args: False
     audit = _FailAudit() if stage == "audit" else _Audit()
     service = _service(filesystem, repo=repo, sets=sets, audit=audit)
     with pytest.raises(LocalSkillStorageError):
@@ -291,8 +288,9 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
 async def test_failed_rollback_step_does_not_stop_package_cleanup():
     package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
     repo = _Repo()
-    repo.remove_default_skill_exclusion = lambda *args: (_ for _ in ()).throw(RuntimeError())
-    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
+    sets = _Sets()
+    sets.remove_default_skill_exclusion = lambda *args: (_ for _ in ()).throw(RuntimeError())
+    service = _service(_Filesystem(), repo=repo, sets=sets, audit=_FailAudit())
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
