@@ -13,7 +13,7 @@ uk_user_bot_skillset_mcp).
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
@@ -28,12 +28,14 @@ from agentclaw.community.plugins.skill_repository import (
     SkillRepository,
     SkillSetRepository,
 )
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration
 
 
 class _FileSqliteDB:
     def __init__(self, engine):
+        self.engine = engine
         self._factory = sessionmaker(
             bind=engine, autocommit=False, autoflush=False
         )
@@ -49,6 +51,9 @@ class _FileSqliteDB:
             raise
         finally:
             db.close()
+
+    def transactional_orm_session(self):
+        return self.orm_session()
 
     session = orm_session
 
@@ -103,6 +108,110 @@ def test_skill_create_get_update_delete(skills):
     assert skills.delete(sid) is True
     assert skills.get_by_id(sid) is None  # hard delete
     assert skills.delete(sid) is False
+
+
+def test_delete_removes_all_associations_for_active_and_inactive_local_skills(
+    skills, sets, db
+):
+    active_skill = skills.create(
+        {"name": "active-local", "git_path": "local:///skills/active"}
+    )
+    inactive_skill = skills.create(
+        {"name": "inactive-local", "git_path": "local:///skills/inactive"}
+    )
+    active_set = sets.create({"name": "active", "is_active": True})
+    inactive_set = sets.create({"name": "inactive", "is_active": False})
+    extra_set = sets.create({"name": "extra", "is_active": True})
+    sets.add_skill_to_set(active_set["id"], active_skill["id"])
+    sets.add_skill_to_set(extra_set["id"], active_skill["id"])
+    sets.add_skill_to_set(inactive_set["id"], inactive_skill["id"])
+
+    assert skills.delete(active_skill["id"]) is True
+    assert skills.delete(inactive_skill["id"]) is True
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 0
+        assert session.query(Skill).count() == 0
+
+
+def test_delete_succeeds_for_skill_without_an_association(skills, db):
+    skill = skills.create(
+        {"name": "unassociated", "git_path": "local:///skills/unassociated"}
+    )
+
+    assert skills.delete(skill["id"]) is True
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 0
+        assert session.query(Skill).count() == 0
+
+
+def test_delete_rolls_back_when_association_cleanup_fails(skills, sets, db):
+    skill = skills.create({"name": "rollback-association"})
+    skill_set = sets.create({"name": "set"})
+    sets.add_skill_to_set(skill_set["id"], skill["id"])
+
+    def fail_association_delete(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if statement.lstrip().lower().startswith("delete from ac_skill_set_skill"):
+            raise RuntimeError("injected association delete failure")
+
+    event.listen(db.engine, "before_cursor_execute", fail_association_delete)
+    try:
+        with pytest.raises(RuntimeError, match="injected association delete failure"):
+            skills.delete(skill["id"])
+    finally:
+        event.remove(db.engine, "before_cursor_execute", fail_association_delete)
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 1
+        assert session.query(Skill).count() == 1
+
+
+def test_delete_rolls_back_association_cleanup_when_skill_delete_fails(
+    skills, sets, db
+):
+    skill = skills.create({"name": "rollback-skill"})
+    skill_set = sets.create({"name": "set"})
+    sets.add_skill_to_set(skill_set["id"], skill["id"])
+
+    def fail_skill_delete(
+        _conn, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if statement.lstrip().lower().startswith("delete from ac_skill "):
+            raise RuntimeError("injected skill delete failure")
+
+    event.listen(db.engine, "before_cursor_execute", fail_skill_delete)
+    try:
+        with pytest.raises(RuntimeError, match="injected skill delete failure"):
+            skills.delete(skill["id"])
+    finally:
+        event.remove(db.engine, "before_cursor_execute", fail_skill_delete)
+
+    with db.orm_session() as session:
+        assert session.query(SkillSetSkill).count() == 1
+        assert session.query(Skill).count() == 1
+
+
+def test_delete_cannot_remove_a_skill_or_association_from_another_tenant(
+    skills, sets, db
+):
+    with avernet_tenant_scope("tenant-b"):
+        skill = skills.create({"name": "tenant-b-skill"})
+        skill_set = sets.create({"name": "tenant-b-set"})
+        sets.add_skill_to_set(skill_set["id"], skill["id"])
+
+    with avernet_tenant_scope("tenant-a"):
+        assert skills.delete(skill["id"]) is False
+        with db.orm_session() as session:
+            assert session.query(SkillSetSkill).count() == 0
+            assert session.query(Skill).count() == 0
+
+    with avernet_tenant_scope("tenant-b"):
+        with db.orm_session() as session:
+            assert session.query(SkillSetSkill).count() == 1
+            assert session.query(Skill).count() == 1
 
 
 def test_skill_create_is_plain_insert_not_upsert(skills):
