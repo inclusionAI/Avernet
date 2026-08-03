@@ -178,6 +178,7 @@ class TestBotBindingData:
         assert data.binding_id == 0
         assert data.device_provider == ""
         assert data.device_id == ""
+        assert data.template_runtime_engine_type is None
 
 
 # ==================== Tests: AiohttpBotServicePlugin.report ===================
@@ -356,6 +357,7 @@ class TestAiohttpBotServicePluginGetBinding:
                 "owner_id": "20881234",
                 "bot_type": "service",
                 "engine_type": "openclaw",
+                "template_runtime_engine_type": "claude_code",
                 "publish_id": 9527,
                 "publish_status": "success",
                 "binding_id": 202,
@@ -384,6 +386,7 @@ class TestAiohttpBotServicePluginGetBinding:
         assert result.owner_id == "20881234"
         assert result.bot_type == "service"
         assert result.engine_type == "openclaw"
+        assert result.template_runtime_engine_type == "claude_code"
         assert result.publish_id == 9527
         assert result.publish_status == "success"
         assert result.binding_id == 202

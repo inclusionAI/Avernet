@@ -9,7 +9,7 @@ Covers:
 - parse_wait_result: 从 metadata 解析 ignore_content / ignore_result 标志
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -548,7 +548,12 @@ class TestBindingDataToInfoEngineNormalization:
     沙箱却传 engine=claude_code 报 500。
     """
 
-    def _data(self, engine_type: str, template_type: str | None) -> BotBindingData:
+    def _data(
+        self,
+        engine_type: str,
+        template_type: str | None,
+        template_runtime_engine_type: str | None = None,
+    ) -> BotBindingData:
         return BotBindingData(
             bot_id="bot-001",
             owner_id="entity-001",
@@ -558,6 +563,7 @@ class TestBindingDataToInfoEngineNormalization:
             device_provider="arca",
             device_id="ARCA-SANDBOX-abc@0",
             template_type=template_type,
+            template_runtime_engine_type=template_runtime_engine_type,
         )
 
     @pytest.mark.parametrize(
@@ -586,3 +592,59 @@ class TestBindingDataToInfoEngineNormalization:
     ):
         info = binding_data_to_info(self._data(engine_type, template_type))
         assert info.engine_type == expected
+
+    @pytest.mark.parametrize(
+        ("template_runtime_engine_type", "expected"),
+        [
+            (None, "aicoding"),
+            ("", "aicoding"),
+            ("   ", "aicoding"),
+            ("claude_code", "claude_code"),
+            (" aicoding ", "aicoding"),
+            ("future_engine", "aicoding"),
+        ],
+    )
+    def test_explicit_template_runtime_engine_type_or_legacy_fallback(
+        self, template_runtime_engine_type, expected
+    ):
+        data = self._data(
+            "claude_code",
+            "applicationCoding",
+            template_runtime_engine_type,
+        )
+
+        info = binding_data_to_info(data)
+
+        assert info.engine_type == expected
+
+    def test_explicit_runtime_engine_fixes_genercc_mismatch(self):
+        data = self._data(
+            "claude_code",
+            "generCC",
+            "aicoding",
+        )
+
+        info = binding_data_to_info(data)
+
+        assert info.engine_type == "aicoding"
+
+    def test_unsupported_explicit_runtime_engine_warns_and_falls_back(self):
+        data = self._data(
+            "claude_code",
+            "applicationCoding",
+            "future_engine",
+        )
+
+        with patch(
+            "secbaas.community.core.service.bot_run._bot_binding_resolver.logger"
+        ) as logger:
+            info = binding_data_to_info(data)
+
+        assert info.engine_type == "aicoding"
+        logger.warning.assert_called_once_with(
+            "engine_type.unsupported_template_runtime: "
+            "template_runtime_engine_type=%r not in whitelist %s, "
+            "fallback to legacy normalization",
+            "future_engine",
+            ["aicoding", "claude_code", "hermes", "openclaw", "teclaw"],
+        )

@@ -23,6 +23,9 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
+from agentclaw.community.core.service_bot.services.template_runtime_engine_type_resolver import (
+    TemplateRuntimeEngineTypeResolver,
+)
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
@@ -47,6 +50,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         bot_repo: BotRepository,
         publish_flow_service_provider: Callable[[], "PublishFlowService"],
         bot_service: "BotService",
+        template_runtime_engine_type_resolver: TemplateRuntimeEngineTypeResolver,
         device_binding_repo: DeviceBindingRepository,
         bcn_service: "BcnService",
         quality_task_service: "QualityTaskService",
@@ -58,6 +62,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         # Lazy provider — breaks the BotPublishService ↔ PublishFlowService cycle.
         self._publish_flow_service_provider = publish_flow_service_provider
         self._bot_service = bot_service
+        self._template_runtime_engine_type_resolver = template_runtime_engine_type_resolver
         self._device_binding_repo = device_binding_repo
         self._bcn_service = bcn_service
         self._quality_task_service = quality_task_service
@@ -436,10 +441,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 raise BotPublishServiceError(
                     f"Binding record missing sandbox_id in device_props: binding_id={binding_id}"
                 )
-        return {
+        bot_type = bot.get("bot_type", "personal")
+        result = {
             "bot_id": bot_id,
             "owner_id": owner_id,
-            "bot_type": bot.get("bot_type", "personal"),
+            "bot_type": bot_type,
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
             "publish_id": None,
@@ -448,6 +454,21 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "device_provider": getattr(binding, "device_provider", ""),
             "device_id": device_id,
         }
+        if bot_type == "personal":
+            result["template_runtime_engine_type"] = (
+                self._get_template_runtime_engine_type(
+                    bot_type=bot_type, bot_id=bot_id
+                )
+            )
+        return result
+
+    def _get_template_runtime_engine_type(
+        self, *, bot_type: str, bot_id: str
+    ) -> str:
+        """Resolve the explicit template runtime engine for the bot type."""
+        return self._template_runtime_engine_type_resolver.resolve(
+            bot_type=bot_type, bot_id=bot_id
+        )
 
     def _get_service_publish_record_for_stage(
         self,

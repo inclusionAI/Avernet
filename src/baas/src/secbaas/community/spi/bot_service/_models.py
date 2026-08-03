@@ -20,6 +20,7 @@ class BotBindingData:
     device_provider: str = ""
     device_id: str = ""
     template_type: str | None = None
+    template_runtime_engine_type: str | None = None
 
 
 @dataclass

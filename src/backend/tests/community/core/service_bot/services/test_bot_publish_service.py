@@ -24,6 +24,11 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
 )
+from agentclaw.community.core.service_bot.services.template_runtime_engine_type_resolver import (
+    BotTypeTemplateRuntimeEngineTypeResolver,
+    EmptyTemplateRuntimeEngineTypeResolver,
+    PersonalTemplateRuntimeEngineTypeResolver,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
@@ -33,6 +38,8 @@ def _make_service(
     bot_repo=None,
     publish_flow_service_provider=None,
     bot_service=None,
+    template_service=None,
+    template_runtime_engine_type_resolver=None,
     device_binding_repo=None,
     bcn_service=None,
     quality_task_service=None,
@@ -50,11 +57,22 @@ def _make_service(
         operation_repo.get_latest_by_kind.return_value = None
         operation_repo.max_attempt.return_value = 0
 
+    if template_runtime_engine_type_resolver is None:
+        template_runtime_engine_type_resolver = BotTypeTemplateRuntimeEngineTypeResolver(
+            resolvers={
+                "personal": PersonalTemplateRuntimeEngineTypeResolver(
+                    template_service or MagicMock()
+                )
+            },
+            default_resolver=EmptyTemplateRuntimeEngineTypeResolver(),
+        )
+
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
         bot_repo=bot_repo or MagicMock(),
         publish_flow_service_provider=publish_flow_service_provider or (lambda: MagicMock()),
         bot_service=bot_service or MagicMock(),
+        template_runtime_engine_type_resolver=template_runtime_engine_type_resolver,
         device_binding_repo=device_binding_repo or MagicMock(),
         bcn_service=bcn_service or MagicMock(),
         quality_task_service=quality_task_service or MagicMock(),
@@ -2143,9 +2161,14 @@ class TestGetBotStageBindingInfo:
             device_provider="arca",
             device_props={"sandbox_id": "BOT-UUID-PERSONAL"},
         )
+        template_service = Mock()
+        template_service.get_template_config.return_value = {
+            "template_runtime_engine_type": " claude_code "
+        }
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
+            template_service=template_service,
             device_binding_repo=device_binding_repo,
         )
 
@@ -2157,12 +2180,58 @@ class TestGetBotStageBindingInfo:
             "bot_type": "personal",
             "engine_type": "openclaw",
             "template_type": "standard",
+            "template_runtime_engine_type": "claude_code",
             "publish_id": None,
             "publish_status": None,
             "binding_id": 501,
             "device_provider": "arca",
             "device_id": "BOT-UUID-PERSONAL",
         }
+
+    @pytest.mark.parametrize(
+        ("template_config", "expected"),
+        [
+            ({}, ""),
+            ({"template_runtime_engine_type": None}, ""),
+            ({"template_runtime_engine_type": ""}, ""),
+            ({"template_runtime_engine_type": "   "}, ""),
+            ({"template_runtime_engine_type": 123}, ""),
+            ({"runtime": "aicoding"}, ""),
+            (None, ""),
+        ],
+    )
+    def test_personal_bot_empty_or_invalid_template_runtime_engine_type(
+        self, template_config, expected
+    ):
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "personal",
+            "binding_id": 502,
+            "active_engine": "claude_code",
+            "template_type": "normalCC",
+        }
+        device_binding_repo = Mock()
+        device_binding_repo.get_by_id.return_value = Mock(
+            device_id="IGNORED-FOR-PERSONAL",
+            device_provider="arca",
+            device_props={"sandbox_id": "BOT-UUID-PERSONAL"},
+        )
+        template_service = Mock()
+        template_service.get_template_config.return_value = template_config
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=bot_repo,
+            template_service=template_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info(
+            "bot_001", "user_001", "online"
+        )
+
+        assert result["template_runtime_engine_type"] == expected
+        template_service.get_template_config.assert_called_once_with("bot_001")
 
     def test_service_bot_draft_uses_personal_binding_info(self):
         mock_repo = Mock()
@@ -2180,9 +2249,11 @@ class TestGetBotStageBindingInfo:
             device_provider="arca",
             device_props={"sandbox_id": "BOT-UUID-DRAFT"},
         )
+        template_service = Mock()
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
+            template_service=template_service,
             device_binding_repo=device_binding_repo,
         )
 
@@ -2200,6 +2271,7 @@ class TestGetBotStageBindingInfo:
             "device_provider": "arca",
             "device_id": "BOT-UUID-DRAFT",
         }
+        template_service.get_template_config.assert_not_called()
 
     def test_service_bot_verify_success(self):
         mock_repo = Mock()

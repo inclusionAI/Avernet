@@ -40,6 +40,7 @@ from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
@@ -71,6 +72,12 @@ from agentclaw.community.core.service_bot.repository.publish_operation_repositor
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
+from agentclaw.community.core.service_bot.services.template_runtime_engine_type_resolver import (
+    BotTypeTemplateRuntimeEngineTypeResolver,
+    EmptyTemplateRuntimeEngineTypeResolver,
+    PersonalTemplateRuntimeEngineTypeResolver,
+    TemplateRuntimeEngineTypeResolver,
+)
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
@@ -263,12 +270,27 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def template_runtime_engine_type_resolver(
+        self, template_service: TemplateService
+    ) -> TemplateRuntimeEngineTypeResolver:
+        """Select template runtime engine resolution by bot type."""
+        return BotTypeTemplateRuntimeEngineTypeResolver(
+            resolvers={
+                "personal": PersonalTemplateRuntimeEngineTypeResolver(template_service)
+            },
+            default_resolver=EmptyTemplateRuntimeEngineTypeResolver(),
+        )
+
+    @singleton
+    @provider
+    @inject
     def bot_publish_service(
         self,
         injector: Injector,
         bot_publish_repo: BotPublishRepositoryProtocol,
         bot_repo: BotRepository,
         bot_service: BotService,
+        template_runtime_engine_type_resolver: TemplateRuntimeEngineTypeResolver,
         device_binding_repo: DeviceBindingRepository,
         bcn_service: BcnService,
         quality_task_service: QualityTaskServiceProtocol,
@@ -287,6 +309,7 @@ class ServiceBotModule(Module):
             bot_publish_repo=bot_publish_repo,
             bot_repo=bot_repo,
             bot_service=bot_service,
+            template_runtime_engine_type_resolver=template_runtime_engine_type_resolver,
             device_binding_repo=device_binding_repo,
             bcn_service=bcn_service,
             quality_task_service=quality_task_service,

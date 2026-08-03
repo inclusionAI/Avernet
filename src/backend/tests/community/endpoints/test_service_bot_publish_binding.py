@@ -14,6 +14,7 @@ from tests.community.framework import (
 
 _OWNER = "u_bind"
 _BOT_ID = "bind_bot"
+_PERSONAL_BOT_ID = "bind_personal_bot"
 _BINDING_ID = 123
 
 _ENDPOINT = "/api/service-bot/publish/{bot_id}/binding"
@@ -76,6 +77,47 @@ def _seed_binding_happy(world) -> None:
     })
 
 
+def _seed_personal_binding_with_runtime_engine(world) -> None:
+    """Seed a personal bot whose template explicitly selects its runtime engine."""
+    from tests.community.factories.access import make_staff_user
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
+        TemplateRepository,
+    )
+    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+
+    make_staff_user(world, user_id=_OWNER)
+    binding_id = world.get(DeviceBindingRepository).insert_binding(
+        entity_id=_OWNER,
+        entity_type="staff",
+        device_id="personal-baas-device",
+        device_provider="baas",
+        env="dev",
+        device_props={},
+        status="ACTIVE",
+        apply_reason="seed",
+        applied_by=_OWNER,
+    )
+    world.get(BotRepository).insert({
+        "bot_id": _PERSONAL_BOT_ID,
+        "bot_name": "Personal Binding Bot",
+        "owner_id": _OWNER,
+        "owner_name": _OWNER,
+        "bot_type": "personal",
+        "status": "ACTIVE",
+        "entity_id": _OWNER,
+        "entity_type": "staff",
+        "creator_id": _OWNER,
+        "active_engine": "claude_code",
+        "template_type": "applicationCoding",
+        "binding_id": binding_id,
+    })
+    world.get(TemplateRepository).insert({
+        "bot_id": _PERSONAL_BOT_ID,
+        "ext": {"template_runtime_engine_type": " claude_code "},
+    })
+
+
 def _seed_binding_error(world) -> None:
     """Seed without the target bot - triggers BotNotFoundError."""
     from tests.community.factories.access import make_staff_user
@@ -96,6 +138,27 @@ def _seed_binding_error(world) -> None:
 )
 def get_binding_happy():
     """Happy path: query binding info for online stage succeeds."""
+
+
+@endpoint_test(
+    method="GET",
+    path=_ENDPOINT,
+    scenario="personal-explicit-runtime-engine",
+    input=CaseInput(
+        path_params={"bot_id": _PERSONAL_BOT_ID},
+        query_params={"owner_id": _OWNER, "stage": "online"},
+    ),
+    seed=_seed_personal_binding_with_runtime_engine,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"template_runtime_engine_type": "claude_code"},
+        },
+    ),
+)
+def get_personal_binding_explicit_runtime_engine():
+    """Personal binding exposes the trimmed template runtime engine field."""
 
 
 @endpoint_test(

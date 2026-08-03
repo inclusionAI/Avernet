@@ -56,6 +56,36 @@ def _normalize_engine_type(
     return "openclaw"
 
 
+def _resolve_effective_engine_type(
+    active_engine: str | None,
+    template_type: str | None = None,
+    template_runtime_engine_type: str | None = None,
+) -> str:
+    """Resolve the effective engine from an explicit supported value or legacy rules.
+
+    A non-empty ``template_runtime_engine_type`` takes precedence only when it is
+    supported by BaaS. Empty or unsupported values fall back to the existing
+    ``active_engine`` and ``template_type`` normalization rules; unsupported
+    explicit values are logged to make configuration drift observable.
+    """
+    runtime_engine_type = (
+        template_runtime_engine_type.strip()
+        if isinstance(template_runtime_engine_type, str)
+        else ""
+    )
+    if runtime_engine_type in _SUPPORTED_ENGINES:
+        return runtime_engine_type
+    if runtime_engine_type:
+        logger.warning(
+            "engine_type.unsupported_template_runtime: "
+            "template_runtime_engine_type=%r not in whitelist %s, "
+            "fallback to legacy normalization",
+            runtime_engine_type,
+            sorted(_SUPPORTED_ENGINES),
+        )
+    return _normalize_engine_type(active_engine, template_type)
+
+
 class BotBindingResolver:
     """Binding 解析器 — 单次查询完整链路。
 
