@@ -1869,7 +1869,11 @@ class SkillService:
             name=skill_name,
             user_id=user_id,
         )
-        if existing_skill is None:
+        # Teclaw 的逻辑 locator 是 ``local://skills-local/<name>``，不携带
+        # owner/workspace 身份，不能据此修复历史 collaborator 行；否则共享
+        # ``default`` Bot 的不同 owner 会发生跨 owner 命中。只有 owner-qualified
+        # 的绝对 locator 才允许这条历史兼容分支。
+        if existing_skill is None and Path(expected_skill_dir).is_absolute():
             historical_skill = self._skill_repo.get_by_git_path(expected_skill_path)
             if (
                 historical_skill is not None
@@ -2238,6 +2242,7 @@ class SkillService:
         skill: dict,
         user_id: str | None = None,
         authorized_bot_owner_id: str | None = None,
+        collaborator_authorization_verified: bool = False,
     ) -> bool:
         """检查用户是否有权限删除技能
 
@@ -2266,6 +2271,7 @@ class SkillService:
         if (
             skill_user_id
             and authorized_bot_owner_id
+            and collaborator_authorization_verified
             and str(skill_user_id) == str(authorized_bot_owner_id)
             and str(self._device_owner_id or "") == str(authorized_bot_owner_id)
         ):
@@ -2307,6 +2313,7 @@ class SkillService:
         skill_id: str,
         user_id: str | None = None,
         authorized_bot_owner_id: str | None = None,
+        collaborator_authorization_verified: bool = False,
     ) -> bool:
         """删除技能 - 同时删除数据库记录和物理文件
 
@@ -2315,6 +2322,8 @@ class SkillService:
             user_id: 当前操作用户ID（用于权限验证）
             authorized_bot_owner_id: 已完成协作者授权时，由 adapter 注入的
                 Bot owner；不接受任何外部请求透传
+            collaborator_authorization_verified: adapter 从 fail-closed
+                协作者拦截器取得的可信授权结论
 
         Returns:
             bool: 删除是否成功
@@ -2332,6 +2341,7 @@ class SkillService:
             skill,
             user_id,
             authorized_bot_owner_id=authorized_bot_owner_id,
+            collaborator_authorization_verified=collaborator_authorization_verified,
         ):
             skill_owner = skill.get('user_id')
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")

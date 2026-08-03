@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
-def _make_service(device_fs, *, runtime_uses_pool_paths=False):
+def _make_service(
+    device_fs,
+    *,
+    runtime_uses_pool_paths=False,
+    device_owner_id: str | None = None,
+):
     """Build SkillService with a mocked device_fs_factory and stubbed deps."""
     from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
@@ -23,9 +28,27 @@ def _make_service(device_fs, *, runtime_uses_pool_paths=False):
         device_fs_factory=factory,
         git_sync_service_factory=MagicMock(),
         runtime_uses_pool_paths=runtime_uses_pool_paths,
+        device_owner_id=device_owner_id,
     )
     svc._skill_repo.list_skill_set_references.return_value = []
     return svc, factory
+
+
+def test_collaborator_delete_requires_explicit_verified_authorization():
+    svc, _ = _make_service(MagicMock(), device_owner_id="owner-1")
+    skill = {"user_id": "owner-1"}
+
+    assert not svc._can_delete_skill(
+        skill,
+        user_id="collaborator-1",
+        authorized_bot_owner_id="owner-1",
+    )
+    assert svc._can_delete_skill(
+        skill,
+        user_id="collaborator-1",
+        authorized_bot_owner_id="owner-1",
+        collaborator_authorization_verified=True,
+    )
 
 
 class TestDeleteSkillStep1:

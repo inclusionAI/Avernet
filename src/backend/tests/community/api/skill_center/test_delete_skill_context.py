@@ -85,6 +85,7 @@ async def _call_delete(
     entity_id=None,
     bot_repo=None,
     bot_record=None,
+    verified_collaborator=False,
 ):
     bot_repo = bot_repo or MagicMock()
     resolved_bot = bot_record or _bot_record()
@@ -113,7 +114,15 @@ async def _call_delete(
         entity_type=None,
         bot_id=None,
         engine_type=engine_type,
-        ctx=RequestContext(user_id=current_user_id, bot_id="default"),
+        ctx=RequestContext(
+            user_id=current_user_id,
+            bot_id="default",
+            metadata=(
+                {"skill_delete_collaborator_authorized": True}
+                if verified_collaborator
+                else {}
+            ),
+        ),
         bot_repo=bot_repo,
         path_factory=path_factory,
         skill_service_factory=factory,
@@ -243,6 +252,7 @@ async def test_authorized_collaborator_can_delete_owner_owned_skill():
         device_fs=device_fs,
         skill_repo=skill_repo,
         current_user_id="authorized-collaborator",
+        verified_collaborator=True,
     )
 
     assert response.success is True
