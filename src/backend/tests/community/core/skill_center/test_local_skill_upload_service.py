@@ -50,6 +50,8 @@ class _Sets:
     def __init__(self, fail_at=None):
         self.default_args = None
         self.fail_at = fail_at
+        self.associations: list[tuple] = []
+        self.exclusions: list[tuple] = []
     def get_default(self, **kwargs):
         self.default_args = kwargs
         return {"id": "4"}
@@ -57,17 +59,21 @@ class _Sets:
     def add_skill_to_set(self, *args, **kwargs):
         if self.fail_at == "association":
             raise RuntimeError("association")
+        self.associations.append(args)
         return True
 
     def remove_skill_from_set(self, *args):
+        self.associations.remove(args)
         return True
 
     def add_default_skill_exclusion(self, *args):
         if self.fail_at == "exclusion":
             return False
+        self.exclusions.append(args)
         return True
 
     def remove_default_skill_exclusion(self, *args):
+        self.exclusions.remove(args)
         return True
 
 
@@ -80,10 +86,11 @@ class _Bot:
 
 
 class _Filesystem:
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, cleanup_results=None):
         self.files: dict[str, bytes] = {}
         self.deleted: list[str] = []
         self.fail = fail
+        self.cleanup_results = iter(cleanup_results or ())
 
     async def write_file(self, path, content):
         if self.fail:
@@ -92,7 +99,10 @@ class _Filesystem:
 
     async def delete_tree(self, path):
         self.deleted.append(path)
-        return True
+        result = next(self.cleanup_results, True)
+        if result:
+            self.files.clear()
+        return result
 
 
 class _Factory:
@@ -122,6 +132,10 @@ class _Storage:
     async def write(self, files):
         for path, content in files:
             await self.filesystem.write_file(f"{self.directory}/{path}", content)
+
+    async def prepare(self):
+        if not await self.filesystem.delete_tree(self.directory):
+            raise OSError("cleanup failed")
 
     async def cleanup(self):
         return await self.filesystem.delete_tree(self.directory)
@@ -170,7 +184,7 @@ async def test_not_ready_and_storage_failure_leave_no_public_skill():
     service = _service(filesystem)
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(bot_id="bot", owner_id="owner", actor_id="owner", package=package)
-    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
 
 
 def test_zip_security_rejects_traversal_and_requires_skill_metadata():
@@ -283,7 +297,7 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
         )
-    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
 
 
 @pytest.mark.asyncio
@@ -297,4 +311,24 @@ async def test_failed_rollback_step_does_not_stop_package_cleanup():
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
         )
-    assert service._skill_service_factory._filesystem.deleted == ["/private/skills-local/upload-skill"]
+    assert service._skill_service_factory._filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
+
+
+@pytest.mark.asyncio
+async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
+    """A residual orphan is not retried into or exposed as a Local Skill."""
+    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    filesystem = _Filesystem(cleanup_results=[True, False])
+    repo = _Repo()
+    sets = _Sets()
+    service = _service(filesystem, repo=repo, sets=sets, audit=_FailAudit())
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        )
+
+    assert repo.created == []
+    assert sets.associations == []
+    assert sets.exclusions == []
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
