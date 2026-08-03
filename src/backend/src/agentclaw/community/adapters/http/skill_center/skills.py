@@ -79,7 +79,10 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     VersionListResponse,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+    BotRepository,
+)
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.errors import (
@@ -2139,8 +2142,31 @@ async def delete_skill(
     effective_bot_id = str(skill.get("bolt_id") or "")
     if not effective_bot_id:
         raise HTTPException(status_code=409, detail="Skill is missing its Bot identity")
+    if bot_id and bot_id != effective_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Skill 持久化归属的 Bot",
+                "bot_id": effective_bot_id,
+            },
+        )
 
-    bot = bot_repo.get_unique_by_id(effective_bot_id)
+    try:
+        bot = (
+            bot_repo.get_by_id_and_entity(effective_bot_id, entity_id)
+            if entity_id
+            else bot_repo.get_unique_by_id(effective_bot_id)
+        )
+    except BotLookupAmbiguousError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_AMBIGUOUS",
+                "message": "历史 Bot ID 不唯一，请提供 entity_id 精确定位",
+                "bot_id": effective_bot_id,
+            },
+        ) from e
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
