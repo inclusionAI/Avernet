@@ -91,6 +91,15 @@ class _Cleanup:
     def record_pending(self, **_kwargs):
         return True
 
+    def list_pending(self, **_kwargs):
+        return []
+
+    def mark_cleaned(self, **_kwargs):
+        return True
+
+    def mark_failed(self, **_kwargs):
+        return True
+
 
 def _package() -> bytes:
     payload = io.BytesIO()

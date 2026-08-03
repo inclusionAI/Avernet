@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
-
 from sqlalchemy import Column, DateTime, Index, Integer, String, Text, UniqueConstraint, func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.plugin_api.models import AutoIncrementBigInteger
 
 
 class LocalSkillCleanupWorkModel(Base):
@@ -17,12 +16,13 @@ class LocalSkillCleanupWorkModel(Base):
     """
 
     __tablename__ = "ac_local_skill_cleanup_work"
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     env = Column(String(20), nullable=False)
     owner_id = Column(String(128), nullable=False)
     bot_id = Column(String(100), nullable=False)
     skill_id = Column(Integer, nullable=False)
     package_locator = Column(String(1024), nullable=False)
+    requires_runtime_restore = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="pending")
     attempts = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
@@ -33,12 +33,3 @@ class LocalSkillCleanupWorkModel(Base):
         UniqueConstraint("env", "owner_id", "bot_id", "package_locator", name="uk_local_skill_cleanup_scope_locator"),
         Index("idx_local_skill_cleanup_pending", "env", "status", "gmt_create"),
     )
-
-
-@runtime_checkable
-class LocalSkillCleanupRepository(Protocol):
-    """Persistence boundary for observable, retriable obsolete-byte cleanup."""
-
-    def record_pending(
-        self, *, env: str, owner_id: str, bot_id: str, skill_id: str, package_locator: str
-    ) -> bool: ...

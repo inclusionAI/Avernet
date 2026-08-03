@@ -1,4 +1,4 @@
-"""Service API for first-time public Local Skill uploads."""
+"""Service API for Local Skill create-or-replace uploads."""
 
 from __future__ import annotations
 

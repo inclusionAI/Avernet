@@ -147,7 +147,7 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.core.skill_center.local_skill_cleanup import (
+from agentclaw.community.plugin_api.local_skill_cleanup import (
     LocalSkillCleanupRepository,
 )
 from agentclaw.community.core.bot_collaborator.protocols import (
