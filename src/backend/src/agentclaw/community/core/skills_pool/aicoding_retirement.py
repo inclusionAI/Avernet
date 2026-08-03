@@ -37,14 +37,12 @@ def is_aicoding_active_mapping_reconciliation_candidate(
     engine: str,
     probe: RuntimeLayoutProbeResult,
 ) -> bool:
-    """Allow one idempotent mapping republish for the retired repo bridge form.
+    """Allow the runtime to evaluate one retired repo-bridge repair.
 
     The old AICoding migration wrote active repo Skills through the stable
     ``~/.aicoding/skills-repo`` bridge.  New probes deliberately reject that
-    indirect target, but the current Pool mapping publisher can rewrite every
-    *currently managed* entry to its direct canonical Pool source.  This is
-    not a general INVALID bypass: the Engine remains the authority for the
-    mapping publish and the caller must probe again before reporting READY.
+    indirect target. The Backend delegates the exact bridge classification and
+    rewrite to the Engine, then probes again before reporting READY.
     """
 
     return (
@@ -56,8 +54,6 @@ def is_aicoding_active_mapping_reconciliation_candidate(
         and probe.layout_contract_version == state.layout_contract_version
         and probe.preparation_id == state.preparation_id
         and probe.evidence.get("reason") == "active_managed_entry_invalid"
-        and probe.evidence.get("implementation_engine") == "aicoding"
-        and probe.evidence.get("physical_layout_engine") == "aicoding"
     )
 
 

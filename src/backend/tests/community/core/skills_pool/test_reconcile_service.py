@@ -399,7 +399,6 @@ class FakeRuntime:
         self.pool_repo = pool_repo or default_repo
         self.events: list[str] = []
         self.probe_results: list[RuntimeLayoutProbeResult] = []
-        self.published_mappings: list[object] | None = None
         self.publish_success = True
         self.verify_success = True
         self.physical_cutovers = 0
@@ -483,7 +482,6 @@ class FakeRuntime:
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
-        self.published_mappings = list(kwargs["mappings"])
         return self.publish_success
 
     async def verify_mappings(self, **kwargs: object) -> bool:
@@ -1950,7 +1948,7 @@ async def test_pool_active_reconciliation_rejects_invalid_current_runtime() -> N
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("logical_engine", ["aicoding", "claude_code"])
-async def test_pool_active_aicoding_bridge_republishes_then_requires_ready_probe(
+async def test_pool_active_aicoding_bridge_uses_engine_repair_then_requires_ready_probe(
     logical_engine: str,
 ) -> None:
     layouts = FakeLayoutRepository(
@@ -1967,21 +1965,9 @@ async def test_pool_active_aicoding_bridge_republishes_then_requires_ready_probe
     initial_probe = replace(
         runtime.probe_result,
         status=RuntimeLayoutProbeStatus.INVALID,
-        evidence={
-            "reason": "active_managed_entry_invalid",
-            "implementation_engine": "aicoding",
-            "physical_layout_engine": "aicoding",
-        },
+        evidence={"reason": "active_managed_entry_invalid"},
     )
-    ready_probe = replace(
-        runtime.probe_result,
-        evidence={
-            **runtime.probe_result.evidence,
-            "implementation_engine": "aicoding",
-            "physical_layout_engine": "aicoding",
-        },
-    )
-    runtime.probe_results = [initial_probe, ready_probe]
+    runtime.probe_results = [initial_probe, runtime.probe_result]
 
     result = await build_service(
         layouts,
@@ -1995,28 +1981,14 @@ async def test_pool_active_aicoding_bridge_republishes_then_requires_ready_probe
     assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
     assert result.evidence["active_aicoding_bridge_reconciled"] is True
     assert result.evidence["reconciled_mapping_count"] == 3
-    assert runtime.events == ["probe", "mapping", "verify", "probe"]
-    assert [mapping.to_dict() for mapping in runtime.published_mappings] == [
-        {
-            "corpus": "local",
-            "relative_path": "local-a",
-            "link_name": "local-a",
-        },
-        {
-            "corpus": "local",
-            "relative_path": "local-b",
-            "link_name": "local-b",
-        },
-        {
-            "corpus": "repo",
-            "relative_path": "business/repo-skill",
-            "link_name": "repo-skill",
-        },
-    ]
+    assert result.evidence["engine_repair"]["status"] == "COMMITTED"
+    assert runtime.events == ["probe", "cutover", "probe"]
 
 
 @pytest.mark.asyncio
-async def test_pool_active_aicoding_bridge_does_not_accept_unproven_republish() -> None:
+async def test_pool_active_aicoding_bridge_does_not_accept_unproven_engine_repair() -> (
+    None
+):
     layouts = FakeLayoutRepository(
         claimed_state(
             active_layout=SkillLayout.POOL,
@@ -2031,11 +2003,7 @@ async def test_pool_active_aicoding_bridge_does_not_accept_unproven_republish() 
     initial_probe = replace(
         runtime.probe_result,
         status=RuntimeLayoutProbeStatus.INVALID,
-        evidence={
-            "reason": "active_managed_entry_invalid",
-            "implementation_engine": "aicoding",
-            "physical_layout_engine": "aicoding",
-        },
+        evidence={"reason": "active_managed_entry_invalid"},
     )
     still_invalid = replace(
         initial_probe,
@@ -2057,7 +2025,7 @@ async def test_pool_active_aicoding_bridge_does_not_accept_unproven_republish() 
     assert (
         result.evidence["reason"] == "active_aicoding_bridge_reconciliation_incomplete"
     )
-    assert runtime.events == ["probe", "mapping", "verify", "probe"]
+    assert runtime.events == ["probe", "cutover", "probe"]
 
 
 @pytest.mark.asyncio
@@ -2080,8 +2048,6 @@ async def test_pool_active_aicoding_bridge_does_not_repair_local_corpus_bridge()
         status=RuntimeLayoutProbeStatus.INVALID,
         evidence={
             "reason": "retired_local_bridge_present",
-            "implementation_engine": "aicoding",
-            "physical_layout_engine": "aicoding",
         },
     )
 
@@ -2092,7 +2058,47 @@ async def test_pool_active_aicoding_bridge_does_not_repair_local_corpus_bridge()
 
     assert result.outcome is SkillsPoolReconcileOutcome.INVALID
     assert runtime.events == ["probe"]
-    assert runtime.published_mappings is None
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_keeps_untrusted_engine_repair_failed() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={"reason": "active_managed_entry_invalid"},
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.INVALID,
+        evidence={"reason": "untrusted_active_bridge"},
+    )
+
+    result = await build_service(layouts, runtime, engine="claude_code").reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is False
+    assert result.evidence["engine_repair"] == {
+        "committed": False,
+        "status": "INVALID",
+        "evidence": {"reason": "untrusted_active_bridge"},
+    }
+    assert runtime.events == ["probe", "cutover"]
 
 
 class StickyClaimService:
