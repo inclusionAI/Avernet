@@ -5,14 +5,17 @@ from pathlib import Path
 import pytest
 import yaml
 
+from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, Server
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
+from gateway.community.spi.authn import Presence, PrincipalType
 
 _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 
 _VARS = {
     "backend_server_url": "http://backend:8080",
     "baas_server_url": "http://baas:9090",
+    "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
 }
 
@@ -68,6 +71,27 @@ def test_shipped_config_loads() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
     assert dm.domain_for("/openapi/v1/bots") is not None
+
+
+def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    collaboration = dm.domain_for("/openapi/v1/collaboration/groups/group-1")
+    assert collaboration is not None
+    assert collaboration.server.name == "bcs"
+    assert collaboration.server.base_url == "http://bcs:8081"
+    assert collaboration.serves_http
+    assert collaboration.rewrite is None
+    assert collaboration.upstream_path("/openapi/v1/collaboration/groups/group-1") == (
+        "/openapi/v1/collaboration/groups/group-1"
+    )
+    assert collaboration.schema.location == "schemas/bcn.openapi.json"
+
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    requirement = security.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.REQUIRED
 
 
 # ── protocols ────────────────────────────────────────────────────────────────

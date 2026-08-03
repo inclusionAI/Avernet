@@ -114,6 +114,31 @@ async def test_forward_strips_inbound_principal_header(
     assert principal_headers[0] != "forged-by-caller"
 
 
+async def test_collaboration_forward_signs_bcs_audience_and_replaces_forgery(
+    app_with_capture: tuple,
+) -> None:
+    app, forwarder = app_with_capture
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get(
+            "/openapi/v1/collaboration/bots/mine",
+            headers={_PRINCIPAL_HEADER: "forged-by-caller"},
+        )
+
+    assert resp.status_code == 200
+    assert forwarder.captured is not None
+    token = forwarder.captured.headers[_PRINCIPAL_HEADER]
+    decoded = jwt.decode(
+        token,
+        _DEV_FALLBACK_KEY,
+        algorithms=["HS256"],
+        audience="bcs",
+        issuer="gateway",
+    )
+    assert decoded["aud"] == "bcs"
+    assert token != "forged-by-caller"
+
+
 async def test_forward_returns_500_when_signing_fails() -> None:
     app = create_app()
     app.state.authenticator = _StubAuthenticator()

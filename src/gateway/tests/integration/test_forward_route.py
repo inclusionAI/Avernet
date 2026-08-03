@@ -83,6 +83,27 @@ async def _stub_upstream(scope: Scope, receive: Receive, send: Send) -> None:
             }
         )
         await send({"type": "http.response.body", "body": body})
+    elif path == "/openapi/v1/collaboration/bots/mine" and method == "GET":
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": b'{"source":"bcs"}'})
+    elif (
+        path == "/openapi/v1/collaboration/groups/group-1/participants/member-1"
+        and method == "PATCH"
+    ):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/octet-stream")],
+            }
+        )
+        await send({"type": "http.response.body", "body": body})
     else:
         await send({"type": "http.response.start", "status": 404, "headers": []})
         await send({"type": "http.response.body", "body": b"upstream 404"})
@@ -111,8 +132,14 @@ def _build() -> tuple[FastAPI, _FakeAuth]:
     app = FastAPI(lifespan=lifespan)
     app.state.domain_map = DomainMap.from_config(
         {
-            "domains": {"bots": {"server": "up"}},
-            "servers": {"up": {"base_url": "http://upstream"}},
+            "domains": {
+                "bots": {"server": "up"},
+                "collaboration": {"server": "bcs"},
+            },
+            "servers": {
+                "up": {"base_url": "http://upstream"},
+                "bcs": {"base_url": "http://upstream"},
+            },
         },
         variables={},
     )
@@ -166,6 +193,26 @@ def test_upload_body_forwarded_verbatim() -> None:
         resp = client.post("/openapi/v1/bots/upload", content=b"raw-bytes-payload")
     assert resp.status_code == 200
     assert resp.content == b"raw-bytes-payload"
+
+
+def test_collaboration_get_forwards_the_verbatim_path() -> None:
+    app, _ = _build()
+    with TestClient(app) as client:
+        resp = client.get("/openapi/v1/collaboration/bots/mine")
+    assert resp.status_code == 200
+    assert resp.json() == {"source": "bcs"}
+
+
+def test_collaboration_patch_forwards_the_body_verbatim() -> None:
+    app, _ = _build()
+    payload = b'{"role":"member"}'
+    with TestClient(app) as client:
+        resp = client.patch(
+            "/openapi/v1/collaboration/groups/group-1/participants/member-1",
+            content=payload,
+        )
+    assert resp.status_code == 200
+    assert resp.content == payload
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
