@@ -1,6 +1,6 @@
 [package]
-name = "bcs-llm-openai-compatible"
-description = "OpenAI-compatible LLM plugin for BCS"
+name = "bcs-llm-anthropic"
+description = "Anthropic Messages API LLM plugin for BCS"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

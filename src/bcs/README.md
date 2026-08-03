@@ -133,6 +133,7 @@ crates/
 │   ├── bcs-cache-local/    # In-memory cache
 │   ├── bcs-db-local/       # SQLite / local persistence
 │   ├── bcs-secret-local/   # Local secret storage
+│   ├── bcs-llm-anthropic/  # Anthropic Messages API LLM plugin
 │   └── bcs-llm-openai-compatible/ # OpenAI-compatible LLM plugin
 ├── external-clients/
 │   └── bcs-fuse-client/            # Context fusion HTTP client
@@ -273,6 +274,29 @@ Key config fields:
 | `default_visibility` | `protected` | Default bot visibility (`public` or `protected`) |
 | `store_messages` | `false` | Persist chat messages to database |
 | `[cors].allowed_origins` | localhost origins | CORS allowed origins for frontend |
+
+To run state-machine LLM judge nodes through the Anthropic Messages API, set
+the API key in the process environment and select the native provider:
+
+```bash
+export ANTHROPIC_API_KEY="..."
+```
+
+```toml
+[llm]
+type = "anthropic"
+base_url = "https://api.anthropic.com"
+api_key_env = "ANTHROPIC_API_KEY"
+model = "claude-sonnet-4-6"
+timeout_ms = 120000
+max_tokens = 4096
+structured_output = "json_schema"
+```
+
+Anthropic supports `json_schema` and `tool_call` for judge output.
+`json_object` is rejected during provider initialization. The Anthropic client
+does not send `temperature`, because current Messages API models may reject
+non-default sampling parameters.
 
 ### Test organization admin-run callbacks locally
 
