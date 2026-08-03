@@ -127,6 +127,31 @@ def test_spawn_build_dag_drops_empty_plan_edges():
     assert any(e.edge_id == "e-good" and e.from_node == "n1" and e.to_node == "n2" for e in g.edges)
 
 
+def test_get_task_graph_serializes_node_properties_to_panel():
+    """get_task_graph → _node_view → TaskNodeView 必须把 node.properties 整包透传,
+    否则 TaskNodeView.properties 取默认 {} → 副屏画布读不到 phase_label/task_spec/
+    plan_summary(spawn_build_dag 挂在那里的任务内容)。"""
+    svc = _service()
+    task = _planned_task(svc)
+    svc.spawn_build_dag(task)
+    graph = svc.get_task_graph(task.id)
+    assert graph is not None
+    by_id = {n["node_id"]: n for n in graph["nodes"]}
+    # recognition:任务明细
+    rec_props = by_id["n_recognition"]["properties"]
+    assert rec_props.get("phase_label") == "任务识别"
+    assert rec_props.get("task_title") == "t"
+    # clarify:任务Spec 五要素
+    cla_props = by_id["n_clarify"]["properties"]
+    assert cla_props.get("phase_label") == "任务明确"
+    assert set(cla_props["task_spec"].keys()) >= {
+        "objective", "background", "constraints", "deliverables", "acceptances",
+    }
+    # execute_start:plan 摘要
+    exe_props = by_id["n_execute_start"]["properties"]
+    assert exe_props["plan_summary"]["sub_task_count"] == 2
+
+
 # --- spawn_sub_dag writes ref, never child state ---------------------------
 
 

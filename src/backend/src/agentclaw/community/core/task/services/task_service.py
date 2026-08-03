@@ -1030,6 +1030,10 @@ class TaskService(GraphStateOpsMixin):
                 {"kind": c.kind.value, "properties": c.properties}
                 for c in n.targets_acceptance
             ],
+            # 透传完整 properties:spawn_build_dag 把任务明细/任务Spec/plan_summary 挂在
+            # node.properties 里(phase_label/task_spec/plan_summary + retry_count 等),
+            # 副屏画布要读这些字段;漏了则 TaskNodeView.properties 取默认 {} → 画布空。
+            "properties": dict(n.properties),
             "sub_dag_ref": self._sub_dag_ref_view(n.sub_dag),
         }
 
