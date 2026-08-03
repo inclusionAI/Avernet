@@ -15,6 +15,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services import local_skill_upload_service as upload_module
 
 
@@ -104,6 +105,9 @@ class _Filesystem:
             self.files.clear()
         return result
 
+    async def exists(self, path):
+        return any(file_path.startswith(f"{path}/") for file_path in self.files)
+
 
 class _Factory:
     def __init__(self, filesystem):
@@ -134,11 +138,22 @@ class _Storage:
             await self.filesystem.write_file(f"{self.directory}/{path}", content)
 
     async def prepare(self):
+        if not await self.filesystem.exists(self.directory):
+            return
         if not await self.filesystem.delete_tree(self.directory):
             raise OSError("cleanup failed")
 
     async def cleanup(self):
         return await self.filesystem.delete_tree(self.directory)
+
+
+@pytest.mark.asyncio
+async def test_package_storage_prepare_accepts_an_absent_first_upload_directory():
+    filesystem = _Filesystem()
+    await LocalSkillPackageStorage(
+        filesystem, "/private/skills-local/upload-skill"
+    ).prepare()
+    assert filesystem.deleted == []
 
 
 class _Collaborators:
@@ -184,7 +199,7 @@ async def test_not_ready_and_storage_failure_leave_no_public_skill():
     service = _service(filesystem)
     with pytest.raises(LocalSkillStorageError):
         await service.upload_local_skill(bot_id="bot", owner_id="owner", actor_id="owner", package=package)
-    assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
 def test_zip_security_rejects_traversal_and_requires_skill_metadata():
@@ -297,7 +312,7 @@ async def test_each_creation_failure_compensates_and_never_returns_success(stage
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
         )
-    assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
 @pytest.mark.asyncio
@@ -311,14 +326,14 @@ async def test_failed_rollback_step_does_not_stop_package_cleanup():
         await service.upload_local_skill(
             bot_id="bot", owner_id="owner", actor_id="owner", package=package
         )
-    assert service._skill_service_factory._filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
+    assert service._skill_service_factory._filesystem.deleted == ["/private/skills-local/upload-skill"]
 
 
 @pytest.mark.asyncio
 async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
     """A residual orphan is not retried into or exposed as a Local Skill."""
     package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
-    filesystem = _Filesystem(cleanup_results=[True, False])
+    filesystem = _Filesystem(cleanup_results=[False, False])
     repo = _Repo()
     sets = _Sets()
     service = _service(filesystem, repo=repo, sets=sets, audit=_FailAudit())
@@ -331,4 +346,21 @@ async def test_failed_final_cleanup_leaves_no_database_authority_or_success():
     assert repo.created == []
     assert sets.associations == []
     assert sets.exclusions == []
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
+
+
+@pytest.mark.asyncio
+async def test_existing_orphan_must_clear_before_a_retry_writes_new_files():
+    filesystem = _Filesystem(cleanup_results=[False, False])
+    filesystem.files["/private/skills-local/upload-skill/stale.txt"] = b"orphan"
+    repo = _Repo()
+    with pytest.raises(LocalSkillStorageError):
+        await _service(filesystem, repo=repo).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"}),
+        )
+    assert repo.created == []
+    assert filesystem.files
     assert filesystem.deleted == ["/private/skills-local/upload-skill"] * 2
