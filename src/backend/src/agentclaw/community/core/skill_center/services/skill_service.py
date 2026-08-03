@@ -55,6 +55,14 @@ class SkillDeleteConsistencyError(RuntimeError):
     """A Skill delete could not safely converge filesystem and database state."""
 
 
+class SkillReferencedBySkillSetError(RuntimeError):
+    """A Skill cannot be deleted while any SkillSet still references it."""
+
+    def __init__(self, skill_set_ids: list[str]) -> None:
+        super().__init__("skill is still referenced by a skill set")
+        self.skill_set_ids = skill_set_ids
+
+
 def _get_default_global_repo_dir() -> Path:
     """Get global skills repo dir — lazy import from config if available."""
     try:
@@ -2287,6 +2295,12 @@ class SkillService:
             skill_owner = skill.get('user_id')
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")
+
+        references = self._skill_repo.list_skill_set_references(skill_id)
+        if references:
+            raise SkillReferencedBySkillSetError(
+                [str(ref["skill_set_id"]) for ref in references]
+            )
 
         # 获取技能名称和路径
         skill_name = skill.get('name')

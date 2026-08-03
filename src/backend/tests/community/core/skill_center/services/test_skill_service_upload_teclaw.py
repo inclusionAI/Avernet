@@ -100,6 +100,7 @@ async def test_non_teclaw_upload_passes_host_path_through_unchanged():
 def _readonly_service(adapter, fake_fs, skill_row) -> SkillService:
     repo = MagicMock()
     repo.get_by_id.return_value = skill_row
+    repo.list_skill_set_references.return_value = []
     svc = SkillService(
         skill_repo=repo,
         skill_repo_sync=MagicMock(get_local_skills_root=MagicMock(return_value=None)),
