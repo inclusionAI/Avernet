@@ -315,6 +315,10 @@ class SkillSetService:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
 
+    def sync_runtime(self) -> bool:
+        """Reconcile this Bot's desired Skill mapping to its runtime."""
+        return self._sync_symlinks_to_device_if_needed(self.entity_id or self.user_id)
+
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
         if "_" in name:
