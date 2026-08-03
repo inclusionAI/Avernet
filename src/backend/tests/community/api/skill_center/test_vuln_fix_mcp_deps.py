@@ -3,16 +3,31 @@
 Verifies that update_skill_mcp_dependencies requires authentication
 and uses authenticated user ID instead of request body user_id.
 """
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.core.auth.models import AuthenticatedIdentity
+from agentclaw.community.adapters.http.dependencies import RequestContext
+from agentclaw.community.adapters.http.skill_center.schemas import (
+    UpdateMCPDependenciesRequest,
+)
+from agentclaw.community.adapters.http.skill_center.skills import (
+    _FailClosedSkillMutationPermissionInterceptor,
+    _extract_skill_mutation_permission,
+    update_skill_mcp_dependencies,
+)
+from agentclaw.community.core.bot_collaborator.interceptor import (
+    CollaboratorPermissionInterceptor,
+    InterceptorContext,
+    PermissionParams,
+)
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 
 
@@ -139,3 +154,125 @@ class TestUpdateSkillMcpDependenciesAuth:
             json={"user_id": "100011", "mcp_dependencies": []},
         )
         assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_non_owner_without_interceptor_grant_is_rejected(self, user_a):
+        """本地 Skill 的协作者必须由前置拦截器显式授权。"""
+        service = MagicMock()
+        service.get_skill.return_value = {
+            "id": 42,
+            "user_id": "bot-owner",
+            "git_path": "local:///workspace/skills-local/test-skill",
+        }
+        endpoint = getattr(
+            update_skill_mcp_dependencies,
+            "__wrapped__",
+            update_skill_mcp_dependencies,
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await endpoint(
+                skill_id="42",
+                request=UpdateMCPDependenciesRequest(mcp_dependencies=[]),
+                user=user_a,
+                http_request=SimpleNamespace(state=SimpleNamespace()),
+                skill_service_factory=MagicMock(create=MagicMock(return_value=service)),
+            )
+
+        assert exc_info.value.status_code == 403
+        service.update_skill.assert_not_called()
+
+
+class TestFailClosedSkillMutationPermissionInterceptor:
+    """覆盖协作者权限异常时的 fail-closed 行为。"""
+
+    @pytest.mark.asyncio
+    async def test_extractor_returns_empty_when_skill_id_or_injector_missing(self):
+        assert await _extract_skill_mutation_permission(
+            "", InterceptorContext()
+        ) == PermissionParams()
+        assert await _extract_skill_mutation_permission(
+            "42", InterceptorContext(injector=None)
+        ) == PermissionParams()
+
+    @pytest.mark.asyncio
+    async def test_extractor_returns_empty_when_skill_lookup_raises(self):
+        injector = MagicMock()
+        injector.get.side_effect = RuntimeError("lookup unavailable")
+
+        result = await _extract_skill_mutation_permission(
+            "42", InterceptorContext(injector=injector)
+        )
+
+        assert result.bot_id is None
+        assert result.owner_id is None
+
+    @pytest.mark.asyncio
+    async def test_global_skill_admin_bypasses_collaborator_lookup(self):
+        interceptor = _FailClosedSkillMutationPermissionInterceptor(
+            authorization_state_key="skill_mutation_authorized"
+        )
+        ctx = InterceptorContext(
+            user=AuthenticatedIdentity(id="1", operatorName="admin", staffId="admin"),
+        )
+
+        with patch(
+            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            return_value={"admin"},
+        ):
+            assert await interceptor.before(ctx) is ctx
+
+        assert ctx.metadata["permission_level"] == "SKILL_ADMIN"
+
+    @pytest.mark.asyncio
+    async def test_collaborator_permission_service_failure_is_fail_closed(self):
+        interceptor = _FailClosedSkillMutationPermissionInterceptor(
+            authorization_state_key="skill_mutation_authorized"
+        )
+        ctx = InterceptorContext(
+            user=AuthenticatedIdentity(id="1", operatorName="collab", staffId="collab"),
+            metadata={"_log_user_id": "collab", "_log_owner_id": "owner"},
+        )
+
+        with patch(
+            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            return_value=set(),
+        ), patch.object(
+            CollaboratorPermissionInterceptor,
+            "before",
+            new=AsyncMock(return_value=ctx),
+        ):
+            assert await interceptor.before(ctx) is None
+
+        assert ctx.response.error_code == 503
+
+    @pytest.mark.asyncio
+    async def test_verified_collaborator_grant_reaches_request_context(self):
+        interceptor = _FailClosedSkillMutationPermissionInterceptor(
+            authorization_state_key="skill_mutation_authorized"
+        )
+        request = SimpleNamespace(state=SimpleNamespace())
+        request_context = RequestContext(user_id="collab")
+        ctx = InterceptorContext(
+            user=AuthenticatedIdentity(id="1", operatorName="collab", staffId="collab"),
+            request=request,
+            route_kwargs={"ctx": request_context},
+            metadata={
+                "_log_user_id": "collab",
+                "_log_owner_id": "owner",
+                "permission_level": "ADMIN",
+            },
+        )
+
+        with patch(
+            "agentclaw.community.adapters.http.skill_center.skills.skill_admin",
+            return_value=set(),
+        ), patch.object(
+            CollaboratorPermissionInterceptor,
+            "before",
+            new=AsyncMock(return_value=ctx),
+        ):
+            assert await interceptor.before(ctx) is ctx
+
+        assert request.state.skill_mutation_authorized is True
+        assert request_context.metadata["skill_mutation_authorized"] is True
