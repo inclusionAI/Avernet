@@ -52,13 +52,27 @@ def test_every_route_begins_with_the_bots_prefix():
     assert not offenders, f"routes outside {_BOTS_PREFIX}: {offenders}"
 
 
-def test_every_route_is_scoped_to_a_single_bot():
+#: Each group's component segment, which its paths must name before ``{bot_id}``.
+_COMPONENTS = ("sessions", "engine", "models", "approvals", "connection")
+
+
+def test_every_route_names_its_component_then_the_bot():
+    """The surface's addressing rule, asserted for the groups that broke it.
+
+    These five used to be mounted at ``/openapi/v1/bots/{bot_id}/<component>``,
+    which put the wildcard ahead of the component and made a router file unable
+    to state its own address. Every path must now be
+    ``/openapi/v1/bots/<component>/{bot_id}/…``.
+    """
     offenders = [
         r.path
         for r in _engine_runtime_routes()
-        if not r.path.startswith(f"{_BOTS_PREFIX}{{bot_id}}")
+        if not any(
+            r.path.startswith(f"{_BOTS_PREFIX}{component}/{{bot_id}}")
+            for component in _COMPONENTS
+        )
     ]
-    assert not offenders, f"routes not bot-scoped: {offenders}"
+    assert not offenders, f"routes not <component>/{{bot_id}}-shaped: {offenders}"
 
 
 def test_the_surface_is_the_agreed_size():
@@ -69,26 +83,28 @@ def test_the_surface_is_the_agreed_size():
 def test_groups_are_mounted_and_reachable_in_the_public_router():
     paths = set(_document()["paths"])
     for expected in (
-        f"{_BOTS_PREFIX}{{bot_id}}/sessions",
-        f"{_BOTS_PREFIX}{{bot_id}}/engine/capabilities",
-        f"{_BOTS_PREFIX}{{bot_id}}/models",
-        f"{_BOTS_PREFIX}{{bot_id}}/approvals/mode",
-        f"{_BOTS_PREFIX}{{bot_id}}/connection",
+        f"{_BOTS_PREFIX}sessions/{{bot_id}}",
+        f"{_BOTS_PREFIX}engine/{{bot_id}}/capabilities",
+        f"{_BOTS_PREFIX}models/{{bot_id}}",
+        f"{_BOTS_PREFIX}approvals/{{bot_id}}/mode",
+        f"{_BOTS_PREFIX}connection/{{bot_id}}",
     ):
         assert expected in paths, f"{expected} not mounted"
 
 
 def test_literal_groups_are_registered_before_the_bot_id_wildcard():
-    """``/openapi/v1/bots/mcp`` must not be swallowed by ``{bot_id}``.
+    """A single-segment literal must not be swallowed by ``{bot_id}``.
 
     A pre-existing Track B invariant, re-asserted because Track C inserts five
     routers into the same assembly. Registration order is what decides it, and
-    the document preserves it.
+    the document preserves it. ``resources`` and ``routines`` are the cases that
+    still depend on it — they serve their own collection roots one segment under
+    ``/openapi/v1/bots``, exactly where the bots wildcard also matches.
     """
     order = list(_document()["paths"])
-    assert order.index(f"{_BOTS_PREFIX}mcp/servers") < order.index(
-        f"{_BOTS_PREFIX}{{bot_id}}"
-    )
+    wildcard = order.index(f"{_BOTS_PREFIX}{{bot_id}}")
+    for literal in ("resources", "routines", "mcp/servers"):
+        assert order.index(f"{_BOTS_PREFIX}{literal}") < wildcard, literal
 
 
 def test_engine_runtime_routes_document_501_and_504():
