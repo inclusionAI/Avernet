@@ -465,31 +465,9 @@ story_user_runs_and_shares_sessions() {
 }
 
 _story_connect_with_group_session_jwt() {
-    info "Session connection: issue a real JWT and complete the public WebSocket Upgrade"
-    local group_body
-    group_body="{\"group_kind\":\"dm\",\"driver_bot\":\"${BOT_PM_UUID}\",\"target_actor_id\":\"${BOT_PM_UUID}\",\"participants\":[{\"bot_uuid\":\"${BOT_PM_UUID}\"}]}"
-    api_post "/groups" "$group_body"
-    require_status "human creates a DM group for the session connection" "200" || return
-    local group_id
-    group_id=$(json_path "$RESPONSE" "id")
-    assert_not_empty "session connection group has an id" "$group_id"
-    [[ -n "$group_id" ]] || return
-
-    api_post "/groups/${group_id}/sessions" \
-        "{\"created_by\":\"human_${BCS_MOCK_USER_ID}\",\"session_title\":\"JWT connection E2E\"}"
-    if ! require_status "human creates a session for the JWT connection" "201"; then
-        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
-        return
-    fi
-    local session_id
-    session_id=$(json_path "$RESPONSE" "session_id")
-    assert_not_empty "JWT connection session has an id" "$session_id"
-    if [[ -z "$session_id" ]]; then
-        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
-        return
-    fi
-
-    local signing_key principal probe
+    info "Public collaboration API: authenticate, manage a session, and complete the WebSocket Upgrade"
+    local public_prefix signing_key principal probe
+    public_prefix="/openapi/v1/collaboration"
     signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
     probe="${SCRIPT_DIR}/group_session_ws_probe.py"
     if ! principal=$(python3 "$probe" principal \
@@ -500,16 +478,109 @@ _story_connect_with_group_session_jwt() {
         fail "Gateway Principal generation failed"
         TESTS_FAILED=$((TESTS_FAILED + 1))
         TESTS_TOTAL=$((TESTS_TOTAL + 1))
-        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
         return
     fi
 
+    _api_request GET "${public_prefix}/groups?kind=all"
+    require_status "public collaboration API rejects a missing Gateway Principal" "401" || true
+    assert_json_eq "missing Principal uses the stable error envelope" \
+        "$RESPONSE" "data.error_code" "unauthenticated"
+
+    api_request_headers POST "${public_prefix}/groups" \
+        "{\"group_kind\":\"dm\",\"target_actor_id\":\"${BOT_PM_UUID}\",\"originator\":\"untrusted\"}" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "public collaboration API rejects unknown request fields" "400" || true
+    assert_json_eq "invalid public request uses the stable error envelope" \
+        "$RESPONSE" "data.error_code" "invalid_request"
+
+    api_request_headers GET "${public_prefix}/bots/mine?limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "authenticated human lists owned bots through the public API" "200" || true
+
+    api_request_headers POST "${public_prefix}/bots/query" \
+        "{\"bot_ids\":[\"${BOT_PM_UUID}\",\"${BOT_ENG_UUID}\"]}" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "authenticated human queries collaboration bots through the public API" "200" || true
+
+    api_request_headers GET "${public_prefix}/bots/${BOT_PM_UUID}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "authenticated human reads a collaboration bot through the public API" "200" || true
+    assert_json_eq "public bot read identifies product manager" \
+        "$RESPONSE" "data.bot_id" "$BOT_PM_UUID"
+
+    local group_body group_id
+    group_body="{\"group_kind\":\"normal\",\"name\":\"JWT connection E2E\",\"context\":\"Validate the public collaboration connection\",\"visibility\":\"private\",\"driver_bot_uuid\":\"${BOT_PM_UUID}\",\"participants\":[{\"actor_id\":\"${BOT_PM_UUID}\",\"role\":\"driver\"},{\"actor_id\":\"${BOT_ENG_UUID}\",\"role\":\"consultant\"}],\"collaboration\":{\"strategy\":\"chat\",\"delivery_policy\":{\"bot_final_delivery\":\"send_to_driver\"}}}"
+    api_request_headers POST "${public_prefix}/groups" "$group_body" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human creates a collaboration group through the public API" "201" || return
+    group_id=$(json_path "$RESPONSE" "data.group_id")
+    assert_not_empty "public collaboration group has an id" "$group_id"
+    [[ -n "$group_id" ]] || return
+
+    api_request_headers GET "${public_prefix}/groups?kind=all&membership=all&limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human lists collaboration groups through the public API" "200" || true
+
+    api_request_headers GET "${public_prefix}/groups/${group_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human reads the collaboration group through the public API" "200" || true
+    assert_json_eq "public group read keeps the created id" \
+        "$RESPONSE" "data.group_id" "$group_id"
+
+    api_request_headers PATCH "${public_prefix}/groups/${group_id}" \
+        '{"name":"JWT connection E2E updated"}' \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human updates the collaboration group through the public API" "200" || true
+    assert_json_eq "public group update keeps the new name" \
+        "$RESPONSE" "data.name" "JWT connection E2E updated"
+
+    local session_body session_id
+    session_body="{\"driver_bot_uuid\":\"${BOT_PM_UUID}\",\"participants\":[{\"bot_uuid\":\"${BOT_PM_UUID}\"},{\"bot_uuid\":\"${BOT_ENG_UUID}\",\"mode\":\"muted\"}],\"title\":\"JWT connection E2E\",\"input\":{\"query\":\"Validate the public WebSocket connection\"}}"
+    api_request_headers POST "${public_prefix}/groups/${group_id}/sessions" "$session_body" \
+        "X-Avernet-Principal: ${principal}"
+    if ! require_status "human creates a session through the public API" "201"; then
+        api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        return
+    fi
+    session_id=$(json_path "$RESPONSE" "data.session_id")
+    assert_not_empty "public collaboration session has an id" "$session_id"
+    if [[ -z "$session_id" ]]; then
+        api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        return
+    fi
+
+    api_request_headers GET "${public_prefix}/groups/${group_id}/sessions?limit=20" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human lists group sessions through the public API" "200" || true
+
+    api_request_headers GET "${public_prefix}/sessions/${session_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human reads the collaboration session through the public API" "200" || true
+    assert_json_eq "public session read keeps the created id" \
+        "$RESPONSE" "data.session_id" "$session_id"
+
+    api_request_headers PATCH "${public_prefix}/sessions/${session_id}" \
+        '{"title":"JWT connection E2E updated"}' \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human updates the collaboration session through the public API" "200" || true
+    assert_json_eq "public session update keeps the new title" \
+        "$RESPONSE" "data.title" "JWT connection E2E updated"
+
+    api_request_headers GET "${public_prefix}/sessions/${session_id}/messages?limit=50" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human reads session messages through the public API" "200" || true
+
     api_request_headers POST \
-        "/openapi/v1/collaboration/sessions/${session_id}/token" \
+        "${public_prefix}/sessions/${session_id}/token" \
         "" \
         "X-Avernet-Principal: ${principal}"
     if ! require_status "authenticated human obtains a session connection JWT" "200"; then
-        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        api_request_headers DELETE "${public_prefix}/sessions/${session_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+            "X-Avernet-Principal: ${principal}"
         return
     fi
     local response_headers connection_token
@@ -519,7 +590,10 @@ _story_connect_with_group_session_jwt() {
     connection_token=$(json_path "$RESPONSE" "data.token")
     assert_not_empty "session connection JWT is present" "$connection_token"
     if [[ -z "$connection_token" ]]; then
-        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        api_request_headers DELETE "${public_prefix}/sessions/${session_id}" "" \
+            "X-Avernet-Principal: ${principal}"
+        api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+            "X-Avernet-Principal: ${principal}"
         return
     fi
 
@@ -530,7 +604,10 @@ _story_connect_with_group_session_jwt() {
             fail "session connection E2E requires an http:// BCS base URL"
             TESTS_FAILED=$((TESTS_FAILED + 1))
             TESTS_TOTAL=$((TESTS_TOTAL + 1))
-            api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+            api_request_headers DELETE "${public_prefix}/sessions/${session_id}" "" \
+                "X-Avernet-Principal: ${principal}"
+            api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+                "X-Avernet-Principal: ${principal}"
             return
             ;;
     esac
@@ -543,7 +620,18 @@ _story_connect_with_group_session_jwt() {
         TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
     TESTS_TOTAL=$((TESTS_TOTAL + 1))
-    api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+
+    api_request_headers DELETE "${public_prefix}/sessions/${session_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human deletes the collaboration session through the public API" "200" || true
+    assert_json_eq "public session deletion is acknowledged" \
+        "$RESPONSE" "data.deleted" "true"
+
+    api_request_headers DELETE "${public_prefix}/groups/${group_id}" "" \
+        "X-Avernet-Principal: ${principal}"
+    require_status "human deletes the collaboration group through the public API" "200" || true
+    assert_json_eq "public group deletion is acknowledged" \
+        "$RESPONSE" "data.deleted" "true"
 }
 
 _story_complete_and_invoke_sessions() {
