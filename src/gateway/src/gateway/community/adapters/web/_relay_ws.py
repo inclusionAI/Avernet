@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from starlette.websockets import WebSocket
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
@@ -186,15 +186,37 @@ async def forward_websocket(websocket: WebSocket) -> None:
     try:
         cm = state.ws_forwarder.connect(request)
         upstream = await cm.__aenter__()
+    # Deliberately ``Exception`` and not ``BaseException``: a cancellation here
+    # has nothing to unwind. The context manager never entered, so there is no
+    # ``__aexit__`` owed, and the socket library releases its own transport when
+    # its dial is cancelled. Catching it would only turn a cancelled worker into
+    # a refusal the caller is no longer there to read.
     except Exception:
         logger.warning("relay upstream unavailable", exc_info=True)
         await _refuse(websocket, _CLOSE_UPSTREAM_UNAVAILABLE, "upstream unavailable")
         return
 
+    # Past this point the upstream is open and the exit is owed unconditionally
+    # — whatever the client does next, and whether the relay ends cleanly, by
+    # exception, or by cancellation.
     try:
-        # Echoed, not guessed: the upstream has already negotiated, so the
-        # client is told exactly what the socket behind it agreed to.
-        await websocket.accept(subprotocol=upstream.subprotocol or None)
+        try:
+            # Echoed, not guessed: the upstream has already negotiated, so the
+            # client is told exactly what the socket behind it agreed to.
+            await websocket.accept(subprotocol=upstream.subprotocol or None)
+        except (RuntimeError, WebSocketDisconnect):
+            # The client gave up while the dial was in flight. Its
+            # ``websocket.disconnect`` is then what ``accept`` reads in place of
+            # the ``websocket.connect`` it expects, and Starlette reports that
+            # mismatch as a ``RuntimeError``. Under load that is an ordinary
+            # race rather than a fault: nobody is left to accept, and nothing
+            # to refuse. Swallowed here rather than left to escape the
+            # endpoint, because one unhandled traceback per abandoned handshake
+            # buries the single warning above that explains a *real* upstream
+            # failure — which is exactly how a capacity investigation loses the
+            # only log line that mattered.
+            logger.debug("client left before the relay accepted", exc_info=True)
+            return
         await _relay(websocket, upstream)
     finally:
         await cm.__aexit__(None, None, None)
@@ -310,9 +332,14 @@ async def _upstream_headers(
 
 
 async def _refuse(websocket: WebSocket, code: int, reason: str) -> None:
-    """Reject the handshake, never having accepted it."""
+    """Reject the handshake, never having accepted it.
+
+    Closed quietly: every refusal races a caller that may already have hung up,
+    and the reason it is being refused is worth more than the failure to say so.
+    Letting that raise would replace the logged cause with a close-time error.
+    """
     logger.info("engine socket refused (%s): %s", code, reason)
-    await websocket.close(code=code, reason=_truncate_reason(reason))
+    await _quietly(websocket.close(code=code, reason=_truncate_reason(reason)))
 
 
 async def _relay(websocket: WebSocket, upstream: WebSocketUpstream) -> None:
