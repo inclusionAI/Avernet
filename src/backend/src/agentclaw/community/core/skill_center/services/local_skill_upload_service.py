@@ -121,16 +121,29 @@ class LocalSkillUploadService:
         except (LocalSkillInvalidPackageError, LocalSkillDuplicateError):
             raise
         except Exception as exc:  # details remain internal; public mapper is fixed
+            # Compensation must continue after a failed rollback step: a failed
+            # association delete must never prevent package cleanup.
             if excluded and skill is not None:
-                self._skill_repo.remove_default_skill_exclusion(
-                    owner_id, bot_id, int(default_set["id"]), int(skill["id"])
-                )
+                try:
+                    self._skill_repo.remove_default_skill_exclusion(
+                        owner_id, bot_id, int(default_set["id"]), int(skill["id"])
+                    )
+                except Exception:
+                    pass
             if associated and skill is not None:
-                self._skill_set_repo.remove_skill_from_set(default_set["id"], skill["id"])
+                try:
+                    self._skill_set_repo.remove_skill_from_set(default_set["id"], skill["id"])
+                except Exception:
+                    pass
             if skill is not None:
-                self._skill_repo.delete(skill["id"])
-            if not await storage.cleanup():
-                raise LocalSkillStorageError()
+                try:
+                    self._skill_repo.delete(skill["id"])
+                except Exception:
+                    pass
+            try:
+                await storage.cleanup()
+            except Exception:
+                pass
             raise LocalSkillStorageError() from exc
 
     def _authorize(self, bot_id: str, owner_id: str, actor_id: str) -> dict[str, Any]:
