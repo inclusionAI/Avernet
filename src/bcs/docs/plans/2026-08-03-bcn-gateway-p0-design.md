@@ -256,6 +256,16 @@ Focused automated evidence must cover:
 - WebSocket pre-Upgrade rejection for missing, forged, expired, and
   wrong-purpose tokens;
 - valid WebSocket Upgrade with the exact immutable User/Group/Session binding;
+- a coverage-gated external-process story that creates a real Human-owned
+  session, signs a local Gateway Principal with the documented development
+  trust, obtains a real session JWT from the token endpoint, and completes a
+  `101 Switching Protocols` handshake on the public message WebSocket. The
+  story stops at connection/authentication and does not duplicate Workbench
+  message-frame tests;
+- local `env` secret-provider behavior: a missing named secret returns
+  `404/not_found`; the distinct `noop` provider's `503/unavailable` behavior
+  remains covered by a focused provider test rather than by the shared
+  environment story;
 - connect-time scope mismatch and revoked-access rejection, without duplicating
   chat, streaming, attachment, abort, or event-delivery cases;
 - Gateway WebSocket domain resolution, anonymous handshake rule, path/query
