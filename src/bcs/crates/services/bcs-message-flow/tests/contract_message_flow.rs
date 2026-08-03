@@ -609,6 +609,151 @@ async fn session_history_denies_human_with_no_session_or_group_stake() {
 }
 
 #[tokio::test]
+async fn session_history_rejects_public_caller() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Public,
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("public session history reads must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Unauthorized(_)),
+        "expected Unauthorized, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_owner_when_not_in_session_and_owns_no_session_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .save_created_by("bot-observer", "1", true)
+        .await
+        .unwrap();
+
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group ownership alone must not grant session history access");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_participant_bot_not_in_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-observer".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group participant bot must be rejected when absent from the session");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_non_participant_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "intruder-bot".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("non-participant bot must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn session_history_resolves_from_prefix_using_session_participants() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -752,7 +897,9 @@ async fn session_history_v3_falls_back_to_session_key_when_explicit_session_requ
 
     let result = history
         .get_session_history(SessionHistoryCommand {
-            caller: CallerContext::Public,
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-driver".to_string(),
+            }),
             group_id: "group-1".to_string(),
             session_id: "group-1:abcdef12".to_string(),
             session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],

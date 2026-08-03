@@ -588,6 +588,22 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
         &self,
         cmd: SessionHistoryCommand,
     ) -> Result<SessionHistoryResult, GroupUseCaseError> {
+        let session_member = match &cmd.caller {
+            CallerContext::Human(human) => cmd
+                .session_participants
+                .iter()
+                .any(|participant| participant.bot_uuid == human.actor_id),
+            CallerContext::Bot(bot) => cmd
+                .session_participants
+                .iter()
+                .any(|participant| participant.bot_uuid == bot.bot_uuid),
+            _ => false,
+        };
+        if !session_member {
+            return Err(GroupUseCaseError::Forbidden(
+                "caller is not a session participant".to_string(),
+            ));
+        }
         self.session_calls.lock().await.push(cmd.clone());
         Ok(SessionHistoryResult {
             session_id: cmd.session_id,
@@ -855,6 +871,97 @@ async fn group_chat_missing_group_preserves_legacy_404_before_auth() {
 }
 
 #[tokio::test]
+async fn session_messages_without_identity_returns_unauthorized() {
+    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
+        build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/group-1:abcdef12/messages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(group_message_history.session_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn session_messages_authenticated_human_uses_history_service_without_view_bot() {
+    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
+        build_group_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/group-1:abcdef12/messages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let session_calls = group_message_history.session_calls.lock().await;
+    assert_eq!(session_calls.len(), 1);
+    assert_eq!(session_calls[0].view_bot_id, None);
+    assert!(matches!(
+        &session_calls[0].caller,
+        CallerContext::Human(human)
+            if human.actor_id == "human_123" && human.staff_no == "123"
+    ));
+}
+
+#[tokio::test]
+async fn session_messages_non_session_human_returns_forbidden() {
+    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
+        build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(static_auth_chain(
+            "456", "Intruder",
+        ))))
+        .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/group-1:abcdef12/messages")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(group_message_history.session_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn session_messages_non_participant_bot_token_returns_forbidden() {
+    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
+        build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/group-1:abcdef12/messages")
+                .header("authorization", "Bearer intruder-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(group_message_history.session_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn session_messages_uses_history_service() {
     let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
         build_group_app().await;
@@ -1118,7 +1225,10 @@ async fn state_machine_session_messages_use_runtime_history() {
     let session = test_session(
         "sm-group:abcdef12",
         "sm-group",
-        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+        vec![
+            Participant::bot("driver-bot", ParticipantRole::Driver),
+            Participant::human("human_123", ParticipantRole::Observer),
+        ],
     );
     let group_message_history = Arc::new(RecordingGroupMessageHistory::default());
     let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
@@ -1147,7 +1257,11 @@ async fn state_machine_session_messages_use_runtime_history() {
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.group_message_history = group_message_history.clone();
     services.collaboration_runtime = collaboration_runtime.clone();
-    let app = build_router(HttpAppState::new(services));
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(
+            static_auth_chain("123", "Owner"),
+        ))),
+    );
 
     let response = app
         .oneshot(
@@ -1174,6 +1288,194 @@ async fn state_machine_session_messages_use_runtime_history() {
     );
     let calls = collaboration_runtime.calls.lock().await;
     assert_eq!(calls.as_slice(), &[("sm-group:abcdef12".to_string(), 20, None)]);
+}
+
+#[tokio::test]
+async fn state_machine_session_messages_non_session_human_returns_forbidden() {
+    let mut group = Group::new(
+        "sm-group-human-forbidden",
+        "driver-bot",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+
+    let session = test_session(
+        "sm-group-human-forbidden:abcdef12",
+        "sm-group-human-forbidden",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: vec![],
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.collaboration_runtime = collaboration_runtime.clone();
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(
+            static_auth_chain("456", "Intruder"),
+        ))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/sm-group-human-forbidden:abcdef12/messages?limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(collaboration_runtime.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn state_machine_session_messages_group_only_bot_returns_forbidden() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    registry
+        .register(
+            "driver-bot".to_string(),
+            BotCapabilities {
+                name: Some("Driver".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .register(
+            "intruder-bot".to_string(),
+            BotCapabilities {
+                name: Some("Intruder".to_string()),
+                visibility: "public".to_string(),
+                ..BotCapabilities::default()
+            },
+        )
+        .await
+        .unwrap();
+    registry
+        .store_token_mapping(
+            "intruder-token".to_string(),
+            "intruder-bot".to_string(),
+        )
+        .await;
+
+    let mut group = Group::new(
+        "sm-group-bot-forbidden",
+        "driver-bot",
+        vec![
+            Participant::bot("driver-bot", ParticipantRole::Driver),
+            Participant::bot("intruder-bot", ParticipantRole::Observer),
+        ],
+    );
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+
+    let session = test_session(
+        "sm-group-bot-forbidden:abcdef12",
+        "sm-group-bot-forbidden",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: vec![],
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.registry = registry;
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.collaboration_runtime = collaboration_runtime.clone();
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/sm-group-bot-forbidden:abcdef12/messages?limit=20")
+                .header("authorization", "Bearer intruder-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(collaboration_runtime.calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn state_machine_session_messages_without_identity_returns_unauthorized() {
+    let mut group = Group::new(
+        "sm-group-no-auth",
+        "driver-bot",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+
+    let session = test_session(
+        "sm-group-no-auth:abcdef12",
+        "sm-group-no-auth",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: vec![],
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.collaboration_runtime = collaboration_runtime.clone();
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/sm-group-no-auth:abcdef12/messages?limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(collaboration_runtime.calls.lock().await.is_empty());
 }
 
 #[tokio::test]
