@@ -557,7 +557,7 @@ async fn get_session_returns_detail() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1",
+            "/openapi/v1/group-sessions/session-1",
             Value::Null,
         ))
         .await
@@ -583,7 +583,7 @@ async fn update_session_returns_updated_detail() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/sessions/session-1",
+            "/openapi/v1/group-sessions/session-1",
             json!({"title": "Renamed"}),
         ))
         .await
@@ -610,7 +610,7 @@ async fn delete_session_returns_deleted() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/sessions/session-1",
+            "/openapi/v1/group-sessions/session-1",
             Value::Null,
         ))
         .await
@@ -636,7 +636,7 @@ async fn complete_session_returns_completion_result() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/sessions/session-1/completion",
+            "/openapi/v1/group-sessions/session-1/completion",
             Value::Null,
         ))
         .await
@@ -664,7 +664,7 @@ async fn list_session_messages_returns_cursor_page() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1/messages?limit=50",
+            "/openapi/v1/group-sessions/session-1/messages?limit=50",
             Value::Null,
         ))
         .await
@@ -696,7 +696,7 @@ async fn list_session_messages_passes_opaque_before_cursor_through() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1/messages?before=1234567890:42&limit=10",
+            "/openapi/v1/group-sessions/session-1/messages?before=1234567890:42&limit=10",
             Value::Null,
         ))
         .await
@@ -723,7 +723,7 @@ async fn list_session_messages_passes_view_bot_id_through() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1/messages?limit=50&view_bot_id=bot-xyz",
+            "/openapi/v1/group-sessions/session-1/messages?limit=50&view_bot_id=bot-xyz",
             Value::Null,
         ))
         .await
@@ -764,7 +764,7 @@ async fn list_session_messages_surfaces_next_cursor_when_has_more() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/sessions/session-1/messages?limit=1",
+            "/openapi/v1/group-sessions/session-1/messages?limit=1",
             Value::Null,
         ))
         .await
@@ -784,7 +784,7 @@ async fn add_session_participant_returns_participant() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/sessions/session-1/participants",
+            "/openapi/v1/group-sessions/session-1/participants",
             json!({"bot_uuid": "bot-2", "mode": "muted"}),
         ))
         .await
@@ -813,7 +813,7 @@ async fn update_session_participant_returns_updated_mode() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/sessions/session-1/participants/bot-2",
+            "/openapi/v1/group-sessions/session-1/participants/bot-2",
             json!({"mode": "muted"}),
         ))
         .await
@@ -841,7 +841,7 @@ async fn remove_session_participant_returns_deleted() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/sessions/session-1/participants/bot-2",
+            "/openapi/v1/group-sessions/session-1/participants/bot-2",
             Value::Null,
         ))
         .await
@@ -886,7 +886,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
     let patch_response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/sessions/session-1",
+            "/openapi/v1/group-sessions/session-1",
             json!({"title": "Renamed", "extra": 1}),
         ))
         .await
@@ -905,7 +905,7 @@ async fn missing_principal_returns_unauthenticated() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/sessions/session-1")
+                .uri("/openapi/v1/group-sessions/session-1")
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -917,6 +917,28 @@ async fn missing_principal_returns_unauthenticated() {
 }
 
 #[tokio::test]
+async fn legacy_global_session_paths_are_not_mounted() {
+    let session = Arc::new(FakeSessionService::default());
+    let message = Arc::new(FakeSessionMessageService::default());
+    let app = test_session_router(session.clone(), message.clone());
+
+    for uri in [
+        "/openapi/v1/sessions/session-1",
+        "/openapi/v1/sessions/session-1/messages",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(authenticated_request("GET", uri, Value::Null))
+            .await
+            .expect("legacy path response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
+
+    assert!(session.got.lock().expect("get lock").is_none());
+    assert!(message.listed.lock().expect("list messages lock").is_none());
+}
+
+#[tokio::test]
 async fn update_session_participant_requires_mode() {
     let session = Arc::new(FakeSessionService::default());
     let message = Arc::new(FakeSessionMessageService::default());
@@ -925,7 +947,7 @@ async fn update_session_participant_requires_mode() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/sessions/session-1/participants/bot-2",
+            "/openapi/v1/group-sessions/session-1/participants/bot-2",
             json!({}),
         ))
         .await

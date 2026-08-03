@@ -18,7 +18,7 @@ pub fn router() -> Router<ApiState> {
             post(create_group_invitation),
         )
         .route(
-            "/openapi/v1/sessions/{session_id}/invitations",
+            "/openapi/v1/group-sessions/{session_id}/invitations",
             post(create_session_invitation),
         )
         .route(
