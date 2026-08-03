@@ -1853,35 +1853,14 @@ class SkillService:
         device_fs = self._device_fs_factory(bolt_id, user_id)
         # POOL_ACTIVE 后 DB locator 已经是 Pool canonical 绝对路径。重传同名
         # 本地技能时必须继续使用该 locator；否则会写到 Legacy bridge 后又以
-        # Legacy locator 新建一条重复记录。
-        #
-        # 正常查询必须始终带 Bot owner。尤其 ``default`` 是多个 owner 可共用的
-        # Bot ID，不能为修复历史 collaborator metadata 而做无 owner 的 name
-        # 查询，否则会命中另一位 owner 的同名本地 Skill。历史修复仅允许精确
-        # 命中本次 Bot layout 推导出的 locator；该路径包含 owner/entity + bot，
-        # 因而不会跨 Bot 取数。
-        expected_skill_dir = self._local_skill_locator_adapter(
-            str(self.local_dir / skill_name)
-        )
-        expected_skill_path = f"local://{expected_skill_dir}"
+        # Legacy locator 新建一条重复记录。查询必须始终带 Bot owner：历史
+        # collaborator metadata 由离线 DB 订正处理，在线请求不从不完整 locator
+        # 猜测记录归属，避免 ``default`` / desktop / teclaw 场景跨 owner 命中。
         existing_skill = self._skill_repo.get_bot_local_by_name(
             bot_id=bolt_id or "default",
             name=skill_name,
             user_id=user_id,
         )
-        # Teclaw 的逻辑 locator 是 ``local://skills-local/<name>``，不携带
-        # owner/workspace 身份，不能据此修复历史 collaborator 行；否则共享
-        # ``default`` Bot 的不同 owner 会发生跨 owner 命中。只有 owner-qualified
-        # 的绝对 locator 才允许这条历史兼容分支。
-        if existing_skill is None and Path(expected_skill_dir).is_absolute():
-            historical_skill = self._skill_repo.get_by_git_path(expected_skill_path)
-            if (
-                historical_skill is not None
-                and str(historical_skill.get("bolt_id") or "default")
-                == (bolt_id or "default")
-                and historical_skill.get("name") == skill_name
-            ):
-                existing_skill = historical_skill
         existing_locator = (
             str(existing_skill["git_path"])[len("local://") :]
             if existing_skill is not None
