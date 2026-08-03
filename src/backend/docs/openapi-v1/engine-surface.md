@@ -181,7 +181,7 @@ sockets, never proxypass topology:
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<gateway>/openapi/v1/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
+      "url": "wss://<gateway>/openapi/v1/bots/messages/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -212,23 +212,28 @@ Rules this endpoint must hold:
   this same socket the same way. _Corrected 2026-07-31._
 - **The address is the gateway's, not the hop behind it.** The published origin
   comes from the `gateway` config block (`base_url` / `base_url_pre`, selected
-  by env), under an `/openapi/v1/engine/{target}{path}` prefix the gateway
+  by env), under an `/openapi/v1/bots/messages/{target}{path}` prefix the gateway
   rewrites onto that hop. A deployment that fronts no gateway — the community
   build's normal state — is a named upstream error, not a 500 and not a
   published address nothing serves. The prefix sits inside the published API
-  namespace, not at the host root: `engine` is an ordinary gateway domain,
-  resolved by the same leading-segment lookup as `bots`, so the socket lives in
-  the same surface as the endpoint that hands it out. _Corrected 2026-08-02._
+  namespace, not at the host root, and inside the `bots` scope rather than
+  beside it: the gateway resolves domains by path pattern, so this prefix is
+  served by the engine proxy while everything else under `/openapi/v1/bots/**`
+  is served by this service. The leading segment names the **owner** of the
+  surface, not the process behind it, and management and runtime here are one
+  owner. Claimed on the socket plane only, so an HTTP request to the same
+  address still reaches this service. _Moved 2026-08-03; previously
+  `/openapi/v1/engine`._
 - **The provider's URL is re-addressed, not rebuilt.** The device connection is
   still requested in **`ws_conn_mode="relay"`**, and the provider still builds a
   finished URL around the engine path it is given — that path passthrough is why
   a `claude_code` bot is not handed openclaw's default and rejected with 4001 on
   connect. Exactly two things then change: the origin becomes the gateway's, and
-  the hop's `/proxypass/` prefix becomes `/openapi/v1/engine/`. Everything past that prefix
+  the hop's `/proxypass/` prefix becomes `/openapi/v1/bots/messages/`. Everything past that prefix
   — target, engine path, any query the provider set — is carried through as the
   provider wrote it, so this endpoint holds no opinion about a URL grammar it
   does not own and cannot silently drop a part it did not anticipate. A provider
-  URL of a shape the `/engine` prefix cannot express — BaaS's LOCAL platform
+  URL of a shape the `/openapi/v1/bots/messages` prefix cannot express — BaaS's LOCAL platform
   answers `/wsrelay/{session_id}` — is refused rather than published, so a wrong
   assumption surfaces server-side instead of as a socket that will not open.
   _Corrected 2026-07-31._

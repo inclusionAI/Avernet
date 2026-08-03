@@ -195,7 +195,7 @@
         add one so both stay parseable.
 - **Depends on:** Task 8
 
-## Task 10: Update the engine-surface docs and regenerate the pinned artifact
+## [x] Task 10: Update the engine-surface docs and regenerate the pinned artifact
 
 - **Goal:** Published documentation and the gateway's pinned OpenAPI artifact
   quote the new socket address.
@@ -204,12 +204,12 @@
   - `src/backend/docs/openapi-v1/engine-surface.zh-CN.md`
   - `src/gateway/configs/schemas/bots.openapi.json`
 - **Done when:**
-  - [ ] Both documents quote `wss://<gateway>/openapi/v1/bots/messages/…` and
+  - [x] Both documents quote `wss://<gateway>/openapi/v1/bots/messages/…` and
         describe the rewrite against the new prefix.
-  - [ ] `bots.openapi.json` is regenerated via `dump_openapi.py` +
+  - [x] `bots.openapi.json` is regenerated via `dump_openapi.py` +
         `gate_and_publish_openapi.py` — the *paths* do not change, but the socket
         URL appears as an example value in two places.
-  - [ ] `src/gateway/tests/fixtures/bots.openapi.json` is **not** regenerated —
+  - [x] `src/gateway/tests/fixtures/bots.openapi.json` is **not** regenerated —
         it is a hand-written fixture, not a copy.
 - **Depends on:** Task 8, Task 9
 
