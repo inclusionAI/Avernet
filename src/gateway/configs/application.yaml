@@ -179,6 +179,9 @@ user_config:
   #                                    each upstream publishes its dumped doc to an
   #                                    object store on deploy, gateway auto-adopts
   #                                    the latest via background refresh)
+  #   source: http          → `url`  (any deployed edition;
+  #                                    fetches the latest published description
+  #                                    from an HTTP endpoint with background refresh)
   # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
   # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
   # routing/auth/forwarding never read it.

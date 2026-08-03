@@ -43,6 +43,10 @@ def build_forwarding(
             if domain.schema.source == "file" and domain.schema.location:
                 sources[name] = config.config_dir / domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
+    for name, domain in domain_map.domains.items():
+        if domain.schema.source == "http" and domain.schema.location:
+            sources[name] = domain.schema.location
+            refresh_seconds = float(domain.schema.refresh_seconds)
     if sources and hasattr(catalog, "set_sources"):
         catalog.set_sources(sources)
         if hasattr(catalog, "refresh_all"):
