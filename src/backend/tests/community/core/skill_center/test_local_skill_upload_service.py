@@ -179,6 +179,8 @@ def test_zip_security_rejects_traversal_and_requires_skill_metadata():
         service._unpack(_zip({"../SKILL.md": b"name: bad\ndescription: nope\n"}))
     with pytest.raises(LocalSkillInvalidPackageError):
         service._unpack(_zip({"SKILL.md": b"name: bad\n"}))
+    with pytest.raises(LocalSkillInvalidPackageError):
+        service._unpack(_zip({"SKILL.md": b"name: bad\ndescription: \xff\n"}))
 
 
 def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
