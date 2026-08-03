@@ -271,15 +271,19 @@ class TestGenerateBotId:
         return repo
 
     def test_generate_first_bot_id(self, mock_bot_repository):
-        """Test generating bot_id for first bot returns 'default'."""
+        """generate_bot_id always returns a globally-unique id (never 'default')."""
         from agentclaw.community.core.bot_management.services.bot_service import generate_bot_id
 
+        # Regression pin: scenario that used to yield 'default'; new impl must still not.
         mock_bot_repository.exists_by_owner_and_bot_id.return_value = False
 
         result = generate_bot_id("123456", mock_bot_repository)
 
-        assert result == "default"
-        mock_bot_repository.exists_by_owner_and_bot_id.assert_called_once_with("123456", "default")
+        assert result != "default"
+        assert len(result) == 17  # 8位日期 + 1位下划线 + 8位随机字符
+        assert "_" in result
+        # id 分配不再依赖 owner 历史
+        mock_bot_repository.exists_by_owner_and_bot_id.assert_not_called()
 
     def test_generate_non_first_bot_id(self, mock_bot_repository):
         """Test generating bot_id for non-first bot returns date-based id."""

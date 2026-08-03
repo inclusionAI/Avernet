@@ -1897,3 +1897,31 @@ class TestBotChatServiceHealthCheck:
 
         assert result.status == "unhealthy"
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# _check_bot_access — no "default"/"{user_id}_default" shortcut (Task 6)
+# ---------------------------------------------------------------------------
+
+class TestCheckBotAccessNoDefaultShortcut:
+
+    @pytest.fixture
+    def service(self):
+        mock_db = MagicMock()
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+
+    def test_historical_default_still_goes_through_has_bot_access(self, service):
+        """The retired "default" literal must go through has_bot_access, not short-circuit."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = True
+
+        assert service._check_bot_access("user001", "default") is True
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "default")
+
+    def test_user_default_form_also_uses_has_bot_access(self, service):
+        """The retired "{user_id}_default" form must go through has_bot_access."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = False
+
+        assert service._check_bot_access("user001", "user001_default") is False
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "user001_default")

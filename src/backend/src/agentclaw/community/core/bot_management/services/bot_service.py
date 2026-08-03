@@ -257,56 +257,17 @@ def _copy_tree_fast(src: Path, dst: Path, symlinks: bool = True) -> None:
 
 
 def generate_bot_id(owner_id: str, bot_repository: BotRepository) -> str:
+    """Return a globally-unique bot_id.
+
+    Never returns 'default' — that convention is retired. ``bot_repository`` is
+    retained in the signature for call-site compatibility; id allocation no
+    longer depends on owner history.
     """
-    Generate bot_id based on owner's bot history.
-
-    Rules:
-    - In the default tenant, if the user has no bot with id "default", return
-      "default"
-    - Otherwise, return "yyyymmdd_{random_8_chars}"
-
-    The ``"default"`` shortcut is confined to the default tenant on purpose.
-    ``bot_id`` is unique only per owner *per tenant*, and the read below goes
-    through the ``BotModel`` tenant guard — so a second tenant asking "does this
-    owner already have a 'default' bot?" cannot see the first tenant's row and
-    correctly answers no. Both tenants would then mint ``bot_id="default"`` for
-    the same owner, and the identities we derive from it are handed to systems
-    that have no tenant field to tell them apart: the passport service's
-    principal, keyed on ``(bot_id, owner)``; the ``agent_code`` it issues for
-    that principal; and the coordination-network record keyed on
-    ``"{bot_id}:{owner_id}"``.
-
-    A generated ``yyyymmdd_xxxxxxxx`` id is unique on its own, so restricting
-    the shortcut keeps every external identity collision-free without changing
-    a single external contract. Existing bots are unaffected: they all belong to
-    the default tenant and keep ``"default"``.
-
-    Args:
-        owner_id: Owner user ID
-        bot_repository: Bot Repository
-
-    Returns:
-        Bot ID as string ("default" or "yyyymmdd_xxxx")
-    """
-    # Check if owner already has a bot with id "default"
-    if (
-        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
-        and not bot_repository.exists_by_owner_and_bot_id(owner_id, "default")
-    ):
-        logger.info(f"[bot_service.generate_bot_id] Owner {owner_id} has no 'default' bot, using 'default' as bot_id")
-        return "default"
-
-    # Generate date-based id with random suffix
+    # owner_id retained as the semantic subject (whose bot); not used in id allocation.
+    del bot_repository  # unused; kept for call-site compatibility
     date_part = datetime.now().strftime("%Y%m%d")
-    # Generate 8 random lowercase letters and digits
-    random_part = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    bot_id = f"{date_part}_{random_part}"
-    logger.info(
-        f"[bot_service.generate_bot_id] Owner {owner_id} is not eligible for the "
-        f"'default' bot_id (tenant={get_current_avernet_tenant()}), "
-        f"using generated bot_id: {bot_id}"
-    )
-    return bot_id
+    random_part = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    return f"{date_part}_{random_part}"
 
 
 class BotService:
@@ -833,25 +794,7 @@ class BotService:
             return None
 
     def is_first_bot(self, user_id: str) -> bool:
-        """
-        Check whether the user has no bots yet.
-
-        Asks the repository how many bots the owner has rather than testing for
-        a bot with id ``"default"``. The id test was a proxy that only held while
-        every owner's first bot was ``"default"``; ``generate_bot_id`` confines
-        that shortcut to the default tenant, so in any other tenant a genuinely
-        first bot carries a generated id and the proxy would answer False —
-        sending the create flow down the non-first-bot Passport branch.
-
-        Must be called before the new bot's row is inserted; both call sites
-        (:meth:`_resolve_bot_name` and ``create_flow``) run pre-insert.
-
-        Args:
-            user_id: User ID to check
-
-        Returns:
-            True if the user owns no bots, False otherwise
-        """
+        """First bot iff the owner has zero bots (current env; tenant enforced by guard)."""
         return self._repository.count_by_owner(user_id) == 0
 
     def _check_bot_count_limit(self, owner_id: str) -> None:
@@ -3214,15 +3157,25 @@ class BotService:
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
-            # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
+            # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
+            # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
+            # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
             # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
             # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
             # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
             # 4xx 映射。
-            if bot_id == "default":
-                raise BotOperationNotAllowedError("default bot 不允许删除")
+            _total_owner_bots, owner_bot_items = self._repository.list_by_owner(user_id, 1, 1000)
+            if owner_bot_items:
+                # gmt_create可能是 datetime 或 ISO 字符串;统一成字符串排序,避免类型混比。
+                # 空值兜底为空串(ISO 字符串排序下排最前,等同"最早")。
+                earliest = min(
+                    owner_bot_items,
+                    key=lambda b: str(b.get("gmt_create") or ""),
+                )
+                earliest_bot_id = earliest.get("bot_id")
+                if earliest_bot_id and bot_id == earliest_bot_id:
+                    raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
@@ -4649,7 +4602,14 @@ class BotService:
         logger.info(f"[bot_service.refresh_passport_token] Starting refresh for bot_id={bot_id}, user_id={user_id}")
 
         # 1. 获取 bot 并校验权限
-        bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+        # 回调走 /api 前缀 → AvernetTenantMiddleware 套 DEFAULT 租户 teamclaw,
+        # 但外部租户 bot 的 passport 刷新需跨租户直查。(bot_id, owner_workno)
+        # 全局唯一,跨租户直查安全。
+        bot = self._repository.get_by_id_and_owner(
+            bot_id,
+            user_id,
+            execution_options={"skip_avernet_tenant_guard": True},
+        )
         if not bot:
             logger.warning(f"[bot_service.refresh_passport_token] Bot not found: bot_id={bot_id}, user_id={user_id}")
             raise BotNotFoundError(f"Bot not found: {bot_id}")

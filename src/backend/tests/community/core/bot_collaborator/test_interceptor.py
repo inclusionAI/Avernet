@@ -639,24 +639,33 @@ class TestResolveOwnerId:
     def setup_method(self):
         self.user = AuthenticatedIdentity(id="1", operatorName="test", staffId="user_001")
 
-    def test_resolves_default_bot_to_current_user(self):
-        """bot_id 为 "default" 时返回当前用户 ID。"""
+    def test_historical_default_bot_id_short_circuits_to_caller(self):
+        """存量 bot_id="default" 保留短路 → 返回当前 user_id。
+
+        单租户内每 owner 都有一条 bot_id="default",repo.get_by_id("default")
+        会歧义命中任意 owner 的 default bot,导致串户;旧语义 default=我自己的 bot,
+        保留短路避免协作者鉴权用错 owner_id。新 bot 永不为 default,此分支仅命中存量。
+        """
+        interceptor = CollaboratorPermissionInterceptor()
+        ctx = InterceptorContext(
+            user=self.user, route_kwargs={}, injector=MagicMock(),
+        )
+
+        mock_repo = MagicMock()
+        ctx.injector.get.return_value = mock_repo
+
+        owner = interceptor._resolve_owner_id(ctx, "default", "user001")
+        assert owner == "user001"
+        # default 短路:不走 repo.get_by_id(避免歧义)
+        mock_repo.get_by_id.assert_not_called()
+
+    def test_missing_bot_id_returns_current_user(self):
+        """bot_id 缺失(None/空) → 返回当前 user_id(语义=我的 bot),保持短路。"""
         interceptor = CollaboratorPermissionInterceptor()
         ctx = InterceptorContext(user=self.user, route_kwargs={})
 
-        result = interceptor._resolve_owner_id(ctx, "default", "user_001")
-        assert result == "user_001"
-
-    def test_resolves_empty_bot_id_to_current_user(self):
-        """bot_id 为空时返回当前用户 ID。"""
-        interceptor = CollaboratorPermissionInterceptor()
-        ctx = InterceptorContext(user=self.user, route_kwargs={})
-
-        result = interceptor._resolve_owner_id(ctx, None, "user_001")
-        assert result == "user_001"
-
-        result = interceptor._resolve_owner_id(ctx, "", "user_001")
-        assert result == "user_001"
+        assert interceptor._resolve_owner_id(ctx, None, "user_001") == "user_001"
+        assert interceptor._resolve_owner_id(ctx, "", "user_001") == "user_001"
 
     def test_resolves_bot_id_via_repo(self):
         """通过 BotRepository.get_by_id 解析 bot 归属。"""

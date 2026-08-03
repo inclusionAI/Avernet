@@ -1,20 +1,21 @@
-"""``bot_id`` never collides across tenants, and "first bot" is a data question.
+"""``bot_id`` is globally unique; "first bot" is a data question.
 
-``bot_id`` is unique only per owner *per tenant*, and the ``"default"`` shortcut
-in ``generate_bot_id`` reads through the ``BotModel`` tenant guard — so a second
-tenant asking "does this owner already have a 'default' bot?" cannot see the
-first tenant's row and correctly answers no. Both tenants would then mint
-``bot_id="default"`` for the same owner, and every identity derived from it is
-handed to a system with no tenant field to disambiguate it: the Passport /
-AgentPass principal keyed on ``(botId, ownerWorkno)``, the ``agent_code``
-AgentPass returns, and the BCN record keyed on ``"{bot_id}:{owner_id}"``.
+Historically ``generate_bot_id`` returned ``"default"`` for an owner's first
+bot (confined to the default tenant after the partial #556 fix). That id was
+unique only per owner *per tenant*, yet every identity derived from it — the
+Passport / AgentPass principal keyed on ``(botId, ownerWorkno)``, the issued
+``agent_code``, and the BCN record keyed on ``"{bot_id}:{owner_id}"`` — carries
+no tenant field to disambiguate it, so two tenants sharing a principal
+collapsed to one record.
 
-Confining the shortcut to the default tenant fixes all of them at the source,
-with no change to any external contract. Two properties have to hold together:
+The full fix retires the ``"default"`` shortcut entirely: ``generate_bot_id``
+always returns a globally-unique ``yyyymmdd_xxxxxxxx`` id, so the collision is
+impossible at the source regardless of tenant. Properties that must hold:
 
-1. Non-default tenants never mint ``"default"`` (the fix), **and**
-2. the default tenant's ids are byte-identical to before (no re-keying of
-   Passport principals or BCN records that already exist).
+1. No tenant ever mints ``"default"`` (the retirement), **and**
+2. ``is_first_bot`` is derived from ``count_by_owner == 0`` (a data question,
+   not an id-string proxy), so a genuinely-first bot in any tenant still picks
+   ``apply_first_agent_passport``.
 
 Regression for issue #556.
 """
@@ -35,7 +36,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def repo_without_default():
-    """An owner who has no ``"default"`` bot yet in the current tenant."""
+    """Repository stub (shape kept; id allocation no longer reads it)."""
     repo = MagicMock()
     repo.exists_by_owner_and_bot_id.return_value = False
     return repo
@@ -48,64 +49,52 @@ def _bare_service(repository) -> BotService:
     return svc
 
 
-class TestDefaultTenantIsUnchanged:
-    """The fix must not re-key any identity that already exists."""
+class TestGenerateBotIdIsGloballyUnique:
+    """The retirement: every tenant gets a generated id, never ``"default"``."""
 
-    def test_default_tenant_still_mints_default(self, repo_without_default):
+    def test_default_tenant_never_mints_default(self, repo_without_default):
         with avernet_tenant_scope(DEFAULT_AVERNET_TENANT):
-            assert generate_bot_id("85020", repo_without_default) == "default"
-
-    def test_outside_any_request_still_mints_default(self, repo_without_default):
-        # get_current_avernet_tenant() is total: background work and ad-hoc
-        # scripts run as the default tenant, and must keep the old behavior.
-        assert generate_bot_id("85020", repo_without_default) == "default"
-
-    def test_default_tenant_second_bot_is_generated(self):
-        repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
-
-        with avernet_tenant_scope(DEFAULT_AVERNET_TENANT):
-            bot_id = generate_bot_id("85020", repo)
-
+            bot_id = generate_bot_id("85020", repo_without_default)
         assert bot_id != "default"
         assert len(bot_id) == 17  # yyyymmdd + "_" + 8 random chars
 
-
-class TestOtherTenantsNeverMintDefault:
-    """The collision itself: same owner, two tenants, distinct ids."""
+    def test_outside_any_request_never_mints_default(self, repo_without_default):
+        # get_current_avernet_tenant() is total: background work and ad-hoc
+        # scripts run as the default tenant, and still get a generated id.
+        bot_id = generate_bot_id("85020", repo_without_default)
+        assert bot_id != "default"
+        assert len(bot_id) == 17
 
     def test_non_default_tenant_gets_generated_id(self, repo_without_default):
         with avernet_tenant_scope("acme"):
             bot_id = generate_bot_id("85020", repo_without_default)
-
         assert bot_id != "default"
         assert len(bot_id) == 17
 
     def test_same_owner_across_tenants_does_not_collide(self, repo_without_default):
-        """The exact scenario in #556: every owner's first bot was "default"."""
+        """The exact scenario in #556: same owner, two tenants, distinct ids."""
         with avernet_tenant_scope(DEFAULT_AVERNET_TENANT):
             first = generate_bot_id("85020", repo_without_default)
         with avernet_tenant_scope("acme"):
             second = generate_bot_id("85020", repo_without_default)
-
-        assert first == "default"
-        assert second != first
+        assert first != "default"
+        assert second != "default"
+        assert first != second
 
     def test_two_non_default_tenants_do_not_collide(self, repo_without_default):
         with avernet_tenant_scope("acme"):
             first = generate_bot_id("85020", repo_without_default)
         with avernet_tenant_scope("globex"):
             second = generate_bot_id("85020", repo_without_default)
-
         assert first != "default"
         assert second != "default"
         assert first != second
 
-    def test_shortcut_read_is_skipped_entirely(self, repo_without_default):
-        """No point asking a tenant-scoped question whose answer cannot be used."""
-        with avernet_tenant_scope("acme"):
+    def test_allocation_does_not_consult_owner_history(self, repo_without_default):
+        """Id allocation no longer depends on exists_by_owner_and_bot_id."""
+        with avernet_tenant_scope(DEFAULT_AVERNET_TENANT):
             generate_bot_id("85020", repo_without_default)
-
+        # The retired "default" shortcut read this; the new impl must not.
         repo_without_default.exists_by_owner_and_bot_id.assert_not_called()
 
 
@@ -114,8 +103,8 @@ class TestIsFirstBotIsDataDriven:
 
     It selects ``apply_first_agent_passport`` vs ``apply_agent_passport`` in
     ``create_flow``. Inferring it from the id string answers False for a
-    genuinely-first bot in any tenant that does not mint ``"default"``, which
-    would send a brand-new owner down the non-first-bot Passport branch.
+    genuinely-first bot in any tenant, which would send a brand-new owner down
+    the non-first-bot Passport branch.
     """
 
     def test_no_bots_is_first(self):

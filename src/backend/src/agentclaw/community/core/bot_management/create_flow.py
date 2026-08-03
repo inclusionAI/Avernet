@@ -34,6 +34,10 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    get_current_avernet_tenant,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -201,11 +205,13 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    apply = (
-        passport_plugin.apply_first_agent_passport
-        if is_first_bot
-        else passport_plugin.apply_agent_passport
-    )
+    # 默认租户:首 bot → applyFirst(跳过审批),非首 → applyAgent(走审批)。
+    # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
+    # 且 applyFirst 对重复调用幂等,故不依赖 is_first_bot。见 #556 的根因修复。
+    if get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT and not is_first_bot:
+        apply = passport_plugin.apply_agent_passport
+    else:
+        apply = passport_plugin.apply_first_agent_passport
     try:
         return apply(
             bot_id=bot_id,
@@ -326,13 +332,6 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    # Ask the repository, not the id. ``bot_id == "default"`` was a proxy that
-    # held only while every owner's first bot was "default"; ``generate_bot_id``
-    # confines that shortcut to the default tenant, so elsewhere a genuinely
-    # first bot carries a generated id and the proxy would pick
-    # ``apply_agent_passport`` for an owner who has never had a Passport.
-    # Safe here because the new bot's row is not inserted until ``create_bot``,
-    # further down this flow.
     is_first_bot = bot_service.is_first_bot(user_id)
 
     # Pre-flight before Passport, so quota, name, and reserved-bot engine

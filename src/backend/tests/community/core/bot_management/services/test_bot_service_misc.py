@@ -59,6 +59,12 @@ def _make_bot(
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
     svc._repository = MagicMock()
+    # Default: target bot (bot001) is NOT the owner's earliest (deletion allowed).
+    # Earliest-bot protection tests MUST override list_by_owner to make the target earliest.
+    # A forgotten override here silently passes — see TestDeleteBotProtection.
+    _target = {"bot_id": "bot001", "gmt_create": "2026-12-31 23:59:59"}
+    _earliest = {"bot_id": "20260101_earliest", "gmt_create": "2026-01-01 00:00:00"}
+    svc._repository.list_by_owner.return_value = (2, [_target, _earliest])
     svc._passport_plugin = MagicMock()
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
@@ -89,28 +95,34 @@ def _make_service() -> BotService:
 
 
 class TestGenerateBotId:
+    """generate_bot_id now always returns a globally-unique id (never 'default')."""
 
-    def test_first_bot_returns_default(self):
+    def test_never_returns_default(self):
         repo = MagicMock()
+        # Regression pin: scenario that used to yield 'default'; new impl must still not.
         repo.exists_by_owner_and_bot_id.return_value = False
-        assert generate_bot_id("user001", repo) == "default"
-
-    def test_second_bot_returns_date_based_id(self):
-        repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         assert bot_id != "default"
-        assert len(bot_id) == 17  # yyyymmdd + _ + 8 chars
 
-    def test_generated_id_format(self):
+    def test_format_is_date_underscore_random8(self):
         repo = MagicMock()
-        repo.exists_by_owner_and_bot_id.return_value = True
         bot_id = generate_bot_id("user001", repo)
         parts = bot_id.split("_")
         assert len(parts) == 2
-        assert len(parts[0]) == 8  # date part
-        assert len(parts[1]) == 8  # random part
-        assert parts[0].isdigit()
+        assert len(parts[0]) == 8 and parts[0].isdigit()  # yyyymmdd
+        assert len(parts[1]) == 8  # 8 lowercase/digit chars
+
+    def test_successive_calls_are_unique(self):
+        repo = MagicMock()
+        ids = {generate_bot_id("user001", repo) for _ in range(50)}
+        assert len(ids) == 50  # 36^8 space → collision-improbable
+
+    def test_ignores_owner_default_history(self):
+        # Id allocation no longer consults owner history at all.
+        repo = MagicMock()
+        bot_id = generate_bot_id("user001", repo)
+        assert bot_id != "default"
+        repo.exists_by_owner_and_bot_id.assert_not_called()
 
 
 # ===========================================================================
@@ -544,8 +556,8 @@ class TestDeleteBot:
             svc.delete_bot("bot001", "user001")
         svc._repository.soft_delete_by_owner.assert_not_called()
 
-    def test_default_bot_delete_is_forbidden(self):
-        """default bot 是用户的常驻默认 Bot,不允许删除(重启请走 restart_bot)。
+    def test_last_bot_delete_is_forbidden(self):
+        """删除 owner 最后一只 Bot 被拒(保留≥1),不再按 bot_id=='default' 拦截。
 
         拦截必须发生在 release_device / destroy_passport / soft_delete 之前,
         否则会误销毁 agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
@@ -553,8 +565,12 @@ class TestDeleteBot:
         svc = _make_service()
         bot = _make_bot(bot_id="default", binding_id=42)
         svc._repository.get_by_id_and_owner.return_value = bot
+        # target bot 是 owner 唯一/最早创建 → earliest 保护命中
+        svc._repository.list_by_owner.return_value = (1, [{
+            "bot_id": "default", "gmt_create": "2026-07-01 00:00:00",
+        }])
 
-        with pytest.raises(BotServiceError, match="default bot 不允许删除"):
+        with pytest.raises(BotServiceError, match="首个创建"):
             svc.delete_bot("default", "user001")
 
         # 许可证未销毁、设备未释放、bot 记录未删、脏数据未清理
@@ -586,6 +602,54 @@ class TestDeleteBot:
 
         result = svc.delete_bot("mybot", "user001")
         assert result is True
+
+
+# ===========================================================================
+# delete_bot — earliest-bot protection (cannot delete the owner's first created bot)
+# ===========================================================================
+
+
+class TestDeleteBotProtection:
+    """delete_bot 拒绝删除 owner 名下最早创建的 bot (首 bot 受保护),
+    不再按 bot_id=='default'。含 owner 仅一只的情形（earliest 即该只 → 拒）。"""
+
+    def _svc(self, bots: list, bot: dict | None):
+        svc = _make_service()
+        svc._repository.list_by_owner.return_value = (len(bots), bots)
+        svc._repository.get_by_id_and_owner.return_value = bot or _make_bot()
+        return svc
+
+    def test_earliest_bot_rejected_when_two_bots(self):
+        """两个 bot 时,删最早的（不是 default）会被拒。"""
+        earliest = {"bot_id": "20260701_aaaaaaaa", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_bbbbbbbb", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([earliest, later], _make_bot(bot_id="20260701_aaaaaaaa"))
+        with pytest.raises(BotServiceError, match="首个创建"):
+            svc.delete_bot(bot_id="20260701_aaaaaaaa", user_id="user001")
+
+    def test_non_earliest_allowed(self):
+        """两个 bot 时,删较新的那只允许。"""
+        earliest = {"bot_id": "20260701_aaaaaaaa", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_bbbbbbbb", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([earliest, later], _make_bot(bot_id="20260731_bbbbbbbb", binding_id=None))
+        svc.delete_bot(bot_id="20260731_bbbbbbbb", user_id="user001")  # 不抛
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_default_bot_deletable_when_not_earliest(self):
+        """行为变化:default 字面值不再受特殊保护;只要不是 earliest 即可删。"""
+        earliest = {"bot_id": "20260630_otherxxx", "gmt_create": "2026-06-30 00:00:00"}
+        default_bot = {"bot_id": "default", "gmt_create": "2026-07-15 00:00:00"}
+        svc = self._svc([earliest, default_bot], _make_bot(bot_id="default", binding_id=None))
+        svc.delete_bot(bot_id="default", user_id="user001")
+        svc._repository.soft_delete_by_owner.assert_called_once()
+
+    def test_default_bot_rejected_when_earliest(self):
+        """存量 default bot 作为 earliest 时仍受保护。"""
+        default_bot = {"bot_id": "default", "gmt_create": "2026-07-01 00:00:00"}
+        later = {"bot_id": "20260731_newerbot", "gmt_create": "2026-07-31 00:00:00"}
+        svc = self._svc([default_bot, later], _make_bot(bot_id="default", binding_id=None))
+        with pytest.raises(BotServiceError, match="首个创建"):
+            svc.delete_bot(bot_id="default", user_id="user001")
 
 
 # ===========================================================================
