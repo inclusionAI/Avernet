@@ -693,40 +693,33 @@ _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: 5 in stub + 2 proposed ★) · `openapi_v1/skills/router.py`
-Two resource families under one component: a global catalog at
-`/openapi/v1/bots/skills/catalog`, and a bot's installed skills at
-`/openapi/v1/bots/skills/{bot_id}`.
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: Track B contract ratified) · `openapi_v1/skills/router.py`
+The Skills public API uses the `/openapi/v1/bots/skills` route group. Local
+Skill upload and lifecycle operations belong to a specific bot.
 
-> **Why the catalog needs a literal `catalog` segment.** Under the addressing
-> rule the bot-scoped family takes `/openapi/v1/bots/skills/{bot_id}`. A catalog
-> detail at `/openapi/v1/bots/skills/{skill_id}` would occupy the same slot with
-> a different meaning — two wildcards at one depth, which no ordering rule can
-> tell apart. `catalog` is the same device the surface already uses for
-> `check-name` and `ceiling`. Declaration order inside the router is what keeps
-> the literal ahead of `{bot_id}`; the file says so.
+> **Ratified with totalfrank.** Existing Local Skills are stored through a bot's
+> device file system; they are not reusable tenant-global assets. Track B
+> therefore uses a per-bot **upload** → **activate/deactivate** → **delete**
+> lifecycle and does not expose a separate installation concept. Reusable
+> tenant-level Skills are deferred until Skill Center provides independent
+> storage and distribution. `skill_id` maps to `ac_skill.id` and uniquely
+> identifies a Skill, so requests do not repeat `bot_id` except when uploading
+> or listing the active Skills of a bot.
 
-> **Co-owned — the trickiest category.** Skills has a three-layer lifecycle
-> (global **upload** → per-bot **install** → per-bot **enable/disable**), two ★
-> endpoints not yet ratified into the stubs, and an open question on whether the
-> richer backend skill-set model gets promoted to a first-class concept. Because
-> of that, **both** own it. Agree a shared sub-plan first — e.g. split
-> catalog/upload vs. per-bot install/lifecycle — and give it its own SDD before
-> writing code. Do it after your P1/P2 slices.
-
-The **Status** column marks whether each endpoint is already in the router stub
-(`in stub`) or a proposed addition from PR #363 (`★ proposed` — not in the stubs
-yet; ratify with totalfrank before implementing).
+In the **Status** column, `in stub` means the current router stub already has
+the ratified path and semantics. `ratified (stub update pending)` means the
+Track B contract is settled, but the implementation PR must add or replace the
+current stub.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills/catalog` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
-| GET | `/openapi/v1/bots/skills/catalog/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST ★ | `/openapi/v1/bots/skills/catalog/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` | ★ proposed |
-| GET | `/openapi/v1/bots/skills/{bot_id}` | List a bot's installed skills | `Envelope[list[BotSkill]]` | in stub |
-| POST | `/openapi/v1/bots/skills/{bot_id}` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` | in stub |
-| PATCH ★ | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` | ★ proposed |
-| DELETE | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` | in stub |
+| GET | `/openapi/v1/bots/skills` | Skill list (`keyword`, paged; no Skill marketplace) | `Envelope[Page[Skill]]` | in stub |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
+| POST | `/openapi/v1/bots/skills/{bot_id}/upload` | Upload a Local Skill to a bot | `Envelope[Skill]` | ratified (stub update pending) |
+| GET | `/openapi/v1/bots/skills/{bot_id}/active` | List a bot's active Skills | `Envelope[list[BotSkill]]` | ratified (stub update pending) |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | ratified (stub update pending) |
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.

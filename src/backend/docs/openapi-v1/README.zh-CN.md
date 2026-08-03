@@ -616,34 +616,26 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
-一个组件下的两类资源：全局目录在 `/openapi/v1/bots/skills/catalog`，某个 Agent 已安装的
-技能在 `/openapi/v1/bots/skills/{bot_id}`。
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：Track B 已定案）· `openapi_v1/skills/router.py`
+Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上传和生命周期属于指定 Bot。
 
-> **目录为什么需要一个字面的 `catalog` 段。** 按寻址规则，带 Agent 作用域的那一类占用
-> `/openapi/v1/bots/skills/{bot_id}`；而目录详情若写成 `/openapi/v1/bots/skills/{skill_id}`，
-> 就会以不同含义占据同一个位置 —— 同一深度上的两个通配，任何顺序规则都无法区分。`catalog`
-> 用的正是本界面已经在 `check-name`、`ceiling` 上使用过的手法。让字面量排在 `{bot_id}`
-> 之前靠的是路由内的声明顺序，文件里已写明这一点。
+> **已与 totalfrank 定案。** 现有 Local Skill 由 Bot 的设备文件系统存储，不是可在租户内复用的
+> 全局资产。因此 Track B 采用 per-bot **上传** → **激活/停用** → **删除**
+> 的生命周期，不暴露独立的“安装”概念。租户级可复用 Skill 延后到 Skill Center 具备独立存储和分发能力后再设计。
+> `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；除上传和按 Bot 查询激活列表外，请求无需重复携带 `bot_id`。
 
-> **共担 —— 最棘手的类别。** skills 有三层生命周期（全局**上传** → per-bot **安装** →
-> per-bot **启用/停用**）、两个尚未纳入桩的 ★ 端点，以及一个悬而未决的问题：后端更丰富的
-> skill-set 模型是否要升为一等公民。因此**两人共担**。动手前先商定一份共同的子计划 ——
-> 例如把 目录/上传 与 per-bot 安装/生命周期 分开 —— 并为它单独走一遍 SDD。在各自的 P1/P2
-> 切片之后再做。
-
-**状态**列标明每个端点是已经在路由桩里（`桩内`），还是来自 PR #363 的提议新增
-（`★ 提议` —— 尚未在桩里；实现前请与 totalfrank 确认）。
+**状态**列中，`桩内` 表示路径和语义与当前路由桩一致；`已定案（待同步桩）`
+表示 Track B 契约已确认，但当前路由桩仍需在实现 PR 中新增或替换。
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills/catalog` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
-| GET | `/openapi/v1/bots/skills/catalog/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` | ★ 提议 |
-| GET | `/openapi/v1/bots/skills/{bot_id}` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{bot_id}` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` | 桩内 |
-| PATCH ★ | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` | ★ 提议 |
-| DELETE | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` | 桩内 |
+| GET | `/openapi/v1/bots/skills` | Skill 列表（`keyword`、分页；不包含 Skill 市场） | `Envelope[Page[Skill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{bot_id}/upload` | 向指定 Bot 上传 Local Skill | `Envelope[Skill]` | 已定案（待同步桩） |
+| GET | `/openapi/v1/bots/skills/{bot_id}/active` | 列出指定 Bot 当前激活的 Skill | `Envelope[list[BotSkill]]` | 已定案（待同步桩） |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 已定案（待同步桩） |
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
