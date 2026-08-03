@@ -35,6 +35,7 @@ SessionConnectionTokenEnvelope:
 SessionConnectionTokenPath:
   post:
     operationId: issue_group_session_connection_token
+    tags: ["Collaboration / Sessions"]
     summary: Issue a short-lived connection token for one Group Session.
     description: >-
       Derives the Human, Group, and Session scope on the server and returns a
@@ -89,6 +90,7 @@ SessionConnectionTokenPath:
 GroupSessionWebSocketPath:
   get:
     operationId: connect_group_session_websocket
+    tags: ["Collaboration / Sessions"]
     summary: Upgrade to a session-bound Workbench WebSocket.
     description: >-
       Authenticates the five-minute BCN credential before Upgrade and exposes

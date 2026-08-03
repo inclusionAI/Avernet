@@ -73,6 +73,37 @@ def test_empty_catalog_yields_empty_but_valid_doc() -> None:
     assert doc["paths"] == {}
 
 
+def test_top_level_tags_are_merged_once_in_domain_order() -> None:
+    descriptions = {
+        "first": {
+            "tags": [
+                {"name": "Collaboration / Bots", "description": "Bot resources."}
+            ],
+            "paths": {},
+        },
+        "second": {
+            "tags": [
+                {"name": "Collaboration / Bots", "description": "Bot resources."},
+                {"name": "Collaboration / Groups", "description": "Group resources."},
+            ],
+            "paths": {},
+        },
+    }
+
+    document = build_served_openapi(
+        ["first", "second"],
+        descriptions.__getitem__,
+        _RULES,
+        title="gateway",
+        version="0.1.0",
+    )
+
+    assert document["tags"] == [
+        {"name": "Collaboration / Bots", "description": "Bot resources."},
+        {"name": "Collaboration / Groups", "description": "Group resources."},
+    ]
+
+
 def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     descriptions = {
         "bots": json.loads(_FIXTURE.read_text()),
@@ -99,3 +130,16 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     assert (
         paths["/openapi/v1/collaboration/group/ws"]["get"]["x-avernet-security"] == {}
     )
+    assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
+        "tags"
+    ] == ["Collaboration / Sessions"]
+    assert paths["/openapi/v1/collaboration/group/ws"]["get"]["tags"] == [
+        "Collaboration / Sessions"
+    ]
+    assert [tag["name"] for tag in document["tags"]] == [
+        "Collaboration / Bots",
+        "Collaboration / Friendships",
+        "Collaboration / Groups",
+        "Collaboration / Sessions",
+        "Collaboration / Invitations",
+    ]

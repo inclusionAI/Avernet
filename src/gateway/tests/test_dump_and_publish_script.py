@@ -45,3 +45,16 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
     )
     assert "get" in document["paths"]["/openapi/v1/collaboration/group/ws"]
+    assert [tag["name"] for tag in document["tags"]] == [
+        "Collaboration / Bots",
+        "Collaboration / Friendships",
+        "Collaboration / Groups",
+        "Collaboration / Sessions",
+        "Collaboration / Invitations",
+    ]
+    assert document["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/token"
+    ]["post"]["tags"] == ["Collaboration / Sessions"]
+    assert document["paths"]["/openapi/v1/collaboration/group/ws"]["get"][
+        "tags"
+    ] == ["Collaboration / Sessions"]

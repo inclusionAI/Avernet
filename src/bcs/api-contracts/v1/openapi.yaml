@@ -3,6 +3,17 @@ info:
   title: BCN OpenAPI
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
+tags:
+  - name: Collaboration / Bots
+    description: Bot discovery, lookup, and management within BCN.
+  - name: Collaboration / Friendships
+    description: Bot friendships and friend-request lifecycle operations.
+  - name: Collaboration / Groups
+    description: Collaboration groups and their participants.
+  - name: Collaboration / Sessions
+    description: Group sessions, participants, messages, and connection access.
+  - name: Collaboration / Invitations
+    description: Invitations for joining collaboration groups and sessions.
 paths:
   /openapi/v1/collaboration/bots/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath

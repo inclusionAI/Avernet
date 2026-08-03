@@ -19,6 +19,7 @@ AcceptInvitationRequest:
 CreateGroupInvitationPath:
   post:
     operationId: create_group_invitation
+    tags: ["Collaboration / Invitations"]
     summary: Create an Invitation for a Group target.
     x-avernet-security:
       user: required
@@ -83,6 +84,7 @@ CreateGroupInvitationPath:
 CreateSessionInvitationPath:
   post:
     operationId: create_session_invitation
+    tags: ["Collaboration / Invitations"]
     summary: Create an Invitation for a Session target.
     x-avernet-security:
       user: required
@@ -148,6 +150,7 @@ CreateSessionInvitationPath:
 AcceptInvitationPath:
   post:
     operationId: accept_invitation
+    tags: ["Collaboration / Invitations"]
     summary: Accept an invitation and join its target resource.
     x-avernet-security:
       user: required
