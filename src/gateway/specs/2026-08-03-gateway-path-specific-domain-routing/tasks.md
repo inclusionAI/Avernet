@@ -22,7 +22,7 @@
         the new package's `__all__`).
 - **Depends on:** —
 
-## Task 2: Re-point `RouteSecurity` at the shared pattern
+## [x] Task 2: Re-point `RouteSecurity` at the shared pattern
 
 - **Goal:** Delete route security's private matcher/ranker in favour of
   `PathPattern`, with no behaviour change on the auth plane.
@@ -30,11 +30,13 @@
   - `src/gateway/src/gateway/community/core/authn/_route_security.py`
   - `src/gateway/tests/test_route_security.py`
 - **Done when:**
-  - [ ] `_Rule` holds a `PathPattern`; `_match_segments`, `_is_param` and the
+  - [x] `_Rule` holds a `PathPattern`; `_match_segments`, `_is_param` and the
         segment-counting half of `_specificity` are gone from this module.
-  - [ ] The method tie-break stays here — the domain map has no methods.
-  - [ ] `tests/test_route_security.py` passes **unchanged** (the engine-prefix
+  - [x] The method tie-break stays here — the domain map has no methods.
+  - [x] `tests/test_route_security.py` passes **unchanged** (the engine-prefix
         case still asserts the old path at this point; Task 7 moves it).
+  - [x] `bootstrap/_authn.py` logged the table via `_Rule.segments` — a caller the
+        plan did not list; re-pointed at `rule.pattern.segments`.
 - **Depends on:** Task 1
 
 ## Task 3: Give `Domain` a pattern, and validate it at boot
