@@ -171,7 +171,7 @@
         endpoint's own path did not change.
 - **Depends on:** Task 6
 
-## Task 9: Record `messages` as a reserved component name
+## [x] Task 9: Record `messages` as a reserved component name
 
 - **Goal:** The reservation is written down where the addressing rule lives, and
   cannot silently fall out of step with the routes.
@@ -180,18 +180,18 @@
   - `src/backend/docs/openapi-v1/README.zh-CN.md`
   - `src/backend/tests/community/adapters/http/openapi_v1/test_path_convention.py`
 - **Done when:**
-  - [ ] A second fenced block under a new `<!-- reserved-component-names-unrouted -->`
+  - [x] A second fenced block under a new `<!-- reserved-component-names-unrouted -->`
         anchor holds `messages`, placed **after** the existing block (the parser
         takes the first fence following its anchor).
-  - [ ] `test_the_docs_reserved_names_match_the_routes` is **unchanged** — still
+  - [x] `test_the_docs_reserved_names_match_the_routes` is **unchanged** — still
         an equality check.
-  - [ ] A new test asserts the unrouted block is disjoint from the routed
+  - [x] A new test asserts the unrouted block is disjoint from the routed
         components, so a name that gains a route must move blocks.
-  - [ ] The prose states the accurate reason: `messages` is reserved because the
+  - [x] The prose states the accurate reason: `messages` is reserved because the
         gateway claims the prefix on the **socket plane** and a component is
         planned there — *not* because a bot id would be unreachable, which is
         untrue for this name today.
-  - [ ] The Chinese README carries the same record. It has **no** anchor today;
+  - [x] The Chinese README carries the same record. It has **no** anchor today;
         add one so both stay parseable.
 - **Depends on:** Task 8
 

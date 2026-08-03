@@ -575,6 +575,29 @@ approvals  ceiling  check-name  connection  engine  identity
 mcp  models  resources  routines  sessions  skills
 ```
 
+**Reserved ahead of their routes.** A second, separate list — names claimed here
+before any route publishes them. They are *not* reserved for the reason above:
+no route serves them, so nothing is currently unreachable at those addresses.
+They are reserved because something else already occupies the address and a
+component is intended there, so a bot id must not be allowed to take it in the
+meantime.
+
+<!-- reserved-component-names-unrouted -->
+```text
+messages
+```
+
+- `messages` — the gateway serves the bot's chat WebSocket at
+  `/openapi/v1/bots/messages/**`, relayed to the engine proxy
+  (`src/gateway/configs/application.yaml`). That claim is on the **socket plane
+  only**, so an HTTP request to the address still reaches this service; the name
+  is held for the HTTP endpoint intended there. See
+  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`.
+
+A name in this list must move to the routed list above the moment a route
+publishes it — the convention test asserts the two lists stay disjoint, so
+adding the route without moving the name fails there rather than in review.
+
 > **Mount order is load-bearing.** `build_public_router()` includes the literal
 > sub-groups **before** the bots group, so `/openapi/v1/bots/resources` resolves
 > ahead of the `/openapi/v1/bots/{bot_id}` wildcard. Only the components that
