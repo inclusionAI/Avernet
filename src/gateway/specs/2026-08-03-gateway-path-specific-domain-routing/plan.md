@@ -54,15 +54,16 @@ None.
 # src/gateway/src/gateway/community/core/paths/_pattern.py  (new)
 @dataclass(frozen=True)
 class PathPattern:
-    segments: tuple[str, ...]           # ("openapi", "v1", "bots", "**")
+    segments: tuple[str, ...]  # ("openapi", "v1", "bots", "**")
 
     @classmethod
     def parse(cls, pattern: str) -> PathPattern: ...
     def matches(self, path_segments: tuple[str, ...]) -> bool: ...
     @property
-    def specificity(self) -> tuple[int, int, int]: ...   # (exact?, literals, params)
+    def specificity(self) -> tuple[int, int, int]: ...  # (exact?, literals, params)
     @property
-    def literal_prefix(self) -> str: ...                 # "/openapi/v1/bots/messages"
+    def literal_prefix(self) -> str: ...  # "/openapi/v1/bots/messages"
+
 
 def split_segments(path: str) -> tuple[str, ...]: ...
 ```
@@ -73,6 +74,7 @@ tie-break, which stays in route security — the domain map has no methods.
 ```python
 # src/gateway/src/gateway/community/core/paths/__init__.py  (new)
 from ._pattern import PathPattern, split_segments
+
 __all__ = ["PathPattern", "split_segments"]
 ```
 
@@ -413,13 +415,15 @@ def test_the_rewrite_anchor_follows_the_declared_pattern(): ...
 #   existing cases re-pointed at /openapi/v1/bots/messages/…, plus:
 def test_the_old_engine_prefix_no_longer_relays(): ...
 def test_an_http_request_to_the_socket_prefix_reaches_the_backend(): ...
+
+
 #   the encoded-prefix matrix (:522-524, :441) moves to the new prefix — the
 #   %62ots / %6dessages spellings, not dropped.
 ```
 
 ```python
 # src/gateway/tests/test_route_security.py:23
-def test_shipped_config_exempts_the_bot_socket_prefix(): ...   # renamed + re-pointed
+def test_shipped_config_exempts_the_bot_socket_prefix(): ...  # renamed + re-pointed
 def test_the_socket_exemption_beats_the_bots_user_requirement(): ...  # new, pins precedence
 ```
 

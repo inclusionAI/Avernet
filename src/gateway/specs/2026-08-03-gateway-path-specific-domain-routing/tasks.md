@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Extract the shared path pattern into `core/paths`
+## [x] Task 1: Extract the shared path pattern into `core/paths`
 
 - **Goal:** One parse/match/rank implementation for path patterns, importable by
   both the routing and the auth plane without a private-module import.
@@ -11,14 +11,14 @@
   - `src/gateway/src/gateway/community/core/paths/_pattern.py` (new)
   - `src/gateway/tests/test_path_pattern.py` (new)
 - **Done when:**
-  - [ ] `PathPattern.parse`, `.matches`, `.specificity`, `.literal_prefix` and
+  - [x] `PathPattern.parse`, `.matches`, `.specificity`, `.literal_prefix` and
         `split_segments` exist, with `__all__` declared.
-  - [ ] `specificity` is `(exact?, literals, params)` — today's
+  - [x] `specificity` is `(exact?, literals, params)` — today's
         `_route_security._specificity` **minus** its method tie-break.
-  - [ ] `**` matches zero segments, so `/openapi/v1/bots/**` matches the bare
+  - [x] `**` matches zero segments, so `/openapi/v1/bots/**` matches the bare
         `/openapi/v1/bots` (the property `test_domain_at_root_resolves` rests on).
-  - [ ] `literal_prefix` returns the leading run of literal segments as a path.
-  - [ ] `tests/architecture/` stays green (`test_all_exports_valid.py` requires
+  - [x] `literal_prefix` returns the leading run of literal segments as a path.
+  - [x] `tests/architecture/` stays green (`test_all_exports_valid.py` requires
         the new package's `__all__`).
 - **Depends on:** —
 
