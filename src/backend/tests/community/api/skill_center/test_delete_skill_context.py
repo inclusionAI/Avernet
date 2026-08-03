@@ -28,6 +28,11 @@ class _SkillServiceFactory:
         self._skill_repo = skill_repo
         self._device_fs = device_fs
         self.calls: list[dict] = []
+        self.device_fs_calls: list[tuple[str, str]] = []
+
+    def _device_fs_for_bot(self, bot_id: str, owner_id: str):
+        self.device_fs_calls.append((bot_id, owner_id))
+        return self._device_fs
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
@@ -39,10 +44,11 @@ class _SkillServiceFactory:
             active_dir=kwargs.get("active_dir", ACTIVE_ROOT),
             repo_dir=kwargs.get("repo_dir", ACTIVE_ROOT / "skills-repo"),
             local_dir=kwargs.get("local_dir", POOL_LOCAL),
-            device_fs_factory=lambda _bot_id, _owner_id: self._device_fs,
+            device_fs_factory=self._device_fs_for_bot,
             git_sync_service_factory=MagicMock(),
             local_skill_path_adapter=kwargs.get("local_skill_path_adapter"),
             runtime_uses_pool_paths=bool(kwargs.get("bot_id")),
+            device_owner_id=kwargs.get("entity_id"),
         )
 
 
@@ -205,7 +211,7 @@ async def test_delete_uses_bot_owner_when_skill_was_authored_by_collaborator():
     device_fs.exists = AsyncMock(return_value=True)
     device_fs.delete_tree = AsyncMock(return_value=True)
 
-    response, path_factory, _ = await _call_delete(
+    response, path_factory, factory = await _call_delete(
         device_fs=device_fs,
         skill_repo=skill_repo,
         current_user_id="405935",
@@ -215,6 +221,7 @@ async def test_delete_uses_bot_owner_when_skill_was_authored_by_collaborator():
     path_factory.get_bot_skills_dir.assert_called_once_with(
         OWNER_ID, BOT_ID, "hermes", "staff"
     )
+    assert factory.device_fs_calls == [(BOT_ID, OWNER_ID)]
 
 
 @pytest.mark.asyncio
