@@ -1,7 +1,11 @@
 # BCN Collaboration Path Alignment Design
 
+> **Superseded:** This two-prefix design is replaced by
+> [`2026-08-03-bcn-collaboration-prefix-design.md`](./2026-08-03-bcn-collaboration-prefix-design.md).
+> BCN now exposes every V1 operation below `/openapi/v1/collaboration/**`.
+
 **Date:** 2026-08-03
-**Status:** Approved
+**Status:** Superseded
 
 ## Problem
 

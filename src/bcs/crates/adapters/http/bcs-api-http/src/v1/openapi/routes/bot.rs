@@ -21,13 +21,13 @@ use crate::v1::openapi::dto::bot::{
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
-            "/openapi/v1/bots/collaboration/{bot_id}/candidates",
+            "/bots/{bot_id}/candidates",
             get(list_candidates),
         )
-        .route("/openapi/v1/bots/collaboration/query", post(query_bots))
-        .route("/openapi/v1/bots/collaboration/mine", get(list_mine))
+        .route("/bots/query", post(query_bots))
+        .route("/bots/mine", get(list_mine))
         .route(
-            "/openapi/v1/bots/collaboration/{bot_id}",
+            "/bots/{bot_id}",
             get(get_bot).patch(update_bot),
         )
 }

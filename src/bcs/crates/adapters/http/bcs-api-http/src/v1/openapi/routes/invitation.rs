@@ -14,15 +14,15 @@ use crate::v1::openapi::dto::invitation::{AcceptInvitationRequest, CreateInvitat
 pub fn router() -> Router<ApiState> {
     Router::new()
         .route(
-            "/openapi/v1/groups/{group_id}/invitations",
+            "/groups/{group_id}/invitations",
             post(create_group_invitation),
         )
         .route(
-            "/openapi/v1/group-sessions/{session_id}/invitations",
+            "/sessions/{session_id}/invitations",
             post(create_session_invitation),
         )
         .route(
-            "/openapi/v1/invitations/{token}/accept",
+            "/invitations/{token}/accept",
             post(accept_invitation),
         )
 }

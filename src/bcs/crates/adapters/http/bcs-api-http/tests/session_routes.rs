@@ -454,7 +454,7 @@ async fn create_session_returns_created_and_forwards_principal() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/sessions",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
                 "driver_bot_uuid": "bot-1",
                 "participants": [
@@ -500,7 +500,7 @@ async fn create_session_reused_returns_ok() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/sessions",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
                 "driver_bot_uuid": "bot-1",
                 "participants": [{"bot_uuid": "bot-1"}]
@@ -523,7 +523,7 @@ async fn list_sessions_returns_page_and_forwards_filters() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/groups/group-1/sessions?view_bot_id=bot-1&offset=5&limit=10&status=running",
+            "/openapi/v1/collaboration/groups/group-1/sessions?view_bot_id=bot-1&offset=5&limit=10&status=running",
             Value::Null,
         ))
         .await
@@ -557,7 +557,7 @@ async fn get_session_returns_detail() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/group-sessions/session-1",
+            "/openapi/v1/collaboration/sessions/session-1",
             Value::Null,
         ))
         .await
@@ -583,7 +583,7 @@ async fn update_session_returns_updated_detail() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/group-sessions/session-1",
+            "/openapi/v1/collaboration/sessions/session-1",
             json!({"title": "Renamed"}),
         ))
         .await
@@ -610,7 +610,7 @@ async fn delete_session_returns_deleted() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/group-sessions/session-1",
+            "/openapi/v1/collaboration/sessions/session-1",
             Value::Null,
         ))
         .await
@@ -636,7 +636,7 @@ async fn complete_session_returns_completion_result() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/group-sessions/session-1/completion",
+            "/openapi/v1/collaboration/sessions/session-1/completion",
             Value::Null,
         ))
         .await
@@ -664,7 +664,7 @@ async fn list_session_messages_returns_cursor_page() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/group-sessions/session-1/messages?limit=50",
+            "/openapi/v1/collaboration/sessions/session-1/messages?limit=50",
             Value::Null,
         ))
         .await
@@ -696,7 +696,7 @@ async fn list_session_messages_passes_opaque_before_cursor_through() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/group-sessions/session-1/messages?before=1234567890:42&limit=10",
+            "/openapi/v1/collaboration/sessions/session-1/messages?before=1234567890:42&limit=10",
             Value::Null,
         ))
         .await
@@ -723,7 +723,7 @@ async fn list_session_messages_passes_view_bot_id_through() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/group-sessions/session-1/messages?limit=50&view_bot_id=bot-xyz",
+            "/openapi/v1/collaboration/sessions/session-1/messages?limit=50&view_bot_id=bot-xyz",
             Value::Null,
         ))
         .await
@@ -764,7 +764,7 @@ async fn list_session_messages_surfaces_next_cursor_when_has_more() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/group-sessions/session-1/messages?limit=1",
+            "/openapi/v1/collaboration/sessions/session-1/messages?limit=1",
             Value::Null,
         ))
         .await
@@ -784,7 +784,7 @@ async fn add_session_participant_returns_participant() {
     let response = app
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/group-sessions/session-1/participants",
+            "/openapi/v1/collaboration/sessions/session-1/participants",
             json!({"bot_uuid": "bot-2", "mode": "muted"}),
         ))
         .await
@@ -813,7 +813,7 @@ async fn update_session_participant_returns_updated_mode() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/group-sessions/session-1/participants/bot-2",
+            "/openapi/v1/collaboration/sessions/session-1/participants/bot-2",
             json!({"mode": "muted"}),
         ))
         .await
@@ -841,7 +841,7 @@ async fn remove_session_participant_returns_deleted() {
     let response = app
         .oneshot(authenticated_request(
             "DELETE",
-            "/openapi/v1/group-sessions/session-1/participants/bot-2",
+            "/openapi/v1/collaboration/sessions/session-1/participants/bot-2",
             Value::Null,
         ))
         .await
@@ -869,7 +869,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
         .clone()
         .oneshot(authenticated_request(
             "POST",
-            "/openapi/v1/groups/group-1/sessions",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
             json!({
                 "driver_bot_uuid": "bot-1",
                 "participants": [{"bot_uuid": "bot-1"}],
@@ -886,7 +886,7 @@ async fn unknown_fields_rejected_with_invalid_request() {
     let patch_response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/group-sessions/session-1",
+            "/openapi/v1/collaboration/sessions/session-1",
             json!({"title": "Renamed", "extra": 1}),
         ))
         .await
@@ -905,7 +905,7 @@ async fn missing_principal_returns_unauthenticated() {
     let response = app
         .oneshot(
             Request::builder()
-                .uri("/openapi/v1/group-sessions/session-1")
+                .uri("/openapi/v1/collaboration/sessions/session-1")
                 .body(Body::empty())
                 .expect("request"),
         )
@@ -925,6 +925,7 @@ async fn legacy_global_session_paths_are_not_mounted() {
     for uri in [
         "/openapi/v1/sessions/session-1",
         "/openapi/v1/sessions/session-1/messages",
+        "/openapi/v1/group-sessions/session-1",
     ] {
         let response = app
             .clone()
@@ -947,7 +948,7 @@ async fn update_session_participant_requires_mode() {
     let response = app
         .oneshot(authenticated_request(
             "PATCH",
-            "/openapi/v1/group-sessions/session-1/participants/bot-2",
+            "/openapi/v1/collaboration/sessions/session-1/participants/bot-2",
             json!({}),
         ))
         .await
@@ -966,7 +967,7 @@ async fn list_sessions_uses_default_pagination_when_omitted() {
     let response = app
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/groups/group-1/sessions",
+            "/openapi/v1/collaboration/groups/group-1/sessions",
             Value::Null,
         ))
         .await

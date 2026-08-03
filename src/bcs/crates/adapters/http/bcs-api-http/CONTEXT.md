@@ -2,7 +2,8 @@
 
 ## Provides
 
-- Versioned `/openapi/v1/**` and `/internal/v1/**` HTTP delivery boundaries.
+- Versioned `/openapi/v1/collaboration/**` and `/internal/v1/**` HTTP delivery
+  boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.
 - A preparatory V1 Gateway wire projection and HS256 token verifier that

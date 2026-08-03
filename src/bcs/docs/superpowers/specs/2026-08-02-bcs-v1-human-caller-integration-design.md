@@ -1,5 +1,10 @@
 # BCS V1 Human Caller Integration Design
 
+> **Path exposure update (2026-08-03):** The caller and authorization
+> decisions remain current, but path examples are superseded by
+> [`../../plans/2026-08-03-bcn-collaboration-prefix-design.md`](../../plans/2026-08-03-bcn-collaboration-prefix-design.md).
+> All 32 operations now share `/openapi/v1/collaboration/**`.
+
 - **Date:** 2026-08-02
 - **Status:** Approved (brainstorm)
 - **Scope:** Principal propagation and Human Actor selection for all 32 implemented BCS V1 HTTP operations
