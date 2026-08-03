@@ -83,7 +83,7 @@ pub fn build_sync_request(
 
 /// Sync worker with configured attempts and exponential backoff.
 ///
-/// Designed to be called inside `tokio::spawn` — never panics, only logs.
+/// Best-effort: failures are logged and not returned to the caller.
 pub async fn sync_worker_with_retry(
     client: &FuseClient,
     bot_id: &str,

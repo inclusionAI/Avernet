@@ -33,11 +33,12 @@ fn bcsfuse_config_without_retry_fields_uses_defaults() {
 }
 
 #[test]
-fn bcsfuse_config_rejects_unknown_fields() {
-    let error =
-        serde_json::from_str::<BcsFuseConfig>(r#"{"enabled":true,"sync_retry_base_delai_ms":1}"#)
-            .expect_err("unknown bcsfuse fields must be rejected");
-    assert!(error.to_string().contains("unknown field"));
+fn bcsfuse_config_ignores_unknown_fields() {
+    let cfg: BcsFuseConfig =
+        serde_json::from_str(r#"{"enabled":true,"sync_retry_base_delai_ms":1}"#)
+            .expect("unknown bcsfuse fields must remain backward compatible");
+    assert!(cfg.enabled);
+    assert_eq!(cfg.sync_retry_base_delay_ms, 1_000);
 }
 
 #[test]

@@ -490,7 +490,7 @@ impl BotManagementService for Bot {
             .update_visibility(&bot_id, &visibility)
             .await?;
         if let Some(visibility_sync) = &self.visibility_sync {
-            visibility_sync.schedule(bot_id.clone());
+            visibility_sync.sync_now(&bot_id).await;
         }
 
         Ok(BotVisibilityResult {

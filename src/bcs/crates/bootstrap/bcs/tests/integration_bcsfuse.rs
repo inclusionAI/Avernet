@@ -9,7 +9,7 @@
 mod helpers;
 
 use helpers::{MockBot, create_temp_bots_dir, start_test_server};
-use std::path::PathBuf;
+use std::{fs, path::PathBuf, process::Command};
 
 use bcs::{BcsConfig, BcsServer, LoggingConfig, MessageHistoryConfig, ParticipantInfo};
 
@@ -51,8 +51,8 @@ fn create_test_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
         bcsfuse: bcs_fuse_client::BcsFuseConfig {
             enabled: true,
             url: "http://127.0.0.1:19999".to_string(), // no server here
-            sync_timeout_ms: 1000,
-            sync_max_attempts: 3,
+            sync_timeout_ms: 1,
+            sync_max_attempts: 1,
             sync_retry_base_delay_ms: 1,
             fusion_timeout_ms: 2000,
             ..Default::default()
@@ -74,6 +74,38 @@ fn create_test_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
         invite: Default::default(),
         ..BcsConfig::default()
     }
+}
+
+#[test]
+fn invalid_bcsfuse_retry_config_reports_clear_startup_error() {
+    let dir = tempfile::tempdir().expect("create temp config directory");
+    let config_path = dir.path().join("bcs-config.toml");
+    fs::write(
+        &config_path,
+        r#"
+bots_base_dir = "/tmp/bots"
+
+[bcsfuse]
+sync_max_attempts = 0
+"#,
+    )
+    .expect("write invalid BCS config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_bcs"))
+        .arg("--config-dir")
+        .arg(config_path)
+        .output()
+        .expect("run BCS binary");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let expected = "ERROR Failed to load BCS configuration: \
+                    bcsfuse.sync_max_attempts must be at least 1";
+    assert!(
+        stderr.lines().any(|line| line == expected),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(!stderr.contains("panicked"), "unexpected panic: {stderr}");
 }
 
 // ── Tests: bcsfuse disabled (default) ────────────────────────────────────

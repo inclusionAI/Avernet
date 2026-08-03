@@ -6,7 +6,7 @@
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
 - Application-facing orchestration around registry reads and writes.
-- Shared per-bot scheduling for best-effort visibility synchronization.
+- Application-layer orchestration for best-effort visibility synchronization.
 
 ## Consumes
 
@@ -36,7 +36,7 @@
 ## Runtime ownership
 
 The crate owns Bot control-plane persistence orchestration such as Provider hydration.
-The crate owns registry business rules, status/connectivity semantics, and visibility-sync scheduling. It does not own socket runtime state, transport handling, or BCSFuse retry policy.
+The crate owns registry business rules, status/connectivity semantics, and visibility-sync orchestration. It does not own socket runtime state, transport handling, or BCSFuse retry policy.
 
 ## Tests
 

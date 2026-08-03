@@ -1,10 +1,4 @@
-use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bcs_bot::{Bot, BotCore, BotOnboarding, VisibilitySyncCoordinator};
@@ -51,8 +45,6 @@ struct BlockingVisibilitySyncPort {
     requests: Mutex<Vec<VisibilitySyncRequest>>,
     request_recorded: Notify,
     release: Semaphore,
-    active: AtomicUsize,
-    max_active: AtomicUsize,
 }
 
 impl BlockingVisibilitySyncPort {
@@ -61,8 +53,6 @@ impl BlockingVisibilitySyncPort {
             requests: Mutex::new(Vec::new()),
             request_recorded: Notify::new(),
             release: Semaphore::new(0),
-            active: AtomicUsize::new(0),
-            max_active: AtomicUsize::new(0),
         }
     }
 
@@ -79,29 +69,16 @@ impl BlockingVisibilitySyncPort {
         .await
         .expect("visibility sync request should arrive");
     }
-
-    async fn wait_until_idle(&self) {
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while self.active.load(Ordering::SeqCst) != 0 {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("visibility sync requests should finish");
-    }
 }
 
 #[async_trait]
 impl VisibilitySyncPort for BlockingVisibilitySyncPort {
     async fn sync_visibility(&self, request: VisibilitySyncRequest) {
-        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-        self.max_active.fetch_max(active, Ordering::SeqCst);
         self.requests.lock().await.push(request);
         self.request_recorded.notify_waiters();
 
         let permit = self.release.acquire().await.unwrap();
         permit.forget();
-        self.active.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -135,7 +112,7 @@ fn onboarding(registry: Arc<BotCore>, visibility_sync: VisibilitySyncCoordinator
 }
 
 #[tokio::test]
-async fn visibility_sync_application_services_schedule_after_successful_mutations() {
+async fn visibility_sync_application_services_run_after_successful_mutations() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     for bot_uuid in ["bot-visibility", "bot-onboard", "bot-admin"] {
@@ -202,32 +179,62 @@ async fn visibility_sync_application_services_schedule_after_successful_mutation
 }
 
 #[tokio::test]
-async fn visibility_sync_management_and_onboarding_share_one_serial_job_per_bot() {
+async fn set_visibility_waits_for_sync_completion() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
-    register_bot(&registry, "bot-shared", "public").await;
+    register_bot(&registry, "bot-visible", "public").await;
     let sync = Arc::new(BlockingVisibilitySyncPort::new());
     let coordinator = VisibilitySyncCoordinator::new(registry.clone(), sync.clone());
-    let bot = Bot::new(registry.clone()).with_visibility_sync(coordinator.clone());
-    let onboarding = onboarding(registry, coordinator);
+    let bot = Bot::new(registry.clone()).with_visibility_sync(coordinator);
 
-    tokio::time::timeout(
-        Duration::from_secs(1),
+    let task = tokio::spawn(async move {
         bot.set_visibility(BotVisibilityCommand {
-            caller_actor_id: Some("bot-shared".to_string()),
-            bot_id: "bot-shared".to_string(),
+            caller_actor_id: Some("bot-visible".to_string()),
+            bot_id: "bot-visible".to_string(),
             visibility: "private".to_string(),
-        }),
-    )
-    .await
-    .expect("application use case must not wait for external sync")
-    .unwrap();
+        })
+        .await
+    });
     sync.wait_for_requests(1).await;
 
-    tokio::time::timeout(
+    assert!(!task.is_finished());
+    assert_eq!(
+        registry
+            .get("bot-visible")
+            .await
+            .unwrap()
+            .capabilities
+            .visibility,
+        "private"
+    );
+    assert_eq!(
+        sync.requests.lock().await[0].capabilities.visibility,
+        "private"
+    );
+
+    sync.release.add_permits(1);
+    let result = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .expect("set_visibility should finish after sync completes")
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.bot_uuid, "bot-visible");
+    assert_eq!(result.visibility, "private");
+}
+
+#[tokio::test]
+async fn onboarding_returns_before_background_sync_completes() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    register_bot(&registry, "bot-onboard", "public").await;
+    let sync = Arc::new(BlockingVisibilitySyncPort::new());
+    let coordinator = VisibilitySyncCoordinator::new(registry.clone(), sync.clone());
+    let onboarding = onboarding(registry, coordinator);
+
+    let result = tokio::time::timeout(
         Duration::from_secs(1),
         onboarding.admin_onboard_bot(AdminBotOnboardCommand {
-            bot_uuid: "bot-shared".to_string(),
+            bot_uuid: "bot-onboard".to_string(),
             name: Some("Latest name".to_string()),
             summary: None,
             domains: Vec::new(),
@@ -238,22 +245,18 @@ async fn visibility_sync_management_and_onboarding_share_one_serial_job_per_bot(
         }),
     )
     .await
-    .expect("application use case must not wait for external sync")
+    .expect("onboarding should not wait for external sync")
     .unwrap();
+    assert!(result.onboarded);
 
-    assert_eq!(sync.requests.lock().await.len(), 1);
-    sync.release.add_permits(1);
-    sync.wait_for_requests(2).await;
+    sync.wait_for_requests(1).await;
 
     let requests = sync.requests.lock().await;
-    assert_eq!(requests[0].capabilities.visibility, "private");
     assert_eq!(
-        requests[1].capabilities.name.as_deref(),
+        requests[0].capabilities.name.as_deref(),
         Some("Latest name")
     );
-    assert_eq!(sync.max_active.load(Ordering::SeqCst), 1);
     drop(requests);
 
     sync.release.add_permits(1);
-    sync.wait_until_idle().await;
 }

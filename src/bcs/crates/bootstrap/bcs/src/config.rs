@@ -1401,6 +1401,21 @@ mod tests {
     }
 
     #[test]
+    fn test_loaded_config_allows_unknown_bcsfuse_fields() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/bots"
+
+[bcsfuse]
+legacy_extra_field = "ignored"
+"#,
+        )
+        .expect("unknown bcsfuse fields must remain backward compatible");
+
+        assert_eq!(config.bcsfuse.sync_max_attempts, 3);
+    }
+
+    #[test]
     fn test_provider_stream_gray_config_defaults_to_full_rollout() {
         let config = BcsConfig::default();
 

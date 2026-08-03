@@ -179,7 +179,11 @@ pub async fn run_from_env() -> Result<()> {
 }
 
 pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf>) -> Result<()> {
-    let mut config = BcsConfig::load_with_env(config_dir);
+    let mut config = BcsConfig::try_load_with_env(config_dir).map_err(|error| {
+        // The logging subscriber is initialized from this config, so load failures go to stderr.
+        eprintln!("ERROR Failed to load BCS configuration: {error}");
+        BcsError::InvalidConfig(error)
+    })?;
     config
         .validate_api_keys()
         .map_err(BcsError::InvalidConfig)?;

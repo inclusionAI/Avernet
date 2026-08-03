@@ -10,7 +10,7 @@
 //! - Discover gracefully degrades when bcsfuse is unreachable (returns registry-only results)
 //! - Discover repeated exact skill filtering combined with `q` using AND semantics
 //! - leave_bot completes without errors (set_worker_offline call was removed)
-//! - set_visibility succeeds with fire-and-forget sync (sync failure is non-blocking)
+//! - set_visibility waits for best-effort sync and still succeeds when sync fails
 //!
 //! These tests use MockBot + in-process BCS server (no real bcsfuse service).
 
@@ -59,8 +59,8 @@ fn create_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
         bcsfuse: bcs_fuse_client::BcsFuseConfig {
             enabled: true,
             url: "http://127.0.0.1:19999".to_string(), // no server here
-            sync_timeout_ms: 1000,
-            sync_max_attempts: 3,
+            sync_timeout_ms: 1,
+            sync_max_attempts: 1,
             sync_retry_base_delay_ms: 1,
             fusion_timeout_ms: 2000,
             ..Default::default()
@@ -248,11 +248,11 @@ async fn leave_bot_does_not_trigger_offline() {
 }
 
 // ============================================================================
-// 12.4: set_visibility triggers fuse sync (fire-and-forget)
+// 12.4: set_visibility waits for best-effort fuse sync
 // ============================================================================
 
 /// set_visibility should succeed even when bcsfuse is unreachable
-/// (sync is fire-and-forget, placed after rollback logic).
+/// (sync is synchronous best-effort and does not roll back BCS state).
 #[tokio::test]
 async fn set_visibility_succeeds_with_fuse_unreachable() {
     let tmp = create_temp_bots_dir();
@@ -269,7 +269,7 @@ async fn set_visibility_succeeds_with_fuse_unreachable() {
     // Wait for onboard sync to attempt
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    // Change visibility — should succeed (sync is fire-and-forget)
+    // Change visibility — should succeed after the best-effort sync finishes
     let client = bot.http_client(addr);
     let result = client.set_visibility(&bot.bot_id, "protected").await;
     assert!(result.is_ok(), "set_visibility should succeed even with fuse unreachable: {:?}", result.err());
@@ -278,15 +278,12 @@ async fn set_visibility_succeeds_with_fuse_unreachable() {
     let result2 = client.set_visibility(&bot.bot_id, "public").await;
     assert!(result2.is_ok(), "Second set_visibility should also succeed: {:?}", result2.err());
 
-    // Wait for background sync attempts
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
     // Bot should still be functional
     let discover_result = client.discover_bots(None).await;
     assert!(discover_result.is_ok(), "Bot should still be discoverable after visibility changes");
 }
 
-/// set_visibility to private should succeed and trigger fuse sync (fire-and-forget).
+/// set_visibility to private should succeed after the best-effort fuse sync.
 /// Verifies the sync is placed after rollback logic — when no friends exist,
 /// no rollback occurs and the change completes successfully.
 #[tokio::test]
@@ -309,9 +306,6 @@ async fn set_visibility_to_private_succeeds_and_triggers_sync() {
     let result_data = client.set_visibility(&bot.bot_id, "private").await
         .expect("set_visibility to private should succeed");
     assert!(result_data.success, "set_visibility response should indicate success");
-
-    // Wait for background sync attempt
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
     // Change back to public to verify round-trip works
     let result2 = client.set_visibility(&bot.bot_id, "public").await;

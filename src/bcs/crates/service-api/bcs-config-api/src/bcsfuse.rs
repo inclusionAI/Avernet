@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// bcsfuse integration configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BcsFuseConfig {
     /// Enable bcsfuse integration.
     #[serde(default)]
