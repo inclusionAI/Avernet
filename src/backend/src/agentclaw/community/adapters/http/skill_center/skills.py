@@ -2072,7 +2072,10 @@ async def delete_skill(
     entity_id: str | None = Query(None, description="Entity ID (pure ID, no prefix needed)"),
     entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: str | None = Query(None, description="Bot ID"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None,
+        description="Legacy compatibility hint; when provided it must match the Bot active_engine",
+    ),
     ctx: RequestContext = Depends(get_request_context),
     skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
@@ -2094,24 +2097,67 @@ async def delete_skill(
     current_user_id = user_id or ctx.user_id
     if not current_user_id:
         raise HTTPException(status_code=401, detail="未认证用户无法删除技能")
+    if not skill_id.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid skill ID")
 
     skill = skill_repo.get_by_id(skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+    persisted_git_path = str(skill.get("git_path") or "")
+    is_shared_source = (
+        not skill.get("user_id")
+        and persisted_git_path.startswith(("git://", "center://"))
+    )
+    if is_shared_source:
+        service = skill_service_factory.create()
+        try:
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+            )
+            if not success:
+                raise HTTPException(status_code=404, detail="Skill not found")
+            return MessageResponse(
+                success=True,
+                message="Skill deleted successfully",
+            )
+        except SkillReferencedBySkillSetError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                    "message": "请先从所有技能集中移除该技能，再删除技能",
+                    "skill_set_ids": e.skill_set_ids,
+                },
+            ) from e
+        except ValueError as e:
+            error_msg = str(e)
+            if "无权删除" in error_msg or "Permission denied" in error_msg:
+                raise HTTPException(status_code=403, detail=error_msg) from e
+            raise HTTPException(status_code=400, detail=error_msg) from e
+
     effective_bot_id = str(skill.get("bolt_id") or "")
-    skill_owner_id = str(skill.get("user_id") or "")
-    if not effective_bot_id or not skill_owner_id:
+    if not effective_bot_id:
         raise HTTPException(status_code=409, detail="Skill is missing its Bot identity")
 
-    bot = bot_repo.get_by_id_and_owner(effective_bot_id, skill_owner_id)
+    bot = bot_repo.get_unique_by_id(effective_bot_id)
     if not bot:
         raise HTTPException(status_code=404, detail="Bot not found")
 
     effective_entity_id = str(
-        bot.get("entity_id") or bot.get("owner_id") or skill_owner_id
+        bot.get("entity_id") or bot.get("owner_id") or ""
     )
     effective_entity_type = str(bot.get("entity_type") or "staff")
     effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+    if engine_type and engine_type != effective_engine:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Bot 当前的生效引擎",
+                "active_engine": effective_engine,
+            },
+        )
     is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw deletes the skill files from the (draft) container; resolve provider

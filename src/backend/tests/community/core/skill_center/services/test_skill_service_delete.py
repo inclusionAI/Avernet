@@ -30,6 +30,26 @@ def _make_service(device_fs, *, runtime_uses_pool_paths=False):
 
 class TestDeleteSkillStep1:
     @pytest.mark.asyncio
+    async def test_delete_tolerates_nullable_git_path(self):
+        """Historical metadata with a NULL locator must not crash deletion."""
+        device_fs = MagicMock()
+        device_fs.exists = AsyncMock(return_value=False)
+        device_fs.delete_tree = AsyncMock(return_value=True)
+        svc, _ = _make_service(device_fs)
+        skill = {
+            "id": "sk-1",
+            "name": "x",
+            "git_path": None,
+            "bolt_id": "bolt-1",
+            "user_id": "u-1",
+        }
+
+        with patch.object(svc, "get_skill", return_value=skill), patch.object(
+            svc, "_can_delete_skill", return_value=True
+        ), patch.object(svc._skill_repo, "delete", return_value=True):
+            assert await svc.delete_skill("sk-1", user_id="u-1") is True
+
+    @pytest.mark.asyncio
     async def test_delete_skill_calls_device_fs_delete_tree_for_active_link(self):
         """delete_skill step 1 must call device_fs.delete_tree on active_link, not shutil.rmtree."""
         device_fs = MagicMock()
