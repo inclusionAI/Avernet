@@ -1342,12 +1342,13 @@ class SkillService:
                 git_path = skill.get('git_path', '')
                 db_bolt_id = skill.get('bolt_id')
                 bolt_id = db_bolt_id or bolt_id
-                skill_author_id = skill.get('user_id') or user_id
-                device_user_id = device_owner_id or skill_author_id
+                skill_metadata_owner_id = skill.get('user_id') or user_id
+                device_user_id = device_owner_id or skill_metadata_owner_id
                 logger.info(
                     f"[get_skill_readme] DB found, git_path={git_path}, "
                     f"db_bolt_id={db_bolt_id}, effective_bolt_id={bolt_id}, "
-                    f"skill_author_id={skill_author_id}, device_user_id={device_user_id}"
+                    f"skill_metadata_owner_id={skill_metadata_owner_id}, "
+                    f"device_user_id={device_user_id}"
                 )
 
                 if git_path.startswith('local://'):
@@ -1803,7 +1804,6 @@ class SkillService:
         self,
         uploaded_files: list[dict[str, Any]],
         user_id: str | None = None,
-        author_id: str | None = None,
         bolt_id: str | None = None
     ):
         """
@@ -1814,8 +1814,7 @@ class SkillService:
                 - filename: 文件名
                 - content: 文件内容（bytes）
                 - relative_path: 相对路径（文件夹上传时使用）
-            user_id: Bot owner ID，用于设备文件系统路由
-            author_id: 实际上传者 ID，用于 Skill 元数据；未提供时兼容为 user_id
+            user_id: Bot owner ID，用于设备文件系统路由和 Skill 元数据
             bolt_id: Bot ID，为空时默认使用 'default'
 
         Returns:
@@ -1824,10 +1823,9 @@ class SkillService:
         Raises:
             ValueError: 如果验证失败
         """
-        author_id = author_id or user_id
         logger.info(
             f"[SkillService.upload_skill] Start: file_count={len(uploaded_files)}, "
-            f"user_id={user_id}, author_id={author_id}, bolt_id={bolt_id}"
+            f"user_id={user_id}, bolt_id={bolt_id}"
         )
 
         if not uploaded_files:
@@ -1859,7 +1857,11 @@ class SkillService:
         existing_skill = self._skill_repo.get_bot_local_by_name(
             bot_id=bolt_id or "default",
             name=skill_name,
-            user_id=author_id,
+            # Bot-private local Skills are identified by Bot + name.  Do not
+            # filter by the historical metadata owner here: an earlier release
+            # wrote collaborator IDs and re-upload must repair that row rather
+            # than create a duplicate.
+            user_id=None,
         )
         existing_locator = (
             str(existing_skill["git_path"])[len("local://") :]
@@ -1910,8 +1912,8 @@ class SkillService:
                     'git_path': skill_path,
                     'gmt_modified': datetime.utcnow()
                 }
-                if author_id:
-                    update_data['user_id'] = author_id
+                if user_id:
+                    update_data['user_id'] = user_id
                 updated = self._skill_repo.update(existing_skill['id'], update_data)
                 logger.info(
                     f"[SkillService.upload_skill] Updated existing skill: {skill_name} "
@@ -1927,7 +1929,7 @@ class SkillService:
                     category=skill_info.get("category", "general"),
                     tags=skill_info.get("tags", []),
                     is_public=False,  # 本地技能默认不公开
-                    user_id=author_id,
+                    user_id=user_id,
                     bolt_id=bolt_id
                 )
                 logger.info(f"[SkillService.upload_skill] Created new skill: {skill_name} (id: {skill.get('id')})")
