@@ -69,6 +69,10 @@ domains is the point.
 - [ ] An HTTP request to `/openapi/v1/bots/messages/...` is not served by the
       engine proxy, and a WebSocket handshake elsewhere under
       `/openapi/v1/bots/**` is not relayed.
+- [ ] A domain declares which **plane** it answers — request/response or relayed
+      socket — and that declaration participates in *selecting* the domain, not
+      only in checking one already selected. A path claimed for one plane must
+      leave the other plane's resolution of that same path untouched.
 - [ ] The socket prefix requires no caller identity; every other path under
       `/openapi/v1/bots/**` still requires an authenticated user. The exemption
       is written down explicitly rather than inferred.
@@ -97,6 +101,13 @@ domains is the point.
 - Gateway domain resolution keyed on (path pattern, protocol) instead of the
   leading segment alone, with startup validation for over-broad patterns and for
   two domains colliding on one path and protocol.
+
+  "Protocol" here means the **plane** — request/response, or relayed socket — and
+  not the URL scheme. `ws` and `wss` are one plane, as `http` and `https` are;
+  the scheme says only whether the connection is TLS, and one configured upstream
+  is already addressable on either plane. A domain that answered `wss` but not
+  `ws` would be describing its transport security, which is not a routing
+  question.
 - Moving the shipped socket domain, its route-security exemption, and the address
   the backend publishes, to `/openapi/v1/bots/messages`.
 - Reserving `messages` as a component name under `/openapi/v1/bots`, and the
@@ -121,6 +132,13 @@ domains is the point.
   specific pattern, then silently try the next one when the protocol does not
   match." Two deliberate per-protocol declarations at one pattern are safe; a
   silent retry is a smuggling hole and is not built.
+
+  The distinction is not academic, because both reach the backend for today's
+  HTTP `messages` request. The plane belongs in the *candidate set*: a domain
+  that does not answer this plane is never a candidate, so the most specific
+  remaining match wins outright. Under a retry, a request that was ranked into
+  one domain and refused there gets a second attempt at another — which is a
+  request being served by a domain that did not win.
 - **Moving any other domain under `bots`.** `sessions`, `messages` and `runs`
   belong to BaaS and `collaboration` to BCS; those are different owners and the
   ownership principle keeps them where they are.
