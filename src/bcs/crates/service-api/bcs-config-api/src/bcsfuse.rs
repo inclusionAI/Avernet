@@ -25,8 +25,8 @@ pub struct BcsFuseConfig {
     #[serde(default = "default_sync_max_attempts")]
     pub sync_max_attempts: u32,
 
-    /// Base delay in milliseconds between worker synchronization attempts.
-    /// Later delays use exponential backoff.
+    /// Maximum jitter delay for the first worker synchronization retry.
+    /// Later retry limits use exponential backoff.
     #[serde(default = "default_sync_retry_base_delay")]
     pub sync_retry_base_delay_ms: u64,
 
@@ -52,7 +52,7 @@ fn default_fusion_timeout() -> u64 {
 }
 
 fn default_sync_timeout() -> u64 {
-    10_000 // 10s — simple CRUD
+    2_000 // 2s — simple CRUD
 }
 
 fn default_sync_max_attempts() -> u32 {
@@ -95,6 +95,11 @@ impl BcsFuseConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.sync_max_attempts == 0 {
             return Err("bcsfuse.sync_max_attempts must be at least 1".to_string());
+        }
+        if !(10..=10_000).contains(&self.sync_retry_base_delay_ms) {
+            return Err(
+                "bcsfuse.sync_retry_base_delay_ms must be between 10 and 10000".to_string(),
+            );
         }
         Ok(())
     }

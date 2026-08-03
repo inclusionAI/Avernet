@@ -12,6 +12,7 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+fastrand = { workspace = true }
 bcs-config-api = { workspace = true }
 bcs-fuse-client = { workspace = true }
 bcs-service-api = { workspace = true }

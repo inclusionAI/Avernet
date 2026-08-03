@@ -15,7 +15,7 @@ pub struct FuseClient {
     base_url: String,
     /// Longer timeout for LLM-backed fusion (default: 120s).
     fusion_client: reqwest::Client,
-    /// Shorter timeout for sync/offline CRUD (default: 10s).
+    /// Shorter timeout for sync/offline CRUD (default: 2s).
     sync_client: reqwest::Client,
 }
 

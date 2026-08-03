@@ -977,6 +977,7 @@ dependencies = [
  "bcs-fuse-client",
  "bcs-service-api",
  "bcs-test-support",
+ "fastrand",
  "serde_json",
  "tempfile",
  "tokio",

@@ -89,7 +89,7 @@ test_default_runtime_config_keeps_bcsfuse_settings() {
   source "$MODULE"
   prepare_bcs_runtime_config >/dev/null
 
-  assert_bcsfuse_config_value "$BCS_RUNTIME_CONFIG_FILE" "sync_timeout_ms = 10000"
+  assert_bcsfuse_config_value "$BCS_RUNTIME_CONFIG_FILE" "sync_timeout_ms = 2000"
   assert_bcsfuse_config_value "$BCS_RUNTIME_CONFIG_FILE" "sync_max_attempts = 3"
   assert_bcsfuse_config_value "$BCS_RUNTIME_CONFIG_FILE" "sync_retry_base_delay_ms = 1000"
 }
@@ -113,7 +113,7 @@ test_e2e_and_coverage_runtime_configs_use_fast_bcsfuse_settings() {
       "${runtime_config_dir}/bcs-config-local.toml"; do
       assert_bcsfuse_config_value "$config_file" "sync_timeout_ms = 1"
       assert_bcsfuse_config_value "$config_file" "sync_max_attempts = 1"
-      assert_bcsfuse_config_value "$config_file" "sync_retry_base_delay_ms = 1"
+      assert_bcsfuse_config_value "$config_file" "sync_retry_base_delay_ms = 10"
     done
   done
 }

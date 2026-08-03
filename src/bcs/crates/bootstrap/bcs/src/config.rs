@@ -1398,6 +1398,15 @@ mod tests {
                 .to_string()
                 .contains("bcsfuse.sync_max_attempts must be at least 1")
         );
+
+        config.bcsfuse.sync_max_attempts = 1;
+        config.bcsfuse.sync_retry_base_delay_ms = 9;
+        let error = validate_loaded_config(&config).expect_err("invalid retry delay must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("bcsfuse.sync_retry_base_delay_ms must be between 10 and 10000")
+        );
     }
 
     #[test]

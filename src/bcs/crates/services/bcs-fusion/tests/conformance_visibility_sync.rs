@@ -87,7 +87,7 @@ async fn conformance_fuse_visibility_sync_port() {
     );
     let config = BcsFuseConfig {
         sync_max_attempts: 1,
-        sync_retry_base_delay_ms: 0,
+        sync_retry_base_delay_ms: 10,
         profile_id: "contract-profile".to_string(),
         ..BcsFuseConfig::default()
     };
@@ -135,7 +135,7 @@ async fn fuse_visibility_sync_port_uses_configured_retry_count() {
     );
     let config = BcsFuseConfig {
         sync_max_attempts: 3,
-        sync_retry_base_delay_ms: 0,
+        sync_retry_base_delay_ms: 10,
         ..BcsFuseConfig::default()
     };
     let temp_dir = tempfile::tempdir().expect("create empty bot context directory");

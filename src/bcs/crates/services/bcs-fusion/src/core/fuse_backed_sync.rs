@@ -14,13 +14,20 @@ fn sync_retry_backoff(
     max_attempts: u32,
     base_delay_ms: u64,
 ) -> Option<Duration> {
+    let max_delay_ms = sync_retry_delay_cap(attempt, max_attempts, base_delay_ms)?;
+    Some(Duration::from_millis(fastrand::u64(0..=max_delay_ms)))
+}
+
+fn sync_retry_delay_cap(
+    attempt: u32,
+    max_attempts: u32,
+    base_delay_ms: u64,
+) -> Option<u64> {
     if attempt + 1 >= max_attempts {
         return None;
     }
     let multiplier = 1u64.checked_shl(attempt).unwrap_or(u64::MAX);
-    Some(Duration::from_millis(
-        base_delay_ms.saturating_mul(multiplier),
-    ))
+    Some(base_delay_ms.saturating_mul(multiplier))
 }
 
 /// Build a `SyncWorkerRequest` from onboard data and bot context.
@@ -81,7 +88,7 @@ pub fn build_sync_request(
     }
 }
 
-/// Sync worker with configured attempts and exponential backoff.
+/// Sync worker with configured attempts and full-jitter exponential backoff.
 ///
 /// Best-effort: failures are logged and not returned to the caller.
 pub async fn sync_worker_with_retry(
@@ -129,7 +136,7 @@ pub async fn sync_worker_with_retry(
             }
         }
     }
-    tracing::error!(
+    tracing::warn!(
         bot_id = %bot_id,
         attempts = max_attempts,
         "Worker sync exhausted retries, will retry on next visibility update or onboard"
@@ -157,33 +164,26 @@ mod tests {
     use bcs_config_api::BcsFuseConfig;
 
     #[test]
-    fn retry_backoff_does_not_sleep_after_last_attempt() {
+    fn retry_delay_cap_uses_configured_attempts_and_base_delay() {
         assert_eq!(
-            sync_retry_backoff(0, 3, 1_000),
-            Some(Duration::from_secs(1))
+            sync_retry_delay_cap(0, 4, 10),
+            Some(10)
         );
         assert_eq!(
-            sync_retry_backoff(1, 3, 1_000),
-            Some(Duration::from_secs(2))
+            sync_retry_delay_cap(1, 4, 10),
+            Some(20)
         );
-        assert_eq!(sync_retry_backoff(2, 3, 1_000), None);
+        assert_eq!(sync_retry_delay_cap(2, 4, 10), Some(40));
+        assert_eq!(sync_retry_delay_cap(3, 4, 10), None);
     }
 
     #[test]
-    fn retry_backoff_uses_configured_attempts_and_base_delay() {
-        assert_eq!(
-            sync_retry_backoff(0, 4, 5),
-            Some(Duration::from_millis(5))
-        );
-        assert_eq!(
-            sync_retry_backoff(1, 4, 5),
-            Some(Duration::from_millis(10))
-        );
-        assert_eq!(
-            sync_retry_backoff(2, 4, 5),
-            Some(Duration::from_millis(20))
-        );
-        assert_eq!(sync_retry_backoff(3, 4, 5), None);
+    fn retry_backoff_stays_within_full_jitter_limit() {
+        for _ in 0..100 {
+            assert!(sync_retry_backoff(0, 3, 1_000).unwrap() <= Duration::from_secs(1));
+            assert!(sync_retry_backoff(1, 3, 1_000).unwrap() <= Duration::from_secs(2));
+        }
+        assert_eq!(sync_retry_backoff(2, 3, 1_000), None);
     }
 
     fn make_context(
