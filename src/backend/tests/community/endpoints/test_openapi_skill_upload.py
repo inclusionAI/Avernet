@@ -9,17 +9,38 @@ import zipfile
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.api.local_skill_upload_service import LocalSkillUploadServiceProtocol
-from agentclaw.community.core.bot_collaborator.protocols import CollaboratorServiceProtocol
-from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    BotCollabLogRepositoryProtocol,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage, SkillServiceFactory
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import LocalSkillUploadService
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository, SkillSetRepository
+from agentclaw.community.core.skill_center.factories import (
+    LocalSkillPackageStorage,
+    SkillServiceFactory,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.repositories import (
+    SkillRepository,
+    SkillSetRepository,
+)
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
-from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
-from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+)
+from tests.community.framework import (
+    CaseInput,
+    ExpectError,
+    ExpectSuccess,
+    endpoint_test,
+)
 
 
 _OWNER = "upload-owner"
@@ -50,10 +71,25 @@ class _Storage:
 
 
 class _StorageFactory:
-    def local_skill_package_storage(self, **_kwargs) -> tuple[str, LocalSkillPackageStorage]:
+    def local_skill_package_storage(
+        self, **_kwargs
+    ) -> tuple[str, LocalSkillPackageStorage]:
         # HTTP, tenant, and Core persistence are real here; filesystem faults
         # belong to the Core fault-injection matrix.
         return "test-local/raw-upload", _Storage()  # type: ignore[return-value]
+
+
+class _RuntimeFactory:
+    def create(self, **_kwargs):
+        return self
+
+    def sync_runtime(self):
+        return True
+
+
+class _Cleanup:
+    def record_pending(self, **_kwargs):
+        return True
 
 
 def _package() -> bytes:
@@ -144,8 +180,10 @@ def _seed_uploadable_bot(world) -> None:
             world.get(BotRepository),
             world.get(CollaboratorServiceProtocol),
             storage_factory,
+            _RuntimeFactory(),
             world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
+            _Cleanup(),
         ),
         scope=None,
     )
@@ -161,7 +199,9 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
         assert default_set["bolt_id"] == _BOT_ID
         assert skill_id in {
             skill["id"]
-            for skill in world.get(SkillSetRepository).get_skills_in_set(default_set["id"])
+            for skill in world.get(SkillSetRepository).get_skills_in_set(
+                default_set["id"]
+            )
         }
 
 
@@ -180,7 +220,10 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
         status=201,
         json_contains={
             "code": 201000,
-            "data": {"operation": "created", "skill": {"name": "raw-upload", "active": False}},
+            "data": {
+                "operation": "created",
+                "skill": {"name": "raw-upload", "active": False},
+            },
         },
     ),
 )
