@@ -6,7 +6,7 @@ fn bcsfuse_config_default_is_disabled_with_local_url() {
     assert!(!cfg.enabled);
     assert!(cfg.url.starts_with("http://"));
     assert!(cfg.fusion_timeout_ms > 0);
-    assert_eq!(cfg.sync_timeout_ms, 2_000);
+    assert_eq!(cfg.sync_timeout_ms, 10_000);
     assert_eq!(cfg.sync_max_attempts, 3);
     assert_eq!(cfg.sync_retry_base_delay_ms, 1_000);
 }

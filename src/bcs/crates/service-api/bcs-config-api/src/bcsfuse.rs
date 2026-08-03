@@ -52,7 +52,7 @@ fn default_fusion_timeout() -> u64 {
 }
 
 fn default_sync_timeout() -> u64 {
-    2_000 // 2s — simple CRUD
+    10_000 // 10s — simple CRUD
 }
 
 fn default_sync_max_attempts() -> u32 {
