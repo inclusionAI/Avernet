@@ -449,24 +449,22 @@ async def test_exists_baas_nonexistent_returns_false(fs_baas):
 
 
 @pytest.mark.asyncio
-async def test_exists_baas_swallows_baas_exception_returns_false(fs_baas, mock_baas):
-    """BaaS 异常 → exists 吞掉返 False（保 bool 契约，与 spec §4.2 一致）。
-
-    其他方法 raise 透传是因为 caller 需要错误信号；exists 是 yes/no 问题，
-    异常等价 "无法确认存在" = False，避免炸 caller。
-    """
+async def test_exists_baas_propagates_baas_exception(fs_baas, mock_baas):
+    """BaaS 不可达不是路径不存在，必须向 caller 暴露失败。"""
     mock_baas.get_http_info.side_effect = BaasServiceError("baas down")
-    assert await fs_baas.exists("/tmp/x") is False
+    with pytest.raises(BaasServiceError, match="baas down"):
+        await fs_baas.exists("/tmp/x")
 
 
 @pytest.mark.asyncio
-async def test_exists_baas_swallows_5xx_returns_false(fs_baas):
-    """容器 5xx 同 BaaS 异常 → False。"""
+async def test_exists_baas_propagates_5xx(fs_baas):
+    """容器 5xx 不是路径不存在，必须向 caller 暴露失败。"""
     response = _mock_httpx_response(status_code=500, json_body={"error": "boom"})
     client = _patch_async_client(response)
 
     with patch("httpx.AsyncClient", return_value=client):
-        assert await fs_baas.exists("/tmp/x") is False
+        with pytest.raises(httpx.HTTPStatusError):
+            await fs_baas.exists("/tmp/x")
 
 
 # ── D3: 每业务调用 1 次 get_http_info ─────────────────────────────────
