@@ -70,6 +70,7 @@ internal_dependencies:
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
   - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols
   - agentclaw.community.core.skill_center            # Local Skill desired-state query service DTOs
+  - agentclaw.community.core.skill_center            # Local Skill upload lifecycle contract
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py

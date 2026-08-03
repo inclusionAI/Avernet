@@ -32,6 +32,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.core.skill_center.errors import LocalSkillInvalidPackageError
 from agentclaw.community.di import Injected
 
 from .schemas import Skill, SkillState, SkillUpload
@@ -128,16 +132,38 @@ async def get_skill(
         },
     },
 )
+@envelope_errors
 async def upload_skill(
-    content: Annotated[bytes, Body(media_type="application/zip")],
     principal: PrincipalDep,
-    bot_id: str = Query(..., description="Bot that owns and stores the Local Skill."),
+    request: Request,
+    package: bytes = Body(..., media_type="application/zip"),
+    bot_id: str = Query(..., description="Ready Bot that owns the Local Skill."),
     owner_entity_id: str | None = Query(
         default=None, description="Verified Bot owner locator."
     ),
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
 ) -> Envelope[SkillUpload]:
-    """Create or safely replace one Local Skill from a raw ZIP body."""
-    raise NotImplementedError
+    """Create one inactive Local Skill from a complete raw ZIP package."""
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].lower()
+        != "application/zip"
+    ):
+        raise LocalSkillInvalidPackageError()
+    actor_id = caller_owner_id(principal)
+    result = await upload_service.upload_local_skill(
+        bot_id=bot_id,
+        owner_id=owner_entity_id or actor_id,
+        actor_id=actor_id,
+        package=package,
+    )
+    return envelope(
+        SkillUpload(operation="created", skill=_to_skill(result["skill"])),
+        request,
+        code=201000,
+        message="Created",
+    )
 
 
 @router.post("/{skill_id}/activate", response_model=Envelope[SkillState])

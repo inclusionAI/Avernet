@@ -22,6 +22,7 @@ from agentclaw.community.adapters.http.openapi_v1.skills.router import router
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.local_skill_upload_service import LocalSkillUploadServiceProtocol
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -74,16 +75,49 @@ class _Query:
         return self.list_local_skills()[1][0]
 
 
+class _Upload:
+    async def upload_local_skill(self, **kwargs):
+        self.args = kwargs
+        return {
+            "operation": "created",
+            "skill": {
+                "id": "8", "name": "new-skill", "description": "Useful",
+                "category": "general", "tags": "[]", "active": False,
+                "gmt_created": "2026-08-04T00:00:00", "gmt_modified": "2026-08-04T00:00:00",
+            },
+        }
+
+
 def _client(query: _Query) -> TestClient:
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
+            binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
     return TestClient(app)
+
+
+def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
+    client = _client(_Query())
+    response = client.post(
+        "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+        content=b"PK\x03\x04",
+        headers={"content-type": "application/zip"},
+    )
+    assert response.status_code == 201
+    assert response.json()["code"] == 201000
+    assert response.json()["data"] == {
+        "operation": "created",
+        "skill": {
+            "skill_id": "8", "name": "new-skill", "description": "Useful",
+            "category": "general", "tags": [], "active": False,
+            "created_at": "2026-08-04T00:00:00", "updated_at": "2026-08-04T00:00:00",
+        },
+    }
 
 
 def test_list_uses_verified_actor_and_exposes_only_public_metadata():

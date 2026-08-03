@@ -65,6 +65,7 @@ from agentclaw.community.api.skill_set_switcher_factory import (
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
+from agentclaw.community.api.local_skill_upload_service import LocalSkillUploadServiceProtocol
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -134,6 +135,7 @@ from agentclaw.community.core.skill_center.services.skill_symlink_listener impor
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import LocalSkillUploadService
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -267,6 +269,16 @@ class SkillCenterModule(Module):
             bot_repo=bot_repo,
             collaborator_service=collaborator_service,
         )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_upload_service(
+        self, skill_repo: SkillRepository, skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository, collaborator_service: CollaboratorServiceProtocol,
+        skill_service_factory: SkillServiceFactory,
+    ) -> LocalSkillUploadServiceProtocol:
+        return LocalSkillUploadService(skill_repo, skill_set_repo, bot_repo, collaborator_service, skill_service_factory)
 
     @singleton
     @provider

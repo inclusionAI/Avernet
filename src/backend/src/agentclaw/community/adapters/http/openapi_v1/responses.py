@@ -80,8 +80,13 @@ from agentclaw.community.core.resources.service import (
     ResourceNotFoundError,
 )
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillDuplicateError,
+    LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
+    LocalSkillNotReadyError,
     LocalSkillOwnerAmbiguousError,
+    LocalSkillStorageError,
+    LocalSkillTooLargeError,
 )
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
@@ -189,6 +194,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     ResourceNotFoundError: (404, "Not found"),
     LocalSkillNotFoundError: (404, "Not found"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
+    LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
+    LocalSkillNotReadyError: (409, "Bot is not ready"),
+    LocalSkillDuplicateError: (409, "Local Skill already exists"),
+    LocalSkillTooLargeError: (413, "Skill package is too large"),
+    LocalSkillStorageError: (502, "Skill storage operation failed"),
     FileTooLargeError: (413, "File too large for preview"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
@@ -275,6 +285,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
 # subcode without changing any existing public response.
 ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillOwnerAmbiguousError: 409104,
+    LocalSkillInvalidPackageError: 400101,
+    LocalSkillNotReadyError: 409101,
+    LocalSkillDuplicateError: 409103,
+    LocalSkillTooLargeError: 413101,
+    LocalSkillStorageError: 502101,
 }
 
 
