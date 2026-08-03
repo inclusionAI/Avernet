@@ -11,3 +11,11 @@ class SkillReferencedBySkillSetError(RuntimeError):
     def __init__(self, skill_set_ids: list[str]) -> None:
         super().__init__("skill is still referenced by a skill set")
         self.skill_set_ids = skill_set_ids
+
+
+class LocalSkillNotFoundError(Exception):
+    """A Local Skill or its authorized Bot scope is not visible to the actor."""
+
+
+class LocalSkillOwnerAmbiguousError(Exception):
+    """Legacy Local Skill ownership cannot be resolved without guessing."""
