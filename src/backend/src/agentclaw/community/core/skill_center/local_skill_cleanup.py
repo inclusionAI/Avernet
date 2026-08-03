@@ -22,6 +22,7 @@ class LocalSkillCleanupWorkModel(Base):
     bot_id = Column(String(100), nullable=False)
     skill_id = Column(Integer, nullable=False)
     package_locator = Column(String(1024), nullable=False)
+    package_locator_hash = Column(String(64), nullable=False)
     requires_runtime_restore = Column(Integer, nullable=False, default=0)
     status = Column(String(20), nullable=False, default="pending")
     attempts = Column(Integer, nullable=False, default=0)
@@ -30,6 +31,9 @@ class LocalSkillCleanupWorkModel(Base):
     gmt_create = Column(DateTime, nullable=False, server_default=func.now())
     gmt_modified = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     __table_args__ = (
-        UniqueConstraint("env", "owner_id", "bot_id", "package_locator", name="uk_local_skill_cleanup_scope_locator"),
+        UniqueConstraint(
+            "env", "owner_id", "bot_id", "package_locator_hash",
+            name="uk_local_skill_cleanup_scope_locator_hash",
+        ),
         Index("idx_local_skill_cleanup_pending", "env", "status", "gmt_create"),
     )

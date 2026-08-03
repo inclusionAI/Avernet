@@ -73,11 +73,15 @@ internal_dependencies:
 Skill-set switching is the highest-throughput flow in production. Changes here can break every chat session in flight. Coordinate with the propagation log schema before changing repository protocols.
 
 Local Skill replacement stages a complete package before switching the existing
-Skill metadata.  Failed post-switch obsolete-byte deletion is recorded through
+Skill metadata. Its old-package cleanup work is persisted before an Active
+runtime switch can commit; a rollback cancels that old-locator work before the
+old package becomes authoritative again. Failed post-switch obsolete-byte deletion is recorded through
 `LocalSkillCleanupRepository` in the exact deployment-wide Bot scope
 `(env, owner_id, bot_id)`.  The next serialized Local Skill mutation retries
 pending work; it marks successful work `cleaned` and retains failures with an
 attempt count and a stable operator-safe error.  A task that follows a failed
 Active rollback retains its staged bytes and restores the old runtime mapping
-before it attempts byte cleanup.  Apply
+before it attempts byte cleanup. Cleanup identity uses the full SHA-256 of the
+locator, while retaining the locator itself for execution; a digest collision
+fails closed. Apply
 `sql/2026_08_04_local_skill_cleanup_work.sql` before deploying this behavior.

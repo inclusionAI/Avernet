@@ -304,9 +304,9 @@ def test_openapi_declares_exact_state_command_paths_and_response_shape():
     assert {"200", "201", "413"} <= set(upload["responses"])
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
-            "Envelope_LocalSkillUpload_"
+            "Envelope_SkillUpload_"
         )
-    assert schema["components"]["schemas"]["LocalSkillUpload"]["properties"]["operation"]["enum"] == [
+    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"]["enum"] == [
         "created", "updated"
     ]
 

@@ -18,7 +18,7 @@ class LocalSkillCleanupRepository(Protocol):
         skill_id: str,
         package_locator: str,
         requires_runtime_restore: bool,
-    ) -> bool: ...
+    ) -> int | None: ...
 
     def list_pending(self, *, env: str, owner_id: str, bot_id: str) -> list[dict]: ...
 
@@ -28,4 +28,8 @@ class LocalSkillCleanupRepository(Protocol):
 
     def mark_failed(
         self, *, work_id: int, env: str, owner_id: str, bot_id: str, error: str
+    ) -> bool: ...
+
+    def cancel_pending(
+        self, *, work_id: int, env: str, owner_id: str, bot_id: str
     ) -> bool: ...
