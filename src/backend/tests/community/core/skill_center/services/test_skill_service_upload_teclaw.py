@@ -26,6 +26,7 @@ def _service(local_dir: Path, adapter, fake_fs) -> SkillService:
     repo = MagicMock()
     repo.list_skills.return_value = []  # get_skill_by_path -> None -> create path
     repo.get_bot_local_by_name.return_value = None
+    repo.get_by_git_path.return_value = None
     svc = SkillService(
         skill_repo=repo,
         skill_repo_sync=MagicMock(get_local_skills_root=MagicMock(return_value=None)),
@@ -87,10 +88,11 @@ async def test_reupload_normalizes_historical_collaborator_owner():
     historical = {
         "id": "17",
         "name": "sync-and-pr",
+        "bolt_id": "b1",
         "user_id": "collaborator",
         "git_path": "local://skills-local/sync-and-pr",
     }
-    svc._skill_repo.get_bot_local_by_name.return_value = historical
+    svc._skill_repo.get_by_git_path.return_value = historical
     svc._skill_repo.update.return_value = {**historical, "user_id": "bot-owner"}
 
     uploaded = [
@@ -109,11 +111,38 @@ async def test_reupload_normalizes_historical_collaborator_owner():
     svc._skill_repo.get_bot_local_by_name.assert_called_once_with(
         bot_id="b1",
         name="sync-and-pr",
-        user_id=None,
+        user_id="bot-owner",
+    )
+    svc._skill_repo.get_by_git_path.assert_called_once_with(
+        "local://skills-local/sync-and-pr"
     )
     assert svc._skill_repo.update.call_args.args[0] == "17"
     assert svc._skill_repo.update.call_args.args[1]["user_id"] == "bot-owner"
     assert result["user_id"] == "bot-owner"
+
+
+@pytest.mark.asyncio
+async def test_default_bot_upload_never_uses_unscoped_owner_lookup():
+    """Shared ``default`` Bot IDs must not select another owner's same-name row."""
+    fake_fs = MagicMock()
+    fake_fs.delete_tree = AsyncMock(return_value=True)
+    fake_fs.write_file = AsyncMock()
+    svc = _service(Path("skills-local"), to_local_skill_engine_path, fake_fs)
+
+    await svc.upload_skill(
+        [{"filename": "SKILL.md", "relative_path": "SKILL.md", "content": SKILL_MD}],
+        user_id="bot-owner",
+        bolt_id="default",
+    )
+
+    svc._skill_repo.get_bot_local_by_name.assert_called_once_with(
+        bot_id="default",
+        name="sync-and-pr",
+        user_id="bot-owner",
+    )
+    svc._skill_repo.get_by_git_path.assert_called_once_with(
+        "local://skills-local/sync-and-pr"
+    )
 
 
 @pytest.mark.asyncio
