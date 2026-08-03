@@ -5,8 +5,17 @@ Tests for:
 - bot_service.create_bot with bot_id parameter (idempotency)
 - bot_service.update_bot_ext method
 """
+from concurrent.futures import ThreadPoolExecutor as RealThreadPoolExecutor
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotServiceError,
+)
+from agentclaw.community.core.devices.errors import DeviceServiceError
+from agentclaw.community.core.service_bot.repository.models import PublishStatus
 
 
 class TestBotServicePassportIntegration:
@@ -52,6 +61,241 @@ class TestBotServicePassportIntegration:
         )
         return service
 
+
+def _caller_binding(
+    binding_id: int,
+    device_id: str,
+    applied_by: str,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=binding_id,
+        entity_id="owner-1",
+        entity_type="staff",
+        device_id=device_id,
+        device_provider="baas",
+        env="prod",
+        device_props={},
+        status="ACTIVE",
+        apply_reason="caller_instance:service-bot-1",
+        applied_by=applied_by,
+    )
+
+
+class TestServiceBotPassportRefresh(TestBotServicePassportIntegration):
+    @staticmethod
+    def _set_publish_records(bot_service, *, online_id: int | None, verify_id: int | None):
+        records = {
+            PublishStatus.SUCCESS.value: (
+                SimpleNamespace(id=101, ext={"binding": {"online": online_id}})
+                if online_id is not None
+                else None
+            ),
+            PublishStatus.VALIDATING.value: (
+                SimpleNamespace(id=102, ext={"binding": {"verify": verify_id}})
+                if verify_id is not None
+                else None
+            ),
+        }
+        bot_service._bot_publish_repo.get_by_publish_bot_id.side_effect = (
+            lambda **kwargs: records[kwargs["publish_status"]]
+        )
+
+    def test_updates_standard_and_caller_targets_with_owner_token_at_fixed_concurrency(
+        self,
+        bot_service,
+    ):
+        self._set_publish_records(bot_service, online_id=21, verify_id=22)
+        bot_service._hot_update_by_device_binding = MagicMock(
+            return_value={"binding_id": 20, "devices": [{"device_uuid": "draft"}]}
+        )
+        bot_service._hot_update_by_publish_binding = MagicMock(
+            side_effect=[
+                {"binding_id": 21, "devices": [{"device_uuid": "online"}]},
+                {"binding_id": 22, "devices": [{"device_uuid": "verify"}]},
+            ]
+        )
+        caller_bindings = [
+            _caller_binding(30 + index, f"BOT-caller-{index}", f"caller-{index}")
+            for index in range(6)
+        ]
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.return_value = (
+            caller_bindings
+        )
+        device_service = MagicMock()
+        device_service.update_device_headers.side_effect = lambda **kwargs: [
+            {"device_uuid": f"DEVICE-{kwargs['device'].device_id}"}
+        ]
+        bot_service._device_service_provider = lambda: device_service
+
+        worker_counts: list[int] = []
+
+        def executor_factory(*, max_workers: int):
+            worker_counts.append(max_workers)
+            return RealThreadPoolExecutor(max_workers=max_workers)
+
+        with (
+            patch(
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+                return_value="prod",
+            ),
+            patch(
+                "agentclaw.community.core.bot_management.services.bot_service.ThreadPoolExecutor",
+                side_effect=executor_factory,
+            ),
+        ):
+            result = bot_service._hot_update_service_bot_passport_token(
+                bot_id="service-bot-1",
+                user_id="owner-1",
+                token="fake-owner-passport-token",
+                bot={"binding_id": 20},
+                agent_code="owner-agent-code",
+            )
+
+        assert worker_counts == [5]
+        assert {item["type"] for item in result} == {
+            "draft",
+            "online",
+            "verify",
+            "caller",
+        }
+        assert sum(item["type"] == "caller" for item in result) == 6
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.assert_called_once_with(
+            bot_id="service-bot-1",
+            owner_id="owner-1",
+            env="prod",
+        )
+        assert len(device_service.update_device_headers.call_args_list) == 6
+        for call in device_service.update_device_headers.call_args_list:
+            assert call.kwargs["agent_pass_token"] == "fake-owner-passport-token"
+            assert call.kwargs["agent_code"] == "owner-agent-code"
+            assert call.kwargs["active_only"] is True
+
+    def test_device_service_error_does_not_stop_later_stages_or_callers(self, bot_service):
+        self._set_publish_records(bot_service, online_id=21, verify_id=22)
+        bot_service._hot_update_by_device_binding = MagicMock(
+            side_effect=DeviceServiceError("draft unavailable")
+        )
+        bot_service._hot_update_by_publish_binding = MagicMock(
+            side_effect=[
+                {"binding_id": 21, "devices": [{"device_uuid": "online"}]},
+                {"binding_id": 22, "devices": [{"device_uuid": "verify"}]},
+            ]
+        )
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.return_value = [
+            _caller_binding(30, "BOT-caller-1", "caller-1")
+        ]
+        device_service = MagicMock()
+        device_service.update_device_headers.return_value = [
+            {"device_uuid": "DEVICE-caller-1"}
+        ]
+        bot_service._device_service_provider = lambda: device_service
+
+        with (
+            patch(
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+                return_value="prod",
+            ),
+            pytest.raises(BotServiceError, match="draft unavailable"),
+        ):
+            bot_service._hot_update_service_bot_passport_token(
+                bot_id="service-bot-1",
+                user_id="owner-1",
+                token="fake-owner-passport-token",
+                bot={"binding_id": 20},
+            )
+
+        assert bot_service._hot_update_by_publish_binding.call_count == 2
+        device_service.update_device_headers.assert_called_once()
+
+    def test_caller_failure_does_not_stop_other_callers_but_fails_overall(self, bot_service):
+        self._set_publish_records(bot_service, online_id=None, verify_id=None)
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.return_value = [
+            _caller_binding(30, "BOT-caller-a", "caller-a"),
+            _caller_binding(31, "BOT-caller-b", "caller-b"),
+            _caller_binding(32, "BOT-caller-c", "caller-c"),
+        ]
+        attempted: list[str] = []
+
+        def update_caller(**kwargs):
+            device_id = kwargs["device"].device_id
+            attempted.append(device_id)
+            if device_id == "BOT-caller-a":
+                raise DeviceServiceError("caller a unavailable")
+            return [{"device_uuid": f"DEVICE-{device_id}"}]
+
+        device_service = MagicMock()
+        device_service.update_device_headers.side_effect = update_caller
+        bot_service._device_service_provider = lambda: device_service
+
+        with (
+            patch(
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+                return_value="prod",
+            ),
+            pytest.raises(BotServiceError, match="caller a unavailable"),
+        ):
+            bot_service._hot_update_service_bot_passport_token(
+                bot_id="service-bot-1",
+                user_id="owner-1",
+                token="fake-owner-passport-token",
+                bot={},
+            )
+
+        assert set(attempted) == {
+            "BOT-caller-a",
+            "BOT-caller-b",
+            "BOT-caller-c",
+        }
+
+    def test_caller_binding_with_zero_active_devices_fails_overall(self, bot_service):
+        self._set_publish_records(bot_service, online_id=None, verify_id=None)
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.return_value = [
+            _caller_binding(30, "BOT-caller-1", "caller-1")
+        ]
+        device_service = MagicMock()
+        device_service.update_device_headers.return_value = []
+        bot_service._device_service_provider = lambda: device_service
+
+        with (
+            patch(
+                "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+                return_value="prod",
+            ),
+            pytest.raises(BotServiceError, match="没有 ACTIVE 物理设备"),
+        ):
+            bot_service._hot_update_service_bot_passport_token(
+                bot_id="service-bot-1",
+                user_id="owner-1",
+                token="fake-owner-passport-token",
+                bot={},
+            )
+
+    def test_no_callers_preserves_existing_standard_target_result(self, bot_service):
+        self._set_publish_records(bot_service, online_id=None, verify_id=None)
+        bot_service._device_binding_repo.list_active_caller_instance_bindings.return_value = []
+        bot_service._hot_update_by_device_binding = MagicMock(
+            return_value={"binding_id": 20, "devices": [{"device_uuid": "draft"}]}
+        )
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+            return_value="prod",
+        ):
+            result = bot_service._hot_update_service_bot_passport_token(
+                bot_id="service-bot-1",
+                user_id="owner-1",
+                token="fake-owner-passport-token",
+                bot={"binding_id": 20},
+            )
+
+        assert result == [
+            {
+                "binding_id": 20,
+                "type": "draft",
+                "device_count": 1,
+                "devices": [{"device_uuid": "draft"}],
+            }
+        ]
 
 class TestCreateBotWithBotId(TestBotServicePassportIntegration):
     """Tests for create_bot with bot_id parameter."""

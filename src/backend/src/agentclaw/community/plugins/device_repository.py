@@ -343,6 +343,41 @@ class DeviceRepository(_DeviceBindingRepositoryProtocol):
             ]
             return total, items
 
+    def list_active_caller_instance_bindings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+    ) -> list[DeviceBindingRecord]:
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(EntityDeviceBinding)
+                .filter(
+                    EntityDeviceBinding.env == env,
+                    EntityDeviceBinding.entity_id == owner_id,
+                    EntityDeviceBinding.entity_type == "staff",
+                    EntityDeviceBinding.status == _DeviceBindingStatus.ACTIVE,
+                    EntityDeviceBinding.device_provider == "baas",
+                    EntityDeviceBinding.apply_reason
+                    == f"caller_instance:{bot_id}",
+                )
+                .order_by(EntityDeviceBinding.id.desc())
+                .all()
+            )
+
+            # ``device_id`` is unique in prod, but keep this defensive de-dupe
+            # for legacy/local data and retain the latest binding deterministically.
+            seen_device_ids: set[str] = set()
+            bindings: list[DeviceBindingRecord] = []
+            for row in rows:
+                record = _to_record(row)
+                if record is None or record.device_id in seen_device_ids:
+                    continue
+                seen_device_ids.add(record.device_id)
+                bindings.append(record)
+            return bindings
+
     def count_non_released_bindings(
         self,
         *,

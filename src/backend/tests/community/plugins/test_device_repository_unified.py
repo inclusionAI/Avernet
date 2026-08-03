@@ -1,7 +1,7 @@
 """Unified DeviceBindingRepository — behavior + contract.
 
 The last DB-repo twin in the unification program (S5). Covers all
-18 Protocol methods + the 3 adopt-prod behavior changes:
+19 Protocol methods + the 3 adopt-prod behavior changes:
 - ``gmt_modified`` advances DB-side after each UPDATE (proves the
   ``func.now()`` reaches the column on SQLite).
 - ``get_active_engine_by_device_id`` falls back to
@@ -243,6 +243,78 @@ def test_list_bindings_filters_and_pagination(repo):
     t_dev, _ = repo.list_bindings(env="dev")
     t_prod, _ = repo.list_bindings(env="prod")
     assert t_dev == 5 and t_prod == 1
+
+
+def test_list_active_caller_instance_bindings_filters_scope_and_deduplicates(repo):
+    matching_old = repo.insert_binding(
+        **_binding(
+            entity_id="owner-1",
+            device_id="BOT-caller-1",
+            device_provider="baas",
+            env="prod",
+            status="ACTIVE",
+            apply_reason="caller_instance:service-bot-1",
+            applied_by="caller-1",
+        )
+    )
+    matching_latest = repo.insert_binding(
+        **_binding(
+            entity_id="owner-1",
+            device_id="BOT-caller-1",
+            device_provider="baas",
+            env="prod",
+            status="ACTIVE",
+            apply_reason="caller_instance:service-bot-1",
+            applied_by="caller-1",
+        )
+    )
+    second_match = repo.insert_binding(
+        **_binding(
+            entity_id="owner-1",
+            device_id="BOT-caller-2",
+            device_provider="baas",
+            env="prod",
+            status="ACTIVE",
+            apply_reason="caller_instance:service-bot-1",
+            applied_by="caller-2",
+        )
+    )
+
+    excluded = [
+        dict(entity_id="other-owner"),
+        dict(env="dev"),
+        dict(status="PENDING"),
+        dict(device_provider="arca"),
+        dict(entity_type="team"),
+        dict(apply_reason="caller_instance:other-service-bot"),
+        dict(apply_reason="caller_instance:service-bot-1-extra"),
+    ]
+    for index, override in enumerate(excluded):
+        values = dict(
+            entity_id="owner-1",
+            entity_type="staff",
+            device_id=f"BOT-excluded-{index}",
+            device_provider="baas",
+            env="prod",
+            status="ACTIVE",
+            apply_reason="caller_instance:service-bot-1",
+            applied_by=f"excluded-{index}",
+        )
+        values.update(override)
+        repo.insert_binding(**_binding(**values))
+
+    bindings = repo.list_active_caller_instance_bindings(
+        bot_id="service-bot-1",
+        owner_id="owner-1",
+        env="prod",
+    )
+
+    assert [binding.id for binding in bindings] == [second_match, matching_latest]
+    assert {binding.device_id for binding in bindings} == {
+        "BOT-caller-1",
+        "BOT-caller-2",
+    }
+    assert matching_old not in {binding.id for binding in bindings}
 
 
 def test_count_non_released_bindings(repo):
