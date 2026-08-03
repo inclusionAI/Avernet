@@ -26,6 +26,10 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
 
 from agentclaw.community.core.access.admin_scopes import skill_admin
+from agentclaw.community.core.skill_center.errors import (
+    SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
+)
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillCategoryRepository,
     SkillRepository,
@@ -49,18 +53,6 @@ SKILLS_LOCAL_DIR = SKILLS_DIR / "skills-local"
 # ``config_compose.teclaw_paths.LOCAL_SKILLS_DIRNAME``; kept as a local literal so
 # core.skill_center doesn't import config_compose (which depends on skill_center).
 _LOCAL_SKILLS_DIRNAME = "skills-local"
-
-
-class SkillDeleteConsistencyError(RuntimeError):
-    """A Skill delete could not safely converge filesystem and database state."""
-
-
-class SkillReferencedBySkillSetError(RuntimeError):
-    """A Skill cannot be deleted while any SkillSet still references it."""
-
-    def __init__(self, skill_set_ids: list[str]) -> None:
-        super().__init__("skill is still referenced by a skill set")
-        self.skill_set_ids = skill_set_ids
 
 
 def _get_default_global_repo_dir() -> Path:
@@ -2318,11 +2310,20 @@ class SkillService:
         logger.info(f"[SkillService] Deleting skill: id={skill_id}, name={skill_name}, git_path={git_path}")
         logger.info(f"[SkillService] local_dir: {self.local_dir}, active_dir: {self.active_dir}")
 
-        device_fs = (
-            None
-            if is_shared_source
-            else self._device_fs_factory(bolt_id, skill_user_id)
-        )
+        device_fs = None
+        if not is_shared_source:
+            try:
+                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        "failed to resolve device filesystem before delete"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime has no available device "
+                    "filesystem; keeping historical metadata-only delete",
+                    exc_info=True,
+                )
 
         # 1. 先收敛 active entry。已激活 Skill 的 entry 删除失败时必须 fail closed，
         # 否则继续删除 source/DB 会把它变成 dangling link。未激活时 entry
@@ -2355,7 +2356,7 @@ class SkillService:
 
         # 2. 删除物理文件（仅 local:// 技能）— 通过 DeviceFileSystem
         logger.info(f"[SkillService] Checking git_path: {git_path}, starts_with_local={git_path.startswith('local://')}")
-        if git_path.startswith('local://'):
+        if git_path.startswith('local://') and device_fs is not None:
             # teclaw: skills-local/<name> → workspace/skills-local/<name>;
             # 非 teclaw: identity（主机路径原样）。
             local_path_str = self._local_skill_path_adapter(git_path[8:])  # 去掉 local:// 前缀
@@ -2397,7 +2398,7 @@ class SkillService:
                     )
                 else:
                     logger.info(f"[SkillService] Deleted skill files: {local_path_str}")
-        else:
+        elif not git_path.startswith('local://'):
             logger.info("[SkillService] Not a local skill, skipping physical delete")
 
         # 3. 删除数据库记录

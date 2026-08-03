@@ -82,6 +82,10 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
+from agentclaw.community.core.skill_center.errors import (
+    SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
+)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
@@ -90,10 +94,6 @@ from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
-)
-from agentclaw.community.core.skill_center.services.skill_service import (
-    SkillDeleteConsistencyError,
-    SkillReferencedBySkillSetError,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
