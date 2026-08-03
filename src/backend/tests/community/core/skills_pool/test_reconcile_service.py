@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +42,21 @@ from agentclaw.community.core.skills_pool.types import (
 )
 from agentclaw.community.core.task_queue.types import Complete, Retry
 from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
+
+
+def _aicoding_engine_api():
+    """Load the sibling Engine source for the deliberate cross-layer test."""
+
+    engine_src = Path(__file__).resolve().parents[5] / "engine" / "src"
+    if str(engine_src) not in sys.path:
+        sys.path.insert(0, str(engine_src))
+    from engine.community.plugins.aicoding.layout_pool import (
+        SkillMapping,
+        activate_aicoding_pool,
+        inspect_aicoding_runtime_layout,
+    )
+
+    return SkillMapping, activate_aicoding_pool, inspect_aicoding_runtime_layout
 
 
 SCOPE = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
@@ -2348,3 +2366,288 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         ("bot-1", "owner-1"),
     ]
     assert transport.bindings == ["binding-new", "binding-new", "binding-new"]
+
+
+class _LocalAICodingResolver:
+    def resolve_for_bot(self, bot_id: str, user_id: str) -> SimpleNamespace:
+        assert (bot_id, user_id) == (SCOPE.bot_id, "owner-1")
+        return SimpleNamespace(conn_info={"binding": "local-engine"})
+
+
+class _LocalAICodingProbe:
+    def __init__(self, *, home: Path, pool_repo: Path) -> None:
+        self._home = home
+        self._pool_repo = pool_repo
+        self.calls = 0
+
+    async def probe_bot(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ) -> RuntimeLayoutProbeResult:
+        assert (bot_id, user_id, engine) == (SCOPE.bot_id, "owner-1", "aicoding")
+        self.calls += 1
+        _, _, inspect_aicoding_runtime_layout = _aicoding_engine_api()
+        inspection = inspect_aicoding_runtime_layout(
+            home=self._home,
+            mapping_contract_version="skills-pool-mapping-v2",
+            repo_is_mounted=lambda path: path == self._pool_repo,
+        )
+        return RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus(inspection.status.value),
+            engine=engine,
+            layout_contract_version=inspection.layout_contract_version,
+            preparation_id=inspection.preparation_id,
+            evidence=inspection.evidence,
+        )
+
+
+class _LocalAICodingEngineTransport:
+    """Execute the Backend adapter payload through the actual Engine operation."""
+
+    def __init__(self, *, home: Path, pool_local: Path, pool_repo: Path) -> None:
+        self._home = home
+        self._pool_local = pool_local
+        self._pool_repo = pool_repo
+        self.calls: list[str] = []
+
+    async def invoke(
+        self,
+        conn_info: object,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, object],
+        timeout: float,
+    ) -> dict[str, object]:
+        assert conn_info == {"binding": "local-engine"}
+        assert method == "POST"
+        assert timeout == 30.0
+        self.calls.append(path)
+        assert path == "/api/skills/layout/activate"
+
+        engine_skill_mapping, activate_aicoding_pool, _ = _aicoding_engine_api()
+        mappings = []
+        for intent in body["mappings"]:
+            assert isinstance(intent, dict)
+            corpus = intent["corpus"]
+            relative_path = intent["relative_path"]
+            link_name = intent["link_name"]
+            assert isinstance(corpus, str)
+            assert isinstance(relative_path, str)
+            assert isinstance(link_name, str)
+            source_root = self._pool_local if corpus == "local" else self._pool_repo
+            mappings.append(
+                engine_skill_mapping(
+                    source=str(source_root / relative_path),
+                    target=str(self._home / ".claude" / "skills" / link_name),
+                )
+            )
+
+        result = activate_aicoding_pool(
+            migration_generation=str(body["migration_generation"]),
+            preparation_id=str(body["preparation_id"]),
+            registered_local_names=list(body["registered_local_names"]),
+            mappings=mappings,
+            home=self._home,
+            repo_is_mounted=lambda candidate: candidate == self._pool_repo,
+        )
+        return {"success": True, "data": result.to_data()}
+
+
+def _prepared_local_aicoding_runtime(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, Path]:
+    """Build the persistent filesystem shape seen by a POOL_ACTIVE Bot."""
+
+    home = tmp_path / "home" / "admin"
+    workspace = home / ".aicoding" / "workspace"
+    legacy_local = workspace / "skills" / "skills-local"
+    active_root = home / ".claude" / "skills"
+    pool_root = workspace / "skills-pool"
+    pool_local = pool_root / "skills-local"
+    pool_repo = pool_root / "skills-repo"
+    repo_bridge = home / ".aicoding" / "skills-repo"
+
+    (legacy_local / "handmade").mkdir(parents=True)
+    (legacy_local / "handmade" / "SKILL.md").write_text("legacy")
+    (pool_local / "handmade").mkdir(parents=True)
+    (pool_local / "handmade" / "SKILL.md").write_text("pool")
+    (pool_repo / "business" / "shared").mkdir(parents=True)
+    (pool_repo / "business" / "shared" / "SKILL.md").write_text("repo")
+    active_root.mkdir(parents=True)
+    (active_root / "skills-local").symlink_to(legacy_local, target_is_directory=True)
+    repo_bridge.symlink_to(pool_repo, target_is_directory=True)
+    (pool_root / ".pool-ready").write_text(
+        json.dumps(
+            {
+                "engine": "aicoding",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": PREPARATION_ID,
+                "prepared_at": "2026-07-24T00:00:00Z",
+                "pool_local_root": str(pool_local),
+                "pool_repo_root": str(pool_repo),
+                "validation_summary": {
+                    "all_valid": True,
+                    "pool_local": {"path": str(pool_local), "valid": True},
+                    "pool_repo": {
+                        "path": str(pool_repo),
+                        "readable_mount": True,
+                        "valid": True,
+                    },
+                    "structural_bridges": [
+                        {
+                            "name": "stable_local_bridge",
+                            "path": str(active_root / "skills-local"),
+                            "target": str(legacy_local),
+                            "valid": True,
+                        },
+                        {
+                            "name": "stable_repo_bridge",
+                            "path": str(repo_bridge),
+                            "target": str(pool_repo),
+                            "valid": True,
+                        },
+                    ],
+                    "managed_active_entries": [],
+                    "external_active_entry_count": 0,
+                },
+            }
+        )
+    )
+    return home, pool_local, pool_repo, repo_bridge
+
+
+def _pool_active_aicoding_service(
+    *,
+    tmp_path: Path,
+) -> tuple[
+    SkillsPoolReconcileService,
+    _LocalAICodingEngineTransport,
+    _LocalAICodingProbe,
+    Path,
+    Path,
+]:
+    home, pool_local, pool_repo, repo_bridge = _prepared_local_aicoding_runtime(
+        tmp_path
+    )
+    active_root = home / ".claude" / "skills"
+    engine_skill_mapping, activate_aicoding_pool, _ = _aicoding_engine_api()
+    initial = activate_aicoding_pool(
+        migration_generation=GENERATION,
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            engine_skill_mapping(
+                source=str(pool_local / "handmade"),
+                target=str(active_root / "handmade"),
+            ),
+            engine_skill_mapping(
+                source=str(pool_repo / "business" / "shared"),
+                target=str(active_root / "shared"),
+            ),
+        ],
+        home=home,
+        repo_is_mounted=lambda candidate: candidate == pool_repo,
+    )
+    assert initial.committed
+
+    skills = FakeSkillRepository(engine="aicoding")
+    skills.registered = [
+        RegisteredSkillAsset(
+            skill_id=1,
+            name="handmade",
+            git_path="local://handmade",
+        )
+    ]
+    skills.active = [
+        *skills.registered,
+        RegisteredSkillAsset(
+            skill_id=2,
+            name="shared",
+            git_path="git://business/shared",
+        ),
+    ]
+    transport = _LocalAICodingEngineTransport(
+        home=home,
+        pool_local=pool_local,
+        pool_repo=pool_repo,
+    )
+    probe = _LocalAICodingProbe(home=home, pool_repo=pool_repo)
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=_LocalAICodingResolver(),
+        adapter_transport=transport,
+        probe_service=probe,
+    )
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            lease_owner=None,
+        )
+    )
+    service = SkillsPoolReconcileService(
+        bot_repository=FakeBotRepository("aicoding"),
+        layout_repository=layouts,
+        skill_repository=skills,
+        runtime=runtime,
+    )
+    return service, transport, probe, active_root, repo_bridge
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_uses_real_engine_activate_contract(
+    tmp_path: Path,
+) -> None:
+    """Backend must call Engine before declaring a retired repo bridge healthy."""
+
+    service, transport, probe, active_root, repo_bridge = _pool_active_aicoding_service(
+        tmp_path=tmp_path
+    )
+    (active_root / "shared").unlink()
+    (active_root / "shared").symlink_to(
+        repo_bridge / "business" / "shared",
+        target_is_directory=True,
+    )
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-after-restart")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert transport.calls == ["/api/skills/layout/activate"]
+    assert probe.calls == 2
+    assert (active_root / "shared").readlink() == (
+        active_root.parent.parent
+        / ".aicoding"
+        / "workspace"
+        / "skills-pool"
+        / "skills-repo"
+        / "business"
+        / "shared"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_stops_when_real_engine_rejects_repair(
+    tmp_path: Path,
+) -> None:
+    """A real Engine rejection must stop Backend before its post-repair probe."""
+
+    service, transport, probe, active_root, repo_bridge = _pool_active_aicoding_service(
+        tmp_path=tmp_path
+    )
+    untrusted_target = repo_bridge / "business" / "missing"
+    (active_root / "shared").unlink()
+    (active_root / "shared").symlink_to(untrusted_target, target_is_directory=True)
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-after-restart")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is False
+    assert transport.calls == ["/api/skills/layout/activate"]
+    assert probe.calls == 1
+    assert (active_root / "shared").readlink() == untrusted_target
