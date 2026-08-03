@@ -154,6 +154,45 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
             "total": 3,
         }
 
+        colliding_relation = client.post(
+            "/api/bot-chat/log-relations",
+            json={
+                "biz_scene": "other-user-scene",
+                "biz_task_id": f"other-user-{trace_id}",
+                "user_id": "other-user",
+                "bot_id": "default",
+                "refs": [
+                    {
+                        "ref_type": "session_key",
+                        "ref_value": "session-key-live",
+                    }
+                ],
+            },
+        )
+        assert colliding_relation.status_code == 200, colliding_relation.text
+        assert colliding_relation.json()["data"]["inserted"] == 1
+
+        open_user_bot = client.get(
+            "/api/v1/open/bot-chats/users/e2e_user/bots/default/traces",
+            params={"page": 1, "limit": 20},
+        )
+        assert open_user_bot.status_code == 200, open_user_bot.text
+        open_user_bot_body = open_user_bot.json()
+        assert open_user_bot_body["success"] is True
+        assert open_user_bot_body["data"]["total"] == 1
+        open_trace = open_user_bot_body["data"]["sessions"][0]
+        assert open_trace["id"] == trace_id
+        assert open_trace["user_id"] == "e2e_user"
+        assert open_trace["bot_id"] == "default"
+        assert open_trace["biz_scene"] == "singlebox-coverage"
+        assert open_trace["biz_task_id"] == trace_id
+
+        other_user_open = client.get(
+            "/api/v1/open/bot-chats/users/other-user/bots/default/traces"
+        )
+        assert other_user_open.status_code == 200, other_user_open.text
+        assert other_user_open.json()["data"]["total"] == 0
+
         task_queries = [
             {
                 "biz_scene": "singlebox-coverage",
