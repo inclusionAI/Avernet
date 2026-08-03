@@ -161,11 +161,12 @@ class SkillRepository:
 
     @inject
     def __init__(self, db: DatabasePlugin):
-        from agentclaw.community.core.models import Skill, SkillSet
+        from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
 
         self._db = db
         self.Skill = Skill
         self.SkillSet = SkillSet
+        self.SkillSetSkill = SkillSetSkill
 
     def get_by_id(self, skill_id: str) -> Optional[dict]:
         with self._db.orm_session() as db:
@@ -672,7 +673,19 @@ class SkillRepository:
         return self.get_by_id(skill_id)
 
     def delete(self, skill_id: str) -> bool:
-        with self._db.orm_session() as db:
+        """Delete one Skill and its set associations as one transaction.
+
+        This remains a bulk-delete repository method, so SQLAlchemy cannot
+        apply ``Skill.skill_sets``' ORM cascade. Remove matching association
+        rows explicitly before deleting the Skill. A real transaction keeps
+        association cleanup and the Skill-row delete atomic and propagates
+        every database error to the caller.
+        """
+        with self._db.transactional_orm_session() as db:
+            db.query(self.SkillSetSkill).filter(
+                self.SkillSetSkill.skill_id == int(skill_id),
+                self.SkillSetSkill.env == get_current_env(),
+            ).delete(synchronize_session=False)
             rowcount = (
                 db.query(self.Skill)
                 .filter(
