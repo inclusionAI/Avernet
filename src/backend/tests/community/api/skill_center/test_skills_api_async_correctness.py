@@ -299,6 +299,26 @@ class TestUploadSkillValidation:
             assert body["message"] == "Bot not found."
             mock_svc.upload_skill.assert_not_called()
 
+    def test_upload_rejects_bot_without_owner_metadata(self, mock_ctx):
+        """Local Skill 的归属无法确定时，不能将上传归到请求方。"""
+        with _upload_skill_di_app(
+            mock_ctx, bot_status="ACTIVE"
+        ) as (client, mock_svc, mock_bot_repo, _):
+            mock_bot_repo.get_by_id_and_owner.return_value["owner_id"] = ""
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            body = response.json()
+            assert body["success"] is False
+            assert body["message"] == "Bot ownership metadata is incomplete."
+            mock_svc.upload_skill.assert_not_called()
+
     def test_upload_rejects_file_paths_length_mismatch(self, mock_ctx):
         with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
             response = client.post(
