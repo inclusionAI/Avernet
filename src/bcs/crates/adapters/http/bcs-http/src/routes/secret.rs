@@ -1,5 +1,5 @@
 //! `GET /admin/secret/:name` — diagnostic route for verifying the secret
-//! pipeline (mist in prod, env/in-memory in dev) end-to-end. Localhost-only
+//! pipeline end-to-end. Localhost-only
 //! by design: the route refuses any peer whose IP is not loopback so a stray
 //! reverse-proxy can't accidentally leak secrets.
 //!

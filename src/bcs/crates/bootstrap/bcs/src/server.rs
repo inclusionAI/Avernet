@@ -151,10 +151,9 @@ fn is_debug_enabled() -> bool {
 
 /// Build a default `SecretService` for the `ServicesBuilder` step.
 ///
-/// At builder time we don't yet know if mist is enabled — wiring there happens
-/// in `http_adapter::build_http_app_state`, which is async. We seed every
-/// `Services` instance with a Noop so the builder's required-field invariant
-/// is satisfied; the real backend (Mist when enabled) is swapped in alongside
+/// At builder time we do not perform async provider initialization. We seed
+/// every `Services` instance with a Noop so the builder's required-field
+/// invariant is satisfied; the configured backend is swapped in alongside
 /// `HttpAppState` construction.
 fn default_bootstrap_secret_service() -> Arc<dyn bcs_service_api::SecretService> {
     use bcs_secret::DefaultSecretService;
@@ -951,7 +950,7 @@ pub struct BcsServerState {
     /// Completed V1 HTTP adapter state assembled from the same runtime services as legacy HTTP.
     pub openapi_v1: ApiState,
 
-    /// Dedicated secret source for the session-bound Workbench connection credential.
+    /// Configured secret source used for the session-bound Workbench credential.
     pub group_session_secret_access: Arc<dyn SecretAccessPort>,
 
     /// Shared OAuth identity port (used to build `/auth/*` route state).
@@ -3237,8 +3236,7 @@ impl BcsServer {
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier =
             build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
-        let group_session_secret_access: Arc<dyn SecretAccessPort> =
-            Arc::new(EnvSecretAccess::new("BCS_SECRET_"));
+        let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {

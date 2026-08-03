@@ -320,6 +320,7 @@ dependencies = [
  "bcs-route-security",
  "bcs-routing",
  "bcs-secret",
+ "bcs-secret-api",
  "bcs-secret-local",
  "bcs-security-gateway-api",
  "bcs-security-gateway-local",
@@ -1391,6 +1392,17 @@ dependencies = [
  "async-trait",
  "bcs-service-api",
  "tracing",
+]
+
+[[package]]
+name = "bcs-secret-api"
+version = "0.1.0"
+dependencies = [
+ "bcs-config-api",
+ "bcs-service-api",
+ "futures",
+ "inventory",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

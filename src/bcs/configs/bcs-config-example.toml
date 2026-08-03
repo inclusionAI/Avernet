@@ -78,6 +78,14 @@ structured_output = "json_schema"
 [database]
 type = "mysql"
 
+# Select a linked secret backend in deployments that do not use environment
+# variables. The session-bound WebSocket key is resolved by its fixed name.
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
 [cache]
 type = "redis"
 

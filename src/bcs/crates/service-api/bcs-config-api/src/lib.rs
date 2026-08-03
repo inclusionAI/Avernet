@@ -13,13 +13,11 @@ use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
 pub mod bcsfuse;
-pub mod mist;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;
 
 pub use bcsfuse::BcsFuseConfig;
-pub use mist::MistConfig;
 pub use mysql::{DataSourceConfig, MysqlDbConfig, StatementProtocol};
 pub use redis::{
     CacheConfig, RedisAuthCredentials, RedisAuthMode, RedisCacheConfig, RedisConnectionConfig,
@@ -403,6 +401,40 @@ impl AuthSdkConfig {
 /// Abstract env view for AuthSdk completeness check, injected by caller.
 pub trait AuthSdkEnvView {
     fn has(&self, var: &str) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Secret backend
+// ---------------------------------------------------------------------------
+
+/// Provider-specific secret-backend options.
+pub type SecretProviderConfig = BTreeMap<String, serde_json::Value>;
+
+/// Secret backend selector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretConfig {
+    /// Secret provider to load. Public/local builds support `noop` and `env`;
+    /// linked extension crates can register additional providers.
+    #[serde(default = "default_secret_provider")]
+    pub provider: String,
+
+    /// Provider-specific options keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, SecretProviderConfig>,
+}
+
+impl Default for SecretConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_secret_provider(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_secret_provider() -> String {
+    "noop".to_string()
 }
 
 // ---------------------------------------------------------------------------

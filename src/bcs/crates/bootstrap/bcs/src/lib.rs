@@ -156,7 +156,7 @@ pub mod logging;
 pub use config::{
     AuthSdkConfig, BcsConfig, CacheConfig, DatabaseConfig, DatabaseType, DingTalkAccountConfig,
     GatewayPrincipalConfig, InviteConfig, LlmConfig, LlmProviderType, LoggingConfig,
-    MessageHistoryConfig, MetricsConfig, MetricsMode, MistConfig, RedisCacheConfig,
+    MessageHistoryConfig, MetricsConfig, MetricsMode, RedisCacheConfig,
     SecurityGatewayProviderConfig,
     StructuredOutputMode, TelemetryConfig, UserDirectoryConfig, UserDirectoryProviderConfig,
 };

@@ -23,7 +23,7 @@ pub fn create_temp_bots_dir() -> tempfile::TempDir {
     tempfile::TempDir::new().expect("Failed to create temp dir")
 }
 
-use bcs::{BcsConfig, LoggingConfig, MessageHistoryConfig, MistConfig};
+use bcs::{BcsConfig, LoggingConfig, MessageHistoryConfig};
 
 pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
     BcsConfig {
@@ -38,7 +38,7 @@ pub fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,

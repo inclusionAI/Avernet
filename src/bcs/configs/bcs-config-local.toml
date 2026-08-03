@@ -77,6 +77,12 @@ type = "sqlite"
 [database.sqlite]
 path = "bcs.db"
 
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
 [collaboration.templates]
 storage_type = "file"
 base_dir = "seeds/collaboration-templates"
