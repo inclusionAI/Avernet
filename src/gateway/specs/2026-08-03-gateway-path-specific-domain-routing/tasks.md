@@ -151,7 +151,7 @@
         `spec.md`'s corrected answer to objection 2.
 - **Depends on:** Task 6
 
-## Task 8: Publish the new address from the backend
+## [x] Task 8: Publish the new address from the backend
 
 - **Goal:** `GET /openapi/v1/bots/connection/{bot_id}` hands out the new socket
   URL; its own path, name, and response shape are unchanged.
@@ -161,13 +161,13 @@
   - `src/backend/tests/community/core/engine_runtime/test_connection.py`
   - `src/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_connection.py`
 - **Done when:**
-  - [ ] `_ENGINE_PREFIX = "/openapi/v1/bots/messages"`.
-  - [ ] The module docstring, the constant's comment, and the docstrings at
+  - [x] `_ENGINE_PREFIX = "/openapi/v1/bots/messages"`.
+  - [x] The module docstring, the constant's comment, and the docstrings at
         `_readdress_onto_gateway` and `_gateway_ws_base` no longer name the old
         address.
-  - [ ] Both example URLs in `schemas.py` use the new address.
-  - [ ] Published-URL assertions in both test files move to the new prefix.
-  - [ ] `coverage_baseline.txt` needs **no** edit — verify, don't assume: the
+  - [x] Both example URLs in `schemas.py` use the new address.
+  - [x] Published-URL assertions in both test files move to the new prefix.
+  - [x] `coverage_baseline.txt` needs **no** edit — verify, don't assume: the
         endpoint's own path did not change.
 - **Depends on:** Task 6
 
