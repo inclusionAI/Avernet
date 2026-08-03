@@ -93,6 +93,7 @@ from agentclaw.community.core.skill_center.services.repositories import (
 )
 from agentclaw.community.core.skill_center.services.skill_service import (
     SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
@@ -2149,6 +2150,15 @@ async def delete_skill(
         raise HTTPException(status_code=409, detail=str(e)) from e
     except SkillDeleteConsistencyError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillReferencedBySkillSetError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                "message": "请先从所有技能集中移除该技能，再删除技能",
+                "skill_set_ids": e.skill_set_ids,
+            },
+        ) from e
     except ValueError as e:
         error_msg = str(e)
         # 权限错误返回 403

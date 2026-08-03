@@ -24,6 +24,7 @@ def _make_service(device_fs, *, runtime_uses_pool_paths=False):
         git_sync_service_factory=MagicMock(),
         runtime_uses_pool_paths=runtime_uses_pool_paths,
     )
+    svc._skill_repo.list_skill_set_references.return_value = []
     return svc, factory
 
 
