@@ -150,11 +150,13 @@ BCS resolves the same community HMAC key as Gateway:
 AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE
 ```
 
-Local/dev single-box execution may use Gateway's documented fixed development
-fallback key. Pre, gray, and prod fail startup when the configured secret is
-missing or empty. Request-time missing, duplicate, malformed, expired,
-wrong-issuer, wrong-audience, wrong-kid, or incorrectly signed Principal values
-produce the existing uniform 401 envelope.
+BCS never infers Principal trust from an environment label and never installs a
+fixed development key. Every process fails startup when the configured secret
+is missing or empty. Local and CI launchers explicitly inject an overridable,
+non-production test value; deployments inject real secret material.
+Request-time missing, duplicate, malformed, expired, wrong-issuer,
+wrong-audience, wrong-kid, or incorrectly signed Principal values produce the
+existing uniform 401 envelope.
 
 The V1 Router is merged directly into the existing Axum application. Legacy
 routes remain mounted unchanged. The mount must not add another

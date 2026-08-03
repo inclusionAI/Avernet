@@ -115,8 +115,8 @@ that baseline after PR #697 merged into `dev`.
 
 - [ ] **Step 1: Write failing configuration/trust tests**
 
-  Assert default local trust resolves the documented dev key, explicit secret
-  material is preferred, and pre/gray/prod reject absent or empty key material.
+  Assert explicit secret material is accepted and absent, empty, or blank
+  material is rejected independently of runtime environment labels.
 
 - [ ] **Step 2: Verify RED**
 
@@ -127,9 +127,9 @@ that baseline after PR #697 merged into `dev`.
 - [ ] **Step 3: Implement trust construction**
 
   Add non-secret issuer/audience/kid/secret lookup configuration. Resolve
-  `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` in the bootstrap. Use
-  `avernet-dev-signing-key-NOT-FOR-PROD` only for local/dev; return
-  `BcsError::InvalidConfig` in pre/gray/prod when material is absent.
+  `AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE` in the bootstrap and return
+  `BcsError::InvalidConfig` whenever material is absent or blank. Local and CI
+  launchers explicitly inject their non-production test value.
 
 ### Task 4: Compose V1 Application facades and mount the Router
 

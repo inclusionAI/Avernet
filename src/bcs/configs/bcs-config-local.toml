@@ -41,7 +41,8 @@ allowed_switch_provider_ids = []
 issuer = "gateway"
 audience = "bcs"
 key_id = "bare"
-# Local/dev uses the documented fallback when this lookup is unset.
+# Local launchers inject an explicit test value; every other deployment must
+# provide real secret material through this lookup.
 signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
 
 [cors]

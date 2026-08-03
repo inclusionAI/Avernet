@@ -485,20 +485,25 @@ test_5bot_openclaw_config_is_written_private() {
     fail "5bot openclaw config should be chmod 600"
 }
 
-test_local_bcs_launchers_supply_group_session_secret() {
-  local singlebox_start five_bot_start secret_default
+test_local_bcs_launchers_supply_required_signing_keys() {
+  local singlebox_start five_bot_start group_secret_default principal_secret_default
   singlebox_start="$(sed -n '/^start_bcs_binary()/,/^}/p' "${ROOT}/scripts/modules/bcs.sh")"
   five_bot_start="$(sed -n '/^start_bcs()/,/^}/p' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh")"
-  secret_default='export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"'
+  group_secret_default='export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"'
+  principal_secret_default='export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"'
 
   grep -F 'if [ "${BCS_SERVER_ENV}" = "local" ]; then' <<<"$singlebox_start" >/dev/null || \
     fail "singlebox BCS launcher must scope the group-session key default to local mode"
-  grep -F "$secret_default" <<<"$singlebox_start" >/dev/null || \
+  grep -F "$group_secret_default" <<<"$singlebox_start" >/dev/null || \
     fail "singlebox BCS launcher must provide an overridable local group-session key"
+  grep -F "$principal_secret_default" <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must explicitly provide an overridable local Principal key"
   grep -F 'if [ "$SERVER_ENV" = "local" ]; then' <<<"$five_bot_start" >/dev/null || \
     fail "5bot BCS launcher must scope the group-session key default to local mode"
-  grep -F "$secret_default" <<<"$five_bot_start" >/dev/null || \
+  grep -F "$group_secret_default" <<<"$five_bot_start" >/dev/null || \
     fail "5bot BCS launcher must provide an overridable local group-session key"
+  grep -F "$principal_secret_default" <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must explicitly provide an overridable local Principal key"
 }
 
 test_ready_banner_describes_full_stack() {
@@ -553,7 +558,7 @@ test_baas_start_refuses_root_bots_dir
 test_baas_start_passes_bcn_runtime_configuration
 test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
-test_local_bcs_launchers_supply_group_session_secret
+test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
 

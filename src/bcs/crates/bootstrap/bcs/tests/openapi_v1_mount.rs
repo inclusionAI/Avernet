@@ -6,7 +6,8 @@ use serde_json::json;
 
 mod helpers;
 
-const DEVELOPMENT_SIGNING_KEY: &[u8] = b"avernet-dev-signing-key-NOT-FOR-PROD";
+const TEST_GATEWAY_PRINCIPAL_SIGNING_KEY: &[u8] =
+    b"test-only-gateway-principal-signing-key";
 
 fn user_principal_token(signing_key: &[u8]) -> String {
     let now = SystemTime::now()
@@ -63,7 +64,7 @@ async fn mounted_openapi_v1_routes_require_and_verify_gateway_principal() {
         .get(&url)
         .header(
             "x-avernet-principal",
-            user_principal_token(DEVELOPMENT_SIGNING_KEY),
+            user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY),
         )
         .send()
         .await
@@ -114,7 +115,7 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
         .post(&url)
         .header(
             "x-avernet-principal",
-            user_principal_token(DEVELOPMENT_SIGNING_KEY),
+            user_principal_token(TEST_GATEWAY_PRINCIPAL_SIGNING_KEY),
         )
         .send()
         .await

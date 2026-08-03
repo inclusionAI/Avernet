@@ -1036,6 +1036,7 @@ start_bcs() {
     export RUST_LOG="${RUST_LOG:-info}"
     export BCS_DATA_DIR="${BCS_DATA_DIR:-$BOTS_BASE_DIR/data}"
     if [ "$SERVER_ENV" = "local" ]; then
+        export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
         export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"
     fi
     mkdir -p "$BCS_DATA_DIR"

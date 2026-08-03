@@ -222,8 +222,8 @@ _story_platform_entrypoints() {
     assert_json_eq "repair inspection targets current actor" "$RESPONSE" "actor_uuid" "human_${BCS_MOCK_USER_ID}"
 
     api_get "/admin/secret/e2e-missing-secret"
-    require_status "disabled local secret backend returns 503 without leaking a value" "503" || return
-    assert_json_eq "disabled secret backend has stable error code" "$RESPONSE" "error" "unavailable"
+    require_status "enabled local env secret backend reports a missing value as 404" "404" || return
+    assert_json_eq "missing env secret has stable error code" "$RESPONSE" "error" "not_found"
 }
 
 _story_register_and_onboard_owned_agent() {
@@ -450,6 +450,7 @@ _story_group_proposal_confirmation() {
 #   - Collection (collect/uncollect/list) follows per-bot isolation and idempotency.
 story_user_runs_and_shares_sessions() {
     info "Story: a team creates, shares, completes, and invokes collaboration sessions"
+    _story_connect_with_group_session_jwt || return
     test_group_session_via_cli
     test_group_invite_link
     test_session_invite_link
@@ -461,6 +462,88 @@ story_user_runs_and_shares_sessions() {
     # lists collected sessions; non-participant collect is rejected. Exercises
     # POST/DELETE /sessions/{sid}/collect and the collected=true list filter.
     test_session_collection
+}
+
+_story_connect_with_group_session_jwt() {
+    info "Session connection: issue a real JWT and complete the public WebSocket Upgrade"
+    local group_body
+    group_body="{\"group_kind\":\"dm\",\"driver_bot\":\"${BOT_PM_UUID}\",\"target_actor_id\":\"${BOT_PM_UUID}\",\"participants\":[{\"bot_uuid\":\"${BOT_PM_UUID}\"}]}"
+    api_post "/groups" "$group_body"
+    require_status "human creates a DM group for the session connection" "200" || return
+    local group_id
+    group_id=$(json_path "$RESPONSE" "id")
+    assert_not_empty "session connection group has an id" "$group_id"
+    [[ -n "$group_id" ]] || return
+
+    api_post "/groups/${group_id}/sessions" \
+        "{\"created_by\":\"human_${BCS_MOCK_USER_ID}\",\"session_title\":\"JWT connection E2E\"}"
+    if ! require_status "human creates a session for the JWT connection" "201"; then
+        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        return
+    fi
+    local session_id
+    session_id=$(json_path "$RESPONSE" "session_id")
+    assert_not_empty "JWT connection session has an id" "$session_id"
+    if [[ -z "$session_id" ]]; then
+        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        return
+    fi
+
+    local signing_key principal probe
+    signing_key="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+    probe="${SCRIPT_DIR}/group_session_ws_probe.py"
+    if ! principal=$(python3 "$probe" principal \
+        --user-id "$BCS_MOCK_USER_ID" \
+        --username "$BCS_MOCK_USER_NICK_NAME" \
+        --tenant "bcs-e2e" \
+        --signing-key "$signing_key"); then
+        fail "Gateway Principal generation failed"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_TOTAL=$((TESTS_TOTAL + 1))
+        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        return
+    fi
+
+    api_request_headers POST \
+        "/openapi/v1/collaboration/sessions/${session_id}/token" \
+        "" \
+        "X-Avernet-Principal: ${principal}"
+    if ! require_status "authenticated human obtains a session connection JWT" "200"; then
+        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        return
+    fi
+    local response_headers connection_token
+    response_headers=$(printf '%s' "$RESPONSE_HEADERS" | tr '[:upper:]' '[:lower:]')
+    assert_contains "session connection JWT response disables caching" \
+        "$response_headers" "cache-control: no-store"
+    connection_token=$(json_path "$RESPONSE" "data.token")
+    assert_not_empty "session connection JWT is present" "$connection_token"
+    if [[ -z "$connection_token" ]]; then
+        api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+        return
+    fi
+
+    local websocket_base
+    case "$BCS_API_BASE_URL" in
+        http://*) websocket_base="ws://${BCS_API_BASE_URL#http://}" ;;
+        *)
+            fail "session connection E2E requires an http:// BCS base URL"
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            TESTS_TOTAL=$((TESTS_TOTAL + 1))
+            api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
+            return
+            ;;
+    esac
+    if python3 "$probe" websocket \
+        --url "${websocket_base}/openapi/v1/collaboration/messages/ws?token=${connection_token}"; then
+        pass "valid session JWT completes the public WebSocket Upgrade"
+        TESTS_PASSED=$((TESTS_PASSED + 1))
+    else
+        fail "valid session JWT did not complete the public WebSocket Upgrade"
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+    fi
+    TESTS_TOTAL=$((TESTS_TOTAL + 1))
+    api_delete "/groups/${group_id}" >/dev/null 2>&1 || true
 }
 
 _story_complete_and_invoke_sessions() {

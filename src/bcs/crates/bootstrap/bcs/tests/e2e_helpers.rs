@@ -23,6 +23,8 @@ use tempfile::TempDir;
 
 const TEST_GROUP_SESSION_WS_SIGNING_KEY: &str =
     "test-only-group-session-key-at-least-32-bytes";
+const TEST_GATEWAY_PRINCIPAL_SIGNING_KEY: &str =
+    "test-only-gateway-principal-signing-key";
 
 /// Get next available port by asking the OS for a free one.
 ///
@@ -93,6 +95,10 @@ impl ProcessManager {
         let mut cmd = Command::new(&bcs_bin);
         cmd.arg("-c").arg(&configs_dir)
             .env("BCS_DATA_DIR", data_dir)
+            .env(
+                "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE",
+                TEST_GATEWAY_PRINCIPAL_SIGNING_KEY,
+            )
             .env(
                 "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT",
                 TEST_GROUP_SESSION_WS_SIGNING_KEY,

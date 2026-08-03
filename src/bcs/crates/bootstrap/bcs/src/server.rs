@@ -48,7 +48,6 @@ use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore
 use bcs_api_http::v1::gateway_principal::{
     GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
 };
-use bcs_config::{RuntimeEnv, resolve_env as resolve_runtime_env};
 use bcs_bot_store::{DbProviderStore, MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
 use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
 use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
@@ -1209,34 +1208,22 @@ fn outbound_url_guard_from_config(config: &BcsConfig) -> OutboundUrlGuard {
     OutboundUrlGuard::new(policy.block_private_networks, policy.allow_loopback)
 }
 
-const GATEWAY_PRINCIPAL_DEVELOPMENT_SIGNING_KEY: &str =
-    "avernet-dev-signing-key-NOT-FOR-PROD";
-
-fn gateway_principal_signing_key<'a>(
-    environment: RuntimeEnv,
-    material: Option<&'a str>,
-) -> crate::Result<&'a str> {
-    if let Some(material) = material.filter(|value| !value.trim().is_empty()) {
-        return Ok(material);
-    }
-
-    match environment {
-        RuntimeEnv::Local | RuntimeEnv::Dev => Ok(GATEWAY_PRINCIPAL_DEVELOPMENT_SIGNING_KEY),
-        RuntimeEnv::Pre | RuntimeEnv::Gray | RuntimeEnv::Prod => {
-            Err(crate::BcsError::InvalidConfig(
-                "Gateway Principal signing key is required outside local/dev".to_string(),
-            ))
-        }
-    }
+fn gateway_principal_signing_key(material: Option<&str>) -> crate::Result<&str> {
+    material
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::BcsError::InvalidConfig(
+                "Gateway Principal signing key is required".to_string(),
+            )
+        })
 }
 
 fn build_gateway_principal_verifier(
     config: &GatewayPrincipalConfig,
-    environment: RuntimeEnv,
     material: Option<&str>,
 ) -> crate::Result<Arc<dyn PrincipalVerifier>> {
     config.validate().map_err(crate::BcsError::InvalidConfig)?;
-    let signing_key = gateway_principal_signing_key(environment, material)?;
+    let signing_key = gateway_principal_signing_key(material)?;
     let trust = GatewayPrincipalTrust::new(
         config.issuer.clone(),
         config.audience.clone(),
@@ -1252,11 +1239,7 @@ fn build_gateway_principal_verifier_from_process(
     config: &GatewayPrincipalConfig,
 ) -> crate::Result<Arc<dyn PrincipalVerifier>> {
     let material = std::env::var(&config.signing_key_env).ok();
-    build_gateway_principal_verifier(
-        config,
-        resolve_runtime_env(),
-        material.as_deref(),
-    )
+    build_gateway_principal_verifier(config, material.as_deref())
 }
 
 const GROUP_SESSION_WS_SECRET_NAME: &str = "bcn-group-session-ws-jwt";
@@ -1422,16 +1405,17 @@ fn build_openapi_v1_state(
     .with_bot_service(bot_service)
 }
 
-#[cfg(test)]
 pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
-    build_gateway_principal_verifier(&GatewayPrincipalConfig::default(), RuntimeEnv::Dev, None)
-        .expect("default Gateway Principal test verifier")
+    build_gateway_principal_verifier(
+        &GatewayPrincipalConfig::default(),
+        Some("test-only-gateway-principal-signing-key"),
+    )
+    .expect("default Gateway Principal test verifier")
 }
 
 #[cfg(test)]
 mod gateway_principal_tests {
     use super::*;
-    use bcs_config::RuntimeEnv;
     use bcs_secret_local::InMemorySecretAccess;
 
     fn trust_config() -> crate::config::GatewayPrincipalConfig {
@@ -1450,49 +1434,23 @@ mod gateway_principal_tests {
     }
 
     #[test]
-    fn local_uses_the_documented_gateway_development_key_when_secret_is_missing() {
-        assert_eq!(
-            gateway_principal_signing_key(RuntimeEnv::Local, None).expect("local fallback"),
-            "avernet-dev-signing-key-NOT-FOR-PROD"
-        );
-    }
-
-    #[test]
-    fn dev_uses_the_documented_gateway_development_key_when_secret_is_empty() {
-        assert_eq!(
-            gateway_principal_signing_key(RuntimeEnv::Dev, Some("   ")).expect("dev fallback"),
-            "avernet-dev-signing-key-NOT-FOR-PROD"
-        );
-    }
-
-    #[test]
-    fn explicit_gateway_principal_material_wins_in_every_environment() {
-        for environment in [
-            RuntimeEnv::Local,
-            RuntimeEnv::Dev,
-            RuntimeEnv::Pre,
-            RuntimeEnv::Gray,
-            RuntimeEnv::Prod,
-        ] {
-            assert_eq!(
-                gateway_principal_signing_key(environment, Some("explicit-test-key"))
-                    .expect("explicit material"),
-                "explicit-test-key"
-            );
+    fn gateway_principal_material_must_be_explicit_and_non_blank() {
+        for material in [None, Some(""), Some("   ")] {
+            assert!(matches!(
+                gateway_principal_signing_key(material),
+                Err(crate::BcsError::InvalidConfig(message))
+                    if message.contains("Gateway Principal signing key")
+            ));
         }
     }
 
     #[test]
-    fn pre_gray_and_prod_reject_missing_or_empty_gateway_principal_material() {
-        for environment in [RuntimeEnv::Pre, RuntimeEnv::Gray, RuntimeEnv::Prod] {
-            for material in [None, Some(""), Some("   ")] {
-                assert!(matches!(
-                    gateway_principal_signing_key(environment, material),
-                    Err(crate::BcsError::InvalidConfig(message))
-                        if message.contains("Gateway Principal signing key")
-                ));
-            }
-        }
+    fn explicit_gateway_principal_material_is_accepted() {
+        assert_eq!(
+            gateway_principal_signing_key(Some("explicit-test-key"))
+                .expect("explicit material"),
+            "explicit-test-key"
+        );
     }
 
     #[test]
@@ -1507,7 +1465,7 @@ mod gateway_principal_tests {
                 _ => unreachable!("known trust config field"),
             }
             assert!(matches!(
-                build_gateway_principal_verifier(&config, RuntimeEnv::Local, None),
+                build_gateway_principal_verifier(&config, Some("explicit-test-key")),
                 Err(crate::BcsError::InvalidConfig(_))
             ));
         }
@@ -2812,12 +2770,17 @@ impl BcsServer {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
             .expect("Secret provider configuration must be valid");
+        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
+            &config.gateway_principal,
+        )
+        .expect("Gateway Principal verifier configuration must be valid");
         Self::new_with_outbound_url_guards(
             config,
             outbound_url_guard.clone(),
             outbound_url_guard.clone(),
             outbound_url_guard,
             group_session_secret_access,
+            gateway_principal_verifier,
         )
     }
 
@@ -2828,6 +2791,7 @@ impl BcsServer {
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             group_session_test_secret_access(),
+            gateway_principal_verifier_for_tests(),
         )
     }
 
@@ -2837,12 +2801,9 @@ impl BcsServer {
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
         group_session_secret_access: Arc<dyn SecretAccessPort>,
+        gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
-            &config.gateway_principal,
-        )
-        .expect("Gateway Principal verifier configuration must be valid");
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
         let provider_repos = memory_provider_repos();
@@ -4388,16 +4349,28 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn public_constructor_does_not_install_test_group_session_signing_key() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let mut config = BcsConfig::default();
+        config.gateway_principal.signing_key_env =
+            "BCS_TEST_GATEWAY_PRINCIPAL_SIGNING_KEY".to_string();
         config.secret.provider = "noop".to_string();
         config.session_files.backend.insert(
             "data_dir".to_string(),
             toml::Value::String(tmp.path().to_string_lossy().into_owned()),
         );
 
+        unsafe {
+            std::env::set_var(
+                "BCS_TEST_GATEWAY_PRINCIPAL_SIGNING_KEY",
+                "test-only-gateway-principal-signing-key",
+            );
+        }
         let server = BcsServer::new(config);
+        unsafe {
+            std::env::remove_var("BCS_TEST_GATEWAY_PRINCIPAL_SIGNING_KEY");
+        }
         let error = match server.build_router().await {
             Ok(_) => panic!("public constructor must not install the fixed test signing key"),
             Err(error) => error,
