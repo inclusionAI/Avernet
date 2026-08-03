@@ -28,6 +28,14 @@ class TestServedOpenAPI:
         baas = [p for p in paths if p.startswith("/openapi/v1/sessions")]
         assert len(baas) > 0, "baas.openapi.json must be loaded by schema catalog"
 
+    def test_collaboration_domain_uses_the_approved_prefix_only(
+        self, app_no_lifespan: FastAPI
+    ) -> None:
+        paths = app_no_lifespan.openapi().get("paths", {})
+        assert "/openapi/v1/collaboration/bots/mine" in paths
+        assert "/openapi/v1/bots/collaboration/bots/mine" not in paths
+        assert "/openapi/v1/group-sessions" not in paths
+
     def test_schema_has_required_fields(self, app_no_lifespan: FastAPI) -> None:
         from fastapi.testclient import TestClient
 
