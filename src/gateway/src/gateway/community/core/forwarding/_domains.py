@@ -207,7 +207,7 @@ class PathRewrite:
     the path exactly as it arrived. A rewrite is the declared exception, for an
     upstream that serves the same resources under a different prefix — the
     engine proxy publishes ``/proxypass/{target}{path}`` where the gateway
-    publishes ``/openapi/v1/engine/{target}{path}``.
+    publishes ``/openapi/v1/bots/messages/{target}{path}``.
 
     Only the prefix changes. Everything past it is carried through untouched, so
     a percent-encoded segment reaches the upstream exactly as its author wrote
@@ -579,8 +579,8 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
     if "?" in from_prefix or "#" in from_prefix:
         # A request path never carries either, so such a rule could not match —
         # the same silent no-op the anchor check below exists to prevent. The
-        # anchor check alone does not catch it: `/openapi/v1/engine/v2?x` does
-        # begin with the domain prefix and a `/`, so it passes that test.
+        # anchor check alone does not catch it: `/openapi/v1/bots/messages/v2?x`
+        # does begin with the domain prefix and a `/`, so it passes that test.
         raise ValueError(
             f"domain {name!r}: rewrite.from {from_prefix!r} must be a path "
             f"prefix with no query or fragment — a request path contains "
