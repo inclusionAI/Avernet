@@ -120,6 +120,18 @@ def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
     }
 
 
+def test_upload_rejects_multipart_and_other_content_types_before_service_call():
+    client = _client(_Query())
+    for content_type in ("multipart/form-data; boundary=x", "application/octet-stream"):
+        response = client.post(
+            "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+            content=b"not-a-zip",
+            headers={"content-type": content_type},
+        )
+        assert response.status_code == 400
+        assert response.json()["code"] == 400101
+
+
 def test_list_uses_verified_actor_and_exposes_only_public_metadata():
     query = _Query()
     response = _client(query).get(

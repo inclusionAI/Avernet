@@ -15,13 +15,17 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.skill_center.services import local_skill_upload_service as upload_module
 
 
-def _zip(entries: dict[str, bytes]) -> bytes:
+def _zip(entries: dict[str, bytes], *, attrs: dict[str, int] | None = None) -> bytes:
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as archive:
         for path, content in entries.items():
-            archive.writestr(path, content)
+            info = zipfile.ZipInfo(path)
+            if attrs and path in attrs:
+                info.external_attr = attrs[path]
+            archive.writestr(info, content)
     return payload.getvalue()
 
 
@@ -52,10 +56,16 @@ class _Repo:
 
 
 class _Sets:
+    def __init__(self, fail_at=None):
+        self.default_args = None
+        self.fail_at = fail_at
     def get_default(self, **kwargs):
+        self.default_args = kwargs
         return {"id": "4"}
 
     def add_skill_to_set(self, *args, **kwargs):
+        if self.fail_at == "association":
+            raise RuntimeError("association")
         return True
 
     def remove_skill_from_set(self, *args):
@@ -128,14 +138,16 @@ class _Audit:
     def insert(self, row): self.rows.append(row)
 
 
-def _service(filesystem, *, status="ACTIVE"):
-    return LocalSkillUploadService(_Repo(), _Sets(), _Bot(status), _Collaborators(), _Factory(filesystem), _Audit())
+def _service(filesystem, *, status="ACTIVE", collaborators=None, repo=None, sets=None, audit=None):
+    return LocalSkillUploadService(repo or _Repo(), sets or _Sets(), _Bot(status), collaborators or _Collaborators(), _Factory(filesystem), audit or _Audit())
 
 
 @pytest.mark.asyncio
 async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
     filesystem = _Filesystem()
-    service = _service(filesystem)
+    audit = _Audit()
+    sets = _Sets()
+    service = _service(filesystem, audit=audit, sets=sets)
     result = await service.upload_local_skill(
         bot_id="bot", owner_id="owner", actor_id="collaborator",
         package=_zip({"SKILL.md": b"---\nname: upload-skill\ndescription: useful\n---\n"}),
@@ -144,6 +156,8 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
     assert result["skill"]["user_id"] == "owner"
     assert result["actor_id"] == "collaborator"
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"]
+    assert audit.rows == [{"bot_id": "bot", "owner_id": "owner", "operator_id": "collaborator", "detail": '{"action": "local_skill_upload", "skill_id": "9"}'}]
+    assert sets.default_args == {"user_id": "owner", "bolt_id": "bot", "engine_type": "moltis"}
 
 
 @pytest.mark.asyncio
@@ -182,3 +196,105 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
         _zip({"wrapped/SKILL.md": b"name: wrapped\ndescription: useful\n", "wrapped/a.txt": b"x"})
     )
     assert name == "wrapped" and [path for path, _ in files] == ["SKILL.md", "a.txt"]
+
+
+@pytest.mark.parametrize("path", ["/SKILL.md", "C:/SKILL.md", "\\\\server\\SKILL.md", "dir\\SKILL.md", "../SKILL.md"])
+def test_zip_rejects_absolute_windows_and_traversal_paths(path):
+    with pytest.raises(LocalSkillInvalidPackageError):
+        _service(_Filesystem())._unpack(_zip({path: b"name: bad\ndescription: no\n"}))
+
+
+@pytest.mark.parametrize("entries", [
+    {},
+    {"SKILL.md": b"name: one\ndescription: one\n", "a/SKILL.md": b"name: one\ndescription: two\n"},
+    {"wrapped/SKILL.md": b"name: wrapped\ndescription: yes\n", "outside.txt": b"x"},
+    {"SKILL.md": b"name: one\ndescription: yes\n", "a//b": b"x", "a/./b": b"y"},
+])
+def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(entries):
+    with pytest.raises(LocalSkillInvalidPackageError):
+        _service(_Filesystem())._unpack(_zip(entries))
+
+
+@pytest.mark.parametrize("kind", [0o120000, 0o160000, 0o060000])
+def test_zip_rejects_links_and_devices(kind):
+    with pytest.raises(LocalSkillInvalidPackageError):
+        _service(_Filesystem())._unpack(_zip(
+            {"SKILL.md": b"name: bad\ndescription: no\n"},
+            attrs={"SKILL.md": kind << 16},
+        ))
+
+
+def test_zip_enforces_documented_file_count_and_path_and_size_limits(monkeypatch):
+    service = _service(_Filesystem())
+    monkeypatch.setattr(upload_module, "_MAX_FILES", 1)
+    with pytest.raises(upload_module.LocalSkillTooLargeError):
+        service._unpack(_zip({"SKILL.md": b"name: many\ndescription: yes\n", "x": b"x"}))
+    monkeypatch.setattr(upload_module, "_MAX_FILES", 500)
+    with pytest.raises(LocalSkillInvalidPackageError):
+        service._unpack(_zip({"a" * 257: b"x", "SKILL.md": b"name: long\ndescription: yes\n"}))
+    monkeypatch.setattr(upload_module, "_MAX_FILE", 2)
+    with pytest.raises(upload_module.LocalSkillTooLargeError):
+        service._unpack(_zip({"SKILL.md": b"name: big\ndescription: yes\n"}))
+    monkeypatch.setattr(upload_module, "_MAX_FILE", 10 * 1024 * 1024)
+    monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 2)
+    with pytest.raises(upload_module.LocalSkillTooLargeError):
+        service._unpack(_zip({"SKILL.md": b"name: expanded\ndescription: yes\n"}))
+    monkeypatch.setattr(upload_module, "_MAX_EXPANDED", 50 * 1024 * 1024)
+    monkeypatch.setattr(upload_module, "_MAX_COMPRESSED", 1)
+    with pytest.raises(upload_module.LocalSkillTooLargeError):
+        service._unpack(_zip({"SKILL.md": b"name: compressed\ndescription: yes\n"}))
+
+
+class _Denied:
+    def check_collaborator_permission(self, *args): return {"has_permission": False}
+
+
+@pytest.mark.asyncio
+async def test_owner_locator_and_denied_collaborator_cannot_forge_access():
+    from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    with pytest.raises(LocalSkillNotFoundError):
+        await _service(_Filesystem(), collaborators=_Denied()).upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="attacker", package=package
+        )
+
+
+class _FailRepo(_Repo):
+    def create(self, row):
+        raise RuntimeError("db failure")
+
+
+class _FailAudit(_Audit):
+    def insert(self, row):
+        raise RuntimeError("audit failure")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["write", "create", "association", "exclusion", "audit"])
+async def test_each_creation_failure_compensates_and_never_returns_success(stage):
+    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    filesystem = _Filesystem(fail=stage == "write")
+    repo = _FailRepo() if stage == "create" else _Repo()
+    sets = _Sets(fail_at=stage)
+    if stage == "exclusion":
+        repo.add_default_skill_exclusion = lambda *args: False
+    audit = _FailAudit() if stage == "audit" else _Audit()
+    service = _service(filesystem, repo=repo, sets=sets, audit=audit)
+    with pytest.raises(LocalSkillStorageError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        )
+    assert filesystem.deleted == ["/private/skills-local/upload-skill"]
+
+
+@pytest.mark.asyncio
+async def test_failed_rollback_step_does_not_stop_package_cleanup():
+    package = _zip({"SKILL.md": b"name: upload-skill\ndescription: useful\n"})
+    repo = _Repo()
+    repo.remove_default_skill_exclusion = lambda *args: (_ for _ in ()).throw(RuntimeError())
+    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
+    with pytest.raises(LocalSkillStorageError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        )
+    assert service._skill_service_factory._filesystem.deleted == ["/private/skills-local/upload-skill"]
