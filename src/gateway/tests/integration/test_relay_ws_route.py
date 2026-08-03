@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from gateway.community.adapters.web._forward import _ALL_METHODS, forward_request
 from gateway.community.adapters.web._relay_ws import (
@@ -314,6 +314,55 @@ def test_an_upstream_close_noticed_while_sending_is_carried_to_the_client() -> N
                 ws.receive_text()
     assert caught.value.code == 4200
     assert caught.value.reason == "upstream done"
+
+
+# ── the client that leaves while the gateway is dialling ─────────────────────
+
+
+async def test_a_client_that_leaves_before_accept_still_releases_the_upstream() -> None:
+    """The dial wins the race, the caller does not wait for it.
+
+    The gateway opens the upstream *before* accepting, so a client that gives up
+    while that dial is in flight leaves an upstream already open and a socket
+    with nobody behind it. Both have to be let go: the upstream because it was
+    entered, and the handshake because there is no longer anyone to accept.
+
+    Driven at the ASGI seam rather than through ``TestClient``, because the
+    condition under test is a message ordering — ``websocket.disconnect``
+    arriving where ``websocket.connect`` is expected — that a cooperating test
+    client will not produce.
+    """
+    app, _, forwarder = _build()
+    inbox: asyncio.Queue[dict] = asyncio.Queue()
+    inbox.put_nowait({"type": "websocket.disconnect", "code": 1006})
+    sent: list[dict] = []
+
+    async def _send(message: dict) -> None:
+        sent.append(message)
+
+    path, _, query = _PATH.partition("?")
+    websocket = WebSocket(
+        {
+            "type": "websocket",
+            "app": app,
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": query.encode(),
+            "headers": [],
+            "subprotocols": [],
+        },
+        receive=inbox.get,
+        send=_send,
+    )
+
+    # No exception escapes: an abandoned handshake is a race, not a fault, and
+    # a traceback per occurrence would bury the log line that reports a real
+    # upstream failure.
+    await forward_websocket(websocket)
+
+    assert forwarder.opened, "the upstream was dialled before the client was accepted"
+    assert forwarder.released == forwarder.opened, "the open upstream was released"
+    assert sent == [], "nothing was written to a client that had already gone"
 
 
 # ── refusals ─────────────────────────────────────────────────────────────────
