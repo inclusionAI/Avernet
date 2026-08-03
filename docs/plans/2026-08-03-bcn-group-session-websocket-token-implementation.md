@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Expose a five-minute, single-session JWT flow through Gateway so a browser can open `/group-sessions/{sid}/ws?token=...` with behavior equivalent to the existing Workbench `/ws` endpoint.
+**Goal:** Expose a five-minute, single-session JWT flow through the `/openapi/v1/collaboration` Gateway domain so a browser can open `/openapi/v1/collaboration/group/ws?token=...` with behavior equivalent to the existing Workbench `/ws` endpoint.
 
-**Architecture:** `bcs-service-api` defines transport-neutral issuance and verification contracts plus an outbound token port. `bcs-app-session` authorizes the Human and derives `gid` from `sid`; `bcs-jwt` signs and verifies the dedicated JWT. `bcs-api-http` exposes token issuance, while `bcs-ws` authenticates before Upgrade and feeds an immutable session-bound identity into the existing Workbench handler and dispatcher. Bootstrap composes the dependencies, and the Python Gateway transparently relays both HTTP and WebSocket traffic. The paths below are BCN paths; the shipped Gateway exposes them under its existing `/openapi/v1` base path.
+**Architecture:** `bcs-service-api` defines transport-neutral issuance and verification contracts plus an outbound token port. `bcs-app-session` authorizes the Human and derives `gid` from `sid`; `bcs-jwt` signs and verifies the dedicated JWT. Bootstrap obtains the signing key through the existing environment-backed `SecretAccessPort`. `bcs-api-http` exposes token issuance, while `bcs-ws` authenticates before Upgrade and feeds an immutable session-bound identity into the existing Workbench handler and dispatcher. The Python Gateway transparently relays both planes to identical BCN paths under `/openapi/v1/collaboration`.
 
 **Tech Stack:** Rust, Axum, Tokio, HMAC-SHA256 JWT, Python/FastAPI Gateway, pytest, Cargo workspace tests.
 
@@ -13,7 +13,7 @@
 ## Preconditions and invariants
 
 - Read `docs/arch/arch.rules.md`, `docs/arch/ci.enforce.md`, `docs/arch/context-boundary-format.md`, `docs/arch/protocol-contract-tests.md`, `src/bcs/AGENTS.md`, and `src/bcs/CLAUDE.md` before editing production code.
-- Keep the public logical suffixes `POST /group-sessions/{sid}/token` and `GET /group-sessions/{sid}/ws?token=...`. In the versioned BCS/Gateway adapters they are mounted as `/openapi/v1/group-sessions/{sid}/token` and `/openapi/v1/group-sessions/{sid}/ws`.
+- Expose `POST /openapi/v1/collaboration/sessions/{sid}/token` and `GET /openapi/v1/collaboration/group/ws?token=...` at both Gateway and BCN. Gateway forwards both paths unchanged.
 - Never accept `uid`, `gid`, tenant, lifetime, or JWT purpose from the request body or query string.
 - The token lifetime is exactly 300 seconds. It scopes one tenant, one Human, one group, and one session. It is stateless and may open more than one socket to that same session before expiration.
 - Token expiration only gates a new Upgrade. It does not terminate an established WebSocket.
@@ -76,7 +76,7 @@ Expected: FAIL because the modules and types do not exist.
 Define:
 
 - `IssueGroupSessionConnectionToken { caller: AuthenticatedCaller, sid: String }`
-- `VerifyGroupSessionConnectionToken { token: String, path_sid: String }`
+- `VerifyGroupSessionConnectionToken { token: String }`
 - `IssuedGroupSessionConnectionToken { token: String, expires_at: OffsetDateTime }`
 - `GroupSessionConnectionBinding { tenant, user_id, group_id, session_id }`
 - async `GroupSessionConnectionService::{issue_token, verify_token}`
@@ -175,7 +175,7 @@ Build fakes for `SessionService` and `GroupSessionTokenPort`. Verify:
 - Bot-only, App-only, access-key-only, or missing-Human callers are rejected;
 - missing session and forbidden session access do not call the signer;
 - token-port unavailable/internal errors remain distinguishable;
-- verification returns the binding only when `path_sid == claims.sid`, otherwise returns forbidden scope.
+- verification returns the complete binding from verified claims; the WS route has no path or query session selector.
 
 **Step 2: Run the tests to verify they fail**
 
@@ -189,7 +189,7 @@ Expected: FAIL because the connection application service is missing.
 
 Create `GroupSessionConnectionServiceImpl` with injected `Arc<dyn SessionService>` and `Arc<dyn GroupSessionTokenPort>`. Reuse `SessionService::get` so the existing V1 session-read authorization remains authoritative. Do not duplicate repository or group membership rules. Pass the fixed TTL constant to the port.
 
-On verification, validate the JWT through the port and enforce exact URL/session equality before returning the immutable binding. Do not perform the dynamic connection authorization here; that remains the Workbench `connect` operation.
+On verification, validate the JWT through the port and return its immutable binding. Do not perform the dynamic connection authorization here; that remains the Workbench `connect` operation.
 
 **Step 4: Run focused and package tests**
 
@@ -221,7 +221,7 @@ git commit -m "feat(bcs): issue authorized group session tokens"
 
 Build a focused route fixture with an injected fake `GroupSessionConnectionService` and `PrincipalVerifier`. Verify:
 
-- `POST /openapi/v1/group-sessions/session-a/token` returns the standard envelope containing only `data.token` and `data.expires_at`;
+- `POST /openapi/v1/collaboration/sessions/session-a/token` returns the standard envelope containing only `data.token` and `data.expires_at`;
 - response headers include `Cache-Control: no-store` and `Pragma: no-cache`;
 - missing/invalid Gateway Principal is 401;
 - a valid signed Gateway Principal without a Human is rejected;
@@ -238,7 +238,7 @@ Expected: FAIL because the route is absent.
 
 **Step 3: Implement the handler and response DTO**
 
-Add a focused `group_session_connection_router` with a minimal state containing only `Arc<dyn GroupSessionConnectionService>` and `Arc<dyn PrincipalVerifier>`. Mount the POST route under the existing versioned group-session path and apply the trusted Principal middleware. Extract `AuthenticatedCaller` from that middleware, and pass only caller plus path `session_id` to the application service.
+Add a focused `group_session_connection_router` with a minimal state containing only `Arc<dyn GroupSessionConnectionService>` and `Arc<dyn PrincipalVerifier>`. Mount `POST /openapi/v1/collaboration/sessions/{session_id}/token` and apply the trusted Principal middleware. Extract `AuthenticatedCaller` from that middleware, and pass only caller plus path `session_id` to the application service.
 
 Do not mount the whole preparatory V1 router in production as a side effect of this feature. Reuse the existing envelope, request-id, and error response helpers instead of duplicating the wire format.
 
@@ -387,8 +387,8 @@ git commit -m "feat(bcs): confine workbench commands to one session"
 Build an adapter router with a fake `GroupSessionConnectionService` and shared Workbench state. Verify:
 
 - missing, malformed, forged, expired, or wrong-purpose token returns HTTP 401 before Upgrade;
-- valid token whose `sid` differs from the path returns HTTP 403;
 - unavailable verifier returns HTTP 503;
+- the verified token is the only source of `tenant`, `uid`, `gid`, and `sid` because the route carries no session selector;
 - valid binding upgrades and enters the same `handle_client_connection` path used by `/ws`;
 - token values never appear in response bodies, close reasons, logs, or metrics;
 - an already-upgraded socket remains alive after the token's `exp`.
@@ -403,7 +403,7 @@ Expected: FAIL because the route builder is missing.
 
 **Step 3: Implement pre-Upgrade verification and shared handling**
 
-Add a handler for `GET /openapi/v1/group-sessions/{session_id}/ws?token=...`. Extract and validate the query credential before calling `on_upgrade`. Map only the approved status classes and use sanitized messages. Convert the application binding to `WorkbenchConnectionAuth::SessionBound`, with `actor_id = format!("human_{}", binding.user_id)`, then call the existing shared Workbench connection handler.
+Add a handler for `GET /openapi/v1/collaboration/group/ws?token=...`. Extract and validate the query credential before calling `on_upgrade`. Map only the approved status classes and use sanitized messages. Convert the application binding to `WorkbenchConnectionAuth::SessionBound`, with `actor_id = format!("human_{}", binding.user_id)`, then call the existing shared Workbench connection handler.
 
 Do not add a second dispatcher, registry, idle timer, or frontend delivery path.
 
@@ -423,63 +423,62 @@ git add src/bcs/crates/adapters/ws/bcs-ws
 git commit -m "feat(bcs): add session-bound workbench websocket"
 ```
 
-### Task 8: Add fail-closed configuration and bootstrap composition
+### Task 8: Resolve the signing key from the environment and compose Bootstrap
 
 **Files:**
 
-- Modify: `src/bcs/crates/bootstrap/bcs/src/config.rs`
-- Modify: `src/bcs/crates/bootstrap/bcs/src/config_loader.rs`
 - Modify: `src/bcs/crates/bootstrap/bcs/src/server.rs`
-- Modify: `src/bcs/crates/bootstrap/bcs/Cargo.toml`
-- Modify: `src/bcs/configs/bcs-config-example.toml`
-- Modify: `src/bcs/configs/bcs-config-local.toml`
+- Modify: `src/bcs/crates/plugins/bcs-secret-local/src/lib.rs`
 - Modify: `src/bcs/crates/bootstrap/bcs/tests/integration_http_api.rs`
 - Modify: `src/bcs/crates/bootstrap/bcs/tests/e2e_workbench.rs`
 - Modify: `src/bcs/crates/bootstrap/bcs/CONTEXT.md`
 
-**Step 1: Write failing configuration and composition tests**
+**Step 1: Write failing secret-resolution and composition tests**
 
-Require two independent trust configurations:
+Extend the existing `EnvSecretAccess` tests with the exact production mapping:
 
-```toml
-[gateway_principal]
-signing_key = "..."
-issuer = "gateway"
-audience = "bcs"
-kid = "bare"
-
-[group_session_ws]
-jwt_secret = "..."
-token_ttl_seconds = 300
+```rust
+#[tokio::test]
+async fn resolves_group_session_ws_key_from_fixed_environment_name() {
+    let env = HashMap::from([(
+        "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT".to_string(),
+        "test-only-key".to_string(),
+    )]);
+    let access = EnvSecretAccess::from_map("BCS_SECRET_", env);
+    let result = access.get_secret("bcn-group-session-ws-jwt").await;
+    assert!(matches!(result, Ok(secret) if secret.value == "test-only-key"));
+}
 ```
 
-Test that missing/empty secrets, wrong audience/kid, or any TTL other than 300 fail startup. Assert the two secret values need not and should not be equal. Add router tests proving both versioned routes are mounted and existing `/ws` still resolves.
+Add Bootstrap tests proving that missing or empty `BCS_SECRET_BCN_GROUP_SESSION_WS_JWT` fails startup, a non-empty value constructs the group-session JWT service, both BCN routes are mounted, and existing `/ws` still resolves. Assert that the key is never included in formatted errors or configuration logs.
 
 **Step 2: Run tests to verify they fail**
 
 ```bash
+cargo test --package bcs-secret-local env_plugin --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test integration_http_api group_session --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test e2e_workbench group_session --manifest-path src/bcs/Cargo.toml
 ```
 
-Expected: FAIL because config and wiring are absent.
+Expected: FAIL because the exact environment mapping and Bootstrap wiring are absent.
 
 **Step 3: Compose the approved services**
 
 At bootstrap only:
 
 1. resolve the Gateway Principal verification key and build `GatewayPrincipalTokenVerifier` with issuer `gateway`, audience `bcs`, and configured `kid`;
-2. resolve the dedicated group-session WebSocket key and build `GroupSessionJwtService`;
+2. construct `EnvSecretAccess::new("BCS_SECRET_")`, request `bcn-group-session-ws-jwt`, reject missing or empty material, and build `GroupSessionJwtService`;
 3. build `GroupSessionConnectionServiceImpl` using the V1 session service and token port;
 4. inject the connection service into the HTTP and WS adapters;
 5. mount the focused V1 token route and session WebSocket route without unintentionally exposing unrelated preparatory V1 routes;
 6. retain current `/ws` and `/ws/bot` mounting and auth behavior.
 
-Do not read environment variables in adapters or application services. Do not provide a production fallback secret. A test/local fixture may use an explicit clearly test-only value.
+The 300-second TTL remains a code-level protocol constant, not an environment-controlled value. Do not read environment variables in adapters, application services, or `bcs-jwt`. Do not provide a fallback secret. A test fixture may inject `InMemorySecretAccess` or `EnvSecretAccess::from_map` with an explicit test-only value.
 
 **Step 4: Run bootstrap tests**
 
 ```bash
+cargo test --package bcs-secret-local --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test integration_http_api --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test e2e_workbench --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs --test e2e_ws_messaging --manifest-path src/bcs/Cargo.toml
@@ -490,7 +489,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add src/bcs/crates/bootstrap/bcs src/bcs/configs
+git add src/bcs/crates/bootstrap/bcs src/bcs/crates/plugins/bcs-secret-local/src/lib.rs
 git commit -m "feat(bcs): wire group session websocket authentication"
 ```
 
@@ -510,12 +509,12 @@ git commit -m "feat(bcs): wire group session websocket authentication"
 Require:
 
 - a `bcs_server_url` upstream variable and `bcs` server;
-- `group-sessions` domain with `protocols: [http, websocket]` and verbatim path forwarding;
-- `POST /openapi/v1/group-sessions/{sid}/token` to require a Gateway Human and forward a signed Principal with audience `bcs`;
-- `GET /openapi/v1/group-sessions/{sid}/ws` to have an explicit empty Gateway requirement so browser WebSocket Upgrade works without headers;
-- the more-specific WS rule to beat the general authenticated group-session rule;
+- `collaboration` domain with `protocols: [http, websocket]`;
+- `POST /openapi/v1/collaboration/sessions/{sid}/token` to require a Gateway Human, forward a signed Principal with audience `bcs`, and arrive at the identical BCN path;
+- `GET /openapi/v1/collaboration/group/ws` to have an explicit empty Gateway requirement, work without browser-supplied headers, and arrive at the identical BCN path;
+- the more-specific WS rule to beat the general authenticated collaboration rule;
 - `token=...` to be redacted in request/relay/error logs, including percent-encoded query cases;
-- no route or query rewriting beyond the configured upstream origin.
+- no path or query rewriting beyond changing the upstream origin.
 
 **Step 2: Run tests to verify they fail**
 
@@ -524,7 +523,7 @@ cd src/gateway
 uv run pytest tests/test_domain_map.py tests/test_route_security.py tests/test_log_redaction.py tests/integration/test_relay_ws_route.py tests/integration/test_forward_signs_principal.py -q
 ```
 
-Expected: FAIL because the group-session domain and security exception are absent.
+Expected: FAIL because the collaboration domain and security exception are absent.
 
 **Step 3: Add the minimal Gateway configuration**
 
@@ -535,13 +534,15 @@ upstream_vars:
   bcs_server_url: https://bcs.sample.com
 
 route_security:
-  "POST /openapi/v1/group-sessions/{sid}/token":
+  "/openapi/v1/collaboration/**":
     user: required
-  "GET /openapi/v1/group-sessions/{sid}/ws": {}
+  "POST /openapi/v1/collaboration/sessions/{sid}/token":
+    user: required
+  "GET /openapi/v1/collaboration/group/ws": {}
 
 upstreams:
   domains:
-    group-sessions:
+    collaboration:
       server: bcs
       protocols: [http, websocket]
   servers:
@@ -621,6 +622,7 @@ Do not create new protocol behavior. Route all fixes through the existing Workbe
 ```bash
 cargo fmt --all --manifest-path src/bcs/Cargo.toml -- --check
 cargo test --package bcs-service-api --manifest-path src/bcs/Cargo.toml
+cargo test --package bcs-secret-local --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs-jwt --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs-app-session --manifest-path src/bcs/Cargo.toml
 cargo test --package bcs-api-http --manifest-path src/bcs/Cargo.toml

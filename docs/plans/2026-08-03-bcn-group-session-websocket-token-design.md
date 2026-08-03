@@ -24,9 +24,10 @@ The new public connection flow needs to:
 
 ## Goals
 
-1. Add `POST /group-sessions/{sid}/token` for issuing a five-minute JWT.
-2. Add `GET /group-sessions/{sid}/ws?token={token}` for session-scoped
-   Workbench WebSocket connections.
+1. Add `POST /openapi/v1/collaboration/sessions/{sid}/token` in BCN for
+   issuing a five-minute JWT.
+2. Add `GET /openapi/v1/collaboration/group/ws?token={token}` in BCN for
+   session-scoped Workbench WebSocket connections.
 3. Bind one JWT to exactly one tenant, Human, group, and group session.
 4. Keep JWT verification stateless. A valid JWT may open multiple connections
    to its one session during its five-minute lifetime.
@@ -57,8 +58,8 @@ when the Workbench `connect` frame is processed.
 
 This separates two decisions:
 
-- **Upgrade authentication:** Is this a genuine, unexpired BCN token for the
-  session named in the URL?
+- **Upgrade authentication:** Is this a genuine, unexpired BCN token carrying
+  one complete session binding?
 - **Connect authorization:** Does this Human still have permission to access
   this group session now?
 
@@ -71,7 +72,7 @@ of identity and requested scope.
 
 A token that can connect to all sessions accessible to one Human has a larger
 leak blast radius, permits session probing, and turns the new credential into a
-second login token. It also makes the `{sid}` URL component and the `gid`/`sid`
+second login token. It also makes the token-issuance `{sid}` and the `gid`/`sid`
 claims non-authoritative.
 
 #### Upgrade-only validation
@@ -98,7 +99,7 @@ opening credential, so that state and operational dependency are unnecessary.
 ### Issue a connection token
 
 ```http
-POST /group-sessions/{sid}/token
+POST /openapi/v1/collaboration/sessions/{sid}/token
 ```
 
 The request must carry an authenticated Gateway Human Principal. The caller
@@ -136,7 +137,7 @@ must not become caller inputs on the next request.
 ### Open the session WebSocket
 
 ```http
-GET /group-sessions/{sid}/ws?token=<compact-jwt>
+GET /openapi/v1/collaboration/group/ws?token=<compact-jwt>
 ```
 
 The browser opens this URL as given. The JWT is the authentication credential
@@ -192,6 +193,27 @@ One token may establish multiple concurrent WebSockets during its lifetime,
 but every WebSocket is restricted to the token's one `sid` and independently
 performs connect-time authorization.
 
+## Signing Key Source
+
+The first release reuses the existing `SecretAccessPort` contract and its
+environment-backed `EnvSecretAccess` implementation. Bootstrap constructs the
+port with the fixed prefix `BCS_SECRET_` and requests the fixed secret name
+`bcn-group-session-ws-jwt`. The resulting environment variable is:
+
+```text
+BCS_SECRET_BCN_GROUP_SESSION_WS_JWT
+```
+
+Bootstrap reads the value once during startup and passes it directly to the
+dedicated group-session JWT implementation. Adapters, application services,
+and the JWT implementation do not read process environment variables.
+
+Missing or empty key material fails BCN startup. There is no fallback key and
+the value is not written to merged configuration logs. This key remains
+independent from both the OAuth session JWT key and the Gateway Principal key.
+Mist, KMS, and online key rotation are later implementations of the same
+`SecretAccessPort`, not part of the first release.
+
 ## Connection Binding
 
 Successful JWT verification produces a transport-neutral immutable binding:
@@ -232,7 +254,7 @@ cleanup.
 
 ```text
 HTTP Upgrade
-    | JWT is valid and path sid matches claims sid
+    | JWT is valid and yields one complete binding
     v
 AwaitingConnect(binding)
     | connect scope matches and current authorization succeeds
@@ -249,8 +271,10 @@ Before accepting the socket, BCN verifies:
 
 1. the token is present and non-empty;
 2. its header, signature, issuer, audience, purpose, times, and claim shape;
-3. `claims.sid == path.sid`; and
-4. the required binding fields are non-empty and valid.
+3. the required binding fields are non-empty and valid.
+
+The WebSocket route has no `sid` path or query parameter. The verified JWT is
+the sole Upgrade-time source of `tenant`, `uid`, `gid`, and `sid`.
 
 Upgrade performs no session database query. Current authorization is checked
 when the protocol establishes its subscription, avoiding an authorization
@@ -339,22 +363,24 @@ and group-session WebSocket JWTs remain separately typed and separately keyed.
 
 ### `bcs-api-http`
 
-Own the `POST /group-sessions/{sid}/token` wire route, path extraction, response
-DTO, no-store headers, and HTTP error mapping. It calls only the application
-service.
+Own `POST /openapi/v1/collaboration/sessions/{sid}/token`, path extraction,
+response DTO, no-store headers, and HTTP error mapping. It calls only the
+application service.
 
 ### `bcs-ws`
 
-Own `GET /group-sessions/{sid}/ws`, query extraction, pre-Upgrade error mapping,
-the `SessionBound` authentication context, and scope enforcement around the
-shared Workbench dispatcher. It calls only application services.
+Own `GET /openapi/v1/collaboration/group/ws`, query extraction, pre-Upgrade
+error mapping, the `SessionBound` authentication context, and scope
+enforcement around the shared Workbench dispatcher. It calls only application
+services.
 
 ### Bootstrap
 
-The composition root resolves the dedicated signing key, constructs the token
-implementation and application service, injects them into both delivery
-adapters, and mounts both routes. No adapter reads environment variables or
-constructs a concrete JWT service.
+The composition root creates `EnvSecretAccess` with the `BCS_SECRET_` prefix,
+resolves `bcn-group-session-ws-jwt`, constructs the token implementation and
+application service, injects them into both delivery adapters, and mounts both
+routes. No adapter reads environment variables or constructs a concrete JWT
+service.
 
 Configuration is validated at startup. A missing or empty signing key fails
 closed; it must not select a default production credential or anonymous mode.
@@ -368,16 +394,17 @@ does not replace the Gateway authentication and routing plane.
 The two routes have intentionally different Gateway security requirements:
 
 ```text
-POST /group-sessions/{sid}/token
+POST /openapi/v1/collaboration/sessions/{sid}/token
     authenticated Gateway Human required
 
-GET /group-sessions/{sid}/ws?token=...
+GET /openapi/v1/collaboration/group/ws?token=...
     anonymous at Gateway; authenticated by the BCN session JWT
 ```
 
-The `group-sessions` upstream domain therefore serves both HTTP and WebSocket
-planes. Gateway configuration maps both requests to the same BCN upstream. The
-Gateway does not parse or validate the BCN JWT.
+The `collaboration` upstream domain therefore serves both HTTP and WebSocket
+planes. Gateway configuration maps both requests to the same BCN upstream and
+forwards each path unchanged. The Gateway does not parse or validate the BCN
+JWT.
 
 All Gateway, ingress, application-server, and BCN access logs must redact the
 `token` query value. Existing `x-proxypass-token` redaction is not sufficient
@@ -402,7 +429,6 @@ the Workbench heartbeat and connection policy.
 | Failure | Result |
 | --- | --- |
 | Missing, malformed, forged, expired, or wrong-purpose token | HTTP 401; no Upgrade |
-| `path.sid != claims.sid` | HTTP 403; no Upgrade |
 | Token verification service unavailable | HTTP 503; no Upgrade |
 
 The browser-facing Gateway relay may expose only a generic handshake failure.
@@ -480,7 +506,8 @@ same immutable connection cannot succeed.
 ### WebSocket boundary tests
 
 - Every pre-Upgrade rejection class.
-- Path/session mismatch.
+- Binding is derived only from the verified token because the WS path has no
+  session selector.
 - Correct immutable binding.
 - `connect` scope mismatch, connect-before-business requirement, and duplicate
   connect rejection.
