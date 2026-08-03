@@ -15,9 +15,11 @@ from agentclaw.community.core.bot_management.repository.protocol import (
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CUTOVER_EVIDENCE_CONTRACT_VERSION,
+    RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.aicoding_retirement import (
+    is_aicoding_active_mapping_reconciliation_candidate,
     is_trusted_aicoding_repo_retirement_resume,
 )
 from agentclaw.community.core.skills_pool.models import (
@@ -162,12 +164,10 @@ class SkillsPoolReconcileService:
             state.data_plane_cutover_committed,
             probe.status.value,
         )
-        finalizing_repo_retirement_resume = (
-            is_trusted_aicoding_repo_retirement_resume(
-                state=state,
-                engine=engine,
-                probe=probe,
-            )
+        finalizing_repo_retirement_resume = is_trusted_aicoding_repo_retirement_resume(
+            state=state,
+            engine=engine,
+            probe=probe,
         )
         if (
             probe.status is not RuntimeLayoutProbeStatus.READY
@@ -797,6 +797,19 @@ class SkillsPoolReconcileService:
             user_id=str(owner_id),
             engine=engine,
         )
+        if is_aicoding_active_mapping_reconciliation_candidate(
+            state=state,
+            engine=engine,
+            probe=probe,
+        ):
+            return await self._reconcile_active_aicoding_repo_bridges(
+                scope=scope,
+                state=state,
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                engine=engine,
+                initial_probe=probe,
+            )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
             return SkillsPoolReconcileResult(
                 self._probe_outcome(probe.status),
@@ -856,6 +869,111 @@ class SkillsPoolReconcileService:
             SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
             preparation_id=probe.preparation_id,
             evidence=probe.evidence,
+        )
+
+    async def _reconcile_active_aicoding_repo_bridges(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        state: BotSkillLayoutState,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        initial_probe: RuntimeLayoutProbeResult,
+    ) -> SkillsPoolReconcileResult:
+        """Rewrite only current managed mappings, then prove the final layout.
+
+        This is deliberately the same idempotent publish/verify pair used by
+        desktop activation recovery.  It neither revives absent mappings nor
+        removes unknown filesystem entries: a second runtime probe remains the
+        fail-closed authority for both cases.
+        """
+
+        try:
+            mappings = build_logical_skill_mappings(
+                self._skills.list_bot_active_assets(
+                    env=scope.env,
+                    bot_id=scope.bot_id,
+                    user_id=user_id,
+                    engine=engine,
+                )
+            )
+        except ValueError as error:
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                evidence={"reason": str(error)},
+                retryable=False,
+            )
+        if not await self._runtime.publish_mappings(
+            bot_id=bot_id,
+            user_id=user_id,
+            mappings=mappings,
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                evidence={
+                    "reason": "active_aicoding_bridge_mapping_publish_failed",
+                    "mapping_count": len(mappings),
+                    "initial_probe": initial_probe.evidence,
+                },
+                retryable=True,
+            )
+        if not await self._runtime.verify_mappings(
+            bot_id=bot_id,
+            user_id=user_id,
+            mappings=mappings,
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                evidence={
+                    "reason": "active_aicoding_bridge_mapping_verify_failed",
+                    "mapping_count": len(mappings),
+                    "initial_probe": initial_probe.evidence,
+                },
+                retryable=True,
+            )
+        refreshed_probe = await self._runtime.probe(
+            bot_id=bot_id,
+            user_id=user_id,
+            engine=engine,
+        )
+        if refreshed_probe.status is not RuntimeLayoutProbeStatus.READY:
+            return SkillsPoolReconcileResult(
+                self._probe_outcome(refreshed_probe.status),
+                evidence={
+                    "reason": "active_aicoding_bridge_reconciliation_incomplete",
+                    "initial_probe": initial_probe.evidence,
+                    "post_publish_probe": refreshed_probe.evidence,
+                },
+                retryable=(
+                    refreshed_probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR
+                ),
+            )
+        if (
+            refreshed_probe.engine != engine
+            or refreshed_probe.preparation_id is None
+            or refreshed_probe.preparation_id != state.preparation_id
+            or refreshed_probe.layout_contract_version != state.layout_contract_version
+            or refreshed_probe.evidence.get("implementation_engine") != "aicoding"
+            or refreshed_probe.evidence.get("physical_layout_engine") != "aicoding"
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                evidence={
+                    "reason": "active_runtime_identity_mismatch",
+                    "initial_probe": initial_probe.evidence,
+                    "post_publish_probe": refreshed_probe.evidence,
+                },
+                retryable=False,
+            )
+        return SkillsPoolReconcileResult(
+            SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
+            preparation_id=refreshed_probe.preparation_id,
+            evidence={
+                **refreshed_probe.evidence,
+                "active_aicoding_bridge_reconciled": True,
+                "reconciled_mapping_count": len(mappings),
+            },
         )
 
     @staticmethod
