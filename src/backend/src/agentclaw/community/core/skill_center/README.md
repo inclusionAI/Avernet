@@ -16,6 +16,7 @@ provides:
   - "CurrentRuntimeLayoutProbeService"
   - "LocalSkillQueryService"
   - "LocalSkillUploadService"
+  - "LocalSkillStateService"
 consumes:
   - "BotRepository"
   - "BotCollabLogRepositoryProtocol"
@@ -39,6 +40,7 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
+  - agentclaw.community.core.skills_pool
   - agentclaw.community.core.models
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
