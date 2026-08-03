@@ -48,6 +48,18 @@ uv run --with pyyaml python src/bcs/scripts/bundle_openapi_contract.py \
   --output-dir /tmp/bcn-openapi
 ```
 
+Export the same validated contract as deterministic JSON for Gateway
+consumption:
+
+```bash
+uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
+  /tmp/bcn.openapi.json
+```
+
+Pass `--root src/bcs/api-contracts/v1` to export a different checked-out
+contract root. The generated JSON is self-contained: source-fragment `$ref`
+entries are resolved and discriminator mappings point inside the JSON document.
+
 Run the contract tests without changing the repository-wide Python
 dependencies:
 
