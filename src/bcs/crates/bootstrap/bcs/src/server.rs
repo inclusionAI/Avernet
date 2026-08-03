@@ -939,6 +939,9 @@ pub struct BcsServerState {
     /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
     pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
 
+    /// Invite-token HMAC secret resolved once for every HTTP surface.
+    pub invite_token_secret: Vec<u8>,
+
     /// Completed V1 HTTP adapter state assembled from the same runtime services as legacy HTTP.
     pub openapi_v1: ApiState,
 
@@ -978,6 +981,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("auth_chain", &"<AuthPluginChain>")
             .field("auth_config", &self.auth_config)
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
+            .field("invite_token_secret", &"<redacted>")
             .field("openapi_v1", &"<ApiState>")
             .field("outbound_url_guard", &self.outbound_url_guard)
             .finish()
@@ -1246,9 +1250,25 @@ fn build_gateway_principal_verifier_from_process(
     )
 }
 
+fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
+    config
+        .invite
+        .token_secret
+        .as_deref()
+        .map(str::as_bytes)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                "invite.token_secret not configured — generating random secret (tokens will not survive restart)"
+            );
+            (0..32).map(|_| fastrand::u8(..)).collect()
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_openapi_v1_state(
     config: &BcsConfig,
+    invite_token_secret: Vec<u8>,
     control_plane_repo: Arc<dyn BotControlPlaneRepoPort>,
     provider_repos: &ProviderRepoBundle,
     registry: Arc<dyn BotRegistryCoreService>,
@@ -1302,13 +1322,6 @@ fn build_openapi_v1_state(
         message_repo,
         SessionServiceConfig { relation_env },
     ));
-    let token_secret = config
-        .invite
-        .token_secret
-        .as_deref()
-        .map(str::as_bytes)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| (0..32).map(|_| fastrand::u8(..)).collect());
     let invitation_groups = groups.clone();
     let invitation_sessions = sessions.clone();
     let invite: Arc<dyn InviteService> = Arc::new(bcs_group::application::invite::InviteServiceImpl {
@@ -1316,7 +1329,7 @@ fn build_openapi_v1_state(
         group: groups,
         session: sessions,
         system_message,
-        token_secret: token_secret.clone(),
+        token_secret: invite_token_secret.clone(),
         default_ttl_seconds: config.invite.default_ttl_seconds,
         base_url: config.invite.base_url.clone(),
         group_link_url: config.invite.group_link_url.clone(),
@@ -1329,7 +1342,7 @@ fn build_openapi_v1_state(
         invitation_sessions,
         registry,
         invite,
-        token_secret,
+        invite_token_secret,
         InvitationFriendshipServiceConfig {
             default_ttl_seconds: config.invite.default_ttl_seconds,
         },
@@ -1359,6 +1372,17 @@ mod gateway_principal_tests {
 
     fn trust_config() -> crate::config::GatewayPrincipalConfig {
         crate::config::GatewayPrincipalConfig::default()
+    }
+
+    #[test]
+    fn configured_invite_token_secret_is_preserved() {
+        let mut config = BcsConfig::default();
+        config.invite.token_secret = Some("configured-invite-secret".to_string());
+
+        assert_eq!(
+            resolve_invite_token_secret(&config),
+            b"configured-invite-secret"
+        );
     }
 
     #[test]
@@ -1429,6 +1453,7 @@ mod gateway_principal_tests {
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
+        let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
             &config.gateway_principal,
         )
@@ -1693,6 +1718,7 @@ impl Default for BcsServerState {
         );
         let openapi_v1 = build_openapi_v1_state(
             &config,
+            invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -1829,6 +1855,7 @@ impl Default for BcsServerState {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            invite_token_secret,
             openapi_v1,
             user_identity_port,
             outbound_url_guard,
@@ -1841,7 +1868,13 @@ impl BcsServerState {
     /// Create a default state for testing.
     #[cfg(test)]
     pub fn default_for_test() -> Self {
-        Self::default()
+        let mut config = BcsConfig::default();
+        config.bots_base_dir = std::env::temp_dir().join(format!(
+            "bcs-default-state-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        Arc::try_unwrap(BcsServer::new_allowing_private_outbound_for_tests(config).state)
+            .expect("test server state has one owner")
     }
 }
 
@@ -2688,6 +2721,7 @@ impl BcsServer {
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
     ) -> Self {
+        let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
             &config.gateway_principal,
         )
@@ -2930,6 +2964,7 @@ impl BcsServer {
         );
         let openapi_v1 = build_openapi_v1_state(
             &config,
+            invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -3066,6 +3101,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            invite_token_secret,
             openapi_v1,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
@@ -3096,6 +3132,7 @@ impl BcsServer {
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
 
+        let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier =
             build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
@@ -3501,6 +3538,7 @@ impl BcsServer {
         );
         let openapi_v1 = build_openapi_v1_state(
             &config,
+            invite_token_secret.clone(),
             control_plane_repo,
             &provider_repos,
             bot_registry.clone(),
@@ -3653,6 +3691,7 @@ impl BcsServer {
             auth_chain,
             auth_config,
             gateway_principal_verifier,
+            invite_token_secret,
             openapi_v1,
             user_identity_port,
             outbound_url_guard,

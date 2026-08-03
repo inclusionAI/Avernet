@@ -38,6 +38,10 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
         "bcs-friend",
         "bcs-bot",
         "bcs-relation",
+        "bcs-app-bot",
+        "bcs-app-group",
+        "bcs-app-session",
+        "bcs-app-invitation",
     ] {
         assert!(
             !manifest_declares_dependency(&manifest, forbidden),

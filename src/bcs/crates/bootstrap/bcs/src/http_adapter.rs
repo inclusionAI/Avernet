@@ -57,6 +57,7 @@ pub fn build_bot_runtime_token_resolver(
 
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
+    let invite_token_secret = state.invite_token_secret.clone();
     let max_group_messages = if config.max_group_messages > 0 {
         config.max_group_messages as u64
     } else {
@@ -125,14 +126,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
             config.async_chat_run_timeout_ms,
         )
         .with_invite_config(
-            config.invite.token_secret
-                .as_deref()
-                .map(|s| s.as_bytes().to_vec())
-                .unwrap_or_else(|| {
-                    tracing::warn!("invite.token_secret not configured — generating random secret (tokens will not survive restart)");
-                    let key: Vec<u8> = (0..32).map(|_| fastrand::u8(..)).collect();
-                    key
-                }),
+            invite_token_secret,
             config.invite.default_ttl_seconds,
             config.invite.base_url.clone(),
             config.invite.group_link_url.clone(),
@@ -520,6 +514,7 @@ mod tests {
     fn test_server_state(port: u16) -> Arc<BcsServerState> {
         let mut config = crate::BcsConfig::default();
         config.port = port;
+        let v1_state = BcsServerState::default_for_test();
         let credentials: Arc<dyn ProviderCredentialRepoPort> =
             Arc::new(MemoryProviderStore::new());
         Arc::new(BcsServerState {
@@ -544,11 +539,23 @@ mod tests {
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
-            openapi_v1: BcsServerState::default_for_test().openapi_v1,
+            invite_token_secret: v1_state.invite_token_secret.clone(),
+            openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
         })
+    }
+
+    #[tokio::test]
+    async fn unset_invite_config_uses_the_bootstrap_shared_invite_secret() {
+        let state = test_server_state(21000);
+        assert!(state.config.invite.token_secret.is_none());
+        let expected = state.invite_token_secret.clone();
+
+        let http_state = build_http_app_state(state).await;
+
+        assert_eq!(http_state.invite_token_secret, expected);
     }
 
     #[tokio::test]
