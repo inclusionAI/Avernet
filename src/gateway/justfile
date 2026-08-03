@@ -23,7 +23,17 @@ test-ci group='ci' mode='bare' overlay='e2e-sqlite':
     ./scripts/ci_test.sh --group {{group}} {{mode}} {{overlay}}
 
 test mode='bare' overlay='e2e-sqlite':
-    source scripts/lib/pipeline.sh && run_ci_pipeline {{mode}} {{overlay}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Delegate to ci_test.sh so `just test` enforces the same changed-line
+    # coverage gate as GitHub CI (threshold 90). ci_test.sh reuses
+    # run_ci_pipeline for the pytest+coverage pass and adds report_check.py
+    # with --base, so local and CI describe the same change range.
+    repo_root="$(cd "{{ justfile_directory() }}/../.." && pwd)"
+    # shellcheck source=scripts/lib/resolve_base_ref.sh
+    source "$repo_root/scripts/lib/resolve_base_ref.sh"
+    base="$(resolve_base_ref)"
+    ./scripts/ci_test.sh --base "$base"
 
 test-full:
     source scripts/lib/test-stages.sh && run_e2e_tests bare e2e-sqlite

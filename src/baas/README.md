@@ -114,6 +114,14 @@ just test-e2e
 just test
 ```
 
+`just test` delegates to `scripts/ci_test.sh --base <resolved-base-ref>`, so it
+enforces the same changed-line coverage gate (threshold 90) as the GitHub CI
+job in `.github/workflows/unit-tests.yml`. The base ref defaults to the merge
+base of `origin/dev` and follows the `just test` / pre-push target contract
+(`AVERNET_PRE_PUSH_MERGE_TARGET` > `avernet.prePush.mergeTarget` > `origin/dev`);
+if the target cannot be fetched, the gate fails loudly instead of silently
+skipping.
+
 ### Environment Variables
 
 | Variable | Purpose |
