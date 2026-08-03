@@ -41,5 +41,9 @@ class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 
 
+class LocalSkillRuntimeSyncError(Exception):
+    """The runtime projection could not match Local Skill desired state."""
+
+
 class LocalSkillEditPausedError(Exception):
     """A Bot Skill layout operation currently owns the edit lock."""
