@@ -7,7 +7,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class LocalSkillUploadServiceProtocol(Protocol):
-    """Create one inactive Local Skill from one raw ZIP package."""
+    """Create or safely replace one Bot-owned Local Skill from a ZIP package."""
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes

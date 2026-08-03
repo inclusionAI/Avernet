@@ -45,6 +45,14 @@ class SkillRepository(Protocol):
         """精确查询 Bot 自有的同名 local 技能，不包含全局行。"""
         ...
 
+    def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
+        """Return every exact Bot-local same-name row for ambiguity handling.
+
+        The caller resolves legacy owner semantics after it holds the Bot Skill
+        layout edit lock; this method deliberately does not pick a winner.
+        """
+        ...
+
     def list_bot_local_skills(
         self,
         *,

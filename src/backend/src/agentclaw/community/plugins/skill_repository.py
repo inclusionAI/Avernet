@@ -359,6 +359,22 @@ class SkillRepository:
             row = query.order_by(self.Skill.gmt_created.desc()).first()
             return _skill_to_dict(row) if row is not None else None
 
+    def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
+        """Return all exact same-name Local rows; never hide legacy duplicates."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.env == get_current_env(),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.name == name,
+                    self.Skill.git_path.like("local://%"),
+                )
+                .order_by(self.Skill.id.asc())
+                .all()
+            )
+            return [_skill_to_dict(row) for row in rows]
+
     @staticmethod
     def _public_local_skill(row, active: bool) -> dict:
         data = _skill_to_dict(row)
