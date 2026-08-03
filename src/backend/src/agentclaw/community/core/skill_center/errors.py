@@ -19,3 +19,22 @@ class LocalSkillNotFoundError(Exception):
 
 class LocalSkillOwnerAmbiguousError(Exception):
     """Legacy Local Skill ownership cannot be resolved without guessing."""
+
+class LocalSkillInvalidPackageError(Exception):
+    """A ZIP package is malformed or violates the Local Skill layout."""
+
+
+class LocalSkillTooLargeError(Exception):
+    """A ZIP package exceeds a published upload limit."""
+
+
+class LocalSkillNotReadyError(Exception):
+    """The Bot cannot safely accept a mutation yet."""
+
+
+class LocalSkillDuplicateError(Exception):
+    """A same-name Local Skill already exists; replacement is not supported."""
+
+
+class LocalSkillStorageError(Exception):
+    """A package persistence or compensating cleanup operation failed."""

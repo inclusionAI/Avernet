@@ -79,6 +79,15 @@ class SkillRepository(Protocol):
         skill_uuid: str | None = None,
     ) -> list[dict]:
         """Return every current-environment SkillSet association for a Skill."""
+
+    def add_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
+        ...
+
+    def remove_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
         ...
 
     def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:

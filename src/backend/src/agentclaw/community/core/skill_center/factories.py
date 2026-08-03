@@ -66,6 +66,23 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
+class LocalSkillPackageStorage:
+    """Explicit package-I/O port owned by the SkillService factory."""
+
+    def __init__(self, filesystem, device_directory: str) -> None:
+        self._filesystem = filesystem
+        self._device_directory = device_directory
+
+    async def write(self, files: list[tuple[str, bytes]]) -> None:
+        for relative_path, content in files:
+            await self._filesystem.write_file(
+                f"{self._device_directory}/{relative_path}", content
+            )
+
+    async def cleanup(self) -> bool:
+        return await self._filesystem.delete_tree(self._device_directory)
+
+
 class SkillServiceFactory:
     """Mints :class:`SkillService` instances scoped to per-request paths.
 
@@ -159,6 +176,19 @@ class SkillServiceFactory:
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
             device_owner_id=bot_owner_id or entity_id,
+        )
+
+    def local_skill_package_storage(
+        self, *, owner_id: str, bot_id: str, engine_type: str | None, name: str
+    ) -> tuple[str, LocalSkillPackageStorage]:
+        """Return the canonical Local Skill locator and its device-I/O port."""
+        service = self.create(
+            entity_id=owner_id, bot_id=bot_id, engine_type=engine_type
+        )
+        directory = str(service.local_dir / name)
+        return directory, LocalSkillPackageStorage(
+            service._device_fs_factory(bot_id, owner_id),
+            service._local_skill_path_adapter(directory),
         )
 
 

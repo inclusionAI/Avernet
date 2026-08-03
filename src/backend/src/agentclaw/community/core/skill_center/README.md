@@ -15,6 +15,7 @@ provides:
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
   - "LocalSkillQueryService"
+  - "LocalSkillUploadService"
 consumes:
   - "BotRepository"
   - "CollaboratorServiceProtocol"
