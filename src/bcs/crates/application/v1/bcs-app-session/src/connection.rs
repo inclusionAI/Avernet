@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    GetSession, GroupSessionConnectionBinding, GroupSessionConnectionError,
-    GroupSessionConnectionService, IssueGroupSessionConnectionToken,
-    IssuedGroupSessionConnectionToken, SessionService, VerifyGroupSessionConnectionToken,
-    GROUP_SESSION_WS_TOKEN_TTL_SECONDS, require_authenticated_user,
+    ActorKind, ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity,
+    AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection, GetSession,
+    GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantMode,
+    SessionService, VerifyGroupSessionConnectionToken, GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
+    require_authenticated_user,
 };
 use bcs_service_api::port::{
     GroupSessionTokenError, GroupSessionTokenPort, GroupSessionTokenScope,
@@ -77,6 +79,53 @@ impl GroupSessionConnectionService for GroupSessionConnectionServiceImpl {
             user_id: claims.scope.user_id,
             group_id: claims.scope.group_id,
             session_id: claims.scope.session_id,
+        })
+    }
+
+    async fn authorize_connect(
+        &self,
+        command: AuthorizeGroupSessionConnection,
+    ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError> {
+        let binding = command.binding;
+        let user_id = binding.user_id;
+        let caller = AuthenticatedCaller {
+            tenant: binding.tenant,
+            user: Some(AuthenticatedUserIdentity {
+                id: user_id.clone(),
+                username: user_id.clone(),
+                display_name: None,
+                full_name: None,
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        };
+        let session = self
+            .sessions
+            .get(GetSession {
+                caller,
+                session_id: binding.session_id,
+            })
+            .await?;
+        if session.group_id != binding.group_id {
+            return Err(ApplicationError::forbidden(
+                "Session no longer belongs to the token-bound Group",
+            )
+            .into());
+        }
+        let actor_id = format!("human_{user_id}");
+        if session.participants.iter().any(|participant| {
+            participant.actor_kind == ActorKind::Human
+                && participant.actor_id == actor_id
+                && participant.mode == ParticipantMode::Absent
+        }) {
+            return Err(ApplicationError::forbidden(
+                "Human participant is absent from the token-bound Session",
+            )
+            .into());
+        }
+        Ok(AuthorizedGroupSessionConnection {
+            participants: session.participants,
         })
     }
 }

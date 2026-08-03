@@ -102,6 +102,16 @@ impl GroupSessionConnectionService for FakeConnectionService {
     ) -> Result<GroupSessionConnectionBinding, GroupSessionConnectionError> {
         panic!("token route does not verify connection tokens")
     }
+
+    async fn authorize_connect(
+        &self,
+        _command: bcs_service_api::application::v1::AuthorizeGroupSessionConnection,
+    ) -> Result<
+        bcs_service_api::application::v1::AuthorizedGroupSessionConnection,
+        GroupSessionConnectionError,
+    > {
+        panic!("token route does not authorize WebSocket connects")
+    }
 }
 
 fn human_caller() -> AuthenticatedCaller {

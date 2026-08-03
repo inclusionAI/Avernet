@@ -292,17 +292,26 @@ frame.group_id   must equal binding.group_id
 frame.session_id must equal binding.session_id
 ```
 
-The handler then calls the existing `WorkbenchSessionService.connect` with:
+The handler then calls the V1 `GroupSessionConnectionService.authorize_connect`
+use case with the immutable binding:
 
 ```text
-bound_actor_id = human_{binding.user_id}
-group_id       = binding.group_id
-session_id     = binding.session_id
+tenant     = binding.tenant
+user_id    = binding.user_id
+group_id   = binding.group_id
+session_id = binding.session_id
 ```
 
-That service reloads current group/session state and checks the existing
-Workbench access policy, including ownership or participation and participant
-mode. It also confirms that the session still belongs to the bound group.
+That V1 application service reconstructs a trusted Human caller from the signed
+binding and reuses `SessionService::get` to reload the exact session and apply
+the same V1 read/connect authorization used during token issuance. It also
+confirms that the session still belongs to the bound group and rejects an
+explicit Human participant whose current mode is `Absent`.
+
+The legacy `WorkbenchSessionService.connect` remains the exclusive path for
+`UserBound` `/ws` connections. The session-bound V1 route does not add flags or
+branches to that legacy contract, so its authorization and participant response
+remain unchanged.
 
 Only one `connect` may succeed on one socket. Repeated connects are rejected
 with `already_connected` so they cannot create duplicate subscriptions.
@@ -336,14 +345,24 @@ pub trait GroupSessionConnectionService: Send + Sync {
     async fn issue_token(
         &self,
         command: IssueGroupSessionConnectionToken,
-    ) -> Result<IssuedGroupSessionConnectionToken, ApplicationError>;
+    ) -> Result<IssuedGroupSessionConnectionToken, GroupSessionConnectionError>;
 
     async fn verify_token(
         &self,
         command: VerifyGroupSessionConnectionToken,
-    ) -> Result<SessionConnectionBinding, ApplicationError>;
+    ) -> Result<GroupSessionConnectionBinding, GroupSessionConnectionError>;
+
+    async fn authorize_connect(
+        &self,
+        command: AuthorizeGroupSessionConnection,
+    ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError>;
 }
 ```
+
+`authorize_connect` accepts only the immutable binding produced by token
+verification and returns the currently authorized V1 Session participants.
+The WebSocket adapter uses this operation only for `SessionBound`; legacy
+`UserBound` connections continue to use `WorkbenchSessionService.connect`.
 
 Add a non-repository outbound port for signing and verifying the dedicated
 token claims. Delivery adapters depend only on the application contract and do
@@ -354,7 +373,8 @@ not call a JWT implementation directly.
 Implement the application use cases. Reuse the existing session lookup and
 read/connect authorization policy rather than duplicating membership rules in
 an adapter. The application service derives `gid`, maps the authenticated Human
-to `uid`, fixes the 300-second lifetime, and calls the token port.
+to `uid`, fixes the 300-second lifetime, calls the token port, and reloads the
+exact bound Session during `authorize_connect`.
 
 ### `bcs-jwt`
 

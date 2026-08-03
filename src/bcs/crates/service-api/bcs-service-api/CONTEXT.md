@@ -9,8 +9,8 @@
   result-publisher port used to return a completed one-shot result to chat.
 - V1 `AuthenticatedCaller` contract types that preserve User, Bot, App, and
   AccessKey context without retaining transport metadata or credentials.
-- Session-scoped Workbench connection-token use cases and the outbound token
-  signing/verification port.
+- Session-scoped Workbench connection-token use cases, exact-session connect
+  reauthorization contracts, and the outbound token signing/verification port.
 - The state-machine run repository contract includes an atomic
   `create_run_if_session_idle` operation for one-shot session launch
   serialization; production stores must override its compatibility default

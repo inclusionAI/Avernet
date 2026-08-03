@@ -4,8 +4,9 @@
 
 - `SessionServiceImpl`, the transport-agnostic BCN V1 Session facade.
 - `GroupSessionConnectionServiceImpl`, which authorizes session access before
-  issuing a session-scoped Workbench WebSocket token and verifies that token
-  into an immutable connection binding.
+  issuing a session-scoped Workbench WebSocket token, verifies that token into
+  an immutable connection binding, and revalidates the exact bound Session at
+  connect time through the V1 Session facade.
 
 ## Consumes
 

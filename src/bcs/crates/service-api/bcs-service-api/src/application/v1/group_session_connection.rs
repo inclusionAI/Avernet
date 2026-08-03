@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use time::OffsetDateTime;
 
-use super::{ApplicationError, AuthenticatedCaller};
+use super::{ApplicationError, AuthenticatedCaller, SessionParticipant};
 
 pub const GROUP_SESSION_WS_TOKEN_TTL_SECONDS: u64 = 300;
 
@@ -32,6 +32,16 @@ pub struct GroupSessionConnectionBinding {
     pub session_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizeGroupSessionConnection {
+    pub binding: GroupSessionConnectionBinding,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizedGroupSessionConnection {
+    pub participants: Vec<SessionParticipant>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GroupSessionConnectionError {
     #[error(transparent)]
@@ -55,4 +65,9 @@ pub trait GroupSessionConnectionService: Send + Sync {
         &self,
         command: VerifyGroupSessionConnectionToken,
     ) -> Result<GroupSessionConnectionBinding, GroupSessionConnectionError>;
+
+    async fn authorize_connect(
+        &self,
+        command: AuthorizeGroupSessionConnection,
+    ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError>;
 }

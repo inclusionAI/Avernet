@@ -189,7 +189,10 @@ Expected: FAIL because the connection application service is missing.
 
 Create `GroupSessionConnectionServiceImpl` with injected `Arc<dyn SessionService>` and `Arc<dyn GroupSessionTokenPort>`. Reuse `SessionService::get` so the existing V1 session-read authorization remains authoritative. Do not duplicate repository or group membership rules. Pass the fixed TTL constant to the port.
 
-On verification, validate the JWT through the port and return its immutable binding. Do not perform the dynamic connection authorization here; that remains the Workbench `connect` operation.
+On verification, validate the JWT through the port and return its immutable
+binding. This initial token task does not yet add dynamic connect authorization;
+Task 6A adds the dedicated V1 `authorize_connect` operation and invokes it from
+the session-bound Workbench `connect` path.
 
 **Step 4: Run focused and package tests**
 
@@ -332,7 +335,7 @@ For `SessionBound`, verify:
 
 - before successful `connect`, business frames return `connect_required`;
 - `connect.group_id` and `connect.session_id` must exactly equal bound `gid`/`sid`, otherwise return `token_scope_mismatch` and close;
-- the dynamic `WorkbenchSessionService::connect` authorization still runs using the bound Human actor;
+- the dynamic V1 group-session authorization still runs using the immutable binding;
 - a second successful connect returns `already_connected`;
 - chat.send cannot name another group/session;
 - chat.abort cannot abort a run belonging to another session, including the form without a client-provided run/session selector;
@@ -350,7 +353,7 @@ Expected: FAIL because session scope is not enforced for all commands.
 
 **Step 3: Implement the state machine and abort scope**
 
-Use explicit `AwaitingConnect -> Connected -> Closed` state. Before connect, allow only ping/pong and connect. On connect, compare exact scope first, then call the existing dynamic authorization/service path. Keep the accepted binding immutable for the life of the connection.
+Use explicit `AwaitingConnect -> Connected -> Closed` state. Before connect, allow only ping/pong and connect. On connect, compare exact scope first, then call the dynamic V1 authorization path. Keep the accepted binding immutable for the life of the connection.
 
 Extend `ChatAbortCommand` with `session_id: Option<String>` rather than creating a second abort path. Existing `/ws`, HTTP, provider, and test callers pass `None`; session-bound WS passes `Some(bound_sid)`. In message flow, constrain candidate runs by session when present. Propagate constructor changes mechanically without changing unrelated behavior.
 
@@ -370,6 +373,128 @@ Expected: PASS.
 ```bash
 git add src/bcs/crates/service-api/bcs-service-api src/bcs/crates/services/bcs-message-flow src/bcs/crates/adapters/ws/bcs-ws src/bcs/crates/adapters/http/bcs-http src/bcs/crates/adapters/http/bcs-provider-http src/bcs/crates/services/bcs-channel src/bcs/crates/bootstrap/bcs/tests
 git commit -m "feat(bcs): confine workbench commands to one session"
+```
+
+### Task 6A: Revalidate the exact session through V1 without changing legacy `/ws`
+
+**Files:**
+
+- Modify: `src/bcs/crates/service-api/bcs-service-api/src/application/v1/group_session_connection.rs`
+- Modify: `src/bcs/crates/service-api/bcs-service-api/tests/group_session_connection_contracts.rs`
+- Modify: `src/bcs/crates/application/v1/bcs-app-session/src/connection.rs`
+- Modify: `src/bcs/crates/application/v1/bcs-app-session/tests/group_session_connection.rs`
+- Modify: `src/bcs/crates/adapters/ws/bcs-ws/src/web/dispatcher.rs`
+- Modify: `src/bcs/crates/adapters/ws/bcs-ws/tests/web_frame_compat.rs`
+- Verify unchanged: `src/bcs/crates/services/bcs-group/src/application/management.rs`
+- Verify unchanged behavior: `src/bcs/crates/services/bcs-group/tests/management.rs`
+
+**Step 1: Write failing V1 application tests**
+
+Extend `GroupSessionConnectionService` with an `authorize_connect` operation
+whose input is the already-verified `GroupSessionConnectionBinding`. Its output
+contains the exact V1 `SessionParticipant` list used by the Workbench connect
+response.
+
+Add tests proving that connect authorization:
+
+- reloads the session instead of trusting the token's issuance-time decision;
+- rejects a deleted session;
+- rejects a session whose current `group_id` differs from the binding;
+- rejects a caller who no longer has V1 session read access;
+- rejects a matching Human participant whose mode is `Absent`;
+- accepts a current Human participant or a Human who still owns a Bot in the
+  exact session.
+
+**Step 2: Run the focused V1 test and verify RED**
+
+```bash
+cargo test --package bcs-app-session --test group_session_connection authorize_connect --manifest-path src/bcs/Cargo.toml
+```
+
+Expected: FAIL because the V1 connect authorization operation does not exist.
+
+**Step 3: Implement minimal V1 revalidation**
+
+In `GroupSessionConnectionServiceImpl::authorize_connect`:
+
+1. reconstruct `AuthenticatedCaller` only from the signed binding's `tenant`
+   and `user_id`;
+2. call `SessionService::get` for the bound `session_id` so the existing V1
+   session-read policy remains the single authority;
+3. require the loaded session's `group_id` to equal the bound `group_id`;
+4. reject a matching Human participant whose mode is `Absent`; and
+5. return the loaded V1 session participants.
+
+Do not call or modify `GroupManagement::connect` and do not add a V1 flag to
+`WorkbenchConnectCommand`.
+
+**Step 4: Run the V1 application test and verify GREEN**
+
+```bash
+cargo test --package bcs-app-session --test group_session_connection authorize_connect --manifest-path src/bcs/Cargo.toml
+```
+
+Expected: PASS.
+
+**Step 5: Write failing WebSocket routing tests**
+
+Add a recording V1 connection service to `WebDispatchState`. Verify that:
+
+- `SessionBound` connect calls `authorize_connect` with the exact immutable
+  tenant/user/group/session binding and does not call the legacy
+  `WorkbenchSessionService::connect`;
+- a V1 authorization error produces `session_access_revoked` and closes;
+- `UserBound` connect still calls only `WorkbenchSessionService::connect` and
+  never calls the V1 service; and
+- the session-bound success response projects the authorized V1 participant
+  list into the existing Workbench connect frame shape.
+
+**Step 6: Run the focused WebSocket tests and verify RED**
+
+```bash
+cargo test --package bcs-ws --test web_frame_compat session_bound --manifest-path src/bcs/Cargo.toml
+cargo test --package bcs-ws --test web_frame_compat user_bound_connect --manifest-path src/bcs/Cargo.toml
+```
+
+Expected: FAIL because the dispatcher still routes session-bound connect
+through the legacy service.
+
+**Step 7: Route only session-bound connect through V1**
+
+Add the V1 application service dependency to `WebDispatchState`. In
+`handle_connect`, dispatch by authentication context:
+
+- `UserBound` keeps the existing legacy `WorkbenchSessionService::connect`
+  path byte-for-byte;
+- `SessionBound` calls only `GroupSessionConnectionService::authorize_connect`,
+  maps application failures to `session_access_revoked`, and projects the V1
+  participants into the existing Workbench response.
+
+Until the new V1 Upgrade route is composed, the optional V1 dependency is
+absent in the legacy bootstrap state and must fail closed if a `SessionBound`
+context is ever constructed without it. Task 8 makes this dependency required
+when mounting the V1 route.
+
+**Step 8: Run focused and compatibility tests**
+
+```bash
+cargo test --package bcs-service-api --test group_session_connection_contracts --manifest-path src/bcs/Cargo.toml
+cargo test --package bcs-app-session --manifest-path src/bcs/Cargo.toml
+cargo test --package bcs-ws --manifest-path src/bcs/Cargo.toml
+cargo test --package bcs-group --test management workbench --manifest-path src/bcs/Cargo.toml
+```
+
+Expected: PASS. `src/bcs/crates/services/bcs-group/src/application/management.rs`
+has no diff, and all legacy Workbench management tests remain green.
+
+**Step 9: Commit**
+
+```bash
+git add src/bcs/docs/plans \
+  src/bcs/crates/service-api/bcs-service-api \
+  src/bcs/crates/application/v1/bcs-app-session \
+  src/bcs/crates/adapters/ws/bcs-ws
+git commit -m "fix(bcs): revalidate v1 websocket session access"
 ```
 
 ### Task 7: Add the session-bound WebSocket Upgrade route

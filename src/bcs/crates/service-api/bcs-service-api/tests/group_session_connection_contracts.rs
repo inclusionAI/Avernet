@@ -1,8 +1,8 @@
 use bcs_service_api::application::v1::{
-    GroupSessionConnectionBinding, GroupSessionConnectionError,
-    GroupSessionConnectionService, IssueGroupSessionConnectionToken,
-    IssuedGroupSessionConnectionToken, VerifyGroupSessionConnectionToken,
-    GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
+    AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
+    GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken,
+    VerifyGroupSessionConnectionToken, GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
 };
 use bcs_service_api::port::{
     GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
@@ -35,6 +35,8 @@ fn connection_contracts_remain_transport_neutral_and_object_safe() {
     let _ = size_of::<IssueGroupSessionConnectionToken>();
     let _ = size_of::<VerifyGroupSessionConnectionToken>();
     let _ = size_of::<IssuedGroupSessionConnectionToken>();
+    let _ = size_of::<AuthorizeGroupSessionConnection>();
+    let _ = size_of::<AuthorizedGroupSessionConnection>();
     let _ = size_of::<GroupSessionConnectionError>();
     let _ = size_of::<GroupSessionTokenScope>();
     let _ = size_of::<GroupSessionTokenClaims>();

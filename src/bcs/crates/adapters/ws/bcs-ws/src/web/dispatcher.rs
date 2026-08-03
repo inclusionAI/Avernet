@@ -1,11 +1,16 @@
 use std::sync::Arc;
 
 use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
+use bcs_service_api::application::v1::{
+    AuthorizeGroupSessionConnection, GroupSessionConnectionBinding,
+    GroupSessionConnectionService, ParticipantRole,
+};
 use bcs_service_api::{
     CallerContext, ChatAbortCommand, CollaborationRuntimeError, CollaborationRuntimeService,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanActor,
     HumanResponseSource, MessageFlowService, ServiceError, WebSendCommand,
-    WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchSessionService,
+    ParticipantKind, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
+    WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -44,6 +49,7 @@ pub struct WebDispatchState {
     pub message_flow: Arc<dyn MessageFlowService>,
     pub collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     pub workbench_sessions: Arc<dyn WorkbenchSessionService>,
+    pub group_session_connections: Option<Arc<dyn GroupSessionConnectionService>>,
     pub frontend_connections: Arc<WorkbenchConnectionRegistry>,
     pub run_channels: Arc<RunChannelManager>,
 }
@@ -54,6 +60,13 @@ impl std::fmt::Debug for WebDispatchState {
             .field("message_flow", &"<MessageFlowService>")
             .field("collaboration_runtime", &"<CollaborationRuntimeService>")
             .field("workbench_sessions", &"<WorkbenchSessionService>")
+            .field(
+                "group_session_connections",
+                &self
+                    .group_session_connections
+                    .as_ref()
+                    .map(|_| "<GroupSessionConnectionService>"),
+            )
             .field("frontend_connections", &"<WorkbenchConnectionRegistry>")
             .field("run_channels", &"<RunChannelManager>")
             .finish()
@@ -237,38 +250,80 @@ async fn handle_connect(
         "Processing connect request"
     );
 
-    let outcome = match state
-        .workbench_sessions
-        .connect(WorkbenchConnectCommand {
-            bound_actor_id: bound_actor_id.map(str::to_string),
-            group_id: group_id.clone(),
-            session_id: session_id.clone(),
-        })
-        .await
-    {
-        Ok(outcome) => outcome,
-        Err(err) => {
-            warn!(
-                group_id = %group_id,
-                session_id = ?session_id,
-                bound_actor_id = ?bound_actor_id,
-                error = ?err,
-                "connect rejected by Workbench WS authorization"
-            );
-            if matches!(auth, WorkbenchConnectionAuth::SessionBound { .. }) {
-                send_error(
-                    tx,
-                    &req.id,
-                    "session_access_revoked",
-                    "Session access is no longer authorized",
-                )
-                .await?;
-                connection_state.phase = WebConnectionPhase::Closed;
-            } else {
+    let outcome = match auth {
+        WorkbenchConnectionAuth::UserBound { .. } => match state
+            .workbench_sessions
+            .connect(WorkbenchConnectCommand {
+                bound_actor_id: bound_actor_id.map(str::to_string),
+                group_id: group_id.clone(),
+                session_id: session_id.clone(),
+            })
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(err) => {
+                warn!(
+                    group_id = %group_id,
+                    session_id = ?session_id,
+                    bound_actor_id = ?bound_actor_id,
+                    error = ?err,
+                    "connect rejected by Workbench WS authorization"
+                );
                 let message = err.message();
                 send_error(tx, &req.id, err.code(), &message).await?;
+                return Ok(());
             }
-            return Ok(());
+        },
+        WorkbenchConnectionAuth::SessionBound {
+            tenant,
+            actor_id,
+            group_id,
+            session_id,
+        } => {
+            let user_id = actor_id
+                .strip_prefix("human_")
+                .filter(|user_id| !user_id.is_empty());
+            let service = state.group_session_connections.as_ref();
+            let authorized = match (service, user_id) {
+                (Some(service), Some(user_id)) => service
+                    .authorize_connect(AuthorizeGroupSessionConnection {
+                        binding: GroupSessionConnectionBinding {
+                            tenant: tenant.clone(),
+                            user_id: user_id.to_string(),
+                            group_id: group_id.clone(),
+                            session_id: session_id.clone(),
+                        },
+                    })
+                    .await,
+                _ => {
+                    warn!("session-bound connect is missing a valid V1 authorization context");
+                    send_session_access_revoked(tx, &req.id, connection_state).await?;
+                    return Ok(());
+                }
+            };
+            match authorized {
+                Ok(authorized) => WorkbenchConnectOutcome {
+                    group_id: group_id.clone(),
+                    participants: authorized
+                        .participants
+                        .into_iter()
+                        .map(|participant| WorkbenchParticipantView {
+                            bot_uuid: participant.actor_id,
+                            role: participant_role_to_wire(participant.role).to_string(),
+                            kind: ParticipantKind::Bot,
+                            mode: Some(participant.mode),
+                        })
+                        .collect(),
+                },
+                Err(err) => {
+                    warn!(
+                        error = ?err,
+                        "connect rejected by V1 group-session authorization"
+                    );
+                    send_session_access_revoked(tx, &req.id, connection_state).await?;
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -301,6 +356,32 @@ async fn handle_connect(
 
     send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
     Ok(())
+}
+
+async fn send_session_access_revoked(
+    tx: &mpsc::Sender<String>,
+    request_id: &str,
+    connection_state: &mut WebClientConnectionState,
+) -> Result<()> {
+    send_error(
+        tx,
+        request_id,
+        "session_access_revoked",
+        "Session access is no longer authorized",
+    )
+    .await?;
+    connection_state.phase = WebConnectionPhase::Closed;
+    Ok(())
+}
+
+fn participant_role_to_wire(role: ParticipantRole) -> &'static str {
+    match role {
+        ParticipantRole::Driver => "driver",
+        ParticipantRole::Consultant => "consultant",
+        ParticipantRole::Manager => "manager",
+        ParticipantRole::Worker => "worker",
+        ParticipantRole::Observer => "observer",
+    }
 }
 
 #[derive(Debug, Deserialize)]

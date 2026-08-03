@@ -5,13 +5,13 @@ use bcs_app_session::GroupSessionConnectionServiceImpl;
 use bcs_service_api::application::v1::{
     ActorKind, AddSessionParticipant, ApplicationError, AuthenticatedAccessKeyIdentity,
     AuthenticatedAppIdentity, AuthenticatedBotIdentity, AuthenticatedCaller,
-    AuthenticatedUserIdentity, CompleteSession, CreateSession, CreateSessionOutcome, DeleteResult,
-    DeleteSession, DeleteSessionParticipant, GetSession, GroupSessionConnectionError,
-    GroupSessionConnectionService, IssueGroupSessionConnectionToken,
-    IssuedGroupSessionConnectionToken, ListSessions, Page, ParticipantMode, ParticipantRole,
-    SessionCompletionResult, SessionDetail, SessionParticipant, SessionService, SessionStatus,
-    SessionSummary, UpdateSession, UpdateSessionParticipant, VerifyGroupSessionConnectionToken,
-    GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
+    AuthenticatedUserIdentity, AuthorizeGroupSessionConnection, CompleteSession, CreateSession,
+    CreateSessionOutcome, DeleteResult, DeleteSession, DeleteSessionParticipant, GetSession,
+    GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ListSessions, Page,
+    ParticipantMode, ParticipantRole, SessionCompletionResult, SessionDetail, SessionParticipant,
+    SessionService, SessionStatus, SessionSummary, UpdateSession, UpdateSessionParticipant,
+    VerifyGroupSessionConnectionToken, GROUP_SESSION_WS_TOKEN_TTL_SECONDS,
 };
 use bcs_service_api::port::{
     GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
@@ -24,11 +24,14 @@ enum SessionMode {
     Success,
     Forbidden,
     NotFound,
+    OtherGroup,
+    HumanAbsent,
+    OwnedBotOnly,
 }
 
 struct FakeSessionService {
     mode: SessionMode,
-    get_calls: Mutex<Vec<String>>,
+    get_calls: Mutex<Vec<GetSession>>,
 }
 
 impl FakeSessionService {
@@ -42,6 +45,13 @@ impl FakeSessionService {
     fn get_call_count(&self) -> usize {
         match self.get_calls.lock() {
             Ok(calls) => calls.len(),
+            Err(_) => panic!("test mutex must not be poisoned"),
+        }
+    }
+
+    fn get_calls(&self) -> Vec<GetSession> {
+        match self.get_calls.lock() {
+            Ok(calls) => calls.clone(),
             Err(_) => panic!("test mutex must not be poisoned"),
         }
     }
@@ -62,7 +72,7 @@ impl SessionService for FakeSessionService {
 
     async fn get(&self, query: GetSession) -> Result<SessionDetail, ApplicationError> {
         match self.get_calls.lock() {
-            Ok(mut calls) => calls.push(query.session_id.clone()),
+            Ok(mut calls) => calls.push(query.clone()),
             Err(_) => panic!("test mutex must not be poisoned"),
         }
         match self.mode {
@@ -72,6 +82,24 @@ impl SessionService for FakeSessionService {
                 "session_not_found",
                 "session not found",
             )),
+            SessionMode::OtherGroup => Ok(session_detail(&query.session_id, "moved-group")),
+            SessionMode::HumanAbsent => {
+                let mut session = session_detail(&query.session_id, "server-owned-group");
+                session.participants[0].mode = ParticipantMode::Absent;
+                Ok(session)
+            }
+            SessionMode::OwnedBotOnly => {
+                let mut session = session_detail(&query.session_id, "server-owned-group");
+                session.participants[0] = SessionParticipant {
+                    actor_id: "owned-bot".into(),
+                    actor_kind: ActorKind::Bot,
+                    name: None,
+                    role: ParticipantRole::Driver,
+                    mode: ParticipantMode::Auto,
+                    joined_at: None,
+                };
+                Ok(session)
+            }
         }
     }
 
@@ -109,6 +137,15 @@ impl SessionService for FakeSessionService {
         _command: DeleteSessionParticipant,
     ) -> Result<DeleteResult, ApplicationError> {
         panic!("delete_participant is not used by connection-token tests")
+    }
+}
+
+fn session_binding() -> GroupSessionConnectionBinding {
+    GroupSessionConnectionBinding {
+        tenant: "tenant-a".into(),
+        user_id: "user-a".into(),
+        group_id: "server-owned-group".into(),
+        session_id: "session-a".into(),
     }
 }
 
@@ -215,6 +252,128 @@ fn session_detail(session_id: &str, group_id: &str) -> SessionDetail {
         created_at: 1,
         updated_at: 1,
     }
+}
+
+#[tokio::test]
+async fn authorize_connect_reloads_the_exact_bound_session() {
+    let sessions = Arc::new(FakeSessionService::new(SessionMode::Success));
+    let service = GroupSessionConnectionServiceImpl::new(
+        sessions.clone(),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let authorized = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await
+        .expect("current V1 session access should authorize connect");
+
+    assert_eq!(authorized.participants.len(), 1);
+    assert_eq!(authorized.participants[0].actor_id, "human_user-a");
+    let calls = sessions.get_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].session_id, "session-a");
+    assert_eq!(calls[0].caller.tenant, "tenant-a");
+    assert_eq!(
+        calls[0].caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("user-a")
+    );
+}
+
+#[tokio::test]
+async fn authorize_connect_rejects_a_deleted_session() {
+    let service = GroupSessionConnectionServiceImpl::new(
+        Arc::new(FakeSessionService::new(SessionMode::NotFound)),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let result = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(GroupSessionConnectionError::Application(ApplicationError::NotFound { .. }))
+    ));
+}
+
+#[tokio::test]
+async fn authorize_connect_rejects_revoked_v1_session_access() {
+    let service = GroupSessionConnectionServiceImpl::new(
+        Arc::new(FakeSessionService::new(SessionMode::Forbidden)),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let result = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(GroupSessionConnectionError::Application(ApplicationError::Forbidden(_)))
+    ));
+}
+
+#[tokio::test]
+async fn authorize_connect_rejects_a_session_moved_to_another_group() {
+    let service = GroupSessionConnectionServiceImpl::new(
+        Arc::new(FakeSessionService::new(SessionMode::OtherGroup)),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let result = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(GroupSessionConnectionError::Application(ApplicationError::Forbidden(_)))
+    ));
+}
+
+#[tokio::test]
+async fn authorize_connect_rejects_an_absent_bound_human() {
+    let service = GroupSessionConnectionServiceImpl::new(
+        Arc::new(FakeSessionService::new(SessionMode::HumanAbsent)),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let result = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(GroupSessionConnectionError::Application(ApplicationError::Forbidden(_)))
+    ));
+}
+
+#[tokio::test]
+async fn authorize_connect_accepts_v1_access_through_an_owned_bot() {
+    let service = GroupSessionConnectionServiceImpl::new(
+        Arc::new(FakeSessionService::new(SessionMode::OwnedBotOnly)),
+        Arc::new(FakeTokenPort::new(TokenMode::Success)),
+    );
+
+    let authorized = service
+        .authorize_connect(AuthorizeGroupSessionConnection {
+            binding: session_binding(),
+        })
+        .await
+        .expect("the V1 Session service already authorized the owned Bot");
+
+    assert_eq!(authorized.participants.len(), 1);
+    assert_eq!(authorized.participants[0].actor_id, "owned-bot");
+    assert_eq!(authorized.participants[0].actor_kind, ActorKind::Bot);
 }
 
 #[tokio::test]

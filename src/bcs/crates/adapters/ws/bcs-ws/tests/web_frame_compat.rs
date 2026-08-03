@@ -19,6 +19,13 @@ use bcs_service_api::{
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
     WorkbenchSessionService, WorkbenchUseCaseError,
 };
+use bcs_service_api::application::v1::{
+    ActorKind, ApplicationError, AuthorizeGroupSessionConnection,
+    AuthorizedGroupSessionConnection, GroupSessionConnectionBinding,
+    GroupSessionConnectionError, GroupSessionConnectionService,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantRole,
+    SessionParticipant, VerifyGroupSessionConnectionToken,
+};
 use bcs_test_support::NoopCollaborationRuntimeService;
 use bcs_ws::shared::RunChannelManager;
 use bcs_ws::web::{
@@ -182,6 +189,49 @@ struct RecordingWorkbenchSessions {
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
 }
 
+#[derive(Default)]
+struct RecordingGroupSessionConnections {
+    authorizations: Mutex<Vec<AuthorizeGroupSessionConnection>>,
+    reject_connect: Mutex<bool>,
+}
+
+#[async_trait]
+impl GroupSessionConnectionService for RecordingGroupSessionConnections {
+    async fn issue_token(
+        &self,
+        _command: IssueGroupSessionConnectionToken,
+    ) -> Result<IssuedGroupSessionConnectionToken, GroupSessionConnectionError> {
+        unreachable!("token issuance is not used by WebSocket frame tests")
+    }
+
+    async fn verify_token(
+        &self,
+        _command: VerifyGroupSessionConnectionToken,
+    ) -> Result<GroupSessionConnectionBinding, GroupSessionConnectionError> {
+        unreachable!("token verification is not used by WebSocket frame tests")
+    }
+
+    async fn authorize_connect(
+        &self,
+        command: AuthorizeGroupSessionConnection,
+    ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError> {
+        self.authorizations.lock().await.push(command);
+        if *self.reject_connect.lock().await {
+            return Err(ApplicationError::forbidden("session access revoked").into());
+        }
+        Ok(AuthorizedGroupSessionConnection {
+            participants: vec![SessionParticipant {
+                actor_id: "human_100001".to_string(),
+                actor_kind: ActorKind::Human,
+                name: Some("Test Human".to_string()),
+                role: ParticipantRole::Observer,
+                mode: ParticipantMode::Present,
+                joined_at: None,
+            }],
+        })
+    }
+}
+
 #[async_trait]
 impl WorkbenchSessionService for RecordingWorkbenchSessions {
     async fn connect(
@@ -277,6 +327,7 @@ impl MessageFlowService for RecordingMessageFlow {
 
 struct TestState {
     workbench_sessions: Arc<RecordingWorkbenchSessions>,
+    group_session_connections: Arc<RecordingGroupSessionConnections>,
     message_flow: Arc<RecordingMessageFlow>,
     dispatch_state: Arc<WebDispatchState>,
 }
@@ -289,18 +340,21 @@ fn new_state_with_collaboration_runtime(
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
 ) -> TestState {
     let workbench_sessions = Arc::new(RecordingWorkbenchSessions::default());
+    let group_session_connections = Arc::new(RecordingGroupSessionConnections::default());
     let message_flow = Arc::new(RecordingMessageFlow::default());
     let frontend_connections = Arc::new(WorkbenchConnectionRegistry::new());
     let dispatch_state = Arc::new(WebDispatchState {
         message_flow: message_flow.clone(),
         collaboration_runtime,
         workbench_sessions: workbench_sessions.clone(),
+        group_session_connections: Some(group_session_connections.clone()),
         frontend_connections,
         run_channels: Arc::new(RunChannelManager::new()),
     });
 
     TestState {
         workbench_sessions,
+        group_session_connections,
         message_flow,
         dispatch_state,
     }
@@ -355,6 +409,12 @@ async fn web_connect_frame_subscribes_frontend_registry() {
     assert_eq!(connects[0].group_id, "group-web-1");
     assert_eq!(connects[0].session_id, None);
     assert_eq!(connects[0].bound_actor_id.as_deref(), Some("human_100001"));
+    assert!(state
+        .group_session_connections
+        .authorizations
+        .lock()
+        .await
+        .is_empty());
 }
 
 #[tokio::test]
@@ -860,6 +920,45 @@ async fn session_bound_scope_mismatch_closes_without_dynamic_authorization() {
 }
 
 #[tokio::test]
+async fn session_bound_connect_projects_v1_participants_into_workbench_shape() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-projection",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-bound-1"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &session_bound_auth(),
+    )
+    .await
+    .unwrap();
+
+    let response = recv_response(&mut rx).await;
+    assert!(response.ok);
+    let payload = response.payload.expect("connect payload");
+    assert_eq!(payload["group_id"], "group-web-1");
+    assert_eq!(
+        payload["participants"],
+        serde_json::json!([{
+            "bot_uuid": "human_100001",
+            "role": "observer",
+            "type": "bot",
+            "mode": "present"
+        }])
+    );
+}
+
+#[tokio::test]
 async fn session_bound_connect_authorizes_once_with_immutable_binding() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
@@ -869,12 +968,19 @@ async fn session_bound_connect_authorizes_once_with_immutable_binding() {
         connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await,
         WebDispatchOutcome::ClientConnect { subscribed: true }
     );
-    let connects = state.workbench_sessions.connects.lock().await;
-    assert_eq!(connects.len(), 1);
-    assert_eq!(connects[0].bound_actor_id.as_deref(), Some("human_100001"));
-    assert_eq!(connects[0].group_id, "group-web-1");
-    assert_eq!(connects[0].session_id.as_deref(), Some("session-bound-1"));
-    drop(connects);
+    assert!(state.workbench_sessions.connects.lock().await.is_empty());
+    let authorizations = state.group_session_connections.authorizations.lock().await;
+    assert_eq!(authorizations.len(), 1);
+    assert_eq!(
+        authorizations[0].binding,
+        GroupSessionConnectionBinding {
+            tenant: "tenant-a".to_string(),
+            user_id: "100001".to_string(),
+            group_id: "group-web-1".to_string(),
+            session_id: "session-bound-1".to_string(),
+        }
+    );
+    drop(authorizations);
 
     let second = BcsFrame::Request(RequestFrame::new(
         "connect-again",
@@ -900,7 +1006,16 @@ async fn session_bound_connect_authorizes_once_with_immutable_binding() {
         response.error.as_ref().map(|error| error.code.as_str()),
         Some("already_connected")
     );
-    assert_eq!(state.workbench_sessions.connects.lock().await.len(), 1);
+    assert!(state.workbench_sessions.connects.lock().await.is_empty());
+    assert_eq!(
+        state
+            .group_session_connections
+            .authorizations
+            .lock()
+            .await
+            .len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -1014,8 +1129,7 @@ async fn session_bound_chat_abort_passes_only_the_bound_session() {
 #[tokio::test]
 async fn session_bound_revoked_access_closes_with_stable_error() {
     let state = new_state();
-    *state.workbench_sessions.connect_error.lock().await =
-        Some(WorkbenchUseCaseError::ForbiddenGroupAccess);
+    *state.group_session_connections.reject_connect.lock().await = true;
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
     let connect = BcsFrame::Request(RequestFrame::new(
@@ -1043,5 +1157,14 @@ async fn session_bound_revoked_access_closes_with_stable_error() {
         response.error.as_ref().map(|error| error.code.as_str()),
         Some("session_access_revoked")
     );
-    assert_eq!(state.workbench_sessions.connects.lock().await.len(), 1);
+    assert!(state.workbench_sessions.connects.lock().await.is_empty());
+    assert_eq!(
+        state
+            .group_session_connections
+            .authorizations
+            .lock()
+            .await
+            .len(),
+        1
+    );
 }
