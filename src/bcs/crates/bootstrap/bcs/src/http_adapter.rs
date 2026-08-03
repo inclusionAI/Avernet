@@ -543,6 +543,7 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),

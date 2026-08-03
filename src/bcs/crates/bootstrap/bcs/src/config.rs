@@ -256,6 +256,69 @@ fn default_collaboration_templates_default_language() -> String {
     "zh-CN".to_string()
 }
 
+/// Gateway Principal verification trust and signing-key lookup configuration.
+///
+/// The signing key itself is intentionally not configuration: bootstrap resolves
+/// it from `signing_key_env` at process startup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayPrincipalConfig {
+    #[serde(default = "default_gateway_principal_issuer")]
+    pub issuer: String,
+
+    #[serde(default = "default_gateway_principal_audience")]
+    pub audience: String,
+
+    #[serde(default = "default_gateway_principal_key_id")]
+    pub key_id: String,
+
+    #[serde(default = "default_gateway_principal_signing_key_env")]
+    pub signing_key_env: String,
+}
+
+impl Default for GatewayPrincipalConfig {
+    fn default() -> Self {
+        Self {
+            issuer: default_gateway_principal_issuer(),
+            audience: default_gateway_principal_audience(),
+            key_id: default_gateway_principal_key_id(),
+            signing_key_env: default_gateway_principal_signing_key_env(),
+        }
+    }
+}
+
+impl GatewayPrincipalConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("issuer", &self.issuer),
+            ("audience", &self.audience),
+            ("key_id", &self.key_id),
+            ("signing_key_env", &self.signing_key_env),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("gateway_principal.{field} must not be blank"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_gateway_principal_issuer() -> String {
+    "gateway".to_string()
+}
+
+fn default_gateway_principal_audience() -> String {
+    "bcs".to_string()
+}
+
+fn default_gateway_principal_key_id() -> String {
+    "bare".to_string()
+}
+
+fn default_gateway_principal_signing_key_env() -> String {
+    "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
+}
+
 /// BCS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -303,6 +366,10 @@ pub struct BcsConfig {
         deserialize_with = "deserialize_optional_secret"
     )]
     pub auth_token: Option<Secret<String>>,
+
+    /// Gateway-signed Principal verification trust configuration.
+    #[serde(default)]
+    pub gateway_principal: GatewayPrincipalConfig,
 
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
@@ -741,6 +808,7 @@ impl Default for BcsConfig {
             store_messages: false,
             dingtalk_accounts: Vec::new(),
             auth_token: None,
+            gateway_principal: GatewayPrincipalConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
@@ -1163,6 +1231,10 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    config.gateway_principal.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.telemetry.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>

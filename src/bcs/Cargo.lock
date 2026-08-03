@@ -262,6 +262,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "bcs",
+ "bcs-api-http",
  "bcs-auth-alipay",
  "bcs-auth-api",
  "bcs-auth-github",

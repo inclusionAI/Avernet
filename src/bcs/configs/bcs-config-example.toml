@@ -37,6 +37,13 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Runtime lookup only; set this environment variable to real secret material.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "https://bcs.example.com",

@@ -130,6 +130,7 @@ bcs-secret   = { workspace = true }
 bcs-secret-local = { workspace = true }
 ding-logger  = { workspace = true }
 bcs-http      = { workspace = true }
+bcs-api-http  = { workspace = true }
 bcs-provider-http = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }

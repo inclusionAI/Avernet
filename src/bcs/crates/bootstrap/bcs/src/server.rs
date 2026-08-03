@@ -26,7 +26,10 @@ use tracing::{debug, info, warn};
 
 use crate::Result;
 use crate::auth_wiring::AuthPluginFactory;
-use crate::config::{BcsConfig, CollaborationTemplateStorageKind, LlmConfig, LlmProviderType};
+use crate::config::{
+    BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, LlmConfig,
+    LlmProviderType,
+};
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
     DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
@@ -35,6 +38,11 @@ use crate::plugins::{
     build_registered_user_directory,
 };
 use bcs_bot::{Bot, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
+use bcs_api_http::PrincipalVerifier;
+use bcs_api_http::v1::gateway_principal::{
+    GatewayPrincipalTokenVerifier, GatewayPrincipalTrust,
+};
+use bcs_config::{RuntimeEnv, resolve_env as resolve_runtime_env};
 use bcs_bot_store::{DbProviderStore, MemoryBotRepo, MemoryProviderStore, PersistentBotRepo};
 use bcs_channel::{BcsChannelService, ChannelServiceInboundSink};
 use bcs_channel_api::{ChannelHttpIngressRegistry, ChannelProvider, ChannelProviderRegistry};
@@ -922,6 +930,9 @@ pub struct BcsServerState {
     /// Auth chain configuration.
     pub auth_config: bcs_auth_api::AuthConfig,
 
+    /// Gateway-signed Principal verifier retained for the V1 HTTP adapter composition.
+    pub gateway_principal_verifier: Arc<dyn PrincipalVerifier>,
+
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
@@ -957,6 +968,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("metrics", &"<MetricsRuntime>")
             .field("auth_chain", &"<AuthPluginChain>")
             .field("auth_config", &self.auth_config)
+            .field("gateway_principal_verifier", &"<PrincipalVerifier>")
             .field("outbound_url_guard", &self.outbound_url_guard)
             .finish()
     }
@@ -1174,9 +1186,143 @@ fn outbound_url_guard_from_config(config: &BcsConfig) -> OutboundUrlGuard {
     OutboundUrlGuard::new(policy.block_private_networks, policy.allow_loopback)
 }
 
+const GATEWAY_PRINCIPAL_DEVELOPMENT_SIGNING_KEY: &str =
+    "avernet-dev-signing-key-NOT-FOR-PROD";
+
+fn gateway_principal_signing_key<'a>(
+    environment: RuntimeEnv,
+    material: Option<&'a str>,
+) -> crate::Result<&'a str> {
+    if let Some(material) = material.filter(|value| !value.trim().is_empty()) {
+        return Ok(material);
+    }
+
+    match environment {
+        RuntimeEnv::Local | RuntimeEnv::Dev => Ok(GATEWAY_PRINCIPAL_DEVELOPMENT_SIGNING_KEY),
+        RuntimeEnv::Pre | RuntimeEnv::Gray | RuntimeEnv::Prod => {
+            Err(crate::BcsError::InvalidConfig(
+                "Gateway Principal signing key is required outside local/dev".to_string(),
+            ))
+        }
+    }
+}
+
+fn build_gateway_principal_verifier(
+    config: &GatewayPrincipalConfig,
+    environment: RuntimeEnv,
+    material: Option<&str>,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let signing_key = gateway_principal_signing_key(environment, material)?;
+    let trust = GatewayPrincipalTrust::new(
+        config.issuer.clone(),
+        config.audience.clone(),
+        config.key_id.clone(),
+    )
+    .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
+    let verifier = GatewayPrincipalTokenVerifier::new(signing_key.as_bytes(), trust)
+        .map_err(|error| crate::BcsError::InvalidConfig(error.to_string()))?;
+    Ok(Arc::new(verifier))
+}
+
+fn build_gateway_principal_verifier_from_process(
+    config: &GatewayPrincipalConfig,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    let material = std::env::var(&config.signing_key_env).ok();
+    build_gateway_principal_verifier(
+        config,
+        resolve_runtime_env(),
+        material.as_deref(),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifier> {
+    build_gateway_principal_verifier(&GatewayPrincipalConfig::default(), RuntimeEnv::Dev, None)
+        .expect("default Gateway Principal test verifier")
+}
+
+#[cfg(test)]
+mod gateway_principal_tests {
+    use super::*;
+    use bcs_config::RuntimeEnv;
+
+    fn trust_config() -> crate::config::GatewayPrincipalConfig {
+        crate::config::GatewayPrincipalConfig::default()
+    }
+
+    #[test]
+    fn local_uses_the_documented_gateway_development_key_when_secret_is_missing() {
+        assert_eq!(
+            gateway_principal_signing_key(RuntimeEnv::Local, None).expect("local fallback"),
+            "avernet-dev-signing-key-NOT-FOR-PROD"
+        );
+    }
+
+    #[test]
+    fn dev_uses_the_documented_gateway_development_key_when_secret_is_empty() {
+        assert_eq!(
+            gateway_principal_signing_key(RuntimeEnv::Dev, Some("   ")).expect("dev fallback"),
+            "avernet-dev-signing-key-NOT-FOR-PROD"
+        );
+    }
+
+    #[test]
+    fn explicit_gateway_principal_material_wins_in_every_environment() {
+        for environment in [
+            RuntimeEnv::Local,
+            RuntimeEnv::Dev,
+            RuntimeEnv::Pre,
+            RuntimeEnv::Gray,
+            RuntimeEnv::Prod,
+        ] {
+            assert_eq!(
+                gateway_principal_signing_key(environment, Some("explicit-test-key"))
+                    .expect("explicit material"),
+                "explicit-test-key"
+            );
+        }
+    }
+
+    #[test]
+    fn pre_gray_and_prod_reject_missing_or_empty_gateway_principal_material() {
+        for environment in [RuntimeEnv::Pre, RuntimeEnv::Gray, RuntimeEnv::Prod] {
+            for material in [None, Some(""), Some("   ")] {
+                assert!(matches!(
+                    gateway_principal_signing_key(environment, material),
+                    Err(crate::BcsError::InvalidConfig(message))
+                        if message.contains("Gateway Principal signing key")
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
+        for field in ["issuer", "audience", "key_id", "signing_key_env"] {
+            let mut config = trust_config();
+            match field {
+                "issuer" => config.issuer = " ".to_string(),
+                "audience" => config.audience = " ".to_string(),
+                "key_id" => config.key_id = " ".to_string(),
+                "signing_key_env" => config.signing_key_env = " ".to_string(),
+                _ => unreachable!("known trust config field"),
+            }
+            assert!(matches!(
+                build_gateway_principal_verifier(&config, RuntimeEnv::Local, None),
+                Err(crate::BcsError::InvalidConfig(_))
+            ));
+        }
+    }
+}
+
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
+        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
+            &config.gateway_principal,
+        )
+        .expect("Gateway Principal verifier configuration must be valid");
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let provider_repos = memory_provider_repos();
@@ -1547,6 +1693,7 @@ impl Default for BcsServerState {
             metrics,
             auth_chain,
             auth_config,
+            gateway_principal_verifier,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -2405,6 +2552,10 @@ impl BcsServer {
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
     ) -> Self {
+        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
+            &config.gateway_principal,
+        )
+        .expect("Gateway Principal verifier configuration must be valid");
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         // Create service implementations (synchronous, in-memory mode)
         let provider_repos = memory_provider_repos();
@@ -2760,6 +2911,7 @@ impl BcsServer {
             metrics,
             auth_chain,
             auth_config,
+            gateway_principal_verifier,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
@@ -2789,6 +2941,8 @@ impl BcsServer {
     ) -> crate::Result<Self> {
         use bcs_service_api::BotRegistryCoreService;
 
+        let gateway_principal_verifier =
+            build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -3325,6 +3479,7 @@ impl BcsServer {
             metrics,
             auth_chain,
             auth_config,
+            gateway_principal_verifier,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,

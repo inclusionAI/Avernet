@@ -37,6 +37,13 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Local/dev uses the documented fallback when this lookup is unset.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "http://localhost:8000",
