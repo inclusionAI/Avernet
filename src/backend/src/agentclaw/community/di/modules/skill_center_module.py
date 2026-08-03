@@ -139,6 +139,7 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
+from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -276,9 +277,9 @@ class SkillCenterModule(Module):
     def local_skill_upload_service(
         self, skill_repo: SkillRepository, skill_set_repo: SkillSetRepository,
         bot_repo: BotRepository, collaborator_service: CollaboratorServiceProtocol,
-        skill_service_factory: SkillServiceFactory,
+        skill_service_factory: SkillServiceFactory, audit_log_repo: BotCollabLogRepositoryProtocol,
     ) -> LocalSkillUploadServiceProtocol:
-        return LocalSkillUploadService(skill_repo, skill_set_repo, bot_repo, collaborator_service, skill_service_factory)
+        return LocalSkillUploadService(skill_repo, skill_set_repo, bot_repo, collaborator_service, skill_service_factory, audit_log_repo)
 
     @singleton
     @provider

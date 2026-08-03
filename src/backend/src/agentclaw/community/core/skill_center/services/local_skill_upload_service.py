@@ -7,6 +7,7 @@ the raw request body and maps the public response.
 from __future__ import annotations
 
 import io
+import json
 import re
 import zipfile
 from typing import Any
@@ -15,6 +16,7 @@ from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import CollaboratorServiceProtocol
+from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
@@ -48,12 +50,14 @@ class LocalSkillUploadService:
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
+        audit_log_repo: BotCollabLogRepositoryProtocol,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
         self._bot_repo = bot_repo
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
+        self._audit_log_repo = audit_log_repo
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -105,6 +109,10 @@ class LocalSkillUploadService:
             ):
                 raise RuntimeError("default Skill Set exclusion failed")
             excluded = True
+            self._audit_log_repo.insert(
+                {"bot_id": bot_id, "owner_id": owner_id, "operator_id": actor_id,
+                 "detail": json.dumps({"action": "local_skill_upload", "skill_id": skill["id"]})}
+            )
             return {
                 "operation": "created",
                 "skill": {**skill, "active": False},
