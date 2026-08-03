@@ -97,7 +97,7 @@ use bcs_routing::MessageRouter;
 use bcs_routing::security::SecurityInterceptor;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_security_gateway_local::NoopSecurityGateway;
-use bcs_secret_local::{EnvSecretAccess, InMemorySecretAccess};
+use bcs_secret_local::InMemorySecretAccess;
 use bcs_service_api::application::v1::GroupSessionConnectionService;
 use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
@@ -2800,7 +2800,7 @@ impl BcsServer {
             outbound_url_guard.clone(),
             outbound_url_guard.clone(),
             outbound_url_guard,
-            Arc::new(EnvSecretAccess::new("BCS_SECRET_")),
+            group_session_test_secret_access(),
         )
     }
 
