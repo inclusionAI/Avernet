@@ -54,7 +54,7 @@ class DumpOpenApiTests(unittest.TestCase):
             for method in path_item
             if method.lower() in HTTP_METHODS
         ]
-        self.assertEqual(len(operations), 32)
+        self.assertEqual(len(operations), 34)
         self.assertTrue(
             all(path.startswith("/openapi/v1/collaboration/") for _, path in operations)
         )

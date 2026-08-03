@@ -1,0 +1,128 @@
+SessionConnectionToken:
+  type: object
+  additionalProperties: false
+  required:
+    - token
+    - expires_at
+  properties:
+    token:
+      type: string
+      minLength: 1
+      maxLength: 4096
+    expires_at:
+      type: integer
+      format: int64
+      minimum: 1
+
+SessionConnectionTokenEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionConnectionToken"
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+SessionConnectionTokenPath:
+  post:
+    operationId: issue_group_session_connection_token
+    summary: Issue a short-lived connection token for one Group Session.
+    description: >-
+      Derives the Human, Group, and Session scope on the server and returns a
+      five-minute credential for the session-bound Workbench WebSocket.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session-bound WebSocket credential.
+        headers:
+          Cache-Control:
+            schema:
+              type: string
+              const: no-store
+          Pragma:
+            schema:
+              type: string
+              const: no-cache
+        content:
+          application/json:
+            schema:
+              $ref: "#/SessionConnectionTokenEnvelope"
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: The authenticated Human cannot connect to the Session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+GroupSessionWebSocketPath:
+  get:
+    operationId: connect_group_session_websocket
+    summary: Upgrade to a session-bound Workbench WebSocket.
+    description: >-
+      Authenticates the five-minute BCN credential before Upgrade and exposes
+      the existing Workbench frame protocol within the immutable token scope.
+    x-avernet-protocol: websocket
+    x-avernet-security: {}
+    parameters:
+      - name: token
+        in: query
+        required: true
+        description: >-
+          Sensitive BCN session connection credential. Implementations must
+          redact its value from logs and error details.
+        x-sensitive: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 4096
+    responses:
+      "101":
+        description: WebSocket protocol switched successfully.
+      "401":
+        description: Connection token is missing, invalid, expired, or has the wrong purpose.
+        x-error-codes:
+          - invalid_connection_token
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "503":
+        description: Connection token verification is unavailable.
+        x-error-codes:
+          - token_service_unavailable
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope

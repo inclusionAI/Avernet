@@ -40,6 +40,8 @@ paths:
     $ref: ./openapi/sessions.yaml#/SessionCompletionPath
   /openapi/v1/collaboration/sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
+  /openapi/v1/collaboration/sessions/{session_id}/token:
+    $ref: ./openapi/connections.yaml#/SessionConnectionTokenPath
   /openapi/v1/collaboration/sessions/{session_id}/participants:
     $ref: ./openapi/sessions.yaml#/AddSessionParticipantPath
   /openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}:
@@ -48,6 +50,8 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
+  /openapi/v1/collaboration/group/ws:
+    $ref: ./openapi/connections.yaml#/GroupSessionWebSocketPath
 components:
   schemas:
     Bot:

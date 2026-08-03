@@ -38,6 +38,8 @@ EXPECTED_OPERATIONS = {
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/completion"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
+    ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
+    ("get", "/openapi/v1/collaboration/group/ws"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
@@ -63,7 +65,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_32_approved_operations() -> None:
+def test_contract_contains_exactly_the_34_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 
@@ -74,15 +76,21 @@ def test_all_operations_share_the_collaboration_ownership_prefix() -> None:
     )
 
 
-def test_all_current_operations_require_a_human_caller() -> None:
+def test_operations_use_the_approved_gateway_security_boundary() -> None:
     contract = load_contract(CONTRACT_ROOT)
 
     for path, path_item in contract["paths"].items():
         for method, operation in path_item.items():
             if method.lower() not in HTTP_METHODS:
                 continue
-            assert operation["x-avernet-security"] == {"user": "required"}, (
-                f"{method.upper()} {path} must require a Gateway User identity"
+            expected = (
+                {}
+                if (method.lower(), path)
+                == ("get", "/openapi/v1/collaboration/group/ws")
+                else {"user": "required"}
+            )
+            assert operation["x-avernet-security"] == expected, (
+                f"{method.upper()} {path} has the wrong Gateway security boundary"
             )
 
 
