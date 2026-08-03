@@ -1854,15 +1854,30 @@ class SkillService:
         # POOL_ACTIVE 后 DB locator 已经是 Pool canonical 绝对路径。重传同名
         # 本地技能时必须继续使用该 locator；否则会写到 Legacy bridge 后又以
         # Legacy locator 新建一条重复记录。
+        #
+        # 正常查询必须始终带 Bot owner。尤其 ``default`` 是多个 owner 可共用的
+        # Bot ID，不能为修复历史 collaborator metadata 而做无 owner 的 name
+        # 查询，否则会命中另一位 owner 的同名本地 Skill。历史修复仅允许精确
+        # 命中本次 Bot layout 推导出的 locator；该路径包含 owner/entity + bot，
+        # 因而不会跨 Bot 取数。
+        expected_skill_dir = self._local_skill_locator_adapter(
+            str(self.local_dir / skill_name)
+        )
+        expected_skill_path = f"local://{expected_skill_dir}"
         existing_skill = self._skill_repo.get_bot_local_by_name(
             bot_id=bolt_id or "default",
             name=skill_name,
-            # Bot-private local Skills are identified by Bot + name.  Do not
-            # filter by the historical metadata owner here: an earlier release
-            # wrote collaborator IDs and re-upload must repair that row rather
-            # than create a duplicate.
-            user_id=None,
+            user_id=user_id,
         )
+        if existing_skill is None:
+            historical_skill = self._skill_repo.get_by_git_path(expected_skill_path)
+            if (
+                historical_skill is not None
+                and str(historical_skill.get("bolt_id") or "default")
+                == (bolt_id or "default")
+                and historical_skill.get("name") == skill_name
+            ):
+                existing_skill = historical_skill
         existing_locator = (
             str(existing_skill["git_path"])[len("local://") :]
             if existing_skill is not None
@@ -2218,12 +2233,19 @@ class SkillService:
         update_data['gmt_modified'] = datetime.utcnow()
         return self._skill_repo.update(skill_id, update_data)
 
-    def _can_delete_skill(self, skill: dict, user_id: str | None = None) -> bool:
+    def _can_delete_skill(
+        self,
+        skill: dict,
+        user_id: str | None = None,
+        authorized_bot_owner_id: str | None = None,
+    ) -> bool:
         """检查用户是否有权限删除技能
 
         只有以下用户可以删除技能：
         1. 技能的创建者（user_id 匹配）
         2. 指定的管理员用户
+        3. 已在 HTTP adapter 经协作者拦截器授权、且当前 Service 也绑定到
+           该 Skill 所属 Bot owner 的协作者
         """
         if not user_id:
             return False
@@ -2235,6 +2257,18 @@ class SkillService:
         # 技能的创建者可以删除自己的技能
         skill_user_id = skill.get('user_id')
         if skill_user_id and str(skill_user_id) == str(user_id):
+            return True
+
+        # ``authorized_bot_owner_id`` 不是客户端参数，只能由已经完成
+        # CollaboratorPermissionInterceptor 校验的 adapter 注入。二次校验
+        # 它与 Skill metadata 和本 Service 的设备 owner 一致，避免调用方仅凭
+        # 伪造 owner 值跨 Bot 删除。
+        if (
+            skill_user_id
+            and authorized_bot_owner_id
+            and str(skill_user_id) == str(authorized_bot_owner_id)
+            and str(self._device_owner_id or "") == str(authorized_bot_owner_id)
+        ):
             return True
 
         return False
@@ -2268,12 +2302,19 @@ class SkillService:
             return False
 
     # ----- Delete -----
-    async def delete_skill(self, skill_id: str, user_id: str | None = None) -> bool:
+    async def delete_skill(
+        self,
+        skill_id: str,
+        user_id: str | None = None,
+        authorized_bot_owner_id: str | None = None,
+    ) -> bool:
         """删除技能 - 同时删除数据库记录和物理文件
 
         Args:
             skill_id: 技能ID
             user_id: 当前操作用户ID（用于权限验证）
+            authorized_bot_owner_id: 已完成协作者授权时，由 adapter 注入的
+                Bot owner；不接受任何外部请求透传
 
         Returns:
             bool: 删除是否成功
@@ -2287,7 +2328,11 @@ class SkillService:
             return False
 
         # 权限检查：只有技能所有者或管理员可以删除
-        if not self._can_delete_skill(skill, user_id):
+        if not self._can_delete_skill(
+            skill,
+            user_id,
+            authorized_bot_owner_id=authorized_bot_owner_id,
+        ):
             skill_owner = skill.get('user_id')
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")

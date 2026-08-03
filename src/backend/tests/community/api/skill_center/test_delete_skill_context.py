@@ -229,6 +229,27 @@ async def test_delete_uses_bot_owner_when_skill_was_authored_by_collaborator():
 
 
 @pytest.mark.asyncio
+async def test_authorized_collaborator_can_delete_owner_owned_skill():
+    """The route passes the persisted Bot owner as trusted collaborator scope."""
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = []
+    skill_repo.delete.return_value = True
+    device_fs = MagicMock()
+    device_fs.exists = AsyncMock(return_value=True)
+    device_fs.delete_tree = AsyncMock(return_value=True)
+
+    response, _, factory = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+        current_user_id="authorized-collaborator",
+    )
+
+    assert response.success is True
+    assert factory.device_fs_calls == [(BOT_ID, OWNER_ID)]
+
+
+@pytest.mark.asyncio
 async def test_delete_project_bot_uses_entity_paths_and_owner_device_binding():
     skill_repo = MagicMock()
     skill_repo.get_by_id.return_value = _skill_record()
