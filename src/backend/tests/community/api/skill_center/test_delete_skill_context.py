@@ -48,7 +48,9 @@ class _SkillServiceFactory:
             git_sync_service_factory=MagicMock(),
             local_skill_path_adapter=kwargs.get("local_skill_path_adapter"),
             runtime_uses_pool_paths=bool(kwargs.get("bot_id")),
-            device_owner_id=kwargs.get("entity_id"),
+            device_owner_id=(
+                kwargs.get("bot_owner_id") or kwargs.get("entity_id")
+            ),
         )
 
 
@@ -82,11 +84,13 @@ async def _call_delete(
     current_user_id=OWNER_ID,
     entity_id=None,
     bot_repo=None,
+    bot_record=None,
 ):
     bot_repo = bot_repo or MagicMock()
-    bot_repo.get_by_id_and_owner.return_value = _bot_record()
-    bot_repo.get_unique_by_id.return_value = _bot_record()
-    bot_repo.get_by_id_and_entity.return_value = _bot_record()
+    resolved_bot = bot_record or _bot_record()
+    bot_repo.get_by_id_and_owner.return_value = resolved_bot
+    bot_repo.get_unique_by_id.return_value = resolved_bot
+    bot_repo.get_by_id_and_entity.return_value = resolved_bot
 
     path_factory = MagicMock()
     path_factory.get_bot_skills_dir.return_value = ACTIVE_ROOT
@@ -109,7 +113,7 @@ async def _call_delete(
         entity_type=None,
         bot_id=None,
         engine_type=engine_type,
-        ctx=RequestContext(user_id=OWNER_ID, bot_id="default"),
+        ctx=RequestContext(user_id=current_user_id, bot_id="default"),
         bot_repo=bot_repo,
         path_factory=path_factory,
         skill_service_factory=factory,
@@ -221,6 +225,36 @@ async def test_delete_uses_bot_owner_when_skill_was_authored_by_collaborator():
     path_factory.get_bot_skills_dir.assert_called_once_with(
         OWNER_ID, BOT_ID, "hermes", "staff"
     )
+    assert factory.device_fs_calls == [(BOT_ID, OWNER_ID)]
+
+
+@pytest.mark.asyncio
+async def test_delete_project_bot_uses_entity_paths_and_owner_device_binding():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = []
+    skill_repo.delete.return_value = True
+    bot_record = {
+        **_bot_record(),
+        "owner_id": OWNER_ID,
+        "entity_id": "project-42",
+        "entity_type": "proj",
+    }
+    device_fs = MagicMock()
+    device_fs.exists = AsyncMock(return_value=False)
+
+    response, path_factory, factory = await _call_delete(
+        device_fs=device_fs,
+        skill_repo=skill_repo,
+        bot_record=bot_record,
+    )
+
+    assert response.success is True
+    path_factory.get_bot_skills_dir.assert_called_once_with(
+        "project-42", BOT_ID, "hermes", "proj"
+    )
+    assert factory.calls[0]["entity_id"] == "project-42"
+    assert factory.calls[0]["bot_owner_id"] == OWNER_ID
     assert factory.device_fs_calls == [(BOT_ID, OWNER_ID)]
 
 
@@ -355,3 +389,43 @@ async def test_admin_can_delete_unreferenced_shared_market_skill():
     assert response.success is True
     skill_repo.delete.assert_called_once_with(SKILL_ID)
     device_fs.exists.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_shared_delete_does_not_trust_query_user_id_for_admin_permission():
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = {
+        "id": SKILL_ID,
+        "name": "market-skill",
+        "git_path": "git://business/market-skill",
+        "bolt_id": "default",
+        "user_id": None,
+    }
+    factory = _SkillServiceFactory(skill_repo=skill_repo, device_fs=MagicMock())
+    endpoint = getattr(delete_skill, "__wrapped__", delete_skill)
+
+    with (
+        patch(
+            "agentclaw.community.core.skill_center.services.skill_service.skill_admin",
+            return_value=[OWNER_ID],
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await endpoint(
+            skill_id=SKILL_ID,
+            user_id=OWNER_ID,
+            entity_id=None,
+            entity_type=None,
+            bot_id=None,
+            engine_type=None,
+            ctx=RequestContext(user_id="ordinary-user", bot_id="default"),
+            skill_repo=skill_repo,
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            skill_service_factory=factory,
+            resolver=MagicMock(),
+            edit_guard=MagicMock(),
+        )
+
+    assert exc_info.value.status_code == 403
+    skill_repo.delete.assert_not_called()

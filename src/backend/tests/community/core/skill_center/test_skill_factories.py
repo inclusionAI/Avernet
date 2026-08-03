@@ -97,6 +97,32 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
     ) == f"{engine_root}/skills-pool/skills-local/handmade"
 
 
+def test_skill_factory_uses_bot_owner_for_pool_and_device_resolution(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/home/admin/.hermes/skills",
+            "/home/admin/.hermes/workspace/skills-pool/skills-local",
+            "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+    service = factory.create(
+        entity_id="project-42",
+        bot_owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="hermes",
+    )
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")]
+    assert service._device_owner_id == "owner-7"
+
+
 def test_real_skill_set_service_factory_create_default_branch(test_injector):
     """No user_id/entity_id → the SKILLS_DIR-defaults (else) branch."""
     factory = test_injector.get(SkillSetServiceFactory)

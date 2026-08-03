@@ -119,13 +119,18 @@ class SkillServiceFactory:
             Callable[[str], str]
         ] = None,
         entity_id: str | None = None,
+        bot_owner_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
     ) -> SkillService:
         uses_pool_paths = False
         if entity_id is not None and bot_id is not None:
+            # Paths are scoped by the Bot entity, while Bot lookup and device
+            # binding are owned by ac_bots.owner_id.  They differ for project
+            # and team Bots and therefore must not be conflated.
+            lookup_owner_id = bot_owner_id or entity_id
             pool_paths = self.resolve_pool_paths(
-                str(entity_id),
+                str(lookup_owner_id),
                 str(bot_id),
                 engine_type or "",
             )
@@ -153,7 +158,7 @@ class SkillServiceFactory:
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
-            device_owner_id=entity_id,
+            device_owner_id=bot_owner_id or entity_id,
         )
 
 
