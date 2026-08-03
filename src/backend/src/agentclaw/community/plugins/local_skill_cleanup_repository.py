@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
+
 from injector import inject
 from sqlalchemy import func
 
@@ -28,21 +30,38 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
         skill_id: str,
         package_locator: str,
         requires_runtime_restore: bool,
-    ) -> bool:
+    ) -> int | None:
+        locator_hash = self._locator_hash(package_locator)
         with self._db.orm_session() as db:
             row = db.query(LocalSkillCleanupWorkModel).filter(
                 LocalSkillCleanupWorkModel.env == env,
                 LocalSkillCleanupWorkModel.owner_id == owner_id,
                 LocalSkillCleanupWorkModel.bot_id == bot_id,
-                LocalSkillCleanupWorkModel.package_locator == package_locator,
+                LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
             ).one_or_none()
             if row is None:
-                db.add(LocalSkillCleanupWorkModel(
+                row = LocalSkillCleanupWorkModel(
                     env=env, owner_id=owner_id, bot_id=bot_id,
                     skill_id=int(skill_id), package_locator=package_locator,
+                    package_locator_hash=locator_hash,
                     requires_runtime_restore=requires_runtime_restore,
-                ))
-            return True
+                )
+                db.add(row)
+                db.flush()
+            elif row.package_locator != package_locator:
+                raise ValueError("Local Skill cleanup package locator hash collision")
+            else:
+                row.requires_runtime_restore = bool(
+                    row.requires_runtime_restore or requires_runtime_restore
+                )
+                row.status = "pending"
+                row.last_error = None
+                row.cleaned_at = None
+            return int(row.id)
+
+    @staticmethod
+    def _locator_hash(package_locator: str) -> str:
+        return sha256(package_locator.encode("utf-8")).hexdigest()
 
     def list_pending(self, *, env: str, owner_id: str, bot_id: str) -> list[dict]:
         with self._db.orm_session() as db:
@@ -55,6 +74,7 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
             return [
                 {
                     "id": row.id,
+                    "skill_id": str(row.skill_id),
                     "package_locator": row.package_locator,
                     "requires_runtime_restore": bool(row.requires_runtime_restore),
                 }
@@ -86,5 +106,20 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                     "attempts": LocalSkillCleanupWorkModel.attempts + 1,
                     "last_error": error,
                 },
+                synchronize_session=False,
+            ) == 1
+
+    def cancel_pending(
+        self, *, work_id: int, env: str, owner_id: str, bot_id: str
+    ) -> bool:
+        with self._db.orm_session() as db:
+            return db.query(LocalSkillCleanupWorkModel).filter(
+                LocalSkillCleanupWorkModel.id == work_id,
+                LocalSkillCleanupWorkModel.env == env,
+                LocalSkillCleanupWorkModel.owner_id == owner_id,
+                LocalSkillCleanupWorkModel.bot_id == bot_id,
+                LocalSkillCleanupWorkModel.status == "pending",
+            ).update(
+                {"status": "cancelled", "last_error": "cleanup target became authoritative"},
                 synchronize_session=False,
             ) == 1
