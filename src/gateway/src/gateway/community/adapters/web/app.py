@@ -136,8 +136,8 @@ def create_app() -> FastAPI:
     # only http gets no socket route, and a socket domain is refused by the HTTP
     # catch-all below.
     domain_map = bs.forwarding.domain_map
-    for name in domain_map.websocket_domains():
-        for route in relay_routes(domain_map.base_path, name):
+    for domain in domain_map.websocket_domains():
+        for route in relay_routes(domain.mount_prefix):
             app.add_api_websocket_route(route, forward_websocket)
 
     app.add_api_route(

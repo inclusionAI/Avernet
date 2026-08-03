@@ -15,6 +15,7 @@ from typing import Any, cast
 
 import yaml
 
+from gateway.community.core.paths import PathPattern, split_segments
 from gateway.community.spi.authn import Presence, PrincipalType
 
 # A requirement maps each identity the route cares about to its Presence.
@@ -24,7 +25,7 @@ Requirement = dict[PrincipalType, Presence]
 @dataclass(frozen=True)
 class _Rule:
     method: str | None  # None = applies to every method
-    segments: tuple[str, ...]
+    pattern: PathPattern
     requirement: Requirement
 
 
@@ -51,7 +52,7 @@ class RouteSecurity:
 
     def resolve(self, method: str, path: str) -> Requirement | None:
         """Most-specific matching rule's requirement, or ``None`` if none match."""
-        segments = _segments(path)
+        segments = split_segments(path)
         matches = [r for r in self._rules if _matches(r, method, segments)]
         if not matches:
             return None
@@ -63,7 +64,11 @@ class RouteSecurity:
 
 def _parse_rule(key: str, value: Any) -> _Rule:
     method, path = _split_key(key)
-    return _Rule(method=method, segments=_segments(path), requirement=_parse_req(value))
+    return _Rule(
+        method=method,
+        pattern=PathPattern.parse(path),
+        requirement=_parse_req(value),
+    )
 
 
 def _split_key(key: str) -> tuple[str | None, str]:
@@ -71,10 +76,6 @@ def _split_key(key: str) -> tuple[str | None, str]:
     if len(parts) == 2 and parts[0].isupper() and parts[1].startswith("/"):
         return parts[0], parts[1]
     return None, key.strip()
-
-
-def _segments(path: str) -> tuple[str, ...]:
-    return tuple(seg for seg in path.split("/") if seg)
 
 
 def _parse_req(value: Any) -> Requirement:
@@ -91,32 +92,18 @@ def _parse_req(value: Any) -> Requirement:
 # ── matching (§8.3) ──────────────────────────────────────────────────────────
 
 
-def _is_param(seg: str) -> bool:
-    return seg.startswith("{") and seg.endswith("}")
-
-
 def _matches(rule: _Rule, method: str, path_segments: tuple[str, ...]) -> bool:
     if rule.method is not None and rule.method != method:
         return False
-    return _match_segments(rule.segments, path_segments)
-
-
-def _match_segments(pattern: tuple[str, ...], segs: tuple[str, ...]) -> bool:
-    if not pattern:
-        return not segs
-    head, rest = pattern[0], pattern[1:]
-    if head == "**":
-        return True
-    if not segs:
-        return False
-    if head != segs[0] and not _is_param(head):
-        return False
-    return _match_segments(rest, segs[1:])
+    return rule.pattern.matches(path_segments)
 
 
 def _specificity(rule: _Rule) -> tuple[int, int, int, int]:
-    """Higher = more specific: exact beats glob, more literals, then method."""
-    has_glob = "**" in rule.segments
-    literals = sum(1 for s in rule.segments if s != "**" and not _is_param(s))
-    params = sum(1 for s in rule.segments if _is_param(s))
-    return (0 if has_glob else 1, literals, params, int(rule.method is not None))
+    """Higher = more specific: the shared path ranking, then method.
+
+    The path terms come from :attr:`PathPattern.specificity`, shared with the
+    domain map so both planes cannot come to rank one pair of patterns
+    differently. The method tie-break stays here: it is this table's alone, since
+    a domain answers a path rather than a verb.
+    """
+    return (*rule.pattern.specificity, int(rule.method is not None))

@@ -47,7 +47,7 @@ class FakeConnections:
             SocketInfo(
                 kind="chat",
                 url=(
-                    "wss://gw.example/openapi/v1/engine/tgt/api/openclaw/ws"
+                    "wss://gw.example/openapi/v1/bots/messages/tgt/api/openclaw/ws"
                     "?x-proxypass-token=tok"
                 ),
             )
