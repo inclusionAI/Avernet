@@ -123,8 +123,13 @@ class _Collaborators:
         return {"has_permission": True}
 
 
+class _Audit:
+    def __init__(self): self.rows = []
+    def insert(self, row): self.rows.append(row)
+
+
 def _service(filesystem, *, status="ACTIVE"):
-    return LocalSkillUploadService(_Repo(), _Sets(), _Bot(status), _Collaborators(), _Factory(filesystem))
+    return LocalSkillUploadService(_Repo(), _Sets(), _Bot(status), _Collaborators(), _Factory(filesystem), _Audit())
 
 
 @pytest.mark.asyncio
