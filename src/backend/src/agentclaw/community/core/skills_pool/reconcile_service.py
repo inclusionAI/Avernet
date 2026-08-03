@@ -22,6 +22,10 @@ from agentclaw.community.core.skills_pool.aicoding_retirement import (
     is_aicoding_active_mapping_reconciliation_candidate,
     is_trusted_aicoding_repo_retirement_resume,
 )
+from agentclaw.community.core.skills_pool.active_aicoding_bridge_repair import (
+    ActiveAICodingBridgeRepairStatus,
+    request_active_aicoding_bridge_repair,
+)
 from agentclaw.community.core.skills_pool.models import (
     FILESYSTEM_POOL_ENGINES,
     PoolCutoverStatus,
@@ -33,6 +37,12 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.reconcile_support import (
+    cutover_failure_profile,
+    persisted_cutover_evidence,
+    post_commit_cutover_failure_profile,
+    probe_outcome,
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -234,7 +244,7 @@ class SkillsPoolReconcileService:
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST
                     )
             return SkillsPoolReconcileResult(
-                self._probe_outcome(probe.status),
+                SkillsPoolReconcileOutcome(probe_outcome(probe.status)),
                 evidence=probe.evidence,
                 retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
@@ -359,7 +369,7 @@ class SkillsPoolReconcileService:
 
         cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-        locator_evidence = self._persisted_cutover_evidence(state)
+        locator_evidence = persisted_cutover_evidence(state)
         logger.info(
             "[skills_pool.reconcile] mapping intent ready bot_id=%s generation=%s "
             "phase=%s committed=%s local_count=%s mapping_count=%s",
@@ -416,8 +426,8 @@ class SkillsPoolReconcileService:
             if not cutover.committed:
                 evidence = cutover.to_dict()
                 if state.data_plane_cutover_committed:
-                    outcome, stage, retryable = (
-                        self._post_commit_cutover_failure_profile(cutover.status)
+                    outcome, stage, retryable = post_commit_cutover_failure_profile(
+                        cutover.status
                     )
                     recorded = self._layouts.record_post_cutover_failure(
                         scope=scope,
@@ -434,7 +444,7 @@ class SkillsPoolReconcileService:
                             preparation_id=probe.preparation_id,
                         )
                     return SkillsPoolReconcileResult(
-                        outcome,
+                        SkillsPoolReconcileOutcome(outcome),
                         preparation_id=probe.preparation_id,
                         evidence=evidence,
                         retryable=retryable,
@@ -481,7 +491,7 @@ class SkillsPoolReconcileService:
                         evidence=evidence,
                         retryable=False,
                     )
-                failure_profile = self._cutover_failure_profile(cutover.status)
+                failure_profile = cutover_failure_profile(cutover.status)
                 if failure_profile is not None:
                     outcome, stage, retryable = failure_profile
                     cutover_evidence = cutover.to_dict()
@@ -500,7 +510,7 @@ class SkillsPoolReconcileService:
                             preparation_id=probe.preparation_id,
                         )
                     return SkillsPoolReconcileResult(
-                        outcome,
+                        SkillsPoolReconcileOutcome(outcome),
                         preparation_id=probe.preparation_id,
                         evidence=cutover_evidence,
                         retryable=retryable,
@@ -812,7 +822,7 @@ class SkillsPoolReconcileService:
             )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
             return SkillsPoolReconcileResult(
-                self._probe_outcome(probe.status),
+                SkillsPoolReconcileOutcome(probe_outcome(probe.status)),
                 evidence=probe.evidence,
                 retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
@@ -881,194 +891,47 @@ class SkillsPoolReconcileService:
         engine: str,
         initial_probe: RuntimeLayoutProbeResult,
     ) -> SkillsPoolReconcileResult:
-        """Ask the Engine to repair only its trusted retired repo bridge.
-
-        Backend cannot tell whether ``active_managed_entry_invalid`` represents
-        the historical AICoding repo bridge or an unsafe Legacy/dangling entry.
-        The Engine activation operation owns that distinction and rejects every
-        other invalid form before changing active mappings.
-        """
-
-        generation = state.migration_generation
-        if generation is None or state.preparation_id is None:
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.INVALID,
-                evidence={
-                    "reason": "active_runtime_identity_mismatch",
-                    "initial_probe": initial_probe.evidence,
-                },
-                retryable=False,
-            )
-        try:
-            registered_local_names = [
-                local_skill_name(asset)
-                for asset in self._skills.list_bot_local_assets(
-                    env=scope.env,
-                    bot_id=scope.bot_id,
-                )
-            ]
-            mappings = build_logical_skill_mappings(
-                self._skills.list_bot_active_assets(
-                    env=scope.env,
-                    bot_id=scope.bot_id,
-                    user_id=user_id,
-                    engine=engine,
-                )
-            )
-        except ValueError as error:
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.INVALID,
-                evidence={"reason": str(error)},
-                retryable=False,
-            )
-        repair = await self._runtime.cutover(
-            bot_id=bot_id,
-            user_id=user_id,
-            migration_generation=generation,
-            preparation_id=state.preparation_id,
-            registered_local_names=registered_local_names,
-            mappings=mappings,
-        )
-        if not repair.committed:
-            outcome, _, retryable = self._post_commit_cutover_failure_profile(
-                repair.status
-            )
-            return SkillsPoolReconcileResult(
-                outcome,
-                evidence={
-                    "initial_probe": initial_probe.evidence,
-                    "engine_repair": repair.to_dict(),
-                },
-                retryable=retryable,
-            )
-        refreshed_probe = await self._runtime.probe(
+        repair = await request_active_aicoding_bridge_repair(
+            skills=self._skills,
+            runtime=self._runtime,
+            scope=scope,
+            state=state,
             bot_id=bot_id,
             user_id=user_id,
             engine=engine,
+            initial_probe=initial_probe,
         )
-        if refreshed_probe.status is not RuntimeLayoutProbeStatus.READY:
-            return SkillsPoolReconcileResult(
-                self._probe_outcome(refreshed_probe.status),
-                evidence={
-                    "reason": "active_aicoding_bridge_reconciliation_incomplete",
-                    "initial_probe": initial_probe.evidence,
-                    "post_publish_probe": refreshed_probe.evidence,
-                },
-                retryable=(
-                    refreshed_probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR
-                ),
+        if repair.status is ActiveAICodingBridgeRepairStatus.ENGINE_REJECTED:
+            assert repair.cutover_status is not None
+            outcome, _, retryable = post_commit_cutover_failure_profile(
+                repair.cutover_status
             )
-        if (
-            refreshed_probe.engine != engine
-            or refreshed_probe.preparation_id is None
-            or refreshed_probe.preparation_id != state.preparation_id
-            or refreshed_probe.layout_contract_version != state.layout_contract_version
-        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome(outcome),
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
+                retryable=retryable,
+            )
+        if repair.status is ActiveAICodingBridgeRepairStatus.PROBE_NOT_READY:
+            assert repair.probe_status is not None
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome(probe_outcome(repair.probe_status)),
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
+                retryable=repair.retryable,
+            )
+        if repair.status is not ActiveAICodingBridgeRepairStatus.REPAIRED:
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
-                evidence={
-                    "reason": "active_runtime_identity_mismatch",
-                    "initial_probe": initial_probe.evidence,
-                    "post_publish_probe": refreshed_probe.evidence,
-                },
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
                 retryable=False,
             )
         return SkillsPoolReconcileResult(
             SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
-            preparation_id=refreshed_probe.preparation_id,
-            evidence={
-                **refreshed_probe.evidence,
-                "active_aicoding_bridge_reconciled": True,
-                "reconciled_mapping_count": len(mappings),
-                "engine_repair": repair.to_dict(),
-            },
+            preparation_id=repair.preparation_id,
+            evidence=repair.evidence,
         )
-
-    @staticmethod
-    def _probe_outcome(
-        status: RuntimeLayoutProbeStatus,
-    ) -> SkillsPoolReconcileOutcome:
-        return {
-            RuntimeLayoutProbeStatus.NOT_CAPABLE: (
-                SkillsPoolReconcileOutcome.NOT_CAPABLE
-            ),
-            RuntimeLayoutProbeStatus.TRANSIENT_ERROR: (
-                SkillsPoolReconcileOutcome.TRANSIENT_ERROR
-            ),
-            RuntimeLayoutProbeStatus.INVALID: SkillsPoolReconcileOutcome.INVALID,
-        }.get(status, SkillsPoolReconcileOutcome.INVALID)
-
-    @staticmethod
-    def _cutover_failure_profile(
-        status: PoolCutoverStatus,
-    ) -> tuple[SkillsPoolReconcileOutcome, str, bool] | None:
-        return {
-            PoolCutoverStatus.DATA_INCONSISTENT: (
-                SkillsPoolReconcileOutcome.DATA_INCONSISTENT,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.ACTIVE_ENTRY_CONFLICT: (
-                SkillsPoolReconcileOutcome.ACTIVE_ENTRY_CONFLICT,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.NOT_ATOMIC: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "atomic_cutover",
-                False,
-            ),
-            PoolCutoverStatus.INVALID: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.TRANSIENT_ERROR: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "pre_cutover_filesystem",
-                True,
-            ),
-        }.get(status)
-
-    @classmethod
-    def _post_commit_cutover_failure_profile(
-        cls,
-        status: PoolCutoverStatus,
-    ) -> tuple[SkillsPoolReconcileOutcome, str, bool]:
-        """Classify refresh failures after the irreversible boundary is known."""
-
-        if status in {
-            PoolCutoverStatus.UNKNOWN,
-            PoolCutoverStatus.TRANSIENT_ERROR,
-            PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
-        }:
-            return (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "post_cutover_refresh",
-                True,
-            )
-        profile = cls._cutover_failure_profile(status)
-        if profile is not None:
-            outcome, _, retryable = profile
-            return outcome, "post_cutover_refresh", retryable
-        return (
-            SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-            "post_cutover_refresh",
-            False,
-        )
-
-    @staticmethod
-    def _persisted_cutover_evidence(
-        state: BotSkillLayoutState,
-    ) -> dict[str, object] | None:
-        probe_evidence = state.last_probe_evidence
-        if not isinstance(probe_evidence, dict):
-            return None
-        cutover = probe_evidence.get("cutover")
-        if not isinstance(cutover, dict):
-            return None
-        evidence = cutover.get("evidence")
-        return evidence if isinstance(evidence, dict) else None
 
     def _handle_engine_drift(
         self,
