@@ -30,6 +30,44 @@ def _make_service(device_fs, *, runtime_uses_pool_paths=False):
 
 class TestDeleteSkillStep1:
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("git_path", "status", "expected_uuid"),
+        [
+            ("center://uuid", "PUBLISHED", "uuid"),
+            ("", "DEVELOPING", None),
+            ("center://uuid", "OFFLINE", None),
+        ],
+    )
+    async def test_delete_checks_uuid_only_for_published_center_version(
+        self,
+        git_path,
+        status,
+        expected_uuid,
+    ):
+        device_fs = MagicMock()
+        device_fs.exists = AsyncMock(return_value=False)
+        svc, _ = _make_service(device_fs)
+        skill = {
+            "id": "sk-1",
+            "name": "x",
+            "git_path": git_path,
+            "skill_uuid": "uuid",
+            "status": status,
+            "bolt_id": "bolt-1",
+            "user_id": "u-1",
+        }
+
+        with patch.object(svc, "get_skill", return_value=skill), patch.object(
+            svc, "_can_delete_skill", return_value=True
+        ), patch.object(svc._skill_repo, "delete", return_value=True):
+            assert await svc.delete_skill("sk-1", user_id="u-1") is True
+
+        svc._skill_repo.list_skill_set_references.assert_called_once_with(
+            "sk-1",
+            skill_uuid=expected_uuid,
+        )
+
+    @pytest.mark.asyncio
     async def test_legacy_delete_keeps_metadata_only_fallback_without_device(self):
         """Legacy deletion preserves its historical behavior without a binding."""
         svc, _ = _make_service(MagicMock())
