@@ -374,6 +374,12 @@ async def upload_skill(
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
     if not bot:
         return UploadSkillResponse(success=False, message="Bot not found.")
+    bot_owner_id = str(bot.get("owner_id") or "")
+    if not bot_owner_id:
+        return UploadSkillResponse(
+            success=False,
+            message="Bot ownership metadata is incomplete.",
+        )
 
     # 状态闸门:桌面 bot 的 DB 状态(ac_bots.status)有延迟 —— BaaS 上 VM 已
     # ACTIVE 但 ac_bots 还停旧值会误拒上传。桌面 bot 先用 BaaS 实时状态覆盖;
@@ -459,11 +465,10 @@ async def upload_skill(
 
         logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
 
-        # ``user_id`` identifies the Bot owner for collaborator authorization and
-        # device access. Skill metadata belongs to the authenticated uploader;
-        # using the owner for both made collaborator-uploaded local Skills appear
-        # to have been authored by the Bot owner.
-        effective_user_id = user_id or ctx.user_id
+        # ``ctx.user_id`` is the authenticated actor used by the collaborator
+        # interceptor and audit trail.  Local Skill metadata follows the
+        # historical product contract and belongs to the Bot owner, resolved
+        # from the persisted Bot rather than a caller-controlled parameter.
 
         # Call the service method (async)
         edit_lease = edit_guard.acquire_for_edit(
@@ -476,8 +481,7 @@ async def upload_skill(
         try:
             skill = await service.upload_skill(
                 uploaded_files,
-                user_id=effective_user_id,
-                author_id=ctx.user_id,
+                user_id=bot_owner_id,
                 bolt_id=effective_bot_id,
             )
         finally:
@@ -1241,7 +1245,8 @@ async def get_skill_readme(
     # A Skill may be read while the caller is operating another Bot.  Its DB
     # ``bolt_id`` is the authoritative target; derive owner, entity type and
     # engine from that Bot instead of trusting the caller's route parameters.
-    # ``skill.user_id`` is only the Skill author and can be a collaborator.
+    # ``skill.user_id`` is metadata ownership, but historical rows may contain
+    # a collaborator ID; device ownership must still come from the Bot row.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
     target_bot = None
     # ``default`` is shared by many owners.  Resolve an explicitly supplied
@@ -2287,8 +2292,8 @@ def _resolve_parameter_bot(
     not the authenticated actor (who may be an ADMIN collaborator).
 
     The requested Bot ID is used only as a lookup key; ownership always comes
-    from the Bot row. ``Skill.user_id`` records the author and may therefore be
-    a collaborator, so it must never participate in device-owner resolution.
+    from the Bot row. Historical ``Skill.user_id`` values may contain a
+    collaborator, so they must never participate in device-owner resolution.
     Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
     no Bot binding and remain usable across Bots.
     """
