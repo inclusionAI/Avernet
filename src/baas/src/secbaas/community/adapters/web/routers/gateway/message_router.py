@@ -50,7 +50,7 @@ from secbaas.community.logger import get_logger
 
 logger = get_logger("router-gateway")
 
-router = APIRouter(prefix="/gateway", tags=["gateway-messages"])
+router = APIRouter(prefix="/openapi/v1/chat", tags=["chat"])
 
 
 @router.post(

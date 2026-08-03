@@ -1,7 +1,7 @@
 """Gateway dependency injection — JWT authentication & context building.
 
 Auth flow:
-  1. Extract Bearer JWT token from the Authorization header
+  1. Extract JWT token from the x-avernet-principal header
   2. Fetch signing secret via SecretStorePlugin, verify JWT signature and expiry
   3. Extract access_key (resource_key) and tenant from JWT payload
   4. Look up baas_resource_key by resource_key + tenant to get record (id, tenant)
@@ -30,32 +30,28 @@ class GatewayAuthContext:
     tenant: str
 
 
-def _get_bearer_token(authorization: str | None) -> str:
-    """Extract the Bearer token from the Authorization header."""
-    if not authorization:
+def _get_token_from_header(principal: str | None) -> str:
+    """Extract the JWT token from the x-avernet-principal header."""
+    if not principal:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": 40101, "message": "Token missing"},
         )
 
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": 40002, "message": "Parameter missing"},
-        )
-
-    return parts[1]
+    return principal
 
 
 @inject
 def validate_jwt_token(
-    authorization: str | None = Header(None),
+    x_avernet_principal: str | None = Header(None, alias="x-avernet-principal"),
     secret_plugin: SecretStorePlugin = Depends(
         Provide[ApplicationContainer.plugins.secret_plugin]
     ),
     resource_key_repository: ResourceKeyRepository = Depends(
         Provide[ApplicationContainer.repository.resource_key_repository]
+    ),
+    secret_name: str = Depends(
+        Provide[ApplicationContainer.config.gateway.jwt.secret_name]
     ),
 ) -> GatewayAuthContext:
     """Validate JWT token and return auth context.
@@ -67,9 +63,8 @@ def validate_jwt_token(
         HTTPException 401: token missing/invalid/expired
         HTTPException 403: resource_key not found
     """
-    token = _get_bearer_token(authorization)
+    token = _get_token_from_header(x_avernet_principal)
 
-    secret_name = ApplicationContainer.config.gateway.jwt.secret_name()
     secret_key = secret_plugin.get_secret(secret_name)
 
     ok, error_msg, payload = verify_jwt_token(token, secret_key)
@@ -79,8 +74,16 @@ def validate_jwt_token(
             detail={"code": 40103, "message": error_msg or "Token invalid"},
         )
 
-    resource_key = payload.get("access_key", "")
-    tenant = payload.get("tenant", "")
+    principals = payload.get("principals") or []
+    if not principals:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"code": 40103, "message": "principals missing in token"},
+        )
+
+    principal = principals[0]
+    resource_key = principal.get("access_key", {}).get("access_key", "")
+    tenant = principal.get("tenant", "")
     if not resource_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -6,6 +6,7 @@ import os
 import time
 from typing import Any
 
+import jwt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
@@ -40,18 +41,10 @@ def generate_jwt_token(target: str, secret_key: str, ttl: int = 300) -> str:
     return f"{header}.{payload}.{_b64url_encode(signature)}"
 
 
-def _b64url_decode(data: str) -> bytes:
-    """Base64 URL 安全解码。"""
-    padding = 4 - len(data) % 4
-    if padding != 4:
-        data += "=" * padding
-    return base64.urlsafe_b64decode(data)
-
-
 def verify_jwt_token(
     token: str, secret_key: str
 ) -> tuple[bool, str | None, dict[str, Any] | None]:
-    """验证 nginx 代理鉴权 JWT token。
+    """验证 JWT token（兼容标准 HS256 JWT，如 PyJWT / jjwt 生成的 token）。
 
     Args:
         token: JWT token 字符串
@@ -61,31 +54,18 @@ def verify_jwt_token(
         tuple[bool, Optional[str], Optional[dict]]: (是否验证通过, 错误信息, payload字典)
     """
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return False, "Invalid token format", None
-
-        header_b64, payload_b64, signature_b64 = parts
-        signing_input = f"{header_b64}.{payload_b64}"
-
-        # 验证签名
-        expected_signature = hmac.new(
-            secret_key.encode(), signing_input.encode(), hashlib.sha256
-        ).digest()
-        actual_signature = _b64url_decode(signature_b64)
-
-        if not hmac.compare_digest(expected_signature, actual_signature):
-            return False, "Invalid signature", None
-
-        # 解析 payload
-        payload = json.loads(_b64url_decode(payload_b64).decode())
-
-        # 检查过期时间
-        if "exp" in payload and payload["exp"] < int(time.time()):
-            return False, "Token expired", payload
-
+        payload = jwt.decode(
+            token,
+            secret_key,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
         return True, None, payload
 
+    except jwt.ExpiredSignatureError:
+        return False, "Token expired", None
+    except jwt.InvalidTokenError as e:
+        return False, f"Token invalid: {e}", None
     except Exception as e:
         return False, f"Token verification failed: {e}", None
 
