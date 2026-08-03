@@ -1064,6 +1064,8 @@ class TestScaleBot:
             sla_grade="enterprise",
             callback_timeout_seconds=600,
             auto_approve_publish=True,
+            entity_id="entity-123",
+            entity_type="workspace",
         )
 
         with patch.object(
@@ -1075,6 +1077,7 @@ class TestScaleBot:
                 target_count=3,
                 operator="user1",
                 request_id="test-request-id-12345678901234567890",
+                auto_approve_publish=True,
                 bot_config=bot_config,
             )
 
