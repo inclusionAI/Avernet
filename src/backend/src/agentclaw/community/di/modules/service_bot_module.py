@@ -40,6 +40,7 @@ from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
@@ -70,6 +71,11 @@ from agentclaw.community.core.service_bot.repository.publish_operation_repositor
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.bot_process import (
+    BotProcessRegistry,
+    EmptyBotProcess,
+    PersonalBotProcess,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
@@ -263,6 +269,18 @@ class ServiceBotModule(Module):
     @singleton
     @provider
     @inject
+    def bot_process_registry(
+        self, template_service: TemplateService
+    ) -> BotProcessRegistry:
+        """Construct bot-type-specific binding response processors."""
+        return BotProcessRegistry(
+            personal_bot_process=PersonalBotProcess(template_service),
+            default_bot_process=EmptyBotProcess(),
+        )
+
+    @singleton
+    @provider
+    @inject
     def bot_publish_service(
         self,
         injector: Injector,
@@ -274,6 +292,7 @@ class ServiceBotModule(Module):
         quality_task_service: QualityTaskServiceProtocol,
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
+        bot_process_registry: BotProcessRegistry,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -292,6 +311,7 @@ class ServiceBotModule(Module):
             quality_task_service=quality_task_service,
             publish_operation_repo=publish_operation_repo,
             task_queue_service=task_queue_service,
+            bot_process_registry=bot_process_registry,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 

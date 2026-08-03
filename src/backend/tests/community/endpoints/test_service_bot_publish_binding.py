@@ -92,7 +92,13 @@ def _seed_binding_error(world) -> None:
         query_params={"owner_id": _OWNER, "stage": "online"},
     ),
     seed=_seed_binding_happy,
-    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "data": {"active_runtime_engine_type": ""},
+        },
+    ),
 )
 def get_binding_happy():
     """Happy path: query binding info for online stage succeeds."""
