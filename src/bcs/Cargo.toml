@@ -61,6 +61,7 @@ members = [
     "crates/plugin-api/bcs-db-api",
     "crates/plugin-api/bcs-llm-api",
     "crates/plugin-api/bcs-security-gateway-api",
+    "crates/plugin-api/bcs-secret-api",
     "crates/plugin-api/bcs-storage-api",
     "crates/plugin-api/bcs-user-directory-api",
     # plugins
@@ -246,6 +247,7 @@ bcs-leader-election = { path = "crates/services/bcs-leader-election" }
 bcs-fuse-client = { path = "crates/external-clients/bcs-fuse-client" }
 bcs-security-gateway-local = { path = "crates/plugins/bcs-security-gateway-local" }
 bcs-security-gateway-api = { path = "crates/plugin-api/bcs-security-gateway-api" }
+bcs-secret-api             = { path = "crates/plugin-api/bcs-secret-api" }
 bcs-proposal   = { path = "crates/services/bcs-proposal" }
 bcs-proposal-store = { path = "crates/services/bcs-proposal-store" }
 bcs-friend     = { path = "crates/services/bcs-friend" }

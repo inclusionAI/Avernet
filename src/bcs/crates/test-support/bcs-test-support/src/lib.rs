@@ -283,7 +283,7 @@ pub async fn db_plugin_contract_tests<P: DbPlugin>(plugin: &P) {
 /// `seed` is responsible for ensuring the secret named
 /// `bcs-secret-contract:roundtrip` exists in the backing store and returning
 /// what the test should observe. For in-memory ports this is a setter; for
-/// mist it's a no-op closure pointing at a secret you've pre-provisioned.
+/// live providers it may be a no-op closure pointing at a pre-provisioned secret.
 #[allow(
     clippy::expect_used,
     reason = "test harness — panic on failure is the contract"

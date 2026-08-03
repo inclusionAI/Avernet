@@ -53,7 +53,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: bcs::MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,

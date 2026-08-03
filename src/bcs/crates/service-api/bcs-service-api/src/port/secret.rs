@@ -3,7 +3,7 @@
 //! Lives next to `port::repo` because it is "infra abstraction the core
 //! consumes": a core service that needs a credential calls a
 //! [`SecretAccessPort`] trait without caring whether the value comes from
-//! mist, an env-var snapshot, or a JSON file on disk.
+//! an env-var snapshot, a JSON file on disk, or another backend.
 
 use async_trait::async_trait;
 use thiserror::Error;

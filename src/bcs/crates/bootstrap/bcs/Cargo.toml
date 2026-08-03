@@ -127,6 +127,7 @@ bcs-friend      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-system-message = { workspace = true }
 bcs-secret   = { workspace = true }
+bcs-secret-api = { workspace = true }
 bcs-secret-local = { workspace = true }
 ding-logger  = { workspace = true }
 bcs-http      = { workspace = true }
