@@ -79,6 +79,10 @@ from agentclaw.community.core.resources.service import (
     FileTooLargeError,
     ResourceNotFoundError,
 )
+from agentclaw.community.core.skill_center.errors import (
+    LocalSkillNotFoundError,
+    LocalSkillOwnerAmbiguousError,
+)
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
@@ -183,6 +187,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # str(exc), which would leak internal ids/paths to external callers.
     DuplicateResourceError: (409, "Resource already exists"),
     ResourceNotFoundError: (404, "Not found"),
+    LocalSkillNotFoundError: (404, "Not found"),
+    LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     FileTooLargeError: (413, "File too large for preview"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
@@ -262,6 +268,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # re-raise and the app's catch-all would answer with {"detail": ...}, which
     # is not an Envelope and breaks the public contract.
     BotServiceError: (500, "Internal error"),
+}
+
+# Most public categories retain the ordinary ``xxx000`` business code.  A
+# small, explicit override table lets a category expose a stable actionable
+# subcode without changing any existing public response.
+ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
+    LocalSkillOwnerAmbiguousError: 409104,
 }
 
 
@@ -346,6 +359,7 @@ def _error_response(
     request: Request,
     *,
     headers: Mapping[str, str] | None = None,
+    code: int | None = None,
 ) -> JSONResponse:
     # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
     # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
@@ -354,7 +368,7 @@ def _error_response(
     # error body has no partial payload to caveat, so ``warning`` has no meaning
     # here.
     body = ErrorEnvelope(
-        code=http_status * 1000,
+        code=code if code is not None else http_status * 1000,
         message=message,
         data=None,
         request_id=_trace_id(request),
@@ -417,5 +431,10 @@ def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | No
     """
     for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
         if isinstance(exc, error_type):
-            return _error_response(http_status, message, request)
+            return _error_response(
+                http_status,
+                message,
+                request,
+                code=ENVELOPE_ERROR_CODES.get(error_type),
+            )
     return None

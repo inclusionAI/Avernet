@@ -45,6 +45,25 @@ class SkillRepository(Protocol):
         """精确查询 Bot 自有的同名 local 技能，不包含全局行。"""
         ...
 
+    def list_bot_local_skills(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        page: int,
+        page_size: int,
+        active: bool | None,
+        keyword: str | None,
+    ) -> tuple[int, list[dict]]:
+        """Page exact Bot-owned ``local://`` desired-state Skill metadata."""
+        ...
+
+    def get_bot_local_skill(
+        self, *, skill_id: str, bot_id: str, user_id: str
+    ) -> dict | None:
+        """Return one exact Bot-owned ``local://`` Skill with desired state."""
+        ...
+
     def create(self, skill_data: dict) -> dict:
         ...
 

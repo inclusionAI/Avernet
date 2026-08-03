@@ -1,15 +1,16 @@
-"""Public contract stubs for Bot-owned Local Skill lifecycle operations.
+"""Public lifecycle routes for Bot-owned Local Skills.
 
-The public surface deliberately has no catalog, marketplace, or installation
-relationship. Every operation requires an authenticated principal; Track B
-implementation slices wire these definitions to the domain services.
+This router deliberately exposes only the six ratified Local Skill operations.
+Git, Center, marketplace, and install semantics remain on their separate,
+non-public surfaces.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+import json
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -22,6 +23,16 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.di import Injected
 
 from .schemas import Skill, SkillState, SkillUpload
 
@@ -30,29 +41,76 @@ router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
+def _tags(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(tag) for tag in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return [value] if value else []
+        return [str(tag) for tag in parsed] if isinstance(parsed, list) else []
+    return []
+
+
+def _to_skill(record: dict[str, Any]) -> Skill:
+    return Skill(
+        skill_id=str(record["id"]),
+        name=str(record["name"]),
+        description=record.get("description"),
+        category=record.get("category"),
+        tags=_tags(record.get("tags")),
+        active=bool(record["active"]),
+        created_at=record.get("gmt_created"),
+        updated_at=record.get("gmt_modified"),
+    )
+
+
 @router.get("", response_model=Envelope[Page[Skill]])
+@envelope_errors
 async def list_skills(
     page: PageParamsDep,
     principal: PrincipalDep,
+    request: Request,
     bot_id: str = Query(..., description="Bot ID whose Local Skills are listed."),
     owner_entity_id: str | None = Query(
         default=None, description="Verified Bot owner locator."
     ),
-    active: bool | None = Query(
-        default=None, description="Filter by desired Active state."
-    ),
-    keyword: str | None = Query(
-        default=None, description="Case-insensitive name or description filter."
+    active: bool | None = Query(default=None),
+    keyword: str | None = Query(default=None),
+    query_service: LocalSkillQueryServiceProtocol = Injected(
+        LocalSkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
-    """List one Bot's Local Skills from persisted desired state."""
-    raise NotImplementedError
+    """List exact Bot-owned Local Skills from database desired state."""
+    actor_id = caller_owner_id(principal)
+    total, records = query_service.list_local_skills(
+        bot_id=bot_id,
+        owner_id=owner_entity_id or actor_id,
+        actor_id=actor_id,
+        page=page.page,
+        page_size=page.page_size,
+        active=active,
+        keyword=keyword,
+    )
+    return page_envelope(total, [_to_skill(record) for record in records], request)
 
 
 @router.get("/{skill_id}", response_model=Envelope[Skill])
-async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[Skill]:
-    """Get public metadata for one Local Skill selected by its Skill ID."""
-    raise NotImplementedError
+@envelope_errors
+async def get_skill(
+    skill_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    query_service: LocalSkillQueryServiceProtocol = Injected(
+        LocalSkillQueryServiceProtocol
+    ),
+) -> Envelope[Skill]:
+    """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
+    record = query_service.get_local_skill(
+        skill_id=skill_id, actor_id=caller_owner_id(principal)
+    )
+    return envelope(_to_skill(record), request)
 
 
 @router.post(
@@ -82,21 +140,13 @@ async def upload_skill(
     raise NotImplementedError
 
 
-@router.post(
-    "/{skill_id}/activate",
-    response_model=Envelope[SkillState],
-)
-async def activate_skill(
-    skill_id: str, principal: PrincipalDep
-) -> Envelope[SkillState]:
+@router.post("/{skill_id}/activate", response_model=Envelope[SkillState])
+async def activate_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillState]:
     """Set one Local Skill's desired state to Active."""
     raise NotImplementedError
 
 
-@router.post(
-    "/{skill_id}/deactivate",
-    response_model=Envelope[SkillState],
-)
+@router.post("/{skill_id}/deactivate", response_model=Envelope[SkillState])
 async def deactivate_skill(
     skill_id: str, principal: PrincipalDep
 ) -> Envelope[SkillState]:

@@ -359,6 +359,99 @@ class SkillRepository:
             row = query.order_by(self.Skill.gmt_created.desc()).first()
             return _skill_to_dict(row) if row is not None else None
 
+    @staticmethod
+    def _public_local_skill(row, active: bool) -> dict:
+        data = _skill_to_dict(row)
+        data["active"] = bool(active)
+        return data
+
+    def list_bot_local_skills(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        page: int,
+        page_size: int,
+        active: bool | None,
+        keyword: str | None,
+    ) -> tuple[int, list[dict]]:
+        """Page exact Bot-owned ``local://`` rows by desired active state."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+
+        with self._db.orm_session() as db:
+            excluded = (
+                db.query(DefaultSkillsetSkillExclusion.id)
+                .filter(
+                    DefaultSkillsetSkillExclusion.user_id
+                    == _normalize_user_id(user_id),
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                )
+                .exists()
+            )
+            query = db.query(self.Skill, (~excluded).label("active")).filter(
+                self.Skill.env == get_current_env(),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.user_id == _normalize_user_id(user_id),
+                self.Skill.git_path.like("local://%"),
+            )
+            if keyword and keyword.strip():
+                term = f"%{keyword.strip().lower()}%"
+                query = query.filter(
+                    or_(
+                        func.lower(self.Skill.name).like(term),
+                        func.lower(func.coalesce(self.Skill.description, "")).like(
+                            term
+                        ),
+                    )
+                )
+            if active is not None:
+                query = query.filter((~excluded) == active)
+            total = query.count()
+            rows = (
+                query.order_by(self.Skill.gmt_modified.desc(), self.Skill.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return total, [
+                self._public_local_skill(row, is_active) for row, is_active in rows
+            ]
+
+    def get_bot_local_skill(
+        self, *, skill_id: str, bot_id: str, user_id: str
+    ) -> dict | None:
+        """Return one exact Bot-owned ``local://`` row or no row."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+
+        with self._db.orm_session() as db:
+            excluded = (
+                db.query(DefaultSkillsetSkillExclusion.id)
+                .filter(
+                    DefaultSkillsetSkillExclusion.user_id
+                    == _normalize_user_id(user_id),
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                )
+                .exists()
+            )
+            row = (
+                db.query(self.Skill, (~excluded).label("active"))
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.user_id == _normalize_user_id(user_id),
+                    self.Skill.git_path.like("local://%"),
+                )
+                .one_or_none()
+            )
+            return self._public_local_skill(*row) if row else None
+
     def list_bot_local_assets(
         self,
         *,
