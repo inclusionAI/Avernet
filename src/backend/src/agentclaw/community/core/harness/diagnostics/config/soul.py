@@ -295,5 +295,13 @@ class SoulPersonaDiagnostic(Diagnostic):
         if not should_generate_full_rewrite:
             for f in findings:
                 f.suggested_template_ids = []
+                # Surface the owner-actionable recovery step so the report — not a
+                # TODO placeholder patch — tells the user how to get a real fix:
+                # enrich the BCSFuse profile, then re-diagnose to enter A-mode.
+                if "BCSFuse" not in (f.message or ""):
+                    f.message = (f.message or "") + (
+                        "\n\n[建议] 前往 BCSFuse 完善 Bot 画像（质量分需 ≥ 0.7）"
+                        "后重新诊断，即可生成专属 SOUL.md 改写建议。"
+                    )
 
         return findings
