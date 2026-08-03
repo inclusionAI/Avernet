@@ -5,7 +5,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use bcs_service_api::application::v1::AuthenticatedCaller;
 
-use super::{ApiState, ErrorResponse, RequestId};
+use super::{ErrorResponse, PrincipalVerificationState, RequestId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrincipalVerificationError {
@@ -27,13 +27,16 @@ pub trait PrincipalVerifier: Send + Sync {
     ) -> Result<AuthenticatedCaller, PrincipalVerificationError>;
 }
 
-pub async fn verify_principal(
-    State(state): State<ApiState>,
+pub async fn verify_principal<S>(
+    State(state): State<S>,
     mut request: Request,
     next: Next,
-) -> Response {
+) -> Response
+where
+    S: PrincipalVerificationState,
+{
     let request_id = RequestId::from_headers(request.headers());
-    match state.principal_verifier.verify(request.headers()).await {
+    match state.principal_verifier().verify(request.headers()).await {
         Ok(caller) => {
             request.extensions_mut().insert(caller);
             request.extensions_mut().insert(request_id);
