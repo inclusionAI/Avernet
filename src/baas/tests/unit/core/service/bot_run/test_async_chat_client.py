@@ -1423,3 +1423,237 @@ class TestInjectMessageSemaphore:
             client.inject_message("m3", session_key="s3"),
         )
         assert call_count == 3
+
+
+# ==================== ChatRequestError propagation tests ====================
+
+
+class TestChatRequestErrorPropagation:
+    """Tests for ChatRequestError handling in AsyncChatClient."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_propagates_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message propagates ChatRequestError from chat_send and sets chat_complete."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+            retryable=True,
+        )
+
+        with pytest.raises(ChatRequestError, match="chat.send failed"):
+            await client.send_message("Hi", session_key="sk-err")
+
+    @pytest.mark.asyncio
+    async def test_send_message_sets_chat_complete_on_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message sets chat_complete on ChatRequestError to unblock waiters."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+        )
+
+        # Capture session state before the error to verify chat_complete is set
+        captured_state = None
+
+        original_chat_send = mock_bot_ws_instance.chat_send.side_effect
+
+        async def chat_send_with_state_capture(*args, **kwargs):
+            state = client._sessions.get(kwargs.get("session_key"))
+            nonlocal captured_state
+            captured_state = state
+            raise original_chat_send
+
+        mock_bot_ws_instance.chat_send.side_effect = chat_send_with_state_capture
+
+        with pytest.raises(ChatRequestError, match="chat.send failed"):
+            await client.send_message("Hi", session_key="sk-err")
+
+        # chat_complete should have been set to unblock any waiters
+        assert captured_state is not None
+        assert captured_state.chat_complete.is_set()
+
+    @pytest.mark.asyncio
+    async def test_send_message_cleans_up_session_on_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message cleans up session state after ChatRequestError."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+        )
+
+        with pytest.raises(ChatRequestError, match="chat.send failed"):
+            await client.send_message("Hi", session_key="sk-err")
+
+        # Session should be cleaned up in the finally block
+        assert "sk-err" not in client._sessions
+        assert "sk-err" not in client._active_sessions
+
+
+# ==================== ChatRequestError in send_message_stream tests ====================
+
+
+class TestChatRequestErrorStream:
+    """Tests for ChatRequestError handling in send_message_stream."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_emits_error_on_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message_stream emits error StreamChunk when ChatRequestError is raised."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+        )
+
+        chunks = []
+        async for chunk in client.send_message_stream("Hi", session_key="sk-err"):
+            chunks.append(chunk)
+
+        # Should emit exactly one error chunk
+        assert len(chunks) == 1
+        assert chunks[0].type == "error"
+        assert "UNAVAILABLE" in chunks[0].content
+        assert "Session validation failed" in chunks[0].content
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_sets_chat_complete_on_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message_stream sets chat_complete when ChatRequestError is raised."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            _SessionState,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        # Pre-register a session state so we can inspect it after the error
+        sk = "sk-err"
+        state = _SessionState()
+        client._sessions[sk] = state
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+        )
+
+        chunks = []
+        async for chunk in client.send_message_stream("Hi", session_key=sk):
+            chunks.append(chunk)
+
+        # The session gets cleaned up in the finally block, but chat_complete
+        # was set before the iterator returned
+        assert len(chunks) == 1
+        assert chunks[0].type == "error"
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_cleans_up_on_chat_request_error(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """send_message_stream cleans up session state after ChatRequestError."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+        from secbaas.community.core.service.bot_run._bot_websocket_client import (
+            ChatRequestError,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        mock_bot_ws_instance.chat_send.side_effect = ChatRequestError(
+            message="chat.send failed: UNAVAILABLE - Session validation failed",
+            error_code="UNAVAILABLE",
+            error_message="Session validation failed",
+        )
+
+        chunks = []
+        async for chunk in client.send_message_stream("Hi", session_key="sk-err"):
+            chunks.append(chunk)
+
+        # Session should be cleaned up
+        assert "sk-err" not in client._sessions
+        assert "sk-err" not in client._active_sessions
