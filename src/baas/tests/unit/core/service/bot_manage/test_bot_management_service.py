@@ -16,6 +16,7 @@ from secbaas.community.api.bot_manage import (
     UpdateDevicesResponse,
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
+from secbaas.community.api.device_manage import DeployConfig
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     PublishStatus,
@@ -1066,6 +1067,8 @@ class TestScaleBot:
             auto_approve_publish=True,
             entity_id="entity-123",
             entity_type="workspace",
+            share_policy={"public": True},
+            deploy_config=DeployConfig(ttl_in_minutes=120),
         )
 
         with patch.object(
@@ -1088,7 +1091,8 @@ class TestScaleBot:
         publish_config = call_kwargs["config"]
         assert publish_config.auto_approve is True
         assert publish_config.callback_timeout_seconds == 600
-        assert publish_config.deploy_config is None  # not provided
+        assert publish_config.deploy_config is not None
+        assert publish_config.deploy_config.ttl_in_minutes == 120
 
     @pytest.mark.asyncio
     async def test_scale_bot_without_bot_config_reads_db_config(self):
