@@ -33,7 +33,8 @@ _INTERNAL_USER_BOT_PATH = (
 )
 _TRACE_ID = "trace_open_endpoint_fixture"
 _SESSION_ID = "session_open_endpoint_fixture"
-_SESSION_KEY = "agent:main:session:open-endpoint-fixture:user:test"
+_BCS_SESSION_ID = "group_open_endpoint_fixture:abcdef12"
+_SESSION_KEY = f"agent:main:bcs:group:{_BCS_SESSION_ID}"
 _SIGNING_KEY = "endpoint-test-shared-secret-at-least-32-bytes"
 
 
@@ -101,7 +102,7 @@ def _seed_group_trace(world) -> None:
     with world.get(DatabasePlugin).orm_session() as session:
         session.add(
             BcsGroupSession(
-                session_id=_SESSION_KEY,
+                session_id=_BCS_SESSION_ID,
                 group_id="group_open_endpoint_fixture",
                 session_kind="chat",
                 env=get_current_env(),
@@ -132,6 +133,15 @@ def _seed_user_bot_traces(world) -> None:
                 "status": "SUCCESS",
                 "usage": {},
             }
+        )
+    with world.get(DatabasePlugin).orm_session() as session:
+        session.add(
+            BcsGroupSession(
+                session_id="trace_user_bot_match",
+                group_id="group_user_bot_fixture",
+                session_kind="chat",
+                env=get_current_env(),
+            )
         )
 
 
@@ -273,7 +283,13 @@ def open_bot_chat_group_list_invalid_limit():
             "code": 200000,
             "data": {
                 "total": 1,
-                "sessions": [{"id": "trace_user_bot_match"}],
+                "sessions": [
+                    {
+                        "id": "trace_user_bot_match",
+                        "group_id": "group_user_bot_fixture",
+                        "session_kind": "chat",
+                    }
+                ],
             },
         },
     ),
@@ -410,7 +426,13 @@ def internal_open_bot_chat_detail_not_found():
             "success": True,
             "data": {
                 "total": 1,
-                "sessions": [{"id": "trace_user_bot_match"}],
+                "sessions": [
+                    {
+                        "id": "trace_user_bot_match",
+                        "group_id": "group_user_bot_fixture",
+                        "session_kind": "chat",
+                    }
+                ],
             },
         },
     ),

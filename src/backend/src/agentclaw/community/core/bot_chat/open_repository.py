@@ -17,6 +17,7 @@ from agentclaw.community.core.bot_chat.models import (
 )
 from agentclaw.community.core.bot_chat.query_support import (
     enrich_bot_names,
+    enrich_group_labels,
 )
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationSession,
@@ -210,6 +211,7 @@ class OpenBotChatRepository:
         user_id: str,
         bot_id: str,
     ) -> None:
+        enrich_group_labels(session, rows)
         cls._enrich_task_labels(
             session,
             rows,
