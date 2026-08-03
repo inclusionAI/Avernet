@@ -23,7 +23,7 @@ set -e
 #
 
 # ============ 常量配置 ============
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 load_repo_env_file() {
@@ -516,6 +516,8 @@ prepare_bcs_coverage_bin() {
 
 # ============ 当前默认安装流程 (无参数调用) ============
 setup_all_and_start() {
+    local mock_started_by_command=0
+
     # 加载之前保存的引擎类型
     load_engine_type
 
@@ -559,7 +561,12 @@ setup_all_and_start() {
 
     # Start current all group (via group module)
     log_info "Running start current all group..."
+    singlebox_mock_model_start || return 1
+    mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
     if ! all_start; then
+        if [ "$mock_started_by_command" = "1" ]; then
+            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+        fi
         log_error "Start failed. Fix the errors above, then rerun ./scripts/singlebox.sh $(singlebox_mode_option)."
         return 1
     fi
@@ -790,22 +797,56 @@ main() {
             done
             ;;
         start)
+            local mock_started_by_command=0
+            local model_consumer_started=0
             load_engine_type
             if [[ "$with_bcs_coverage" -eq 1 ]]; then
                 prepare_bcs_coverage_bin
             fi
+            if singlebox_model_config_required_for_services "${services[@]}"; then
+                singlebox_mock_model_start || exit 1
+                mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
+            fi
             for svc in "${services[@]}"; do
-                start_service "$svc"
+                if ! start_service "$svc"; then
+                    if [ "$mock_started_by_command" = "1" ] && [ "$model_consumer_started" = "0" ]; then
+                        singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+                    fi
+                    exit 1
+                fi
+                if singlebox_model_config_required_for_services "$svc"; then
+                    model_consumer_started=1
+                fi
             done
             ;;
         stop)
             for svc in "${services[@]}"; do
                 stop_service "$svc"
             done
+            if singlebox_mock_model_stop_required_for_services "${services[@]}"; then
+                singlebox_mock_model_stop
+            fi
             ;;
         restart)
             for svc in "${services[@]}"; do
-                restart_service "$svc"
+                if [ "$svc" = "all" ]; then
+                    stop_service "$svc"
+                    singlebox_mock_model_stop || exit 1
+                    sleep 2
+                    singlebox_mock_model_start || exit 1
+                    local mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
+                    if ! start_service "$svc"; then
+                        if [ "$mock_started_by_command" = "1" ]; then
+                            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+                        fi
+                        exit 1
+                    fi
+                else
+                    if singlebox_model_config_required_for_services "$svc"; then
+                        singlebox_mock_model_start || exit 1
+                    fi
+                    restart_service "$svc"
+                fi
             done
             ;;
         clean)
@@ -837,4 +878,6 @@ main() {
 }
 
 # 执行主函数
-main "$@"
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main "$@"
+fi

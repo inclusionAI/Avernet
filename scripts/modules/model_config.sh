@@ -7,6 +7,130 @@ singlebox_model_config_output_file() {
     printf '%s\n' "${SINGLEBOX_MODEL_CONFIG_FILE:-${DEP_DIR}/openclaw/model-config/openclaw.json}"
 }
 
+singlebox_mock_model_base_url() {
+    printf 'http://127.0.0.1:%s\n' "${SINGLEBOX_MOCK_MODEL_PORT:-18080}"
+}
+
+singlebox_mock_model_pid_file() {
+    printf '%s\n' "${DEP_DIR}/openclaw/model-config/mock-model.pid"
+}
+
+singlebox_mock_model_is_ready() {
+    local base_url="${1:-$(singlebox_mock_model_base_url)}"
+    curl --noproxy '*' -fsS "${base_url}/health" 2>/dev/null |
+        jq -e '
+            .status == "ok"
+            and .service == "singlebox-mock-model"
+            and (keys | sort) == ["service", "status"]
+        ' >/dev/null
+}
+
+singlebox_mock_model_start() {
+    SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=0
+    [ "${SINGLEBOX_MODEL_CONFIG_MODE:-}" = "mock" ] || return 0
+
+    local base_url pid_file log_file pid command
+    base_url="$(singlebox_mock_model_base_url)"
+    pid_file="$(singlebox_mock_model_pid_file)"
+    log_file="${LOG_DIR}/mock-model.log"
+
+    if singlebox_mock_model_is_ready "$base_url"; then
+        log_info "Mock model server is ready: ${base_url}"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$pid_file")" "$LOG_DIR"
+    if [ -f "$pid_file" ]; then
+        pid="$(tr -d '\r\n' < "$pid_file")"
+        case "$pid" in
+            ''|*[!0-9]*)
+                rm -f "$pid_file"
+                ;;
+            *)
+                if kill -0 "$pid" 2>/dev/null; then
+                    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+                    case "$command" in
+                        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*)
+                            log_error "Owned mock model server PID ${pid} is running but is not ready at ${base_url}."
+                            log_error "Run 'restart all' to apply a mode or port change."
+                            ;;
+                        *)
+                            log_error "Mock model PID file points to another process: ${pid}."
+                            ;;
+                    esac
+                    return 1
+                fi
+                rm -f "$pid_file"
+                ;;
+        esac
+    fi
+
+    python3 "${PROJECT_ROOT}/scripts/modules/mock_model_server.py" \
+        --port "${SINGLEBOX_MOCK_MODEL_PORT:-18080}" >"$log_file" 2>&1 &
+    pid=$!
+
+    local attempt
+    for attempt in $(seq 1 100); do
+        if kill -0 "$pid" 2>/dev/null && singlebox_mock_model_is_ready "$base_url"; then
+            printf '%s\n' "$pid" > "$pid_file"
+            SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND=1
+            log_info "Mock model server started: ${base_url}"
+            return 0
+        fi
+        if ! kill -0 "$pid" 2>/dev/null; then
+            break
+        fi
+        sleep 0.05
+    done
+
+    log_error "Mock model server failed to start; log: ${log_file}"
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+    return 1
+}
+
+singlebox_mock_model_stop() {
+    local pid_file pid command attempt
+    pid_file="$(singlebox_mock_model_pid_file)"
+    [ -f "$pid_file" ] || return 0
+    pid="$(tr -d '\r\n' < "$pid_file")"
+    case "$pid" in
+        ''|*[!0-9]*)
+            rm -f "$pid_file"
+            return 0
+            ;;
+    esac
+    if ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$pid_file"
+        return 0
+    fi
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    case "$command" in
+        *"${PROJECT_ROOT}/scripts/modules/mock_model_server.py"*) ;;
+        *)
+            log_warn "Refusing to stop PID ${pid}; it is not the singlebox mock model server."
+            return 0
+            ;;
+    esac
+    if ! kill "$pid" 2>/dev/null; then
+        log_error "Failed to stop mock model server PID ${pid}; preserving ${pid_file}."
+        return 1
+    fi
+    for attempt in $(seq 1 100); do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            rm -f "$pid_file"
+            log_info "Mock model server stopped."
+            return 0
+        fi
+        sleep 0.05
+    done
+    log_error "Mock model server PID ${pid} did not exit; preserving ${pid_file}."
+    return 1
+}
+
 singlebox_model_config_required_for_services() {
     local service
     for service in "$@"; do
@@ -19,12 +143,22 @@ singlebox_model_config_required_for_services() {
     return 1
 }
 
+singlebox_mock_model_stop_required_for_services() {
+    local service
+    for service in "$@"; do
+        if [ "$service" = "all" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 singlebox_model_config_prompt() {
     local selection=""
     while true; do
         {
             echo "Choose model config mode:"
-            echo "  1) mock     Start without real model replies"
+            echo "  1) mock     Use fixed-format local model replies"
             echo "  2) manual   Use values from .env.local"
             echo "  3) home     Import model fields from ~/.openclaw/openclaw.json"
             echo ""
@@ -251,16 +385,47 @@ singlebox_model_config_write_home() {
 
 singlebox_model_config_write_mock() {
     local output_file="$1"
+    local base_url
+    base_url="$(singlebox_mock_model_base_url)/v1"
     (
         umask 077
-        jq -n '{
+        jq -n --arg base_url "$base_url" '{
           models: {
             mode: "merge",
-            providers: {}
+            providers: {
+              "singlebox-mock": {
+                baseUrl: $base_url,
+                apiKey: "singlebox-local",
+                api: "openai-completions",
+                models: [
+                  {
+                    id: "singlebox-mock",
+                    name: "singlebox-mock",
+                    reasoning: false,
+                    input: ["text"],
+                    cost: {
+                      input: 0,
+                      output: 0,
+                      cacheRead: 0,
+                      cacheWrite: 0
+                    },
+                    contextWindow: 200000,
+                    maxTokens: 8192
+                  }
+                ]
+              }
+            }
           },
           agents: {
             defaults: {
-              models: {}
+              model: {
+                primary: "singlebox-mock/singlebox-mock"
+              },
+              models: {
+                "singlebox-mock/singlebox-mock": {
+                  alias: "singlebox-mock"
+                }
+              }
             }
           }
         }' > "$output_file"
@@ -289,7 +454,7 @@ singlebox_model_config_prepare() {
             ;;
         mock)
             singlebox_model_config_write_mock "$output_file" || return 1
-            log_warn "Singlebox model config mode is mock; bots can join BCN but cannot produce real model replies."
+            log_warn "Singlebox model config mode is mock; bots use fixed-format local model replies."
             ;;
     esac
 

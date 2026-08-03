@@ -10,11 +10,13 @@ import {
   abortAllStreams,
   cleanupAgentEventsSubscription,
   combineDeliveredReplyParts,
+  handleChatInject,
   handleChatSend,
   handleBcsRouteTool,
   initAgentEventsSubscription,
   rememberTaskToolSession,
   resolveChatRunId,
+  resolveInboundSender,
   resolveGroupIdFromSessionKey,
 } from '../src/inbound-handler.js';
 import type { RequestFrame, ResolvedBcsAccount } from '../src/types.js';
@@ -43,6 +45,213 @@ describe('openclaw-channel-bcn', () => {
     assert.match(
       resolveChatRunId(undefined, '  '),
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
+
+  it('keeps the legacy From value while using actor identity for sender metadata', async () => {
+    const inboundContexts: Array<Record<string, unknown>> = [];
+    const client = {
+      sendResponse() {},
+      sendEvent() {},
+    };
+    const account = {
+      accountId: 'default',
+      botId: 'bot-1',
+    } as ResolvedBcsAccount;
+    setBcsRuntime({
+      config: {
+        async loadConfig() {
+          return {};
+        },
+      },
+      channel: {
+        routing: {
+          resolveAgentRoute() {
+            return { agentId: 'agent-1', sessionKey: 'bcs:group-1' };
+          },
+        },
+        reply: {
+          finalizeInboundContext(ctx: Record<string, unknown>) {
+            inboundContexts.push(ctx);
+            return ctx;
+          },
+          async dispatchReplyWithBufferedBlockDispatcher({ dispatcherOptions }: any) {
+            await dispatcherOptions.deliver({ text: 'done' }, { kind: 'final' });
+          },
+        },
+        session: {
+          resolveStorePath() {
+            return '/tmp/openclaw-bcn-sender-test';
+          },
+          async recordInboundSession() {
+            throw new Error('stop after capturing inbound context');
+          },
+        },
+      },
+    } as any);
+
+    const params = {
+      bcs_group_id: 'group-1',
+      channel: {
+        source: 'api',
+        user_id: 'legacy-channel-name',
+        actor_id: 'bot-11',
+        actor_name: 'Current Actor',
+      },
+      session_context: {
+        from: 'legacy-session-name',
+      },
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: '[from:Legacy Prefix]hello' }],
+        timestamp: Date.now(),
+      },
+    };
+
+    try {
+      await handleChatSend({
+        type: 'req',
+        id: 'chat-sender-send',
+        method: 'chat.send',
+        params,
+      }, client as any, account);
+      await handleChatInject({
+        type: 'req',
+        id: 'chat-sender-inject',
+        method: 'chat.inject',
+        params,
+      }, client as any, account);
+
+      assert.equal(inboundContexts.length, 2);
+      for (const inboundContext of inboundContexts) {
+        assert.equal(inboundContext.From, 'bcs:Legacy Prefix');
+        assert.equal(inboundContext.SenderName, 'Current Actor');
+        assert.equal(inboundContext.SenderId, 'bot-11');
+      }
+    } finally {
+      abortAllStreams();
+    }
+  });
+
+  it('uses BCS actor identity for OpenClaw sender metadata', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:Apple]ALL Hi',
+        {
+          source: 'api',
+          user_id: 'Apple',
+          actor_id: 'human_001',
+          actor_name: 'Apple',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: 'Apple(human_001)',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'ALL Hi',
+        },
+      ),
+      {
+        fromDisplayName: 'Apple',
+        senderName: 'Apple',
+        senderId: 'human_001',
+        strippedText: 'ALL Hi',
+      },
+    );
+
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: '研发',
+          actor_id: 'bot_11b77a19',
+          actor_name: '研发',
+        },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          from_bot_owner: '001',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('does not treat a legacy Human display name as SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        'hello',
+        { source: 'api', user_id: 'Apple' },
+      ),
+      {
+        fromDisplayName: 'Apple',
+        senderName: 'Apple',
+        senderId: undefined,
+        strippedText: 'hello',
+      },
+    );
+  });
+
+  it('uses legacy from_bot_id as the Bot SenderId', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        { source: 'api', user_id: '研发' },
+        {
+          session_id: 'session-1',
+          participants: [],
+          originator: '产品经理',
+          from: '研发(bot_11b77a19)',
+          from_bot_id: 'bot_11b77a19',
+          you_are_mentioned: true,
+          is_sender: false,
+          mentions: [],
+          message: 'bot reply',
+        },
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: 'bot_11b77a19',
+        strippedText: 'bot reply',
+      },
+    );
+  });
+
+  it('ignores malformed non-string sender fields without throwing', () => {
+    assert.deepEqual(
+      resolveInboundSender(
+        '[from:研发]bot reply',
+        {
+          source: 'api',
+          user_id: 101,
+          actor_id: { value: 'human_001' },
+          actor_name: false,
+        } as never,
+        { from_bot_id: 101 } as never,
+      ),
+      {
+        fromDisplayName: '研发',
+        senderName: '研发',
+        senderId: undefined,
+        strippedText: 'bot reply',
+      },
     );
   });
 
@@ -599,6 +808,8 @@ describe('openclaw-channel-bcn', () => {
       assert.equal(capturedReplyOptions?.disableBlockStreaming, false);
       assert.equal(capturedReplyOptions?.sourceReplyDeliveryMode, 'automatic');
       assert.equal(capturedInboundContext?.Body, '[Image: diagram.png]');
+      assert.equal(capturedInboundContext?.SenderName, 'user-1');
+      assert.equal(capturedInboundContext?.SenderId, undefined);
       assert.equal(capturedInboundContext?.MediaPath, savedImagePath);
       assert.equal(capturedInboundContext?.MediaType, 'image/png');
       assert.deepEqual(capturedInboundContext?.MediaPaths, [ savedImagePath ]);
