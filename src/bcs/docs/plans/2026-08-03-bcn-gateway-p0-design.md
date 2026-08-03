@@ -26,7 +26,7 @@ P0 contains only the work required for a usable, fail-closed integration:
    `aud=bcs`, and `kid=bare`.
 5. Complete and mount PR #697's session-bound connection flow:
    `POST /openapi/v1/collaboration/sessions/{session_id}/token` and
-   `GET /openapi/v1/collaboration/group/ws?token=...`.
+   `GET /openapi/v1/collaboration/messages/ws?token=...`.
 6. Resolve the dedicated group-session WebSocket JWT key once in bootstrap and
    inject the shared connection service into the HTTP and WebSocket adapters.
 7. Configure Gateway domain `collaboration` for both HTTP and WebSocket relay,
@@ -97,7 +97,7 @@ Client
 Browser
   -> POST /openapi/v1/collaboration/sessions/{session_id}/token
   -> receive five-minute, single-session BCN JWT
-  -> GET /openapi/v1/collaboration/group/ws?token=...
+  -> GET /openapi/v1/collaboration/messages/ws?token=...
   -> Gateway relays anonymously and preserves path/query
   -> BCS verifies the BCN JWT before Upgrade
   -> shared Workbench handler revalidates the bound session on connect
@@ -203,7 +203,7 @@ upstream_vars:
 route_security:
   /openapi/v1/collaboration/**:
     user: required
-  "GET /openapi/v1/collaboration/group/ws": {}
+  "GET /openapi/v1/collaboration/messages/ws": {}
 
 upstreams:
   domains:

@@ -26,7 +26,7 @@ The new public connection flow needs to:
 
 1. Add `POST /openapi/v1/collaboration/sessions/{sid}/token` in BCN for
    issuing a five-minute JWT.
-2. Add `GET /openapi/v1/collaboration/group/ws?token={token}` in BCN for
+2. Add `GET /openapi/v1/collaboration/messages/ws?token={token}` in BCN for
    session-scoped Workbench WebSocket connections.
 3. Bind one JWT to exactly one tenant, Human, group, and group session.
 4. Keep JWT verification stateless. A valid JWT may open multiple connections
@@ -137,12 +137,19 @@ must not become caller inputs on the next request.
 ### Open the session WebSocket
 
 ```http
-GET /openapi/v1/collaboration/group/ws?token=<compact-jwt>
+GET /openapi/v1/collaboration/messages/ws?token=<compact-jwt>
 ```
 
 The browser opens this URL as given. The JWT is the authentication credential
 for this WebSocket handshake. A Gateway login cookie is not required on this
 route.
+
+The path names the public collaboration message channel and keeps the explicit
+`ws` transport suffix. WebSocket Upgrade and a future SSE stream both appear as
+HTTP `GET` operations in OpenAPI, so the suffix keeps Swagger, Gateway routing,
+and generated clients unambiguous. A future SSE sibling would use
+`/openapi/v1/collaboration/messages/sse`; session message history remains under
+`/openapi/v1/collaboration/sessions/{session_id}/messages`.
 
 After Upgrade, the endpoint exposes the same Workbench protocol and feature set
 as `/ws`. Its only differences are its authentication source and immutable
@@ -389,7 +396,7 @@ application service.
 
 ### `bcs-ws`
 
-Own `GET /openapi/v1/collaboration/group/ws`, query extraction, pre-Upgrade
+Own `GET /openapi/v1/collaboration/messages/ws`, query extraction, pre-Upgrade
 error mapping, the `SessionBound` authentication context, and scope
 enforcement around the shared Workbench dispatcher. It calls only application
 services.
@@ -417,7 +424,7 @@ The two routes have intentionally different Gateway security requirements:
 POST /openapi/v1/collaboration/sessions/{sid}/token
     authenticated Gateway Human required
 
-GET /openapi/v1/collaboration/group/ws?token=...
+GET /openapi/v1/collaboration/messages/ws?token=...
     anonymous at Gateway; authenticated by the BCN session JWT
 ```
 
