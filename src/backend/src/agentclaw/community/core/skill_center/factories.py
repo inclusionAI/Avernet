@@ -153,6 +153,7 @@ class SkillServiceFactory:
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
+            device_owner_id=entity_id,
         )
 
 

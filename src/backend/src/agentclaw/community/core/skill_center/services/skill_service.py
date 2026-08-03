@@ -82,6 +82,7 @@ class SkillService:
         local_skill_path_adapter: "Callable[[str], str] | None" = None,
         local_skill_locator_adapter: "Callable[[str], str] | None" = None,
         runtime_uses_pool_paths: bool = False,
+        device_owner_id: str | None = None,
     ):
         """
         Args:
@@ -113,6 +114,7 @@ class SkillService:
         # Device filesystem factory — supplied per-request by
         # SkillServiceFactory.create() (uses DeviceFilesystemDispatcher.for_bot).
         self._device_fs_factory = device_fs_factory
+        self._device_owner_id = device_owner_id
 
         # Adapter applied to a local-skill path right before it is handed to the
         # device filesystem. Identity for arca/baas/local (they pass a host path
@@ -2288,9 +2290,16 @@ class SkillService:
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")
 
+        git_path = skill.get('git_path') or ''
+        published_center_uuid = (
+            skill.get("skill_uuid")
+            if git_path.startswith("center://")
+            and str(skill.get("status") or "").upper() == "PUBLISHED"
+            else None
+        )
         references = self._skill_repo.list_skill_set_references(
             skill_id,
-            skill_uuid=skill.get("skill_uuid"),
+            skill_uuid=published_center_uuid,
         )
         if references:
             raise SkillReferencedBySkillSetError(
@@ -2299,9 +2308,9 @@ class SkillService:
 
         # 获取技能名称和路径
         skill_name = skill.get('name')
-        git_path = skill.get('git_path') or ''
         bolt_id = skill.get('bolt_id')
         skill_user_id = skill.get('user_id') or user_id
+        device_owner_id = self._device_owner_id or skill_user_id
         is_shared_source = (
             not skill.get('user_id')
             and git_path.startswith(("git://", "center://"))
@@ -2313,7 +2322,7 @@ class SkillService:
         device_fs = None
         if not is_shared_source:
             try:
-                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
+                device_fs = self._device_fs_factory(bolt_id, device_owner_id)
             except Exception as e:
                 if self.runtime_uses_pool_paths:
                     raise SkillDeleteConsistencyError(
