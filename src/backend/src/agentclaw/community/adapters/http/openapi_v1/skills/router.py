@@ -35,6 +35,9 @@ from agentclaw.community.api.local_skill_query_service import (
 from agentclaw.community.api.local_skill_upload_service import (
     LocalSkillUploadServiceProtocol,
 )
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
 from agentclaw.community.core.skill_center.errors import LocalSkillInvalidPackageError
 from agentclaw.community.di import Injected
 
@@ -172,20 +175,50 @@ async def upload_skill(
     )
 
 
-@router.post("/{skill_id}/activate", response_model=Envelope[SkillState])
+@router.post(
+    "/{skill_id}/activate",
+    response_model=Envelope[SkillState],
+)
+@envelope_errors
 async def activate_skill(
-    skill_id: str, principal: PrincipalDep
+    skill_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    state_service: LocalSkillStateServiceProtocol = Injected(
+        LocalSkillStateServiceProtocol
+    ),
 ) -> Envelope[SkillState]:
-    """Set one Local Skill's desired state to Active."""
-    raise NotImplementedError
+    """Activate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    result = await state_service.set_local_skill_active(
+        skill_id=skill_id, actor_id=caller_owner_id(principal), active=True
+    )
+    return envelope(
+        SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
+        request,
+    )
 
 
-@router.post("/{skill_id}/deactivate", response_model=Envelope[SkillState])
+@router.post(
+    "/{skill_id}/deactivate",
+    response_model=Envelope[SkillState],
+)
+@envelope_errors
 async def deactivate_skill(
-    skill_id: str, principal: PrincipalDep
+    skill_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    state_service: LocalSkillStateServiceProtocol = Injected(
+        LocalSkillStateServiceProtocol
+    ),
 ) -> Envelope[SkillState]:
-    """Set one Local Skill's desired state to Inactive."""
-    raise NotImplementedError
+    """Deactivate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    result = await state_service.set_local_skill_active(
+        skill_id=skill_id, actor_id=caller_owner_id(principal), active=False
+    )
+    return envelope(
+        SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
+        request,
+    )
 
 
 @router.delete("/{skill_id}", response_model=Envelope[Deleted])

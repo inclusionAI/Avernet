@@ -46,14 +46,24 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import LocalSkillUploadServiceProtocol
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
 from agentclaw.community.core.services.engine_config import EngineConfigService
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
-from agentclaw.community.core.skill_center.services.local_skill_upload_service import LocalSkillUploadService
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
@@ -63,6 +73,7 @@ _PAIRS = [
     (EngineConnectionServiceProtocol, EngineConnectionService),
     (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
     (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
+    (LocalSkillStateServiceProtocol, LocalSkillStateService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]
