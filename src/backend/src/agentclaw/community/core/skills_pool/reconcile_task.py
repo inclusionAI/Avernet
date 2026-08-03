@@ -29,7 +29,6 @@ from agentclaw.community.core.skills_pool.quarantine import (
     QUARANTINE_RETENTION,
     SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
     QuarantineRepositoryProtocol,
-    QuarantineStatus,
     SkillsPoolQuarantineCleanupTaskHandler,
 )
 from agentclaw.community.core.skills_pool.reconcile_service import (
@@ -155,12 +154,6 @@ class SkillsPoolReconcileTaskHandler:
             generation = claim.state.migration_generation
             if generation is None:
                 return Fail("pool-active layout has no migration generation")
-            quarantine = self._quarantines.get_quarantine(scope, generation)
-            if (
-                quarantine is not None
-                and quarantine.status is QuarantineStatus.CLEANED
-            ):
-                return Complete()
             if observed_at is None:
                 # Tasks written by the previous Backend cannot prove a
                 # post-activation runtime observation. They remain safe to

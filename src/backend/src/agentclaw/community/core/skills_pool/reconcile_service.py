@@ -881,15 +881,32 @@ class SkillsPoolReconcileService:
         engine: str,
         initial_probe: RuntimeLayoutProbeResult,
     ) -> SkillsPoolReconcileResult:
-        """Rewrite only current managed mappings, then prove the final layout.
+        """Ask the Engine to repair only its trusted retired repo bridge.
 
-        This is deliberately the same idempotent publish/verify pair used by
-        desktop activation recovery.  It neither revives absent mappings nor
-        removes unknown filesystem entries: a second runtime probe remains the
-        fail-closed authority for both cases.
+        Backend cannot tell whether ``active_managed_entry_invalid`` represents
+        the historical AICoding repo bridge or an unsafe Legacy/dangling entry.
+        The Engine activation operation owns that distinction and rejects every
+        other invalid form before changing active mappings.
         """
 
+        generation = state.migration_generation
+        if generation is None or state.preparation_id is None:
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                evidence={
+                    "reason": "active_runtime_identity_mismatch",
+                    "initial_probe": initial_probe.evidence,
+                },
+                retryable=False,
+            )
         try:
+            registered_local_names = [
+                local_skill_name(asset)
+                for asset in self._skills.list_bot_local_assets(
+                    env=scope.env,
+                    bot_id=scope.bot_id,
+                )
+            ]
             mappings = build_logical_skill_mappings(
                 self._skills.list_bot_active_assets(
                     env=scope.env,
@@ -904,33 +921,25 @@ class SkillsPoolReconcileService:
                 evidence={"reason": str(error)},
                 retryable=False,
             )
-        if not await self._runtime.publish_mappings(
+        repair = await self._runtime.cutover(
             bot_id=bot_id,
             user_id=user_id,
+            migration_generation=generation,
+            preparation_id=state.preparation_id,
+            registered_local_names=registered_local_names,
             mappings=mappings,
-        ):
-            return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.MAPPING_FAILED,
-                evidence={
-                    "reason": "active_aicoding_bridge_mapping_publish_failed",
-                    "mapping_count": len(mappings),
-                    "initial_probe": initial_probe.evidence,
-                },
-                retryable=True,
+        )
+        if not repair.committed:
+            outcome, _, retryable = self._post_commit_cutover_failure_profile(
+                repair.status
             )
-        if not await self._runtime.verify_mappings(
-            bot_id=bot_id,
-            user_id=user_id,
-            mappings=mappings,
-        ):
             return SkillsPoolReconcileResult(
-                SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                outcome,
                 evidence={
-                    "reason": "active_aicoding_bridge_mapping_verify_failed",
-                    "mapping_count": len(mappings),
                     "initial_probe": initial_probe.evidence,
+                    "engine_repair": repair.to_dict(),
                 },
-                retryable=True,
+                retryable=retryable,
             )
         refreshed_probe = await self._runtime.probe(
             bot_id=bot_id,
@@ -954,8 +963,6 @@ class SkillsPoolReconcileService:
             or refreshed_probe.preparation_id is None
             or refreshed_probe.preparation_id != state.preparation_id
             or refreshed_probe.layout_contract_version != state.layout_contract_version
-            or refreshed_probe.evidence.get("implementation_engine") != "aicoding"
-            or refreshed_probe.evidence.get("physical_layout_engine") != "aicoding"
         ):
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.INVALID,
@@ -973,6 +980,7 @@ class SkillsPoolReconcileService:
                 **refreshed_probe.evidence,
                 "active_aicoding_bridge_reconciled": True,
                 "reconciled_mapping_count": len(mappings),
+                "engine_repair": repair.to_dict(),
             },
         )
 
