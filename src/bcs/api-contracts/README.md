@@ -37,7 +37,7 @@ Session-bound WebSocket access adds two operations to that HTTP surface:
 - `POST /openapi/v1/collaboration/sessions/{session_id}/token` issues the
   short-lived connection credential after normal user authentication and
   session authorization.
-- `GET /openapi/v1/collaboration/group/ws?token=...` describes the WebSocket
+- `GET /openapi/v1/collaboration/messages/ws?token=...` describes the WebSocket
   HTTP Upgrade handshake. The OpenAPI contract intentionally covers only the
   connection credential, authentication failures, and `101` upgrade response;
   WebSocket message envelopes remain governed by the existing protocol tests.

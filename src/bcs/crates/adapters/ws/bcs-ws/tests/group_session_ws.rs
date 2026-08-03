@@ -18,7 +18,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
-const PATH: &str = "/openapi/v1/collaboration/group/ws";
+const PATH: &str = "/openapi/v1/collaboration/messages/ws";
 
 #[derive(Clone, Copy)]
 enum VerifyMode {

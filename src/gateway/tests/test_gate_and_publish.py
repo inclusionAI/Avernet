@@ -86,6 +86,6 @@ def test_checked_in_bcn_artifact_is_a_34_operation_openapi_document() -> None:
         "post"
         in document["paths"]["/openapi/v1/collaboration/sessions/{session_id}/token"]
     )
-    websocket = document["paths"]["/openapi/v1/collaboration/group/ws"]["get"]
+    websocket = document["paths"]["/openapi/v1/collaboration/messages/ws"]["get"]
     assert websocket["x-avernet-protocol"] == "websocket"
     assert websocket["x-avernet-security"] == {}

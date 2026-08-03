@@ -250,7 +250,7 @@ that baseline after PR #697 merged into `dev`.
 
   ```text
   POST /openapi/v1/collaboration/sessions/{session_id}/token
-  GET  /openapi/v1/collaboration/group/ws
+  GET  /openapi/v1/collaboration/messages/ws
   ```
 
   Assert 34 total operations. The POST must require a Gateway User, have no
@@ -359,7 +359,7 @@ that baseline after PR #697 merged into `dev`.
 
 - [ ] **Step 3: Implement the focused Router**
 
-  Add `GET /openapi/v1/collaboration/group/ws`. Extract the query token before
+  Add `GET /openapi/v1/collaboration/messages/ws`. Extract the query token before
   Upgrade, call only `GroupSessionConnectionService::verify_token`, map the
   approved 401/503 classes without exposing credential data, create
   `WorkbenchConnectionAuth::SessionBound`, and call the existing
@@ -393,7 +393,7 @@ that baseline after PR #697 merged into `dev`.
 
   Require `collaboration.protocols == [http, websocket]`; the token POST keeps
   the general required User and signed `aud=bcs` Principal; exact rule
-  `GET /openapi/v1/collaboration/group/ws` resolves to `{}`; the WebSocket
+  `GET /openapi/v1/collaboration/messages/ws` resolves to `{}`; the WebSocket
   relay preserves path and query byte-for-byte and sends no forged identity;
   every `token` query value is redacted from normal and error logs.
 
@@ -409,7 +409,7 @@ that baseline after PR #697 merged into `dev`.
   method/path security exception:
 
   ```yaml
-  "GET /openapi/v1/collaboration/group/ws": {}
+  "GET /openapi/v1/collaboration/messages/ws": {}
   ```
 
   Do not add rewrite logic or a handwritten Gateway operation. Reuse the

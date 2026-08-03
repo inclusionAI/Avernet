@@ -39,7 +39,7 @@ EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/completion"),
     ("get", "/openapi/v1/collaboration/sessions/{session_id}/messages"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/token"),
-    ("get", "/openapi/v1/collaboration/group/ws"),
+    ("get", "/openapi/v1/collaboration/messages/ws"),
     ("post", "/openapi/v1/collaboration/sessions/{session_id}/participants"),
     ("patch", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
     ("delete", "/openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}"),
@@ -86,7 +86,7 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
             expected = (
                 {}
                 if (method.lower(), path)
-                == ("get", "/openapi/v1/collaboration/group/ws")
+                == ("get", "/openapi/v1/collaboration/messages/ws")
                 else {"user": "required"}
             )
             assert operation["x-avernet-security"] == expected, (
@@ -97,6 +97,7 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
 def test_contract_excludes_unapproved_runtime_and_routing_surfaces() -> None:
     actual = _actual_operations()
 
+    assert ("get", "/openapi/v1/collaboration/group/ws") not in actual
     assert (
         "post",
         "/openapi/v1/collaboration/sessions/{session_id}/messages",

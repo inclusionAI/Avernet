@@ -37,7 +37,7 @@ def test_shipped_config_exempts_only_the_bcn_session_websocket_get() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
 
-    assert rs.resolve("GET", "/openapi/v1/collaboration/group/ws") == {}
+    assert rs.resolve("GET", "/openapi/v1/collaboration/messages/ws") == {}
 
     token_post = rs.resolve(
         "POST", "/openapi/v1/collaboration/sessions/session-1/token"

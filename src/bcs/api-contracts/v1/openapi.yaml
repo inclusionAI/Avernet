@@ -61,7 +61,7 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
-  /openapi/v1/collaboration/group/ws:
+  /openapi/v1/collaboration/messages/ws:
     $ref: ./openapi/connections.yaml#/GroupSessionWebSocketPath
 components:
   schemas:

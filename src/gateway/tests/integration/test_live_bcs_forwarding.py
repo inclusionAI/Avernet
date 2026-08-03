@@ -30,7 +30,7 @@ pytestmark = pytest.mark.integration
 
 DEVELOPMENT_SIGNING_KEY = "avernet-dev-signing-key-NOT-FOR-PROD"
 LIVE_USER_ID = "gatewayliveuser"
-_SESSION_WEBSOCKET_PATH = "/openapi/v1/collaboration/group/ws"
+_SESSION_WEBSOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
 _SHIPPED_CONFIG = Path(__file__).resolve().parents[2] / "configs" / "application.yaml"
 
 

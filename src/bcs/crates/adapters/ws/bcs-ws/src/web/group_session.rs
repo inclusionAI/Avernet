@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use super::{WebDispatchState, WorkbenchConnectionAuth, handle_client_connection};
 
-pub const GROUP_SESSION_WS_ENDPOINT: &str = "/openapi/v1/collaboration/group/ws";
+pub const GROUP_SESSION_WS_ENDPOINT: &str = "/openapi/v1/collaboration/messages/ws";
 
 #[derive(Clone)]
 struct GroupSessionWebSocketState {

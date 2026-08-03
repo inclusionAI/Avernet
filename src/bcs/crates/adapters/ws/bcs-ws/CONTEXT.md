@@ -8,7 +8,7 @@
 - Session-bound Workbench connect delivery that delegates current Session
   authorization to the V1 group-session connection service; legacy
   user-bound `/ws` connect remains on the Workbench session service.
-- Focused `/openapi/v1/collaboration/group/ws` Upgrade boundary that verifies
+- Focused `/openapi/v1/collaboration/messages/ws` Upgrade boundary that verifies
   the query credential before switching protocols and binds its immutable
   tenant/User/Group/Session scope into the existing Workbench connection loop.
 - Shared connection-state helpers under `src/shared/`.

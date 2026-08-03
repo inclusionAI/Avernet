@@ -13,7 +13,7 @@ from scripts.validate_openapi_contract import (  # noqa: E402
 
 
 TOKEN_PATH = "/openapi/v1/collaboration/sessions/{session_id}/token"
-WEBSOCKET_PATH = "/openapi/v1/collaboration/group/ws"
+WEBSOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
 
 
 def _contract() -> dict:
