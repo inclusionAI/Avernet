@@ -194,10 +194,12 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                 }
                 None
             }
-            CallerContext::Public | CallerContext::Integration(_) | CallerContext::Admin(_) => {
-                // Public/integration/admin callers: allow access without ownership verification
-                None
+            CallerContext::Public => {
+                return Err(GroupUseCaseError::Unauthorized(
+                    "valid Human identity or Bot token is required for session history".to_string(),
+                ));
             }
+            CallerContext::Integration(_) | CallerContext::Admin(_) => None,
         };
 
         backfill_bot_names(self.registry.as_ref(), &mut group).await;
@@ -340,7 +342,10 @@ impl BcsGroupMessageHistory {
             }
         }
 
-        self.verify_human_group_access(group, caller).await
+        Err(GroupUseCaseError::Forbidden(format!(
+            "current Human '{}' is not a session participant and owns no Bot in session '{}'",
+            caller.actor_id, group.id
+        )))
     }
 
     async fn verify_view_actor_ownership(

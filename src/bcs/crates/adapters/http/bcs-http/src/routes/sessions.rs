@@ -1807,14 +1807,10 @@ pub async fn get_session_messages(
         }
     };
 
-    // 3. Resolve caller context (only when view_bot_id is provided, matching old behavior)
-    let caller = if query.view_bot_id.is_some() {
-        match resolve_session_caller(&state, &group, &headers, &uri).await {
-            Ok(c) => c,
-            Err(response) => return response,
-        }
-    } else {
-        bcs_service_api::CallerContext::Public
+    // 3. Resolve caller context before any session history read.
+    let caller = match resolve_session_caller(&state, &group, &headers, &uri).await {
+        Ok(c) => c,
+        Err(response) => return response,
     };
 
     let limit = query.limit.unwrap_or(u64::MAX);
@@ -1866,27 +1862,34 @@ async fn resolve_session_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<bcs_service_api::CallerContext, Response> {
-    // Try to extract a human caller from headers
-    if let Some(identity) = state.user_identity.extract(headers, uri).await {
-        if let Some(staff_no) = &identity.staff_no {
-            return Ok(bcs_service_api::CallerContext::Human(
-                bcs_service_api::HumanActor {
-                    actor_id: format!("human_{}", staff_no),
-                    staff_no: staff_no.clone(),
-                },
-            ));
-        }
-    }
-
-    // Try to extract a bot caller from token
+    // Try to extract a bot caller from token first so bearer Bot tokens are not
+    // accidentally treated as an ambient Human identity in local/static auth setups.
     if let Some(bot_id) = state.bot_uuid_from_headers(headers).await {
         return Ok(bcs_service_api::CallerContext::Bot(
             bcs_service_api::BotActor { bot_uuid: bot_id },
         ));
     }
 
-    // Default: public caller — allow through but with no ownership verification
-    Ok(bcs_service_api::CallerContext::Public)
+    // Try to extract a human caller from headers.
+    if let Some(identity) = state.user_identity.extract(headers, uri).await {
+        if let Some(staff_no) = identity.staff_no.filter(|staff_no| !staff_no.is_empty()) {
+            return Ok(bcs_service_api::CallerContext::Human(
+                bcs_service_api::HumanActor {
+                    actor_id: format!("human_{}", staff_no),
+                    staff_no,
+                },
+            ));
+        }
+    }
+
+    Err((
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({
+            "error": "unauthorized",
+            "message": "valid Human identity or Bot token is required for this session history request"
+        })),
+    )
+        .into_response())
 }
 
 fn session_history_error_to_response(
