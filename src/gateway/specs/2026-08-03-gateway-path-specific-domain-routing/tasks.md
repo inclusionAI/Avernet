@@ -39,7 +39,7 @@
         plan did not list; re-pointed at `rule.pattern.segments`.
 - **Depends on:** Task 1
 
-## Task 3: Give `Domain` a pattern, and validate it at boot
+## [x] Task 3: Give `Domain` a pattern, and validate it at boot
 
 - **Goal:** A domain declares `match:` (or inherits `{base_path}/{name}/**`), and
   a pattern that would make the gateway an open or ambiguous proxy is refused at
@@ -48,21 +48,21 @@
   - `src/gateway/src/gateway/community/core/forwarding/_domains.py`
   - `src/gateway/tests/test_domain_map.py`
 - **Done when:**
-  - [ ] `Domain.pattern: PathPattern` and `Domain.mount_prefix` exist; `match` is
+  - [x] `Domain.pattern: PathPattern` and `Domain.mount_prefix` exist; `match` is
         added to `_DOMAIN_KEYS`.
-  - [ ] A domain with no `match` gets `{base_path}/{name}/**` — every shipped
+  - [x] A domain with no `match` gets `{base_path}/{name}/**` — every shipped
         HTTP domain keeps its current address.
-  - [ ] Accepted shape is `<literal segments>/**` only. Refused, at boot, naming
+  - [x] Accepted shape is `<literal segments>/**` only. Refused, at boot, naming
         the domain: `/**`, `/openapi/**`, `/openapi/v1/**` (over-broad);
         `/openapi/v1/{x}/**` (a parameter cannot pin a prefix);
         `/openapi/v1/bots` (missing `/**`).
-  - [ ] Two domains declaring the same pattern with overlapping protocols are
+  - [x] Two domains declaring the same pattern with overlapping protocols are
         refused at boot.
-  - [ ] `_parse_rewrite`'s anchor is `pattern.literal_prefix`; its existing
+  - [x] `_parse_rewrite`'s anchor is `pattern.literal_prefix`; its existing
         `"can never match"` and segment-boundary checks still fire.
 - **Depends on:** Task 1
 
-## Task 4: Resolve on (pattern, plane) — match first, then most specific
+## [x] Task 4: Resolve on (pattern, plane) — match first, then most specific
 
 - **Goal:** Replace leading-segment lookup with plane-filtered, specificity-ranked
   resolution, and hand the adapters two named entry points so no protocol
@@ -72,18 +72,18 @@
   - `src/gateway/src/gateway/community/adapters/web/_forward.py`
   - `src/gateway/tests/test_domain_map.py`
 - **Done when:**
-  - [ ] `domain_for(path, protocol)` filters candidates by plane **before**
+  - [x] `domain_for(path, protocol)` filters candidates by plane **before**
         ranking, and returns the most specific match or `None`.
-  - [ ] `http_domain_for` / `websocket_domain_for` wrap it; `resolve(path)` is
+  - [x] `http_domain_for` / `websocket_domain_for` wrap it; `resolve(path)` is
         gone (a default plane would silently pick one).
-  - [ ] `_forward.py` calls `http_domain_for` and drops its `serves_http` check.
-  - [ ] A test proves an HTTP request under a websocket-only prefix resolves to
+  - [x] `_forward.py` calls `http_domain_for` and drops its `serves_http` check.
+  - [x] A test proves an HTTP request under a websocket-only prefix resolves to
         the **broader HTTP domain**, not to `None` — the trap this design exists
         to avoid.
-  - [ ] A test proves resolution does **not** retry after a plane mismatch.
+  - [x] A test proves resolution does **not** retry after a plane mismatch.
 - **Depends on:** Task 3
 
-## Task 5: Mount socket routes and the raw-path guard from the pattern
+## [x] Task 5: Mount socket routes and the raw-path guard from the pattern
 
 - **Goal:** The socket entrypoint derives its mount paths and its
   encoded-prefix guard from the declared pattern rather than from `base_path +
@@ -93,17 +93,17 @@
   - `src/gateway/src/gateway/community/adapters/web/app.py`
   - `src/gateway/src/gateway/community/core/forwarding/_domains.py`
 - **Done when:**
-  - [ ] `relay_routes(prefix)` takes the prefix; `websocket_domains()` returns
+  - [x] `relay_routes(prefix)` takes the prefix; `websocket_domains()` returns
         the domains themselves.
-  - [ ] Both mount forms are still produced together (bare prefix **and**
+  - [x] Both mount forms are still produced together (bare prefix **and**
         `/{full_path:path}`) — a handshake to exactly the prefix must still be
         served.
-  - [ ] `_required_raw_prefix` returns `rewrite.from_prefix`, else
+  - [x] `_required_raw_prefix` returns `rewrite.from_prefix`, else
         `domain.mount_prefix`. **Guard logic unchanged** — it is what defeats a
         percent-encoded routing prefix.
-  - [ ] `forward_websocket` calls `websocket_domain_for` and drops its
+  - [x] `forward_websocket` calls `websocket_domain_for` and drops its
         `serves_websocket` check.
-  - [ ] Docstrings naming `/openapi/v1/engine` in worked examples are rewritten
+  - [x] Docstrings naming `/openapi/v1/engine` in worked examples are rewritten
         against the new prefix.
 - **Depends on:** Task 4
 

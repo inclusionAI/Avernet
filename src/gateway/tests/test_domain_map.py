@@ -17,6 +17,11 @@ _VARS = {
 }
 
 
+def _server(domain: object) -> Server | None:
+    """The resolved domain's upstream, or ``None`` if nothing resolved."""
+    return getattr(domain, "server", None)
+
+
 def _map() -> DomainMap:
     return DomainMap.from_config(
         {
@@ -34,30 +39,30 @@ def _map() -> DomainMap:
 
 
 def test_resolves_configured_domain() -> None:
-    server = _map().resolve("/openapi/v1/bots/123/restart")
+    server = _server(_map().http_domain_for("/openapi/v1/bots/123/restart"))
     assert server is not None
     assert server.name == "backend"
     assert server.base_url == "http://backend:8080"
 
 
 def test_domain_at_root_resolves() -> None:
-    assert _map().resolve("/openapi/v1/bots") is not None
+    assert _map().http_domain_for("/openapi/v1/bots") is not None
 
 
 def test_unknown_domain_returns_none() -> None:
-    assert _map().resolve("/openapi/v1/unknown/x") is None
+    assert _map().http_domain_for("/openapi/v1/unknown/x") is None
 
 
 def test_path_outside_version_base_returns_none() -> None:
-    assert _map().resolve("/api/bots/123") is None
+    assert _map().http_domain_for("/api/bots/123") is None
 
 
 def test_bare_version_base_has_no_domain() -> None:
-    assert _map().resolve("/openapi/v1") is None
+    assert _map().http_domain_for("/openapi/v1") is None
 
 
 def test_schema_source_parsed() -> None:
-    domain = _map().domain_for("/openapi/v1/bots/1")
+    domain = _map().http_domain_for("/openapi/v1/bots/1")
     assert domain is not None
     assert domain.schema.source == "file"
     assert domain.schema.location == "schemas/bots.openapi.json"
@@ -67,7 +72,7 @@ def test_schema_source_parsed() -> None:
 def test_shipped_config_loads() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
-    assert dm.domain_for("/openapi/v1/bots") is not None
+    assert dm.http_domain_for("/openapi/v1/bots") is not None
 
 
 # ── protocols ────────────────────────────────────────────────────────────────
@@ -96,27 +101,27 @@ def _protocol_map() -> DomainMap:
 
 def test_protocols_default_to_http_only() -> None:
     """Every domain predating the declaration keeps behaving identically."""
-    bots = _protocol_map().domain_for("/openapi/v1/bots/x")
+    bots = _protocol_map().http_domain_for("/openapi/v1/bots/x")
     assert bots is not None
     assert bots.serves_http
     assert not bots.serves_websocket
 
 
 def test_a_socket_domain_does_not_serve_http() -> None:
-    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    engine = _protocol_map().websocket_domain_for("/openapi/v1/engine/t/ws")
     assert engine is not None
     assert engine.serves_websocket
     assert not engine.serves_http
 
 
 def test_a_domain_may_declare_both_planes() -> None:
-    both = _protocol_map().domain_for("/openapi/v1/both/x")
+    both = _protocol_map().http_domain_for("/openapi/v1/both/x")
     assert both is not None
     assert both.serves_http and both.serves_websocket
 
 
 def test_websocket_domains_lists_only_socket_domains() -> None:
-    assert set(_protocol_map().websocket_domains()) == {"engine", "both"}
+    assert {d.name for d in _protocol_map().websocket_domains()} == {"engine", "both"}
 
 
 def test_unknown_protocol_is_rejected() -> None:
@@ -134,14 +139,14 @@ def test_unknown_protocol_is_rejected() -> None:
 
 
 def test_no_rewrite_means_the_path_travels_verbatim() -> None:
-    bots = _protocol_map().domain_for("/openapi/v1/bots/x")
+    bots = _protocol_map().http_domain_for("/openapi/v1/bots/x")
     assert bots is not None
     assert bots.rewrite is None
     assert bots.upstream_path("/openapi/v1/bots/a%2Fb") == "/openapi/v1/bots/a%2Fb"
 
 
 def test_a_declared_rewrite_substitutes_only_the_prefix() -> None:
-    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    engine = _protocol_map().websocket_domain_for("/openapi/v1/engine/t/ws")
     assert engine is not None
     assert (
         engine.upstream_path("/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
@@ -150,7 +155,7 @@ def test_a_declared_rewrite_substitutes_only_the_prefix() -> None:
 
 
 def test_a_rewrite_never_re_encodes_the_tail() -> None:
-    engine = _protocol_map().domain_for("/openapi/v1/engine/t/ws")
+    engine = _protocol_map().websocket_domain_for("/openapi/v1/engine/t/ws")
     assert engine is not None
     assert (
         engine.upstream_path("/openapi/v1/engine/ARCA%5Fx%400%3A2/api/x%20y")
@@ -197,7 +202,7 @@ def test_a_rewrite_anchored_off_the_domain_is_rejected(from_prefix: str) -> None
 )
 def test_a_rewrite_on_the_domain_boundary_is_accepted(from_prefix: str) -> None:
     """The domain's own prefix, and any path beneath it, can both fire."""
-    engine = _rewrite_map(from_prefix).domain_for("/openapi/v1/engine/t")
+    engine = _rewrite_map(from_prefix).http_domain_for("/openapi/v1/engine/t")
     assert engine is not None
     assert engine.rewrite is not None
 
@@ -209,7 +214,9 @@ def test_a_rewrite_matches_on_segment_boundaries_not_characters() -> None:
     *different* segment, but a character-wise prefix match would rewrite it to
     `/proxypass0/ws` — a path on the upstream nobody asked for.
     """
-    engine = _rewrite_map("/openapi/v1/engine/v2").domain_for("/openapi/v1/engine/v20")
+    engine = _rewrite_map("/openapi/v1/engine/v2").http_domain_for(
+        "/openapi/v1/engine/v20"
+    )
     assert engine is not None
     assert engine.upstream_path("/openapi/v1/engine/v20/ws") == (
         "/openapi/v1/engine/v20/ws"
@@ -305,7 +312,7 @@ def test_a_rewrite_target_of_root_strips_the_prefix() -> None:
         },
         variables={},
     )
-    engine = dm.domain_for("/openapi/v1/engine/t")
+    engine = dm.http_domain_for("/openapi/v1/engine/t")
     assert engine is not None
     assert engine.upstream_path("/openapi/v1/engine/t/ws") == "/t/ws"
 
@@ -474,7 +481,7 @@ def test_an_http_only_domain_is_still_reachable_as_a_socket_origin() -> None:
         },
         variables={},
     )
-    bots = dm.domain_for("/openapi/v1/bots")
+    bots = dm.http_domain_for("/openapi/v1/bots")
     assert bots is not None
     assert not bots.serves_websocket
     assert bots.server.websocket_base_url == "wss://backend.sample.com"
@@ -558,10 +565,10 @@ def test_from_config_with_variables_resolves_all() -> None:
         },
         variables=_VARS,
     )
-    bots = dm.resolve("/openapi/v1/bots")
+    bots = _server(dm.http_domain_for("/openapi/v1/bots"))
     assert bots is not None
     assert bots.base_url == "http://backend:8080"
-    runs = dm.resolve("/openapi/v1/runs")
+    runs = _server(dm.http_domain_for("/openapi/v1/runs"))
     assert runs is not None
     assert runs.base_url == "http://baas:9090"
 
@@ -594,21 +601,21 @@ def test_from_yaml_loads_upstreams(tmp_path) -> None:
         "        base_url: http://backend:8080\n"
     )
     dm = DomainMap.from_yaml(cfg, variables={})
-    assert dm.resolve("/openapi/v1/bots/123") is not None
+    assert dm.http_domain_for("/openapi/v1/bots/123") is not None
 
 
 def test_from_yaml_non_dict_root_uses_empty(tmp_path) -> None:
     cfg = tmp_path / "application.yaml"
     cfg.write_text("- just a list")
     dm = DomainMap.from_yaml(cfg, variables={})
-    assert dm.resolve("/openapi/v1/bots/123") is None
+    assert dm.http_domain_for("/openapi/v1/bots/123") is None
 
 
 def test_from_yaml_user_config_not_dict_uses_empty(tmp_path) -> None:
     cfg = tmp_path / "application.yaml"
     cfg.write_text("user_config: not-a-dict\n")
     dm = DomainMap.from_yaml(cfg, variables={})
-    assert dm.resolve("/openapi/v1/bots/123") is None
+    assert dm.http_domain_for("/openapi/v1/bots/123") is None
 
 
 # ── unknown configuration keys ───────────────────────────────────────────────
@@ -680,6 +687,196 @@ def test_every_key_the_shipped_config_uses_is_recognised() -> None:
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     domain_map = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
-    engine = domain_map.domain_for("/openapi/v1/engine/t/ws")
+    engine = domain_map.websocket_domain_for("/openapi/v1/engine/t/ws")
     assert engine is not None
     assert engine.serves_websocket and not engine.serves_http
+
+
+# ── path patterns: match first, then most specific ───────────────────────────
+
+
+def _pattern_map() -> DomainMap:
+    """The shipped shape: a socket prefix nested inside an HTTP domain."""
+    return DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {"server": "backend"},
+                "bots-messages-ws": {
+                    "match": "/openapi/v1/bots/messages/**",
+                    "server": "proxy",
+                    "protocols": ["websocket"],
+                    "rewrite": {
+                        "from": "/openapi/v1/bots/messages",
+                        "to": "/proxypass",
+                    },
+                },
+            },
+            "servers": {
+                "backend": {"base_url": "http://backend:8080"},
+                "proxy": {"base_url": "https://proxy:20003"},
+            },
+        },
+        variables={},
+    )
+
+
+def test_a_domain_without_a_match_claims_its_own_name() -> None:
+    """The implicit pattern is exactly the leading-segment routing it replaces."""
+    bots = _map().domains["bots"]
+    assert bots.pattern.segments == ("openapi", "v1", "bots", "**")
+    assert bots.mount_prefix == "/openapi/v1/bots"
+
+
+def test_the_most_specific_matching_pattern_wins() -> None:
+    domain = _pattern_map().websocket_domain_for("/openapi/v1/bots/messages/T/api/ws")
+    assert domain is not None
+    assert domain.name == "bots-messages-ws"
+
+
+def test_an_http_request_under_a_socket_prefix_reaches_the_broader_domain() -> None:
+    """The trap this design exists to avoid.
+
+    ``messages`` is reserved for a future *HTTP* endpoint. Were the plane checked
+    after ranking rather than before, the socket domain would win the path, fail
+    the check, and the endpoint would be unreachable the day it is added — the
+    prefix would have eaten exactly the thing it was reserved for.
+    """
+    domain = _pattern_map().http_domain_for("/openapi/v1/bots/messages/some-bot")
+    assert domain is not None
+    assert domain.name == "bots"
+    assert domain.server.name == "backend"
+
+
+def test_a_socket_prefix_is_not_relayed_outside_its_own_pattern() -> None:
+    """The narrower claim does not spill onto the rest of the parent prefix."""
+    assert _pattern_map().websocket_domain_for("/openapi/v1/bots/abc") is None
+
+
+def test_resolution_does_not_retry_after_a_plane_mismatch() -> None:
+    """A domain refusing the plane must not hand the request to another.
+
+    With no HTTP domain configured at all, an HTTP request under the socket
+    prefix has nowhere to fall — it resolves to ``None`` rather than being
+    served by the socket domain's upstream over the wrong plane.
+    """
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "bots-messages-ws": {
+                    "match": "/openapi/v1/bots/messages/**",
+                    "server": "proxy",
+                    "protocols": ["websocket"],
+                }
+            },
+            "servers": {"proxy": {"base_url": "https://proxy:20003"}},
+        },
+        variables={},
+    )
+    assert dm.http_domain_for("/openapi/v1/bots/messages/x") is None
+
+
+def test_a_pattern_serves_its_own_bare_prefix() -> None:
+    """`**` matches no remaining segments, so the prefix itself is claimed."""
+    domain = _pattern_map().websocket_domain_for("/openapi/v1/bots/messages")
+    assert domain is not None
+    assert domain.name == "bots-messages-ws"
+
+
+# ── refusing a pattern that would widen the gateway ──────────────────────────
+
+
+def _match_map(pattern: str, **extra: object) -> DomainMap:
+    return DomainMap.from_config(
+        {
+            "domains": {"x": {"match": pattern, "server": "s", **extra}},
+            "servers": {"s": {"base_url": "http://s"}},
+        },
+        variables={},
+    )
+
+
+@pytest.mark.parametrize("pattern", ["/**", "/openapi/**", "/openapi/v1/**"])
+def test_an_over_broad_pattern_is_refused_at_boot(pattern: str) -> None:
+    """Before patterns, an open proxy could not be typed; now it must be refused.
+
+    A domain used to *be* its leading segment, so an unknown segment resolved to
+    ``None`` and the caller denied. `match: /**` is an open proxy into that
+    domain's upstream, so the invariant is now enforced rather than structural.
+    """
+    with pytest.raises(ValueError, match="too broad"):
+        _match_map(pattern)
+
+
+@pytest.mark.parametrize(
+    "pattern", ["/openapi/v1/{tenant}/**", "/openapi/v1/**/bots/**"]
+)
+def test_a_pattern_that_pins_no_prefix_is_refused(pattern: str) -> None:
+    """A leading parameter matches every domain's traffic while looking specific,
+    and neither it nor an inner glob yields a prefix to mount a route on."""
+    with pytest.raises(ValueError, match="literal segments"):
+        _match_map(pattern)
+
+
+def test_a_pattern_must_declare_its_glob() -> None:
+    """Required rather than inferred: the width of the claim stays visible."""
+    with pytest.raises(ValueError, match=r"must end in"):
+        _match_map("/openapi/v1/bots")
+
+
+def test_two_domains_claiming_one_pattern_and_plane_are_refused() -> None:
+    with pytest.raises(ValueError, match="undefined"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "a": {"match": "/openapi/v1/z/**", "server": "s"},
+                    "b": {"match": "/openapi/v1/z/**", "server": "s"},
+                },
+                "servers": {"s": {"base_url": "http://s"}},
+            },
+            variables={},
+        )
+
+
+def test_one_pattern_may_be_declared_once_per_plane() -> None:
+    """Two deliberate per-plane declarations are the supported way to serve both.
+
+    This is what keeps the design honest: reserving a prefix for one plane never
+    forecloses the other, it only requires saying so.
+    """
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "z-http": {"match": "/openapi/v1/z/**", "server": "s"},
+                "z-ws": {
+                    "match": "/openapi/v1/z/**",
+                    "server": "s",
+                    "protocols": ["websocket"],
+                },
+            },
+            "servers": {"s": {"base_url": "http://s"}},
+        },
+        variables={},
+    )
+    http = dm.http_domain_for("/openapi/v1/z/x")
+    ws = dm.websocket_domain_for("/openapi/v1/z/x")
+    assert http is not None and http.name == "z-http"
+    assert ws is not None and ws.name == "z-ws"
+
+
+def test_the_rewrite_anchor_follows_the_declared_pattern() -> None:
+    """A nested domain's rewrite anchors at its own prefix, not at its name."""
+    domain = _pattern_map().websocket_domain_for("/openapi/v1/bots/messages/T/api/ws")
+    assert domain is not None
+    assert domain.rewrite is not None
+    assert domain.upstream_path("/openapi/v1/bots/messages/T/api/ws") == (
+        "/proxypass/T/api/ws"
+    )
+
+
+def test_a_rewrite_anchored_off_the_declared_pattern_is_refused() -> None:
+    """The anchor is the pattern's literal head — not `base_path` + the name."""
+    with pytest.raises(ValueError, match="can never match"):
+        _match_map(
+            "/openapi/v1/bots/messages/**",
+            rewrite={"from": "/openapi/v1/x", "to": "/proxypass"},
+        )

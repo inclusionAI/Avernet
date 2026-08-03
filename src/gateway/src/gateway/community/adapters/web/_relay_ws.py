@@ -50,22 +50,22 @@ from ._forward import _INBOUND_STRIP, _PRINCIPAL_HEADER, _bundle
 logger = get_logger("relay_ws")
 
 
-def relay_routes(base_path: str, domain: str) -> tuple[str, ...]:
+def relay_routes(prefix: str) -> tuple[str, ...]:
     """Every path a socket domain's entrypoint must be mounted on.
 
-    Built from configuration rather than written down, so adding a socket domain
-    is a config edit and this module never names one.
+    Takes the domain's declared prefix rather than deriving one from its name, so
+    a domain may sit anywhere its pattern claims — including beneath another
+    domain — and this module still never names one.
 
     **Two paths, not one.** Starlette compiles ``{full_path:path}`` with a
     mandatory separator in front of it, so mounting only the tail form leaves
-    the bare prefix unserved — a handshake to exactly ``/openapi/v1/engine``
-    is refused before it reaches the entrypoint. That is not hypothetical: a
-    domain whose upstream publishes its socket at the rewrite target's own root
-    is reached at precisely that prefix, and :meth:`PathRewrite.apply` has an
-    exact-prefix branch for it. Returned together so a caller cannot mount one
-    and forget the other.
+    the bare prefix unserved — a handshake to exactly
+    ``/openapi/v1/bots/messages`` is refused before it reaches the entrypoint.
+    That is not hypothetical: a domain whose upstream publishes its socket at the
+    rewrite target's own root is reached at precisely that prefix, and
+    :meth:`PathRewrite.apply` has an exact-prefix branch for it. Returned
+    together so a caller cannot mount one and forget the other.
     """
-    prefix = f"{base_path.rstrip('/')}/{domain}"
     return (prefix, f"{prefix}/{{full_path:path}}")
 
 
@@ -113,8 +113,8 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # plane does, so one request cannot be routed or authorised differently
     # depending on which entrypoint serves it.
     path = websocket.url.path
-    domain = state.domain_map.domain_for(path)
-    if domain is None or not domain.serves_websocket:
+    domain = state.domain_map.websocket_domain_for(path)
+    if domain is None:
         await _refuse(websocket, _CLOSE_NO_ROUTE, "no route for path")
         return
 
@@ -127,7 +127,7 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # something, or the request is authorised as one resource and dialled as
     # another — see _required_raw_prefix.
     raw_path = _raw_path(websocket)
-    if not _starts_at(raw_path, _required_raw_prefix(state.domain_map, domain)):
+    if not _starts_at(raw_path, _required_raw_prefix(domain)):
         await _refuse(websocket, _CLOSE_BAD_PATH, "routing prefix is encoded")
         return
 
@@ -203,7 +203,7 @@ def _has_dot_segment(path: str) -> bool:
     return any(segment in _DOT_SEGMENTS for segment in path.split("/"))
 
 
-def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
+def _required_raw_prefix(domain: Any) -> str:
     """The prefix the **raw** path must carry literally, for this domain.
 
     Routing and authentication run on the decoded path; the dial is built from
@@ -213,13 +213,17 @@ def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
 
     Two prefixes decide something, and the deeper one governs:
 
-    - the domain prefix, which chose the route and the authentication rule.
-      ``/openapi/v1/%65ngine/...`` decodes to the domain, so it resolves and
-      authenticates as it, while the raw path keeps ``%65ngine``.
+    - the domain's own prefix, which chose the route and the authentication rule.
+      ``/openapi/v1/bots/%6dessages/...`` decodes to the socket domain, so it
+      resolves and authenticates as it, while the raw path keeps ``%6dessages``
+      — and would dial the upstream outside the substituted prefix. Note this
+      prefix is now several segments deep and may nest inside another domain's,
+      so every segment of it has to be literal, not merely the first.
     - the rewrite's own ``from``, when one is declared — which may be *deeper*
       than the domain prefix, since a nested ``from`` is accepted. With
-      ``from: /openapi/v1/engine/v2``, a raw ``/openapi/v1/engine/%76%32/...``
-      clears the domain prefix but defeats the substitution.
+      ``from: /openapi/v1/bots/messages/v2``, a raw
+      ``/openapi/v1/bots/messages/%76%32/...`` clears the domain prefix but
+      defeats the substitution.
 
     In both cases the rewrite silently fails to fire and the upstream is dialled
     outside the prefix its credential check is scoped to. Requiring the rewrite's
@@ -232,7 +236,7 @@ def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
     """
     if domain.rewrite is not None:
         return str(domain.rewrite.from_prefix)
-    return f"{domain_map.base_path.rstrip('/')}/{domain.name}"
+    return str(domain.mount_prefix)
 
 
 def _starts_at(path: str, prefix: str) -> bool:

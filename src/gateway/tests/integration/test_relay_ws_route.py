@@ -169,8 +169,8 @@ def _build(
     # Mounted the way the composition root does it: one route per socket domain,
     # driven from config. With no engine domain configured, nothing is mounted
     # under that prefix at all — which is the behaviour under test.
-    for name in domain_map.websocket_domains():
-        for route in relay_routes(domain_map.base_path, name):
+    for socket_domain in domain_map.websocket_domains():
+        for route in relay_routes(socket_domain.mount_prefix):
             app.add_api_websocket_route(route, forward_websocket)
     # An always-present route so an unconfigured prefix is refused by the
     # endpoint rather than by Starlette's router, keeping the assertion about
@@ -478,7 +478,7 @@ def test_the_bare_domain_prefix_is_mounted_too() -> None:
 
 def test_relay_routes_returns_both_forms_together() -> None:
     """Returned as one tuple so a caller cannot mount one and forget the other."""
-    assert relay_routes("/openapi/v1", "engine") == (
+    assert relay_routes("/openapi/v1/engine") == (
         "/openapi/v1/engine",
         "/openapi/v1/engine/{full_path:path}",
     )
@@ -510,8 +510,8 @@ def _nested_rewrite_app(forwarder: _StubForwarder) -> FastAPI:
     app.state.principal_signer = _FixedSigner()
     app.state.ws_forwarder = forwarder
     app.state.domain_map = domain_map
-    for name in domain_map.websocket_domains():
-        for route in relay_routes(domain_map.base_path, name):
+    for socket_domain in domain_map.websocket_domains():
+        for route in relay_routes(socket_domain.mount_prefix):
             app.add_api_websocket_route(route, forward_websocket)
     return app
 
@@ -602,7 +602,7 @@ def test_an_http_domain_still_forwards_verbatim() -> None:
         },
         variables={},
     )
-    bots = domain_map.domain_for("/openapi/v1/bots/x")
+    bots = domain_map.http_domain_for("/openapi/v1/bots/x")
     assert bots is not None
     assert bots.serves_http and not bots.serves_websocket
     assert bots.upstream_path("/openapi/v1/bots/x") == "/openapi/v1/bots/x"

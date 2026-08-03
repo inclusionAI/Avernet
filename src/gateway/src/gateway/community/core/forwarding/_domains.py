@@ -1,10 +1,24 @@
 """Domain → upstream-server resolution (transport-agnostic).
 
-The gateway routes by **domain**: the leading path segment after the version
-base (e.g. ``bots`` in ``/openapi/v1/bots/...``) selects the target server. The
-map is loaded from the ``user_config.upstreams`` section in
-``application.yaml``; a request whose leading segment matches no configured
-domain resolves to ``None`` (the caller denies — never an open proxy).
+The gateway routes by **domain**, and a domain claims a *path pattern*: a run of
+literal segments under the version base, followed by ``**``. Resolution gathers
+every domain whose pattern matches the path **and** which answers the requesting
+plane, then takes the most specific of those — match first, rank second. A path
+no configured domain claims on that plane resolves to ``None`` (the caller
+denies — never an open proxy).
+
+The pattern usually goes unwritten: a domain that declares no ``match`` claims
+``{base_path}/{name}/**``, which is the leading-segment routing every domain had
+before patterns existed. Writing one lets a domain sit *beneath* another —
+``/openapi/v1/bots/messages/**`` is served by the engine proxy while
+``/openapi/v1/bots/**`` is served by the backend — so the public address space
+can follow ownership rather than process topology.
+
+Because the plane filters the *candidates* rather than vetoing the winner, a
+prefix claimed for one plane leaves the other plane's resolution of that same
+path untouched: an HTTP request under a websocket-only prefix still finds the
+broader HTTP domain. Resolution never retries after a mismatch; a request
+refused by the domain that won must not get a second attempt at another.
 
 A domain also declares two things about *how* it is served:
 
@@ -30,6 +44,8 @@ from typing import Any, cast
 from urllib.parse import urlsplit
 
 import yaml
+
+from gateway.community.core.paths import GLOB, PathPattern, split_segments
 
 _ENV_REF = re.compile(r"\$\{([^}]+)\}")
 _DEFAULT_BASE_PATH = "/openapi/v1"
@@ -232,15 +248,30 @@ class SchemaSource:
 
 @dataclass(frozen=True)
 class Domain:
-    """A configured domain: its server, schema source, protocols and rewrite."""
+    """A configured domain: its pattern, server, schema, protocols and rewrite."""
 
     name: str
     server: Server
     schema: SchemaSource
+    #: The paths this domain claims. Defaults to the domain's own name under the
+    #: version base, which is exactly the leading-segment match every domain had
+    #: before patterns existed.
+    pattern: PathPattern = field(default_factory=lambda: PathPattern(()))
     protocols: frozenset[str] = _DEFAULT_PROTOCOLS
     #: ``None`` when the path forwards verbatim, which is the default and the
     #: case for every domain that does not declare otherwise.
     rewrite: PathRewrite | None = None
+
+    @property
+    def mount_prefix(self) -> str:
+        """The fixed path this domain is reachable at.
+
+        Every accepted pattern is ``<literals>/**``, so this is the whole of it
+        bar the glob — the prefix a route is mounted on and the prefix a raw,
+        still-encoded path must carry literally. Validation is what makes it
+        meaningful: a pattern that could not produce one is refused at boot.
+        """
+        return self.pattern.literal_prefix
 
     @property
     def serves_http(self) -> bool:
@@ -286,38 +317,57 @@ class DomainMap:
         domains = _parse_domains(raw.get("domains") or {}, servers, base_path)
         return cls(base_path=base_path, domains=domains)
 
-    def resolve(self, path: str) -> Server | None:
-        """The server for *path*'s domain, or ``None`` if the domain is unknown."""
-        domain = self.domain_for(path)
-        return domain.server if domain is not None else None
+    def domain_for(self, path: str, protocol: str) -> Domain | None:
+        """The domain serving *path* on *protocol*, or ``None`` if none does.
 
-    def domain_for(self, path: str) -> Domain | None:
-        """The domain *path* belongs to, or ``None`` if outside the version base."""
-        base = _segments(self.base_path)
-        segments = _segments(path)
-        if segments[: len(base)] != base:
-            return None
-        rest = segments[len(base) :]
-        if not rest:
-            return None
-        return self.domains.get(rest[0])
+        Match first, rank second. Every domain claiming this path **and**
+        answering this plane is a candidate; the most specific of them wins.
 
-    def websocket_domains(self) -> dict[str, Domain]:
-        """Every domain answering the socket plane, keyed by name.
+        The plane filters the candidates rather than vetoing the winner, and the
+        difference is load-bearing. Ranking first and then checking the plane
+        would let a narrow socket-only prefix swallow the HTTP traffic beneath
+        it — ``/openapi/v1/bots/messages/**`` is claimed for sockets, and an HTTP
+        request there has to keep resolving to the backend that serves
+        ``/openapi/v1/bots/**``. Recovering that by *retrying* the next-best
+        candidate is worse than the bug: a request the winning domain refused
+        would get a second attempt at a domain that did not win.
+        """
+        segments = split_segments(path)
+        candidates = [
+            domain
+            for domain in self.domains.values()
+            if protocol in domain.protocols and domain.pattern.matches(segments)
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda domain: domain.pattern.specificity)
+
+    def http_domain_for(self, path: str) -> Domain | None:
+        """The domain serving *path* on the request/response plane.
+
+        Named rather than parameterised because the delivery adapters are the
+        callers and may not import core (layer rule) — the same reason
+        :attr:`Domain.serves_http` is a predicate. A protocol constant would
+        otherwise have to be duplicated across that boundary, where it can drift.
+        """
+        return self.domain_for(path, HTTP)
+
+    def websocket_domain_for(self, path: str) -> Domain | None:
+        """The domain serving *path* on the relayed-socket plane."""
+        return self.domain_for(path, WEBSOCKET)
+
+    def websocket_domains(self) -> tuple[Domain, ...]:
+        """Every domain answering the socket plane.
 
         The web adapter uses this to mount one socket entrypoint per such
-        domain, so no code has to name a particular domain — ``engine`` is
-        configuration, not an identifier the gateway knows.
+        domain, so no code has to name a particular domain — which prefix is
+        served is configuration, not an identifier the gateway knows. The domains
+        themselves rather than their names, because the mount path comes from the
+        declared pattern and a name no longer implies one.
         """
-        return {
-            name: domain
-            for name, domain in self.domains.items()
-            if domain.serves_websocket
-        }
-
-
-def _segments(path: str) -> list[str]:
-    return [seg for seg in path.split("/") if seg]
+        return tuple(
+            domain for domain in self.domains.values() if domain.serves_websocket
+        )
 
 
 #: Every key each block of the ``upstreams`` section understands. An unknown one
@@ -326,7 +376,7 @@ def _segments(path: str) -> list[str]:
 #: exposes. ``protcols: [websocket]`` would otherwise turn the socket domain
 #: into an HTTP route — on the one prefix the shipped table exempts from
 #: authentication.
-_DOMAIN_KEYS = frozenset({"server", "schema", "protocols", "rewrite"})
+_DOMAIN_KEYS = frozenset({"match", "server", "schema", "protocols", "rewrite"})
 _SERVER_KEYS = frozenset({"base_url"})
 _REWRITE_KEYS = frozenset({"from", "to"})
 _SCHEMA_KEYS = frozenset({"source", "path", "url", "refresh_seconds"})
@@ -382,15 +432,97 @@ def _parse_domains(
             raise ValueError(
                 f"domain {name!r} references unknown server {server_name!r}"
             )
-        domain_prefix = f"{base_path.rstrip('/')}/{name}"
+        pattern = _parse_pattern(name, spec.get("match"), base_path)
         domains[name] = Domain(
             name=name,
             server=server,
             schema=_parse_schema(name, spec.get("schema") or {}),
+            pattern=pattern,
             protocols=_parse_protocols(name, spec.get("protocols")),
-            rewrite=_parse_rewrite(name, spec.get("rewrite"), domain_prefix),
+            rewrite=_parse_rewrite(name, spec.get("rewrite"), pattern.literal_prefix),
         )
+    _reject_ambiguous(domains)
     return domains
+
+
+def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
+    """The paths this domain claims: ``match``, or its own name under the base.
+
+    **This is the check that keeps the gateway from being an open proxy.** Before
+    patterns, a domain *was* its leading path segment: an unknown segment
+    resolved to ``None`` and the caller denied, so "never an open proxy" was a
+    property of the data structure and the mistake could not be typed. A pattern
+    can be written wider than that, and ``match: /**`` is precisely an open
+    proxy — so the invariant now has to be enforced rather than assumed.
+
+    The accepted shape is a run of literal segments followed by ``**``, and the
+    literals must extend *past* the version base. That refuses the three ways to
+    write something too wide (``/**``, ``/openapi/**``, ``/openapi/v1/**``) and
+    also refuses a leading parameter, which pins nothing at all: ``/openapi/v1/{x}/**``
+    matches every domain's traffic while looking specific.
+
+    A trailing ``**`` is required rather than inferred. A domain serves a
+    *subtree* — the bare prefix and everything beneath it — and writing the glob
+    keeps that visible at the config, where a reader decides whether the claim is
+    too wide. (``**`` matches no remaining segments as well as many, so the bare
+    prefix is still served.)
+    """
+    if raw is None:
+        return PathPattern.parse(f"{base_path.rstrip('/')}/{name}/{GLOB}")
+    pattern = PathPattern.parse(str(raw))
+    if not pattern.segments or pattern.segments[-1] != GLOB:
+        raise ValueError(
+            f"domain {name!r}: match {raw!r} must end in '/{GLOB}' — a domain "
+            f"serves a subtree, and writing the glob keeps the width of the "
+            f"claim visible where it is configured"
+        )
+    literals = pattern.segments[:-1]
+    if GLOB in literals or any(_is_param_segment(seg) for seg in literals):
+        raise ValueError(
+            f"domain {name!r}: match {raw!r} must be literal segments followed "
+            f"by '/{GLOB}' — a parameter or an inner glob pins no prefix, so "
+            f"routes could not be mounted and a raw path could not be checked "
+            f"against it"
+        )
+    base = split_segments(base_path)
+    if literals[: len(base)] != base or len(literals) <= len(base):
+        raise ValueError(
+            f"domain {name!r}: match {raw!r} is too broad — it must pin "
+            f"{base_path.rstrip('/')!r} plus at least one more literal segment. "
+            f"A wider pattern makes the gateway an open proxy into this "
+            f"domain's upstream"
+        )
+    return pattern
+
+
+def _is_param_segment(segment: str) -> bool:
+    return segment.startswith("{") and segment.endswith("}")
+
+
+def _reject_ambiguous(domains: dict[str, Domain]) -> None:
+    """Refuse two domains that would answer one path on one plane.
+
+    Only *identical* patterns can collide: every accepted pattern is a literal
+    prefix, so two of equal length differ at some segment and no path matches
+    both, while two of unequal length are ranked apart by literal count. Same
+    pattern and an overlapping plane, though, is a tie with no defined winner —
+    and the winner would decide which upstream receives the traffic.
+
+    Two declarations at one pattern for *different* planes are the supported way
+    to serve a prefix over both, so those are left alone.
+    """
+    for name, domain in domains.items():
+        for other_name, other in domains.items():
+            if other_name <= name or domain.pattern != other.pattern:
+                continue
+            shared = domain.protocols & other.protocols
+            if shared:
+                raise ValueError(
+                    f"domains {name!r} and {other_name!r} both claim "
+                    f"{domain.mount_prefix!r} on {sorted(shared)} — which one "
+                    f"serves a request there is undefined. Give them different "
+                    f"patterns, or different protocols"
+                )
 
 
 def _parse_protocols(name: str, raw: Any) -> frozenset[str]:
@@ -419,18 +551,17 @@ def _validated_protocols(name: str, protocols: frozenset[str]) -> frozenset[str]
 def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | None:
     """The domain's declared prefix substitution, or ``None`` for verbatim.
 
-    ``from`` must begin at the domain's own prefix, **on a segment boundary**. A
-    rewrite anchored anywhere else could never fire — the domain map matches the
-    leading segment exactly, so nothing routed here can carry another prefix —
+    ``from`` must begin at the domain's own prefix — the literal head of its
+    pattern — **on a segment boundary**. A rewrite anchored anywhere else could
+    never fire, since every path routed here carries that prefix by definition,
     and it is a configuration mistake worth refusing at startup rather than a
     rule that silently never matches.
 
     The boundary is the whole point of the check. A textual ``startswith`` would
-    accept ``/openapi/v1/engine-v2`` for the ``engine`` domain, since it does
-    begin with those characters; but ``/openapi/v1/engine-v2/…`` resolves to a
-    domain *named* ``engine-v2``, never to this one, so the rule would be
-    accepted and then never apply — the exact silent no-op being guarded
-    against.
+    accept ``/openapi/v1/bots/messages-v2`` for a domain claiming
+    ``/openapi/v1/bots/messages/**``, since it does begin with those characters;
+    but that path does not match the pattern, so the rule would be accepted and
+    then never apply — the exact silent no-op being guarded against.
     """
     if not raw:
         return None
