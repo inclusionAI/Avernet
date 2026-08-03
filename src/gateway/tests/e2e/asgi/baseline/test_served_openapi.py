@@ -33,8 +33,11 @@ class TestServedOpenAPI:
     ) -> None:
         paths = app_no_lifespan.openapi().get("paths", {})
         assert "/openapi/v1/collaboration/bots/mine" in paths
-        assert "/openapi/v1/bots/collaboration/bots/mine" not in paths
-        assert "/openapi/v1/group-sessions" not in paths
+        for retired_prefix in (
+            "/openapi/v1/bots/collaboration",
+            "/openapi/v1/group-sessions",
+        ):
+            assert not any(path.startswith(retired_prefix) for path in paths)
 
     def test_schema_has_required_fields(self, app_no_lifespan: FastAPI) -> None:
         from fastapi.testclient import TestClient

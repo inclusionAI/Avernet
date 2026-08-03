@@ -12,6 +12,7 @@ port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0))
 bcs_url="http://127.0.0.1:${port}"
 bcs_pid=""
 watchdog_pid=""
+development_signing_key="avernet-dev-signing-key-NOT-FOR-PROD"
 
 unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
 
@@ -54,22 +55,44 @@ sed \
     "${bcs_dir}/configs/bcs-config-local.toml" > "${config_file}"
 
 (cd "${bcs_dir}" && CARGO_SHIM_SKIP_CLEAN=1 cargo build -p bcs --bin bcs)
-"${bcs_dir}/target/debug/bcs" --config-dir "${config_file}" > "${log_file}" 2>&1 &
+env -u SERVER_ENV -u REAL_SERVER_ENV -u ALIPAY_APP_ENV \
+    SERVER_ENV=local \
+    AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${development_signing_key}" \
+    "${bcs_dir}/target/debug/bcs" --config-dir "${config_file}" > "${log_file}" 2>&1 &
 bcs_pid=$!
 
+if ! command -v lsof >/dev/null 2>&1; then
+    echo "lsof is required to verify BCS owns its selected loopback port" >&2
+    exit 1
+fi
+
+bcs_owns_selected_port() {
+    lsof -nP -a -p "${bcs_pid}" -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
+}
+
+health_check() {
+    curl --connect-timeout 2 --max-time 5 --fail --silent --show-error --noproxy '*' \
+        "${bcs_url}/health" >/dev/null
+}
+
 for _ in {1..60}; do
-    if curl --fail --silent --show-error --noproxy '*' "${bcs_url}/health" >/dev/null; then
-        break
-    fi
     if ! kill -0 "${bcs_pid}" 2>/dev/null; then
         echo "BCS exited before becoming healthy" >&2
         exit 1
     fi
+    if bcs_owns_selected_port && health_check; then
+        break
+    fi
     sleep 1
 done
 
-if ! curl --fail --silent --show-error --noproxy '*' "${bcs_url}/health" >/dev/null; then
-    echo "BCS did not become healthy within 60 seconds" >&2
+if ! bcs_owns_selected_port; then
+    echo "BCS process ${bcs_pid} never owned selected loopback port ${port}" >&2
+    exit 1
+fi
+
+if ! health_check; then
+    echo "BCS process ${bcs_pid} owns loopback port ${port} but did not become healthy within 60 seconds" >&2
     exit 1
 fi
 
