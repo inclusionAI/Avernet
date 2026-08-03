@@ -81,7 +81,13 @@ class BotRepository(Protocol):
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
-        """List bots by owner_id with pagination."""
+        """List bots by owner_id with pagination.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard). Callers that key semantics off this — ``is_first_bot``,
+        ``delete_bot`` earliest-protection, ``create_bot_for_others`` owner
+        lookup — must be aware the result reflects only the current tenant.
+        """
         ...
 
     def list_by_owner_or_collaborator(
@@ -163,6 +169,9 @@ class BotRepository(Protocol):
 
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         """Count bots by owner_id.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard); see :meth:`list_by_owner`.
 
         Args:
             owner_id: Owner user ID.

@@ -793,13 +793,9 @@ class BotService:
             logger.error(f"[get_bot_by_ip_and_user] Error querying bot by IP {ip} and user {user_id}: {e}")
             return None
 
-    def _is_first_bot(self, user_id: str) -> bool:
-        """First bot iff the owner has zero bots (current env; tenant enforced by session guard)."""
-        return self._repository.count_by_owner(user_id) == 0
-
     def is_first_bot(self, user_id: str) -> bool:
-        """Public alias (used by create_flow) for :meth:`_is_first_bot`."""
-        return self._is_first_bot(user_id)
+        """First bot iff the owner has zero bots (current env; tenant enforced by guard)."""
+        return self._repository.count_by_owner(user_id) == 0
 
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
@@ -3161,15 +3157,25 @@ class BotService:
             if not bot:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
-            # 至少保留一个 Bot:删掉这只后归零则拒。
-            # 必须在 release_device / destroy_passport 之前拦截,否则会误销毁
+            # 保护 owner 名下最早创建的 bot 不能删除（等价于旧 "default" bot 不可删语义）。
+            # 含 owner 仅一只的情形（earliest 即该只 → 拒），自然保留 ≥1。
+            # 必须在 release_device / destroy_passport 之前拦截，否则会误销毁
             # agent 许可证 (Passport) 并重置引擎配置 (openclaw.json)。
             # 用 BotOperationNotAllowedError（BotServiceError 子类）表达"这是客户端
             # 不支持的操作"，而不是服务端故障：重试永远不会成功。内部路由的 except 链没有
             # 这一分支，仍落到 `except BotServiceError` → 500，行为不变；公共 API 则按
             # 4xx 映射。
-            if self._repository.count_by_owner(user_id) <= 1:
-                raise BotOperationNotAllowedError("至少保留一个 Bot，不能全部删除")
+            _total_owner_bots, owner_bot_items = self._repository.list_by_owner(user_id, 1, 1000)
+            if owner_bot_items:
+                # gmt_create可能是 datetime 或 ISO 字符串;统一成字符串排序,避免类型混比。
+                # 空值兜底为空串(ISO 字符串排序下排最前,等同"最早")。
+                earliest = min(
+                    owner_bot_items,
+                    key=lambda b: str(b.get("gmt_create") or ""),
+                )
+                earliest_bot_id = earliest.get("bot_id")
+                if earliest_bot_id and bot_id == earliest_bot_id:
+                    raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")

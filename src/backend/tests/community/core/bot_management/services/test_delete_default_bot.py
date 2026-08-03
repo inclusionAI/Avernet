@@ -10,8 +10,9 @@ This exercises the **real** method rather than a mocked service: an endpoint
 test that stubs ``delete_bot`` to raise the subclass proves only that the
 mapping works, not that the service ever produces it.
 
-The protection is count-based (refuse to delete the owner's last bot, keep ≥1);
-``count_by_owner`` is stubbed to 1 so the rejection path fires.
+The protection is earliest-bot-based (refuse to delete the owner's first
+created bot, equivalent to the legacy "default" protection);
+``list_by_owner`` is stubbed so the target bot is the earliest (only) one.
 """
 
 from __future__ import annotations
@@ -60,7 +61,8 @@ def test_last_bot_delete_raises_operation_not_allowed():
         "id": 1, "bot_id": "default", "owner_id": "u1",
         "status": "ACTIVE", "binding_id": None, "ext": {},
     }
-    repo.count_by_owner.return_value = 1  # 最后一只,触发保留≥1保护
+    # target bot 是 owner 唯一/最早创建 → earliest 保护命中
+    repo.list_by_owner.return_value = (1, [{"bot_id": "default", "gmt_create": "2026-07-01 00:00:00"}])
     service = _make_bot_service(repo)
 
     with pytest.raises(BotOperationNotAllowedError):
@@ -74,7 +76,7 @@ def test_last_bot_delete_does_not_release_device_or_passport(monkeypatch):
         "id": 1, "bot_id": "default", "owner_id": "u1",
         "status": "ACTIVE", "binding_id": "bind-1", "ext": {},
     }
-    repo.count_by_owner.return_value = 1  # 最后一只,触发保留≥1保护
+    repo.list_by_owner.return_value = (1, [{"bot_id": "default", "gmt_create": "2026-07-01 00:00:00"}])
     service = _make_bot_service(repo)
 
     with pytest.raises(BotOperationNotAllowedError):

@@ -441,7 +441,12 @@ class CollaboratorPermissionInterceptor:
         """
         if not bot_id:
             return user_id
-        # 历史的 bot_id=="default" 不再短路;统一走 repo 解析 owner
+        # 存量 default bot 兜底:单租户内每 owner 都有一条 bot_id="default",
+        # repo.get_by_id("default") 会歧义命中任意 owner 的 default bot,导致串户。
+        # 旧语义 default=我自己的 bot,保留此短路避免协作者鉴权用错 owner_id。
+        # 新 bot 永不为 default (generate_bot_id 全局唯一),此分支仅命中存量。
+        if bot_id == "default":
+            return user_id
 
         if ctx.injector is None:
             logger.warning(
