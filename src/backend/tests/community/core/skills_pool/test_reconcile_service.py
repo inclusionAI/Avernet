@@ -188,6 +188,7 @@ class FakeLayoutRepository:
             and kwargs["migration_generation"] == GENERATION
             and self.quarantine_conflict
         )
+
     def record_post_cutover_evidence(self, **kwargs: object) -> bool:
         if self._should_fail("post_cutover_evidence"):
             return False
@@ -240,13 +241,9 @@ class FakeLayoutRepository:
             return False
         self.events.append("post_failure")
         cutover_evidence = (self.state.last_probe_evidence or {}).get("cutover")
-        refresh_pending = (
-            self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-            and (
-                not isinstance(cutover_evidence, dict)
-                or cutover_evidence.get("post_cutover_evidence_recorded")
-                is not True
-            )
+        refresh_pending = self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED" and (
+            not isinstance(cutover_evidence, dict)
+            or cutover_evidence.get("post_cutover_evidence_recorded") is not True
         )
         self.state = replace(
             self.state,
@@ -401,6 +398,8 @@ class FakeRuntime:
         self.pool_local = pool_local or default_local
         self.pool_repo = pool_repo or default_repo
         self.events: list[str] = []
+        self.probe_results: list[RuntimeLayoutProbeResult] = []
+        self.published_mappings: list[object] | None = None
         self.publish_success = True
         self.verify_success = True
         self.physical_cutovers = 0
@@ -439,14 +438,13 @@ class FakeRuntime:
     async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
         self.events.append("probe")
         assert kwargs["engine"] == self.engine
+        if self.probe_results:
+            return self.probe_results.pop(0)
         return self.probe_result
 
     async def cutover(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("cutover")
-        assert (
-            kwargs["registered_local_names"]
-            == self.expected_registered_local_names
-        )
+        assert kwargs["registered_local_names"] == self.expected_registered_local_names
         mappings = kwargs["mappings"]
         assert [mapping.to_dict() for mapping in mappings] == [
             {
@@ -485,6 +483,7 @@ class FakeRuntime:
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
+        self.published_mappings = list(kwargs["mappings"])
         return self.publish_success
 
     async def verify_mappings(self, **kwargs: object) -> bool:
@@ -561,16 +560,13 @@ async def test_historical_local_versions_share_engine_locator_on_commit() -> Non
     assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert layouts.committed_locators == {
         11: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-a"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"
         ),
         12: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-b"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
         13: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-a"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"
         ),
     }
 
@@ -598,9 +594,7 @@ async def test_conflicting_same_name_sources_fail_before_cutover() -> None:
     )
 
     assert result.outcome is SkillsPoolReconcileOutcome.INVALID
-    assert result.evidence == {
-        "reason": "duplicate managed target: local-a"
-    }
+    assert result.evidence == {"reason": "duplicate managed target: local-a"}
     assert runtime.events == ["probe"]
     assert runtime.physical_cutovers == 0
     assert layouts.events == ["failure"]
@@ -644,7 +638,10 @@ async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -714,7 +711,10 @@ async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> No
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -900,13 +900,13 @@ async def test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation() -> 
     )
     runtime.probe_result = replace(
         runtime.probe_result,
-            evidence={
-                "checks": {
-                    "legacy_local_bridge_valid": True,
-                    "stable_repo_bridge_valid": True,
-                },
-                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        evidence={
+            "checks": {
+                "legacy_local_bridge_valid": True,
+                "stable_repo_bridge_valid": True,
             },
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
 
     result = await build_service(
@@ -1063,9 +1063,9 @@ async def test_repair_refresh_mapping_failure_reuses_persisted_locator_evidence(
 
     assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
     assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
-    assert layouts.state.last_probe_evidence["cutover"]["evidence"][
-        "local_locators"
-    ]["local-a"].endswith("/local-a")
+    assert layouts.state.last_probe_evidence["cutover"]["evidence"]["local_locators"][
+        "local-a"
+    ].endswith("/local-a")
 
     runtime.events.clear()
     layouts.events.clear()
@@ -1948,6 +1948,153 @@ async def test_pool_active_reconciliation_rejects_invalid_current_runtime() -> N
     assert runtime.events == ["probe"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("logical_engine", ["aicoding", "claude_code"])
+async def test_pool_active_aicoding_bridge_republishes_then_requires_ready_probe(
+    logical_engine: str,
+) -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine=logical_engine)
+    initial_probe = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={
+            "reason": "active_managed_entry_invalid",
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+        },
+    )
+    ready_probe = replace(
+        runtime.probe_result,
+        evidence={
+            **runtime.probe_result.evidence,
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+        },
+    )
+    runtime.probe_results = [initial_probe, ready_probe]
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=logical_engine,
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert result.evidence["active_aicoding_bridge_reconciled"] is True
+    assert result.evidence["reconciled_mapping_count"] == 3
+    assert runtime.events == ["probe", "mapping", "verify", "probe"]
+    assert [mapping.to_dict() for mapping in runtime.published_mappings] == [
+        {
+            "corpus": "local",
+            "relative_path": "local-a",
+            "link_name": "local-a",
+        },
+        {
+            "corpus": "local",
+            "relative_path": "local-b",
+            "link_name": "local-b",
+        },
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_does_not_accept_unproven_republish() -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+    initial_probe = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={
+            "reason": "active_managed_entry_invalid",
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+        },
+    )
+    still_invalid = replace(
+        initial_probe,
+        evidence={"reason": "unknown_active_entry"},
+    )
+    runtime.probe_results = [initial_probe, still_invalid]
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert (
+        result.evidence["reason"] == "active_aicoding_bridge_reconciliation_incomplete"
+    )
+    assert runtime.events == ["probe", "mapping", "verify", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_does_not_repair_local_corpus_bridge() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="aicoding")
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={
+            "reason": "retired_local_bridge_present",
+            "implementation_engine": "aicoding",
+            "physical_layout_engine": "aicoding",
+        },
+    )
+
+    result = await build_service(layouts, runtime, engine="aicoding").reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert runtime.events == ["probe"]
+    assert runtime.published_mappings is None
+
+
 class StickyClaimService:
     """Expose the real reconciliation service through the durable task seam."""
 
@@ -2057,7 +2204,10 @@ def test_real_reconciliation_retry_resumes_same_generation_without_repeating_cut
         engine="openclaw",
         layout_contract_version=LAYOUT_CONTRACT_VERSION,
         preparation_id=PREPARATION_ID,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -2144,7 +2294,10 @@ class ReadyProbeService:
             engine="openclaw",
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+            evidence={
+                "marker": "valid",
+                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+            },
         )
 
 
