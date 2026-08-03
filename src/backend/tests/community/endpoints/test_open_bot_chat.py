@@ -45,7 +45,9 @@ def _principal_headers() -> dict[str, str]:
             "iss": "gateway",
             "aud": "backend",
             "iat": now,
-            "exp": now + 60,
+            # Endpoint cases are collected before the full backend suite runs.
+            # Keep this static fixture valid for the duration of that suite.
+            "exp": now + 60 * 60,
             "principals": [
                 {
                     "type": "user",
