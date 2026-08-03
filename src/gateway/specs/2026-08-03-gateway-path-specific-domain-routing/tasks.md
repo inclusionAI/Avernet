@@ -213,25 +213,47 @@
         it is a hand-written fixture, not a copy.
 - **Depends on:** Task 8, Task 9
 
-## Task 11: Tests & Verification
+## [x] Task 11: Tests & Verification
 
 - **Goal:** Every spec acceptance criterion is demonstrably met, and what could
   not be run is stated.
 - **Files:** —
 - **Done when:**
-  - [ ] Gateway suite green: `test_path_pattern`, `test_domain_map`,
+  - [x] Gateway suite green: `test_path_pattern`, `test_domain_map`,
         `test_route_security`, `test_relay_ws_route`, `tests/architecture/*`.
-  - [ ] Backend suite green for `engine_runtime` and `openapi_v1` tests.
-  - [ ] Coverage gate checked by grepping for **`ERROR` as well as `FAILED`** —
+  - [x] Backend suite green for `engine_runtime` and `openapi_v1` tests.
+  - [x] Coverage gate checked by grepping for **`ERROR` as well as `FAILED`** —
         it errors on a missing fixture in isolation and would otherwise drop out
         of a before/after diff silently.
-  - [ ] Every acceptance criterion in `spec.md` ticked, each against a named test
+  - [x] Every acceptance criterion in `spec.md` ticked, each against a named test
         or a named file.
-  - [ ] Pre-existing sandbox failures reported as such, not as regressions:
+  - [x] Pre-existing sandbox failures reported as such, not as regressions:
         legacy `/api/bots` 403s, missing SQLite fixtures under
         `tests/community/{endpoints,e2e}/*`, gateway `tests/e2e/*` needing a live
         server, and `ruff format --check` on gateway `docs/*.md`.
 - **Depends on:** Task 10
+
+
+### Results
+
+- **Gateway** — 630 passed. One failure, `test_ruff_formatting_passes`, is
+  pre-existing: the identical 8-file list reproduces on the base commit
+  (`770d677`), and this branch adds none. Two relay cases
+  (`test_a_dot_inside_a_name_still_relays`,
+  `test_a_nested_rewrite_still_relays_its_own_paths`) flake ~1 run in 3 on a
+  teardown race; also reproduced on the base commit, so pre-existing and left
+  alone.
+- **Backend** — 10319 passed, 3 skipped, 0 failed (full suite, 9m52s). The
+  sandbox gaps the handoff warned about did not reproduce here.
+- **Coverage gate** — 16 passed, no `ERROR` (checked for both, in isolation and
+  in the full run). Baseline needed no edit: verified against the generated
+  document that `GET /openapi/v1/bots/connection/{bot_id}` is unchanged.
+- **Pinned artifact** — regenerated through `dump_openapi.py` +
+  `gate_and_publish_openapi.py`; the compat gate reported *compatible*, and the
+  diff is exactly the two example URLs.
+- **Acceptance criteria** — every criterion in `spec.md` checked against the
+  shipped `application.yaml`, including the corrected criterion that the socket
+  exemption does not reach the HTTP plane.
 
 ---
 
