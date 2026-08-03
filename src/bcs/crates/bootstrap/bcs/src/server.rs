@@ -40,7 +40,9 @@ use crate::plugins::{
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
-use bcs_app_session::{SessionServiceConfig, SessionServiceImpl};
+use bcs_app_session::{
+    GroupSessionConnectionServiceImpl, SessionServiceConfig, SessionServiceImpl,
+};
 use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_bot::{Bot, BotControlPlaneCore, BotCore, ProviderBotEvents, ProviderCore, ProviderManagement};
 use bcs_api_http::v1::gateway_principal::{
@@ -77,6 +79,7 @@ use bcs_http::{
     state::AdminInvocationStore,
 };
 use bcs_judge::{LlmJudgeService, NoopJudgeEvaluator};
+use bcs_jwt::GroupSessionJwtService;
 use bcs_leader_election::StandaloneLeaderElection;
 use bcs_llm_api::LlmChatCompletionPort;
 use bcs_llm_anthropic::AnthropicLlmClient;
@@ -94,8 +97,11 @@ use bcs_routing::MessageRouter;
 use bcs_routing::security::SecurityInterceptor;
 use bcs_security_gateway_api::SecurityGatewayPort;
 use bcs_security_gateway_local::NoopSecurityGateway;
+use bcs_secret_local::{EnvSecretAccess, InMemorySecretAccess};
+use bcs_service_api::application::v1::GroupSessionConnectionService;
 use bcs_service_api::interceptor::InterceptorChain;
 use bcs_service_api::lifecycle::ServiceLifecycle;
+use bcs_service_api::port::{GroupSessionTokenPort, SecretAccessPort};
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotActor, BotDeliveryPort, BotDeliveryTarget,
     BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
@@ -945,6 +951,9 @@ pub struct BcsServerState {
     /// Completed V1 HTTP adapter state assembled from the same runtime services as legacy HTTP.
     pub openapi_v1: ApiState,
 
+    /// Dedicated secret source for the session-bound Workbench connection credential.
+    pub group_session_secret_access: Arc<dyn SecretAccessPort>,
+
     /// Shared OAuth identity port (used to build `/auth/*` route state).
     pub user_identity_port: Option<Arc<dyn bcs_auth_api::UserIdentityPort>>,
 
@@ -983,6 +992,7 @@ impl std::fmt::Debug for BcsServerState {
             .field("gateway_principal_verifier", &"<PrincipalVerifier>")
             .field("invite_token_secret", &"<redacted>")
             .field("openapi_v1", &"<ApiState>")
+            .field("group_session_secret_access", &"<SecretAccessPort>")
             .field("outbound_url_guard", &self.outbound_url_guard)
             .finish()
     }
@@ -1250,6 +1260,47 @@ fn build_gateway_principal_verifier_from_process(
     )
 }
 
+const GROUP_SESSION_WS_SECRET_NAME: &str = "bcn-group-session-ws-jwt";
+const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str =
+    "test-only-group-session-key-at-least-32-bytes";
+
+fn group_session_test_secret_access() -> Arc<dyn SecretAccessPort> {
+    Arc::new(InMemorySecretAccess::with_entries([(
+        GROUP_SESSION_WS_SECRET_NAME,
+        String::new(),
+        GROUP_SESSION_WS_TEST_SIGNING_KEY.to_string(),
+    )]))
+}
+
+async fn build_group_session_token_port(
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn GroupSessionTokenPort>> {
+    let secret = secret_access
+        .get_secret(GROUP_SESSION_WS_SECRET_NAME)
+        .await
+        .map_err(|_| {
+            crate::BcsError::InvalidConfig(
+                "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required".to_string(),
+            )
+        })?;
+    let tokens = GroupSessionJwtService::new(&secret.value).map_err(|_| {
+        crate::BcsError::InvalidConfig(
+            "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT must be non-empty".to_string(),
+        )
+    })?;
+    Ok(Arc::new(tokens))
+}
+
+async fn build_group_session_connection_service(
+    sessions: Arc<dyn bcs_service_api::application::v1::SessionService>,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn GroupSessionConnectionService>> {
+    let tokens = build_group_session_token_port(secret_access).await?;
+    Ok(Arc::new(GroupSessionConnectionServiceImpl::new(
+        sessions, tokens,
+    )))
+}
+
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
     config
         .invite
@@ -1369,6 +1420,7 @@ pub(crate) fn gateway_principal_verifier_for_tests() -> Arc<dyn PrincipalVerifie
 mod gateway_principal_tests {
     use super::*;
     use bcs_config::RuntimeEnv;
+    use bcs_secret_local::InMemorySecretAccess;
 
     fn trust_config() -> crate::config::GatewayPrincipalConfig {
         crate::config::GatewayPrincipalConfig::default()
@@ -1446,6 +1498,51 @@ mod gateway_principal_tests {
                 build_gateway_principal_verifier(&config, RuntimeEnv::Local, None),
                 Err(crate::BcsError::InvalidConfig(_))
             ));
+        }
+    }
+
+    #[tokio::test]
+    async fn group_session_websocket_signing_key_is_required_and_non_empty() {
+        let missing: Arc<dyn bcs_service_api::port::SecretAccessPort> =
+            Arc::new(InMemorySecretAccess::new());
+        let missing_error = match build_group_session_token_port(missing).await {
+            Ok(_) => panic!("missing group-session WebSocket key must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(missing_error, crate::BcsError::InvalidConfig(_)));
+
+        let empty: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
+            InMemorySecretAccess::with_entries([(
+                GROUP_SESSION_WS_SECRET_NAME,
+                String::new(),
+                "   ".to_string(),
+            )]),
+        );
+        let empty_error = match build_group_session_token_port(empty).await {
+            Ok(_) => panic!("empty group-session WebSocket key must fail"),
+            Err(error) => error,
+        };
+        assert!(matches!(empty_error, crate::BcsError::InvalidConfig(_)));
+        assert!(!empty_error.to_string().contains("   "));
+    }
+
+    #[tokio::test]
+    async fn explicit_group_session_websocket_signing_key_is_accepted() {
+        let secret_material = "test-only-group-session-key-at-least-32-bytes";
+        let access: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
+            InMemorySecretAccess::with_entries([(
+                GROUP_SESSION_WS_SECRET_NAME,
+                String::new(),
+                secret_material.to_string(),
+            )]),
+        );
+
+        let result = build_group_session_token_port(access).await;
+
+        if let Err(error) = result {
+            let message = error.to_string();
+            assert!(!message.contains(secret_material));
+            panic!("explicit group-session WebSocket key must be accepted: {message}");
         }
     }
 }
@@ -1857,6 +1954,7 @@ impl Default for BcsServerState {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            group_session_secret_access: group_session_test_secret_access(),
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -2703,6 +2801,7 @@ impl BcsServer {
             outbound_url_guard.clone(),
             outbound_url_guard.clone(),
             outbound_url_guard,
+            Arc::new(EnvSecretAccess::new("BCS_SECRET_")),
         )
     }
 
@@ -2712,6 +2811,7 @@ impl BcsServer {
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
+            group_session_test_secret_access(),
         )
     }
 
@@ -2720,6 +2820,7 @@ impl BcsServer {
         provider_webhook_url_guard: OutboundUrlGuard,
         provider_request_url_guard: OutboundUrlGuard,
         callback_url_guard: OutboundUrlGuard,
+        group_session_secret_access: Arc<dyn SecretAccessPort>,
     ) -> Self {
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
@@ -3103,6 +3204,7 @@ impl BcsServer {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            group_session_secret_access,
             user_identity_port,
             outbound_url_guard: callback_url_guard,
             admin_invocation_runs,
@@ -3135,6 +3237,8 @@ impl BcsServer {
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier =
             build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
+        let group_session_secret_access: Arc<dyn SecretAccessPort> =
+            Arc::new(EnvSecretAccess::new("BCS_SECRET_"));
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -3693,6 +3797,7 @@ impl BcsServer {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
+            group_session_secret_access,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -3797,10 +3902,15 @@ impl BcsServer {
     }
 
     /// Build the Axum router.
-    async fn build_router(&self) -> Router {
+    async fn build_router(&self) -> crate::Result<Router> {
         let api_router = bcs_http::router::build_router(
             crate::http_adapter::build_http_app_state(Arc::clone(&self.state)).await,
         );
+        let group_session_connections = build_group_session_connection_service(
+            self.state.openapi_v1.session_service.clone(),
+            self.state.group_session_secret_access.clone(),
+        )
+        .await?;
 
         let mut router = Router::new()
             // WebSocket endpoint for frontend clients (via gateway)
@@ -3815,7 +3925,11 @@ impl BcsServer {
         let mut router = router
             .with_state(Arc::clone(&self.state))
             .merge(api_router)
-            .merge(bcs_api_http::router(self.state.openapi_v1.clone()));
+            .merge(bcs_api_http::router(self.state.openapi_v1.clone()))
+            .merge(bcs_api_http::group_session_connection_router(
+                group_session_connections,
+                self.state.gateway_principal_verifier.clone(),
+            ));
 
         if let Some(oauth_router) = self.build_auth_router() {
             router = router.merge(oauth_router);
@@ -3830,7 +3944,7 @@ impl BcsServer {
                 .collect::<std::collections::HashSet<_>>(),
         );
 
-        router
+        Ok(router
             .layer(middleware::from_fn_with_state(
                 Arc::clone(&self.state),
                 http_metrics_middleware,
@@ -3864,7 +3978,7 @@ impl BcsServer {
                     .allow_methods(AllowMethods::mirror_request())
                     .allow_headers(AllowHeaders::mirror_request())
                     .allow_credentials(true),
-            )
+            ))
     }
 
     async fn initialize_lifecycle(&self) -> Result<()> {
@@ -3940,7 +4054,7 @@ impl BcsServer {
             });
         }
 
-        let app = self.build_router().await;
+        let app = self.build_router().await?;
 
         info!(
             bind = %self.config.bind,
@@ -4011,7 +4125,7 @@ impl BcsServer {
         self.initialize_lifecycle().await?;
         let _state_machine_timeout_handle = self.spawn_state_machine_timeout_scanner();
 
-        let app = self.build_router().await;
+        let app = self.build_router().await?;
 
         let listener = tokio::net::TcpListener::bind(addr)
             .await

@@ -8,6 +8,9 @@
 - Composition of the V1 Bot, Group, Session/Message, and Invitation/Friendship
   application facades from the same runtime stores and core services used by
   legacy HTTP, then direct mounting of the versioned collaboration Router.
+- Fail-closed resolution of the dedicated group-session WebSocket signing key,
+  composition of one session-connection application service from the shared
+  V1 Session facade, and mounting of its focused token issuance Router.
 - Composition adapter that publishes a completed one-shot state-machine result
   through the message-flow service under the initiating Bot identity.
 
@@ -39,6 +42,9 @@
 
 - This crate owns config file discovery, env parsing, and CLI/bootstrap flags.
 - Only this crate selects local, test, or remote concrete implementations.
+- Production resolves `bcn-group-session-ws-jwt` through `EnvSecretAccess`
+  using `BCS_SECRET_BCN_GROUP_SESSION_WS_JWT`; missing or empty material aborts
+  Router construction and is never replaced by another JWT secret.
 
 ## Runtime ownership
 

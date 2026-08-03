@@ -540,6 +540,7 @@ mod tests {
             auth_config: bcs_auth_api::AuthConfig::default(),
             gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
             invite_token_secret: v1_state.invite_token_secret.clone(),
+            group_session_secret_access: v1_state.group_session_secret_access.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),

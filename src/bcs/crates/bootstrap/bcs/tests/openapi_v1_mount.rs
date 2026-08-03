@@ -82,3 +82,46 @@ async fn mounted_openapi_v1_routes_require_and_verify_gateway_principal() {
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn mounted_session_token_route_authenticates_before_reaching_the_application() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+    let client = reqwest::Client::new();
+    let url = format!(
+        "http://{addr}/openapi/v1/collaboration/sessions/missing-session/token"
+    );
+
+    let missing = client
+        .post(&url)
+        .send()
+        .await
+        .expect("missing-principal request");
+    assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let invalid = client
+        .post(&url)
+        .header("x-avernet-principal", user_principal_token(b"wrong-test-key"))
+        .send()
+        .await
+        .expect("invalid-principal request");
+    assert_eq!(invalid.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let valid = client
+        .post(&url)
+        .header(
+            "x-avernet-principal",
+            user_principal_token(DEVELOPMENT_SIGNING_KEY),
+        )
+        .send()
+        .await
+        .expect("valid-principal request");
+    assert_eq!(valid.status(), reqwest::StatusCode::NOT_FOUND);
+    let envelope: serde_json::Value = valid.json().await.expect("JSON envelope");
+    assert_eq!(envelope["data"]["error_code"], "session_not_found");
+
+    handle.abort();
+}

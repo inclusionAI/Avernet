@@ -35,8 +35,8 @@
 - Production bootstrap mounts this Router directly at its contract-owned
   `/openapi/v1/collaboration/**` paths and injects completed V1 application
   services plus the Gateway Principal verifier.
-- The focused session-token Router remains a separate delivery slice that
-  requires explicit bootstrap composition with its application service and the
+- The focused session-token Router remains a separate delivery slice; production
+  bootstrap composes it explicitly with the shared V1 Session facade and the
   same Principal verifier.
 - The adapter must not read environment variables, select concrete V1
   implementations, or select a production Principal trust mechanism.

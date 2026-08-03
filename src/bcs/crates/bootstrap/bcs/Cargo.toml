@@ -154,6 +154,7 @@ bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-judge = { workspace = true }
+bcs-jwt = { workspace = true }
 bcs-llm-anthropic = { workspace = true }
 bcs-llm-openai-compatible = { workspace = true }
 
@@ -187,6 +188,5 @@ bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true }
 serial_test = "3"
-bcs-jwt = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }
