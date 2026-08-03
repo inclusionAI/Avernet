@@ -37,7 +37,7 @@ from agentclaw.community.di import (
     validate_deploy_environment,
 )
 from agentclaw.community.di.config_bootstrap import register_config_provider
-from agentclaw.community.di.modules_bootstrap import register_corp_modules
+from agentclaw.community.di.modules_bootstrap import register_corp_modules, resolve_extra_modules
 
 # Single mandatory switch: read the deploy profile once, here at the
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
@@ -55,7 +55,7 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-injector = build_injector(profile=_deploy_profile)
+injector = build_injector(profile=_deploy_profile, extra_modules=resolve_extra_modules(_deploy_profile))
 
 # Startup integrity check: resolve a small set of critical bindings
 # now so misconfiguration surfaces at boot instead of on first request.

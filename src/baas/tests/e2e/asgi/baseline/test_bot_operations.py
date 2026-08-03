@@ -674,6 +674,41 @@ class TestDestroyingStatus:
         data = resp.json()
         assert "DESTROYING" in data.get("detail", {}).get("message", "")
 
+    @pytest.mark.asyncio
+    async def test_scale_bot_with_config(
+        self, api: APITestHelper, unique_id: str
+    ) -> None:
+        bot = await create_test_bot(api, f"test-scale-config-{unique_id}")
+
+        try:
+            pid = bot["publish_id"]
+            resp = await api.client.post(
+                api.publish_url(pid, "approve"),
+                params=api.params(),
+                json={"operator": "e2e-test", "request_id": uuid.uuid4().hex},
+            )
+            assert resp.status_code == 200
+
+            resp = await api.client.post(
+                f"{api.bot_url(bot['bot_uuid'])}/scale",
+                params=api.params(),
+                json={
+                    "target_count": 3,
+                    "operator": "e2e-test",
+                    "request_id": uuid.uuid4().hex,
+                    "config": {
+                        "sla_grade": "enterprise",
+                        "callback_timeout_seconds": 600,
+                        "auto_approve_publish": True,
+                    },
+                },
+            )
+            assert resp.status_code in [200, 409]
+            if resp.status_code == 200:
+                assert resp.json()["code"] == 0
+        finally:
+            await cleanup_bot(api, bot["bot_uuid"])
+
 
 class TestStopOperation:
     """E2E tests for stop operation behavior."""

@@ -6,6 +6,8 @@
   boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.
+- The focused authenticated
+  `POST /openapi/v1/collaboration/sessions/{sid}/token` delivery slice.
 - A preparatory V1 Gateway wire projection and HS256 token verifier that
   returns a complete, secret-free authenticated caller.
 
@@ -33,15 +35,19 @@
 - Production bootstrap mounts this Router directly at its contract-owned
   `/openapi/v1/collaboration/**` paths and injects completed V1 application
   services plus the Gateway Principal verifier.
+- The focused session-token Router remains a separate delivery slice that
+  requires explicit bootstrap composition with its application service and the
+  same Principal verifier.
 - The adapter must not read environment variables, select concrete V1
   implementations, or select a production Principal trust mechanism.
 
 ## Runtime ownership
 
 This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
-request IDs, envelopes, and HTTP error mapping. Bootstrap owns concrete service
-selection, production trust selection, and Router mounting; application facades
-own resource authorization, Actor selection, and business policy.
+request IDs, envelopes, no-store token responses, and HTTP error mapping.
+Bootstrap owns concrete service selection, production trust selection, and
+Router mounting; application facades own resource authorization, Actor
+selection, and business policy.
 
 ## Tests
 

@@ -337,10 +337,13 @@ class DeviceService:
         device: AllocatedDevice,
         agent_pass_token: str = "",
         agent_code: str = "",
+        active_only: bool = False,
     ) -> bool:
         """Update outbound header rules on a running device (hot-update hook)。
 
         Subclasses override this to provider-specific implementations.
+        ``active_only`` limits a provider's batch target set to ACTIVE physical
+        devices; providers without physical-device fan-out may ignore it.
         Default: no-op.
         """
         return False

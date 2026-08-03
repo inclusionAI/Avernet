@@ -1,13 +1,17 @@
 """refresh-token 回调按 (bot_id, owner_workno) 跨租户解析,不被 tenant guard 挡。"""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotService,
+    BotServiceError,
+)
+from agentclaw.community.adapters.http.bot_management.router import (
+    refresh_bot_passport_token,
 )
 
 
@@ -42,3 +46,48 @@ def test_callback_missing_bot_raises_not_found():
         svc.hot_update_passport_token_to_device(
             bot_id="missing", user_id="user001", token="tok"
         )
+
+
+@pytest.mark.asyncio
+async def test_http_callback_success_contract_is_unchanged():
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "bot_id": "service-bot-1",
+            "owner_workno": "owner-1",
+            "token": "fake-owner-passport-token",
+        }
+    )
+    svc = MagicMock()
+    svc.hot_update_passport_token_to_device.return_value = {
+        "token_prefix": "fake-owner-passport-",
+        "bindings": [{"binding_id": 30, "type": "caller"}],
+    }
+
+    response = await refresh_bot_passport_token(request=request, bot_service=svc)
+
+    assert response.success is True
+    assert response.error_code == 200
+    assert response.message == "Passport Token 刷新成功"
+
+
+@pytest.mark.asyncio
+async def test_http_callback_partial_failure_keeps_retryable_500_contract():
+    request = MagicMock()
+    request.json = AsyncMock(
+        return_value={
+            "bot_id": "service-bot-1",
+            "owner_workno": "owner-1",
+            "token": "fake-owner-passport-token",
+        }
+    )
+    svc = MagicMock()
+    svc.hot_update_passport_token_to_device.side_effect = BotServiceError(
+        "部分设备热更新失败: caller(binding_id=30): unavailable"
+    )
+
+    response = await refresh_bot_passport_token(request=request, bot_service=svc)
+
+    assert response.success is False
+    assert response.error_code == 500
+    assert response.data is None

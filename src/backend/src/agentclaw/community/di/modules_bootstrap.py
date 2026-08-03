@@ -64,14 +64,16 @@ def register_corp_modules(profile: DeployProfile) -> None:
     - ``corp`` registers the full corp infrastructure column.
     - ``corp_test`` registers the corp-reuse subset the corp test column installs
       (it runs with corp deps present in the dev/CI venv).
-    - ``test`` / ``singlebox`` register **nothing** — B11 (3.2) made those columns
-      corp-free, so they no longer reach the corp reuse column.
+    - ``singlebox`` registers **nothing** — corp overlay modules are
+      supplied via ``extra_modules`` in the composition root (``app.py``)
+      so this file names no ``agentclaw.corp`` module (B8).
+    - ``test`` registers **nothing** — B11 (3.2) made that column corp-free.
 
     The corp branches live in the corp-only ``di.corp_bootstrap`` module, loaded
-    here via ``importlib`` (a string import, corp/corp_test only) — so this shared
-    file names **no** ``infrastructure.corp`` / ``config_corp`` module and a
-    community boot (without ``corp`` present) imports it fine. The corp side calls
-    the setter registries below back on this module (corp → community).
+    here via ``importlib`` (a string import, corp/corp_test only) — so
+    this shared file names **no** ``infrastructure.corp`` / ``config_corp`` module
+    and a community boot (without ``corp`` present) imports it fine. The corp side
+    calls the setter registries below back on this module (corp → community).
     """
     if profile is DeployProfile.CORP:
         from importlib import import_module
@@ -131,3 +133,26 @@ def get_test_corp_modules() -> list[Module]:
             "before build_injector (see di/modules_bootstrap.py)."
         )
     return _test_corp_reuse_provider()
+
+
+def resolve_extra_modules(profile: DeployProfile) -> list[Module] | None:
+    """Resolve corp overlay modules for ``singlebox`` via importlib (B8).
+
+    The singlebox profile must go through the community entry point
+    (``app.py``); corp modules are loaded via ``importlib`` so the
+    community import graph stays corp-free. Returns ``None`` for
+    non-singlebox profiles, or when the corp package is absent
+    (community build / Avernet CI).
+    """
+    if profile is not DeployProfile.SINGLEBOX:
+        return None
+    try:
+        from importlib import import_module
+
+        return import_module(
+            "agentclaw.corp.di.corp_bootstrap"
+        ).get_singlebox_overlay_modules()
+    except ModuleNotFoundError:
+        return None
+
+

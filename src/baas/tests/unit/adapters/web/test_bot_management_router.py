@@ -849,6 +849,7 @@ async def test_scale_bot_success(mock_service):
         operator="operator1",
         request_id="a" * 32,
         auto_approve_publish=False,
+        bot_config=None,
     )
 
 
@@ -907,6 +908,7 @@ async def test_scale_bot_with_auto_approve(mock_service):
         operator="operator1",
         request_id="a" * 32,
         auto_approve_publish=True,
+        bot_config=None,
     )
 
 
@@ -957,6 +959,7 @@ async def test_scale_bot_scale_down(mock_service):
         operator="op",
         request_id="a" * 32,
         auto_approve_publish=False,
+        bot_config=None,
     )
 
 

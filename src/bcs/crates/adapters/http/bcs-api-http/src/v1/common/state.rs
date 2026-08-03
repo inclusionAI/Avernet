@@ -7,6 +7,10 @@ use bcs_service_api::application::v1::{
 
 use super::PrincipalVerifier;
 
+pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
+    fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub bot_service: Option<Arc<dyn BotService>>,
@@ -45,5 +49,11 @@ impl ApiState {
     pub fn with_bot_service(mut self, bot_service: Arc<dyn BotService>) -> Self {
         self.bot_service = Some(bot_service);
         self
+    }
+}
+
+impl PrincipalVerificationState for ApiState {
+    fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
+        &self.principal_verifier
     }
 }

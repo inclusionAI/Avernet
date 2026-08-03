@@ -96,6 +96,10 @@ class ScaleBotRequest(BaseRequest):
         default=False,
         description="When True, auto-approve all publish stage gates without manual intervention",
     )
+    config: BotConfig | None = Field(
+        default=None,
+        description="Bot configuration for the scale publish workflow (merged with existing config; not persisted to DB)",
+    )
 
 
 class RestartBotRequest(BaseRequest):
@@ -426,6 +430,7 @@ async def scale_bot(
         operator=request.operator,
         request_id=request.request_id,
         auto_approve_publish=request.auto_approve_publish,
+        bot_config=request.config,
     )
     return ApiResponse(data=result)
 
