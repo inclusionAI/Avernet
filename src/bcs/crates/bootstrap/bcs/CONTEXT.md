@@ -10,7 +10,8 @@
   legacy HTTP, then direct mounting of the versioned collaboration Router.
 - Fail-closed resolution of the dedicated group-session WebSocket signing key,
   composition of one session-connection application service from the shared
-  V1 Session facade, and mounting of its focused token issuance Router.
+  V1 Session facade, and mounting of its focused token issuance and WebSocket
+  Upgrade Routers.
 - Composition adapter that publishes a completed one-shot state-machine result
   through the message-flow service under the initiating Bot identity.
 

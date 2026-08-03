@@ -125,3 +125,32 @@ async fn mounted_session_token_route_authenticates_before_reaching_the_applicati
 
     handle.abort();
 }
+
+#[tokio::test]
+async fn mounted_session_websocket_route_verifies_token_and_preserves_legacy_websocket() {
+    let bots_dir = helpers::create_temp_bots_dir();
+    let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
+    config.metrics.enabled = false;
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+    let (addr, handle) = server.run_on_random_port().await.expect("start server");
+
+    let error = tokio_tungstenite::connect_async(format!(
+        "ws://{addr}/openapi/v1/collaboration/group/ws?token=invalid"
+    ))
+    .await
+    .expect_err("invalid BCN token must fail before Upgrade");
+    let tokio_tungstenite::tungstenite::Error::Http(response) = error else {
+        panic!("expected HTTP rejection, got {error}")
+    };
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let (_legacy, response) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+        .await
+        .expect("legacy Workbench WebSocket remains mounted");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::SWITCHING_PROTOCOLS
+    );
+
+    handle.abort();
+}

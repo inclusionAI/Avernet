@@ -3911,6 +3911,11 @@ impl BcsServer {
             self.state.group_session_secret_access.clone(),
         )
         .await?;
+        let group_session_websocket_router = bcs_ws::web::group_session_websocket_router(
+            group_session_connections.clone(),
+            web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
+            ws_lifecycle_hook(&self.state),
+        );
 
         let mut router = Router::new()
             // WebSocket endpoint for frontend clients (via gateway)
@@ -3929,7 +3934,8 @@ impl BcsServer {
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
                 self.state.gateway_principal_verifier.clone(),
-            ));
+            ))
+            .merge(group_session_websocket_router);
 
         if let Some(oauth_router) = self.build_auth_router() {
             router = router.merge(oauth_router);
@@ -4276,12 +4282,15 @@ fn bot_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::bot::BotDis
     })
 }
 
-fn web_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::web::WebDispatchState> {
+fn web_ws_dispatch_state(
+    state: &Arc<BcsServerState>,
+    group_session_connections: Option<Arc<dyn GroupSessionConnectionService>>,
+) -> Arc<bcs_ws::web::WebDispatchState> {
     Arc::new(bcs_ws::web::WebDispatchState {
         message_flow: state.services.message_flow.clone(),
         collaboration_runtime: state.services.collaboration_runtime.clone(),
         workbench_sessions: state.services.workbench_sessions.clone(),
-        group_session_connections: None,
+        group_session_connections,
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
     })
@@ -4984,7 +4993,7 @@ async fn ws_upgrade_handler(
     }
 
     ws.on_upgrade(move |socket| {
-        let ws_state = web_ws_dispatch_state(&state);
+        let ws_state = web_ws_dispatch_state(&state, None);
         let metrics_hook = ws_lifecycle_hook(&state);
         bcs_ws::web::handle_client_connection(
             socket,
