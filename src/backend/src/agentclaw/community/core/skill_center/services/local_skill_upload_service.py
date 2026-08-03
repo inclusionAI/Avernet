@@ -82,6 +82,9 @@ class LocalSkillUploadService:
         associated = False
         excluded = False
         try:
+            # A previous failed first upload has no authoritative record, but
+            # must not be mixed into this package on a retry.
+            await storage.prepare()
             await storage.write(files)
             skill = self._skill_repo.create(
                 {

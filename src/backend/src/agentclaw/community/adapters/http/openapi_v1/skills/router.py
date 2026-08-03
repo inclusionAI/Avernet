@@ -129,6 +129,16 @@ async def get_skill(
         413: {
             "model": ErrorEnvelope,
             "description": "ZIP package exceeds an upload limit.",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "code": 413101,
+                        "message": "Skill package is too large",
+                        "data": None,
+                        "request_id": "",
+                    }
+                }
+            },
         },
     },
 )

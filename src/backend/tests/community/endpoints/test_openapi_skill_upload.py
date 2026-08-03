@@ -38,6 +38,9 @@ class _Resolver:
 
 
 class _Storage:
+    async def prepare(self) -> None:
+        return None
+
     async def write(self, _files: list[tuple[str, bytes]]) -> None:
         return None
 
