@@ -5,6 +5,9 @@
 - WebSocket delivery adapter for BCS.
 - Bot runtime entry under `src/bot/`.
 - Workbench/Web entry under `src/web/`.
+- Session-bound Workbench connect delivery that delegates current Session
+  authorization to the V1 group-session connection service; legacy
+  user-bound `/ws` connect remains on the Workbench session service.
 - Shared connection-state helpers under `src/shared/`.
 - Implementations of `BotDeliveryPort` and `FrontendDeliveryPort`.
 

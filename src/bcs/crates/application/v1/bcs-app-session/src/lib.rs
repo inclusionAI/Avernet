@@ -9,6 +9,10 @@
 //! lists, message history, and mutations intentionally use separate
 //! authorization rules defined by the V1 contract.
 
+mod connection;
+
+pub use connection::GroupSessionConnectionServiceImpl;
+
 use std::collections::HashSet;
 use std::sync::Arc;
 

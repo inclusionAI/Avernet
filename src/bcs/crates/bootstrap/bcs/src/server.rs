@@ -3796,6 +3796,7 @@ fn web_ws_dispatch_state(state: &Arc<BcsServerState>) -> Arc<bcs_ws::web::WebDis
         message_flow: state.services.message_flow.clone(),
         collaboration_runtime: state.services.collaboration_runtime.clone(),
         workbench_sessions: state.services.workbench_sessions.clone(),
+        group_session_connections: None,
         frontend_connections: state.frontend_connections.clone(),
         run_channels: state.frontend_run_channels.clone(),
     })
@@ -4500,7 +4501,14 @@ async fn ws_upgrade_handler(
     ws.on_upgrade(move |socket| {
         let ws_state = web_ws_dispatch_state(&state);
         let metrics_hook = ws_lifecycle_hook(&state);
-        bcs_ws::web::handle_client_connection(socket, ws_state, bound_actor_id, metrics_hook)
+        bcs_ws::web::handle_client_connection(
+            socket,
+            ws_state,
+            bcs_ws::web::WorkbenchConnectionAuth::UserBound {
+                actor_id: bound_actor_id,
+            },
+            metrics_hook,
+        )
     })
 }
 

@@ -1572,6 +1572,19 @@ pub async fn handle_chat_abort(
     flow: &BcsMessageFlow,
     cmd: ChatAbortCommand,
 ) -> ServiceResult<ChatAbortOutcome> {
+    if !abort_run_matches_session_scope(flow, &cmd).await {
+        warn!(
+            group_id = %cmd.group_id,
+            "chat.abort run does not belong to the bound session"
+        );
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+        });
+    }
+
     let Some(group) = flow.group.get(&cmd.group_id).await else {
         warn!(
             group_id = %cmd.group_id,
@@ -1585,7 +1598,10 @@ pub async fn handle_chat_abort(
         });
     };
 
-    let session_key = build_session_key(&cmd.group_id);
+    let session_key = cmd
+        .session_id
+        .clone()
+        .unwrap_or_else(|| build_session_key(&cmd.group_id));
     let participant_ids: Vec<String> = group
         .bot_participant_ids()
         .into_iter()
@@ -1645,7 +1661,13 @@ pub async fn handle_chat_abort(
     }
 
     let aborted_run_ids = cmd.run_id.into_iter().collect::<Vec<_>>();
-    let frontend_deliveries = publish_chat_abort_event(flow, &cmd.group_id, &aborted_run_ids).await;
+    let frontend_deliveries = publish_chat_abort_event(
+        flow,
+        &cmd.group_id,
+        cmd.session_id.as_deref(),
+        &aborted_run_ids,
+    )
+    .await;
 
     Ok(ChatAbortOutcome {
         aborted: !aborted_run_ids.is_empty() || !has_participants,
@@ -1653,6 +1675,22 @@ pub async fn handle_chat_abort(
         bot_deliveries,
         frontend_deliveries,
     })
+}
+
+async fn abort_run_matches_session_scope(flow: &BcsMessageFlow, cmd: &ChatAbortCommand) -> bool {
+    let Some(session_id) = cmd.session_id.as_deref() else {
+        return true;
+    };
+    let Some(run_id) = cmd.run_id.as_deref() else {
+        return true;
+    };
+    let Some(run_context) = flow.bot_run_context.as_ref() else {
+        return false;
+    };
+    let Some(context) = run_context.get_context(run_id).await else {
+        return false;
+    };
+    context.group_id == cmd.group_id && context.bcs_session_id.as_deref() == Some(session_id)
 }
 
 fn resolve_group_chat_sender(cmd: &GroupChatCommand) -> ServiceResult<String> {
@@ -2418,15 +2456,22 @@ async fn publish_group_callback_event(
 async fn publish_chat_abort_event(
     flow: &BcsMessageFlow,
     group_id: &str,
+    session_id: Option<&str>,
     aborted_run_ids: &[String],
 ) -> Vec<FrontendDeliveryResult> {
     let event_json = build_chat_abort_event(group_id, aborted_run_ids);
+    let target = match session_id {
+        Some(session_id) => FrontendDeliveryTarget::Session {
+            session_id: session_id.to_string(),
+        },
+        None => FrontendDeliveryTarget::Group {
+            group_id: group_id.to_string(),
+        },
+    };
     let delivery = flow
         .frontend_delivery
         .publish(FrontendDeliveryCommand {
-            target: FrontendDeliveryTarget::Group {
-                group_id: group_id.to_string(),
-            },
+            target,
             event_json,
             delivery_kind: FrontendDeliveryKind::WorkbenchEvent,
             run_fallback: None,

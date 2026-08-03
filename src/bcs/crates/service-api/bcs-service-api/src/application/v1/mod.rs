@@ -9,6 +9,7 @@ pub mod bot;
 pub mod error;
 pub mod friendship;
 pub mod group;
+pub mod group_session_connection;
 pub mod identity;
 pub mod invitation;
 pub mod message;
@@ -22,6 +23,7 @@ pub use bot::*;
 pub use error::ApplicationError;
 pub use friendship::*;
 pub use group::*;
+pub use group_session_connection::*;
 pub use identity::{
     AuthenticatedAccessKeyIdentity, AuthenticatedAppIdentity, AuthenticatedBotIdentity,
     AuthenticatedCaller, AuthenticatedUserIdentity,

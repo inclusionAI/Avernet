@@ -6,6 +6,8 @@
   boundaries.
 - Request/response DTO translation and the common response envelope.
 - An injectable Gateway Principal verification boundary.
+- The focused authenticated
+  `POST /openapi/v1/collaboration/sessions/{sid}/token` delivery slice.
 - A preparatory V1 Gateway wire projection and HS256 token verifier that
   returns a complete, secret-free authenticated caller.
 
@@ -37,9 +39,10 @@
 ## Runtime ownership
 
 This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
-request IDs, envelopes, and HTTP error mapping. Header extraction, production
-trust selection, router mounting, resource authorization, Actor selection, and
-business policy remain outside this preparatory verifier slice.
+request IDs, envelopes, no-store token responses, and HTTP error mapping.
+Header extraction, production trust selection, router mounting, resource
+authorization, Actor selection, and business policy remain outside this
+delivery boundary.
 
 ## Tests
 
