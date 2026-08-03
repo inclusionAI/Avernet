@@ -1815,6 +1815,9 @@ pub async fn get_session_messages(
 
     let limit = query.limit.unwrap_or(u64::MAX);
     if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
+        if let Err(response) = authorize_state_machine_session_history(&state, &sess, &caller).await {
+            return response;
+        }
         return match state
             .services
             .collaboration_runtime
@@ -1853,6 +1856,47 @@ pub async fn get_session_messages(
             let (status, body) = session_history_error_to_response(&e);
             (status, Json(body)).into_response()
         }
+    }
+}
+
+async fn authorize_state_machine_session_history(
+    state: &HttpAppState,
+    session: &bcs_service_api::Session,
+    caller: &bcs_service_api::CallerContext,
+) -> Result<(), Response> {
+    let authorized = match caller {
+        bcs_service_api::CallerContext::Human(human) => {
+            human_has_session_access(state, session, &human.actor_id, &human.staff_no).await
+        }
+        bcs_service_api::CallerContext::Bot(bot) => session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == bot.bot_uuid),
+        bcs_service_api::CallerContext::Public => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "unauthorized",
+                    "message": "valid Human identity or Bot token is required for session history"
+                })),
+            )
+                .into_response());
+        }
+        bcs_service_api::CallerContext::Integration(_)
+        | bcs_service_api::CallerContext::Admin(_) => true,
+    };
+
+    if authorized {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "forbidden",
+                "message": "caller is not a session participant and owns no Bot in this session"
+            })),
+        )
+            .into_response())
     }
 }
 

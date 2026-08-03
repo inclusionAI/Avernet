@@ -181,15 +181,14 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                 Some(human.actor_id.as_str())
             }
             CallerContext::Bot(bot_actor) => {
-                if !group.participants.iter().any(|p| p.bot_uuid == bot_actor.bot_uuid)
-                    && !cmd
-                        .session_participants
-                        .iter()
-                        .any(|p| p.bot_uuid == bot_actor.bot_uuid)
+                if !cmd
+                    .session_participants
+                    .iter()
+                    .any(|p| p.bot_uuid == bot_actor.bot_uuid)
                 {
                     return Err(GroupUseCaseError::Forbidden(format!(
-                        "bot '{}' is not a participant in group '{}'",
-                        bot_actor.bot_uuid, cmd.group_id
+                        "bot '{}' is not a participant in session '{}'",
+                        bot_actor.bot_uuid, cmd.session_id
                     )));
                 }
                 None
