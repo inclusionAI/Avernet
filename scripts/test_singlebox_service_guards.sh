@@ -485,6 +485,22 @@ test_5bot_openclaw_config_is_written_private() {
     fail "5bot openclaw config should be chmod 600"
 }
 
+test_local_bcs_launchers_supply_group_session_secret() {
+  local singlebox_start five_bot_start secret_default
+  singlebox_start="$(sed -n '/^start_bcs_binary()/,/^}/p' "${ROOT}/scripts/modules/bcs.sh")"
+  five_bot_start="$(sed -n '/^start_bcs()/,/^}/p' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh")"
+  secret_default='export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"'
+
+  grep -F 'if [ "${BCS_SERVER_ENV}" = "local" ]; then' <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must scope the group-session key default to local mode"
+  grep -F "$secret_default" <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must provide an overridable local group-session key"
+  grep -F 'if [ "$SERVER_ENV" = "local" ]; then' <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must scope the group-session key default to local mode"
+  grep -F "$secret_default" <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must provide an overridable local group-session key"
+}
+
 test_ready_banner_describes_full_stack() {
   grep -F 'FULL SINGLEBOX STACK' "${ROOT}/scripts/utils.sh" >/dev/null || \
     fail "ready banner should describe full singlebox stack"
@@ -537,6 +553,7 @@ test_baas_start_refuses_root_bots_dir
 test_baas_start_passes_bcn_runtime_configuration
 test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
+test_local_bcs_launchers_supply_group_session_secret
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
 

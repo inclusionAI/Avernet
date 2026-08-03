@@ -1271,6 +1271,19 @@ fn group_session_test_secret_access() -> Arc<dyn SecretAccessPort> {
     )]))
 }
 
+fn build_secret_access_blocking(config: &BcsConfig) -> crate::Result<Arc<dyn SecretAccessPort>> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Runtime::new()
+                    .expect("temp runtime for secret provider build")
+                    .block_on(crate::http_adapter::build_secret_access(config))
+            })
+            .join()
+            .expect("secret provider build thread panicked")
+    })
+}
+
 async fn build_group_session_token_port(
     secret_access: Arc<dyn SecretAccessPort>,
 ) -> crate::Result<Arc<dyn GroupSessionTokenPort>> {
@@ -1549,6 +1562,8 @@ mod gateway_principal_tests {
 impl Default for BcsServerState {
     fn default() -> Self {
         let config = BcsConfig::default();
+        let group_session_secret_access = build_secret_access_blocking(&config)
+            .expect("Secret provider configuration must be valid");
         let invite_token_secret = resolve_invite_token_secret(&config);
         let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
             &config.gateway_principal,
@@ -1953,7 +1968,7 @@ impl Default for BcsServerState {
             gateway_principal_verifier,
             invite_token_secret,
             openapi_v1,
-            group_session_secret_access: group_session_test_secret_access(),
+            group_session_secret_access,
             user_identity_port,
             outbound_url_guard,
             admin_invocation_runs,
@@ -2795,12 +2810,14 @@ impl BcsServer {
     /// Create a new BCS server.
     pub fn new(config: BcsConfig) -> Self {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
+        let group_session_secret_access = build_secret_access_blocking(&config)
+            .expect("Secret provider configuration must be valid");
         Self::new_with_outbound_url_guards(
             config,
             outbound_url_guard.clone(),
             outbound_url_guard.clone(),
             outbound_url_guard,
-            group_session_test_secret_access(),
+            group_session_secret_access,
         )
     }
 
@@ -4370,6 +4387,29 @@ mod tests {
         events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
     }
 
+    #[tokio::test]
+    async fn public_constructor_does_not_install_test_group_session_signing_key() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = BcsConfig::default();
+        config.secret.provider = "noop".to_string();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+
+        let server = BcsServer::new(config);
+        let error = match server.build_router().await {
+            Ok(_) => panic!("public constructor must not install the fixed test signing key"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .to_string()
+                .contains("BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required")
+        );
+    }
+
     #[async_trait]
     impl SessionChannelOutboundPort for RecordingSessionChannelOutbound {
         async fn publish_human_input_ready(
@@ -4722,7 +4762,7 @@ mod tests {
             "data_dir".to_string(),
             toml::Value::String(tmp.path().to_string_lossy().into_owned()),
         );
-        let server = BcsServer::new(config);
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
 
         server
@@ -4772,7 +4812,7 @@ mod tests {
             "data_dir".to_string(),
             toml::Value::String(tmp.path().to_string_lossy().into_owned()),
         );
-        let server = BcsServer::new(config);
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
 
         let first = bot_ws_dispatch_state(&server.state);
         let second = bot_ws_dispatch_state(&server.state);

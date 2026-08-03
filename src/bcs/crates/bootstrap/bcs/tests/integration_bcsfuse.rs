@@ -141,7 +141,7 @@ async fn onboard_with_bcsfuse_enabled_but_unreachable_succeeds() {
     let bots_dir = tmp.path().to_path_buf();
 
     let config = create_test_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     // Onboard should succeed — bcsfuse sync failure is non-blocking
@@ -166,7 +166,7 @@ async fn fuse_with_bcsfuse_enabled_but_unreachable_returns_error() {
     let bots_dir = tmp.path().to_path_buf();
 
     let config = create_test_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     let mut bot1 = MockBot::connect(addr).await;

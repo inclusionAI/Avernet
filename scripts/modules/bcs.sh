@@ -773,6 +773,9 @@ start_bcs_binary() {
     export BCS_MOCK_USER_ID="${BCS_MOCK_USER_ID:-001}"
     export BCS_MOCK_USER_NICK_NAME="${BCS_MOCK_USER_NICK_NAME:-admin}"
     export BCS_MOCK_USER_CHANNEL="${BCS_MOCK_USER_CHANNEL:-mock}"
+    if [ "${BCS_SERVER_ENV}" = "local" ]; then
+        export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"
+    fi
     if [ "${BCS_AUTH_MOCK}" = "1" ] && [ -z "${BCS_MOCK_USER_ID}" ]; then
         log_warn "BCS_AUTH_MOCK=1 but BCS_MOCK_USER_ID is empty; caller identity mock is disabled until configured."
     fi
