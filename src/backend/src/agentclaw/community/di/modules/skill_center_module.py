@@ -153,6 +153,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
+from agentclaw.community.core.skill_center.local_skill_cleanup import (
+    LocalSkillCleanupRepository,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -181,6 +184,9 @@ from agentclaw.community.plugins.skill_center_sync_log_repository import (
 )
 from agentclaw.community.plugins.skill_propagation_log_repository import (
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
+)
+from agentclaw.community.plugins.local_skill_cleanup_repository import (
+    SqlLocalSkillCleanupRepository,
 )
 
 
@@ -300,8 +306,10 @@ class SkillCenterModule(Module):
         bot_repo: BotRepository,
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
+        skill_set_service_factory: SkillSetServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
+        cleanup_repo: LocalSkillCleanupRepository,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -309,9 +317,19 @@ class SkillCenterModule(Module):
             bot_repo,
             collaborator_service,
             skill_service_factory,
+            skill_set_service_factory,
             audit_log_repo,
             edit_guard,
+            cleanup_repo,
         )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_cleanup_repository(
+        self, db: DatabasePlugin
+    ) -> LocalSkillCleanupRepository:
+        return SqlLocalSkillCleanupRepository(db)
 
     @singleton
     @provider

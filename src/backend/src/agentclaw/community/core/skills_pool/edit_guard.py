@@ -71,7 +71,12 @@ class SkillsPoolEditGuard:
     async def acquire_for_edit_wait(
         self, *, scope: BotSkillLayoutScope, timeout_seconds: float = 30.0
     ) -> SkillsPoolEditLease:
-        """Wait for an ordinary edit while still failing closed for rollback."""
+        """Wait for another ordinary Local Skill edit, never bypass its lock.
+
+        Layout rollback remains an immediate pause; only a held edit lease is
+        retried.  This gives concurrent same-name uploads one serialized
+        authoritative read rather than a lock-contention race.
+        """
         deadline = time.monotonic() + timeout_seconds
         while True:
             try:

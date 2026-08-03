@@ -88,10 +88,12 @@ class _Query:
 
 
 class _Upload:
+    operation = "created"
+
     async def upload_local_skill(self, **kwargs):
         self.args = kwargs
         return {
-            "operation": "created",
+            "operation": self.operation,
             "skill": {
                 "id": "8",
                 "name": "new-skill",
@@ -160,6 +162,30 @@ def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
             "updated_at": "2026-08-04T00:00:00",
         },
     }
+
+
+def test_upload_replacement_returns_200_and_updated_operation():
+    class _UpdatedUpload(_Upload):
+        operation = "updated"
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(LocalSkillQueryServiceProtocol, to=_Query())
+            binder.bind(LocalSkillUploadServiceProtocol, to=_UpdatedUpload())
+            binder.bind(LocalSkillStateServiceProtocol, to=_State())
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
+    attach_injector(app, Injector([Bindings()]))
+    client = TestClient(app)
+    response = client.post(
+        "/openapi/v1/bots/skills/upload?bot_id=bot-1",
+        content=b"PK\x03\x04", headers={"content-type": "application/zip"},
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == 200000
+    assert response.json()["data"]["operation"] == "updated"
 
 
 def test_upload_rejects_multipart_and_other_content_types_before_service_call():
@@ -274,6 +300,8 @@ def test_openapi_declares_exact_state_command_paths_and_response_shape():
         assert response_schema["$ref"].endswith("Envelope_SkillState_")
     state_schema = schema["components"]["schemas"]["SkillState"]
     assert state_schema["required"] == ["skill", "changed"]
+    upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
+    assert {"200", "201", "413"} <= set(upload["responses"])
 
 
 class _Database:
