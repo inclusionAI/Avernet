@@ -12,6 +12,8 @@ from pathlib import Path
 
 from gateway.community.config import Config
 from gateway.community.core.forwarding import DomainMap, Forwarding
+from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
+from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
 from gateway.community.spi.ws_forwarder import WebSocketForwarder
@@ -38,15 +40,23 @@ def build_forwarding(
     domain_map = _load_domain_map(config)
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
     sources: dict[str, str | Path] = {}
+    source_kind = _catalog_source_kind(catalog)
     if config.config_dir is not None:
         for name, domain in domain_map.domains.items():
-            if domain.schema.source == "file" and domain.schema.location:
+            if (
+                source_kind == "file"
+                and domain.schema.source == "file"
+                and domain.schema.location
+            ):
                 sources[name] = config.config_dir / domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
-    for name, domain in domain_map.domains.items():
-        if domain.schema.source == "http" and domain.schema.location:
-            sources[name] = domain.schema.location
-            refresh_seconds = float(domain.schema.refresh_seconds)
+            elif (
+                source_kind == "http"
+                and domain.schema.source == "http"
+                and domain.schema.location
+            ):
+                sources[name] = domain.schema.location
+                refresh_seconds = float(domain.schema.refresh_seconds)
     if sources and hasattr(catalog, "set_sources"):
         catalog.set_sources(sources)
         if hasattr(catalog, "refresh_all"):
@@ -58,6 +68,14 @@ def build_forwarding(
         ws_forwarder=ws_forwarder,
         refresh_seconds=refresh_seconds,
     )
+
+
+def _catalog_source_kind(catalog: SchemaCatalog) -> str:
+    if isinstance(catalog, FileSchemaCatalog):
+        return "file"
+    if isinstance(catalog, HttpSchemaCatalog):
+        return "http"
+    return "file"
 
 
 def _load_domain_map(config: Config | None = None) -> DomainMap:
