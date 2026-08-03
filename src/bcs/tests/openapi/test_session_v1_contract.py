@@ -22,7 +22,7 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
         "get"
     ]
     list_messages = contract["paths"][
-        "/openapi/v1/sessions/{session_id}/messages"
+        "/openapi/v1/group-sessions/{session_id}/messages"
     ]["get"]
 
     list_queries = _query_parameters(list_sessions)
@@ -43,7 +43,7 @@ def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() ->
     operations = [
         contract["paths"]["/openapi/v1/groups"]["get"],
         contract["paths"]["/openapi/v1/groups/{group_id}/sessions"]["get"],
-        contract["paths"]["/openapi/v1/sessions/{session_id}/messages"]["get"],
+        contract["paths"]["/openapi/v1/group-sessions/{session_id}/messages"]["get"],
     ]
 
     for operation in operations:
@@ -57,7 +57,7 @@ def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() ->
 
 def test_session_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
     contract = load_contract(CONTRACT_ROOT)
-    operation = contract["paths"]["/openapi/v1/sessions/{session_id}"]["get"]
+    operation = contract["paths"]["/openapi/v1/group-sessions/{session_id}"]["get"]
 
     assert "view_bot_id" not in {
         parameter["name"]
