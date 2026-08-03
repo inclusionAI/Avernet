@@ -1,4 +1,6 @@
--- Deploy before application code that can commit Local Skill replacement.
+-- RELEASE GATE: deploy this DDL and verify it before deploying application
+-- code that can commit Local Skill replacement.  The application has no
+-- compatibility fallback for an absent cleanup-work table.
 -- Strict Bot scope (env, owner_id, bot_id) is deployment-wide unique, therefore
 -- this operational table intentionally is not a tenant-leading catalog.
 CREATE TABLE `ac_local_skill_cleanup_work` (
@@ -8,6 +10,7 @@ CREATE TABLE `ac_local_skill_cleanup_work` (
   `bot_id` VARCHAR(100) NOT NULL,
   `skill_id` BIGINT NOT NULL,
   `package_locator` VARCHAR(1024) NOT NULL,
+  `requires_runtime_restore` TINYINT(1) NOT NULL DEFAULT 0,
   `status` VARCHAR(20) NOT NULL DEFAULT 'pending',
   `attempts` INT NOT NULL DEFAULT 0,
   `last_error` TEXT NULL,
@@ -19,5 +22,14 @@ CREATE TABLE `ac_local_skill_cleanup_work` (
   KEY `idx_local_skill_cleanup_pending` (`env`, `status`, `gmt_create`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Verify: SHOW CREATE TABLE ac_local_skill_cleanup_work;
--- Roll back before code deployment only: DROP TABLE ac_local_skill_cleanup_work;
+-- Verify before application rollout:
+--   SHOW CREATE TABLE ac_local_skill_cleanup_work;
+--   SELECT COUNT(*) FROM information_schema.statistics
+--     WHERE table_schema = DATABASE()
+--       AND table_name = 'ac_local_skill_cleanup_work'
+--       AND index_name IN ('uk_local_skill_cleanup_scope_locator',
+--                          'idx_local_skill_cleanup_pending');
+-- Roll back only before application deployment: DROP TABLE ac_local_skill_cleanup_work;
+-- After code rollout, retain work rows until they reach status='cleaned'; use
+-- a forward repair rather than dropping the table, so no obsolete bytes lose
+-- their durable retry record.

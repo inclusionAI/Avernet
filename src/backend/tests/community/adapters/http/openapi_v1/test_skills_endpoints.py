@@ -302,6 +302,13 @@ def test_openapi_declares_exact_state_command_paths_and_response_shape():
     assert state_schema["required"] == ["skill", "changed"]
     upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
+    for status in ("200", "201"):
+        assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
+            "Envelope_LocalSkillUpload_"
+        )
+    assert schema["components"]["schemas"]["LocalSkillUpload"]["properties"]["operation"]["enum"] == [
+        "created", "updated"
+    ]
 
 
 class _Database:
