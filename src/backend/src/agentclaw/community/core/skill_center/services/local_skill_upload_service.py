@@ -97,7 +97,9 @@ class LocalSkillUploadService:
                 }
             )
             default_set = self._skill_set_repo.get_default(
-                user_id=owner_id, engine_type=bot.get("active_engine")
+                user_id=owner_id,
+                bolt_id=bot_id,
+                engine_type=bot.get("active_engine"),
             )
             if default_set is None or not self._skill_set_repo.add_skill_to_set(
                 default_set["id"], skill["id"], user_id=owner_id
