@@ -106,7 +106,7 @@ class LocalSkillUploadService:
             ):
                 raise RuntimeError("default Skill Set association failed")
             associated = True
-            if not self._skill_repo.add_default_skill_exclusion(
+            if not self._skill_set_repo.add_default_skill_exclusion(
                 owner_id, bot_id, int(default_set["id"]), int(skill["id"])
             ):
                 raise RuntimeError("default Skill Set exclusion failed")
@@ -127,7 +127,7 @@ class LocalSkillUploadService:
             # association delete must never prevent package cleanup.
             if excluded and skill is not None:
                 try:
-                    self._skill_repo.remove_default_skill_exclusion(
+                    self._skill_set_repo.remove_default_skill_exclusion(
                         owner_id, bot_id, int(default_set["id"]), int(skill["id"])
                     )
                 except Exception:
