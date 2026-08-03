@@ -62,7 +62,7 @@ async def test_teclaw_upload_adapts_path_and_stores_logical_git_path():
 
 
 @pytest.mark.asyncio
-async def test_upload_uses_author_id_for_skill_metadata():
+async def test_upload_uses_bot_owner_for_skill_metadata():
     fake_fs = MagicMock()
     fake_fs.delete_tree = AsyncMock(return_value=True)
     fake_fs.write_file = AsyncMock()
@@ -72,11 +72,48 @@ async def test_upload_uses_author_id_for_skill_metadata():
     await svc.upload_skill(
         uploaded,
         user_id="bot-owner",
-        author_id="collaborator",
         bolt_id="b1",
     )
 
-    assert svc.create_skill.call_args.kwargs["user_id"] == "collaborator"
+    assert svc.create_skill.call_args.kwargs["user_id"] == "bot-owner"
+
+
+@pytest.mark.asyncio
+async def test_reupload_normalizes_historical_collaborator_owner():
+    fake_fs = MagicMock()
+    fake_fs.delete_tree = AsyncMock(return_value=True)
+    fake_fs.write_file = AsyncMock()
+    svc = _service(Path("skills-local"), to_local_skill_engine_path, fake_fs)
+    historical = {
+        "id": "17",
+        "name": "sync-and-pr",
+        "user_id": "collaborator",
+        "git_path": "local://skills-local/sync-and-pr",
+    }
+    svc._skill_repo.get_bot_local_by_name.return_value = historical
+    svc._skill_repo.update.return_value = {**historical, "user_id": "bot-owner"}
+
+    uploaded = [
+        {
+            "filename": "SKILL.md",
+            "relative_path": "SKILL.md",
+            "content": SKILL_MD,
+        }
+    ]
+    result = await svc.upload_skill(
+        uploaded,
+        user_id="bot-owner",
+        bolt_id="b1",
+    )
+
+    svc._skill_repo.get_bot_local_by_name.assert_called_once_with(
+        bot_id="b1",
+        name="sync-and-pr",
+        user_id=None,
+    )
+    assert svc._skill_repo.update.call_args.args[0] == "17"
+    assert svc._skill_repo.update.call_args.args[1]["user_id"] == "bot-owner"
+    assert result["user_id"] == "bot-owner"
 
 
 @pytest.mark.asyncio

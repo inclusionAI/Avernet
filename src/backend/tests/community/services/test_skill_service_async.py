@@ -255,7 +255,7 @@ class TestSkillServiceAsyncRouting:
         repo.get_bot_local_by_name.assert_called_once_with(
             bot_id="bot1",
             name="shared-name",
-            user_id="user1",
+            user_id=None,
         )
         repo.update.assert_not_called()
         repo.create.assert_called_once()
