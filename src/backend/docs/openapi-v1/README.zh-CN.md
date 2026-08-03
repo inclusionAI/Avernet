@@ -622,17 +622,18 @@ Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上
 > **已与 totalfrank 定案。** 现有 Local Skill 由 Bot 的设备文件系统存储，不是可在租户内复用的
 > 全局资产。因此 Track B 采用 per-bot **上传** → **激活/停用** → **删除**
 > 的生命周期，不暴露独立的“安装”概念。租户级可复用 Skill 延后到 Skill Center 具备独立存储和分发能力后再设计。
-> `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；除上传和按 Bot 查询激活列表外，请求无需重复携带 `bot_id`。
+> 公开 API 不提供跨 Bot 的 Skill 目录；列表、上传和激活列表都必须通过查询参数携带 `bot_id`。
+> `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；针对具体 Skill 的请求无需重复携带 `bot_id`。
 
 **状态**列中，`桩内` 表示路径和语义与当前路由桩一致；`已定案（待同步桩）`
 表示 Track B 契约已确认，但当前路由桩仍需在实现 PR 中新增或替换。
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Skill 列表（`keyword`、分页；不包含 Skill 市场） | `Envelope[Page[Skill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填，`keyword`、分页；包含 Active 和 Inactive） | `Envelope[Page[Skill]]` | 已定案（待同步桩） |
 | GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{bot_id}/upload` | 向指定 Bot 上传 Local Skill | `Envelope[Skill]` | 已定案（待同步桩） |
-| GET | `/openapi/v1/bots/skills/{bot_id}/active` | 列出指定 Bot 当前激活的 Skill | `Envelope[list[BotSkill]]` | 已定案（待同步桩） |
+| POST | `/openapi/v1/bots/skills/upload` | 向指定 Bot 上传 Local Skill（`bot_id` 必填；默认 Inactive） | `Envelope[Skill]` | 已定案（待同步桩） |
+| GET | `/openapi/v1/bots/skills/active` | 列出指定 Bot 当前 Active 的 Skill（`bot_id` 必填） | `Envelope[list[BotSkill]]` | 已定案（待同步桩） |
 | POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
 | POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 已定案（待同步桩） |

@@ -702,9 +702,10 @@ Skill upload and lifecycle operations belong to a specific bot.
 > therefore uses a per-bot **upload** → **activate/deactivate** → **delete**
 > lifecycle and does not expose a separate installation concept. Reusable
 > tenant-level Skills are deferred until Skill Center provides independent
-> storage and distribution. `skill_id` maps to `ac_skill.id` and uniquely
-> identifies a Skill, so requests do not repeat `bot_id` except when uploading
-> or listing the active Skills of a bot.
+> storage and distribution. The public API does not expose a cross-bot Skill
+> catalog: list, upload, and active-list operations require `bot_id` as a query
+> parameter. `skill_id` maps to `ac_skill.id` and uniquely identifies a Skill,
+> so operations on a specific Skill do not repeat `bot_id`.
 
 In the **Status** column, `in stub` means the current router stub already has
 the ratified path and semantics. `ratified (stub update pending)` means the
@@ -713,10 +714,10 @@ current stub.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Skill list (`keyword`, paged; no Skill marketplace) | `Envelope[Page[Skill]]` | in stub |
+| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required, `keyword`, paged; includes Active and Inactive) | `Envelope[Page[Skill]]` | ratified (stub update pending) |
 | GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST | `/openapi/v1/bots/skills/{bot_id}/upload` | Upload a Local Skill to a bot | `Envelope[Skill]` | ratified (stub update pending) |
-| GET | `/openapi/v1/bots/skills/{bot_id}/active` | List a bot's active Skills | `Envelope[list[BotSkill]]` | ratified (stub update pending) |
+| POST | `/openapi/v1/bots/skills/upload` | Upload a Local Skill (`bot_id` required; Inactive by default) | `Envelope[Skill]` | ratified (stub update pending) |
+| GET | `/openapi/v1/bots/skills/active` | List a bot's Active Skills (`bot_id` required) | `Envelope[list[BotSkill]]` | ratified (stub update pending) |
 | POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
 | POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | ratified (stub update pending) |
