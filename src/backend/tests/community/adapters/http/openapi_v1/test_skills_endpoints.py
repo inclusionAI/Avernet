@@ -6,6 +6,7 @@ import time
 from contextlib import contextmanager
 
 import jwt
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
@@ -22,7 +23,12 @@ from agentclaw.community.adapters.http.openapi_v1.skills.router import router
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
 )
-from agentclaw.community.api.local_skill_upload_service import LocalSkillUploadServiceProtocol
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
@@ -31,13 +37,19 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_query_service import (
     LocalSkillQueryService,
 )
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugins.bot_repository import BotRepository
 from agentclaw.community.plugins.local.sqlite_models import (
     DefaultSkillsetSkillExclusion,
 )
-from agentclaw.community.plugins.skill_repository import SkillRepository
+from agentclaw.community.plugins.skill_repository import (
+    SkillRepository,
+    SkillSetRepository,
+)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -81,18 +93,43 @@ class _Upload:
         return {
             "operation": "created",
             "skill": {
-                "id": "8", "name": "new-skill", "description": "Useful",
-                "category": "general", "tags": "[]", "active": False,
-                "gmt_created": "2026-08-04T00:00:00", "gmt_modified": "2026-08-04T00:00:00",
+                "id": "8",
+                "name": "new-skill",
+                "description": "Useful",
+                "category": "general",
+                "tags": "[]",
+                "active": False,
+                "gmt_created": "2026-08-04T00:00:00",
+                "gmt_modified": "2026-08-04T00:00:00",
             },
         }
 
 
-def _client(query: _Query) -> TestClient:
+class _State:
+    def __init__(self) -> None:
+        self.args = None
+
+    async def set_local_skill_active(self, **kwargs):
+        self.args = kwargs
+        return {
+            "id": "8",
+            "name": "new-skill",
+            "description": "Useful",
+            "category": "general",
+            "tags": "[]",
+            "active": kwargs["active"],
+            "changed": False,
+            "gmt_created": "2026-08-04T00:00:00",
+            "gmt_modified": "2026-08-04T00:00:00",
+        }
+
+
+def _client(query: _Query, state: _State | None = None) -> TestClient:
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
+            binder.bind(LocalSkillStateServiceProtocol, to=state or _State())
 
     app = FastAPI()
     app.include_router(router)
@@ -113,9 +150,14 @@ def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
     assert response.json()["data"] == {
         "operation": "created",
         "skill": {
-            "skill_id": "8", "name": "new-skill", "description": "Useful",
-            "category": "general", "tags": [], "active": False,
-            "created_at": "2026-08-04T00:00:00", "updated_at": "2026-08-04T00:00:00",
+            "skill_id": "8",
+            "name": "new-skill",
+            "description": "Useful",
+            "category": "general",
+            "tags": [],
+            "active": False,
+            "created_at": "2026-08-04T00:00:00",
+            "updated_at": "2026-08-04T00:00:00",
         },
     }
 
@@ -130,6 +172,33 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
         )
         assert response.status_code == 400
         assert response.json()["code"] == 400101
+
+
+def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state():
+    state = _State()
+    client = _client(_Query(), state)
+
+    activated = client.post("/openapi/v1/bots/skills/8/activate")
+    assert activated.status_code == 200
+    assert activated.json()["data"] == {
+        "skill": {
+            "skill_id": "8",
+            "name": "new-skill",
+            "description": "Useful",
+            "category": "general",
+            "tags": [],
+            "active": True,
+            "created_at": "2026-08-04T00:00:00",
+            "updated_at": "2026-08-04T00:00:00",
+        },
+        "changed": False,
+    }
+    assert state.args == {"skill_id": "8", "actor_id": "actor", "active": True}
+
+    deactivated = client.post("/openapi/v1/bots/skills/8/deactivate")
+    assert deactivated.status_code == 200
+    assert deactivated.json()["data"]["skill"]["active"] is False
+    assert state.args == {"skill_id": "8", "actor_id": "actor", "active": False}
 
 
 def test_list_uses_verified_actor_and_exposes_only_public_metadata():
@@ -190,6 +259,21 @@ def test_list_requires_bot_id_and_shared_page_limits():
         client.get("/openapi/v1/bots/skills?bot_id=bot&page_size=101").status_code
         == 422
     )
+
+
+def test_openapi_declares_exact_state_command_paths_and_response_shape():
+    schema = _client(_Query()).app.openapi()
+    for path in (
+        "/openapi/v1/bots/skills/{skill_id}/activate",
+        "/openapi/v1/bots/skills/{skill_id}/deactivate",
+    ):
+        assert set(schema["paths"][path]) == {"post"}
+        response_schema = schema["paths"][path]["post"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        assert response_schema["$ref"].endswith("Envelope_SkillState_")
+    state_schema = schema["components"]["schemas"]["SkillState"]
+    assert state_schema["required"] == ["skill", "changed"]
 
 
 class _Database:
@@ -369,3 +453,85 @@ def test_default_bot_scope_is_owner_distinguished(tmp_path):
         )
     assert [skill["name"] for skill in a_skills] == ["owner-a"]
     assert [skill["name"] for skill in b_skills] == ["owner-b"]
+
+
+@pytest.mark.asyncio
+async def test_state_command_cannot_cross_the_real_tenant_guard(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'state-tenant.db'}")
+    from agentclaw.community.core.models import SkillSet, SkillSetSkill
+
+    for model in (
+        BotModel,
+        Skill,
+        SkillSet,
+        SkillSetSkill,
+        DefaultSkillsetSkillExclusion,
+    ):
+        model.__table__.create(engine)
+    db = _Database(engine)
+    bots, skills, sets = BotRepository(db), SkillRepository(db), SkillSetRepository(db)
+    with avernet_tenant_scope("tenant-a"):
+        bots.insert(
+            {
+                "bot_id": "bot",
+                "entity_id": "owner",
+                "entity_type": "staff",
+                "creator_id": "owner",
+                "owner_id": "owner",
+                "status": "ACTIVE",
+                "active_engine": "openclaw",
+            }
+        )
+        default_set = sets.create(
+            {
+                "name": "Default",
+                "user_id": "owner",
+                "bolt_id": "bot",
+                "is_default": True,
+                "is_builtin": False,
+                "is_active": False,
+                "engine_type": "openclaw",
+            }
+        )
+        skill = skills.create(
+            {
+                "name": "private",
+                "git_path": "local://private",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+        sets.add_skill_to_set(default_set["id"], skill["id"], user_id="owner")
+        sets.add_default_skill_exclusion(
+            "owner", "bot", int(default_set["id"]), int(skill["id"])
+        )
+
+    class _Runtime:
+        calls = 0
+
+        def sync_runtime(self):
+            self.calls += 1
+            return True
+
+    class _Factory:
+        def __init__(self):
+            self.runtime = _Runtime()
+
+        def create(self, **_kwargs):
+            return self.runtime
+
+    class _Guard:
+        def acquire_for_edit(self, **_kwargs):
+            return object()
+
+        def release(self, _lease):
+            return True
+
+    factory = _Factory()
+    service = LocalSkillStateService(skills, sets, bots, object(), factory, _Guard())
+    with avernet_tenant_scope("tenant-b"):
+        with pytest.raises(LocalSkillNotFoundError):
+            await service.set_local_skill_active(
+                skill_id=skill["id"], actor_id="owner", active=True
+            )
+    assert factory.runtime.calls == 0

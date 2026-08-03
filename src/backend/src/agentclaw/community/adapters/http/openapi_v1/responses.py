@@ -92,6 +92,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillNotReadyError,
     LocalSkillOwnerAmbiguousError,
+    LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
@@ -206,6 +207,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
+    LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     FileTooLargeError: (413, "File too large for preview"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
@@ -298,6 +300,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillDuplicateError: 409103,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
+    LocalSkillRuntimeSyncError: 502102,
 }
 
 

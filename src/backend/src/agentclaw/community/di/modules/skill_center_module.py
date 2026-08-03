@@ -147,6 +147,12 @@ from agentclaw.community.core.skill_center.services.local_skill_query_service im
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
@@ -304,6 +310,27 @@ class SkillCenterModule(Module):
             collaborator_service,
             skill_service_factory,
             audit_log_repo,
+            edit_guard,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_state_service(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_set_service_factory: SkillSetServiceFactory,
+        edit_guard: SkillsPoolEditGuard,
+    ) -> LocalSkillStateServiceProtocol:
+        return LocalSkillStateService(
+            skill_repo,
+            skill_set_repo,
+            bot_repo,
+            collaborator_service,
+            skill_set_service_factory,
             edit_guard,
         )
 
