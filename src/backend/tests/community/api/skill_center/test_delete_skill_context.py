@@ -106,6 +106,7 @@ async def test_delete_without_bot_query_uses_skill_bot_and_engine_paths():
     """DELETE derives the physical context from the persisted Skill, not default."""
     skill_repo = MagicMock()
     skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = []
     skill_repo.delete.return_value = True
     device_fs = MagicMock()
     device_fs.exists = AsyncMock(return_value=True)
@@ -135,6 +136,7 @@ async def test_delete_fails_closed_when_existing_active_entry_cannot_be_removed(
     """An active-link deletion failure keeps Pool source and DB intact."""
     skill_repo = MagicMock()
     skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = []
     skill_repo.delete.return_value = True
     device_fs = MagicMock()
     device_fs.exists = AsyncMock(return_value=True)
@@ -148,3 +150,30 @@ async def test_delete_fails_closed_when_existing_active_entry_cannot_be_removed(
     device_fs.delete_tree.assert_awaited_once_with(
         f"{ACTIVE_ROOT}/find-skills"
     )
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_skill_referenced_by_any_skill_set():
+    """Active and inactive SkillSet references both block metadata deletion."""
+    skill_repo = MagicMock()
+    skill_repo.get_by_id.return_value = _skill_record()
+    skill_repo.list_skill_set_references.return_value = [
+        {"skill_set_id": "1113652"},
+        {"skill_set_id": "1113653"},
+    ]
+    device_fs = MagicMock()
+    device_fs.exists = AsyncMock(return_value=True)
+    device_fs.delete_tree = AsyncMock(return_value=True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_delete(device_fs=device_fs, skill_repo=skill_repo)
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {
+        "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+        "message": "请先从所有技能集中移除该技能，再删除技能",
+        "skill_set_ids": ["1113652", "1113653"],
+    }
+    skill_repo.delete.assert_not_called()
+    device_fs.exists.assert_not_awaited()
+    device_fs.delete_tree.assert_not_awaited()

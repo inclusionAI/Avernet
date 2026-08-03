@@ -211,6 +211,25 @@ def test_delete_by_bot_id(skills):
     assert skills.list_skills(bolt_id="bot-x") == []
 
 
+def test_list_skill_set_references_includes_active_and_inactive_sets(
+    skills, sets
+):
+    skill = skills.create({"name": "referenced", "bolt_id": "bot-x"})
+    active_set = sets.create(
+        {"name": "active", "bolt_id": "bot-x", "is_active": True}
+    )
+    inactive_set = sets.create(
+        {"name": "inactive", "bolt_id": "bot-x", "is_active": False}
+    )
+    sets.add_skill_to_set(active_set["id"], skill["id"])
+    sets.add_skill_to_set(inactive_set["id"], skill["id"])
+
+    assert skills.list_skill_set_references(skill["id"]) == [
+        {"skill_set_id": active_set["id"]},
+        {"skill_set_id": inactive_set["id"]},
+    ]
+
+
 def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     local = skills.create(
         {
