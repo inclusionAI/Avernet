@@ -75,6 +75,28 @@ class RunResultResponse(ApiResponse[RunResultResponseData]):
     )
 
 
+class RunCancelResponseData(BaseModel):
+    """Run cancellation response data"""
+
+    run_id: str = Field(..., description="Run ID")
+    bot_id: str = Field(..., description="Bot ID")
+    session_id: str = Field(..., description="Session ID")
+    status: str = Field(
+        ...,
+        description="Run status after cancellation: aborted/completed/failed/time_out",
+    )
+    created_at: datetime = Field(..., description="Creation time")
+    completed_at: datetime | None = Field(default=None, description="Completion time")
+
+
+class RunCancelResponse(ApiResponse[RunCancelResponseData]):
+    """Run cancellation standard response"""
+
+    data: RunCancelResponseData | None = Field(
+        default=None, description="Run cancellation data"
+    )
+
+
 class MessageRequest(BaseModel):
     """Message delivery request model"""
 

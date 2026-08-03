@@ -247,6 +247,96 @@ class TestBotRunRepositoryProtocol:
             error="Some error",
         )
 
+    # ── 5b. update_aborted ──
+
+    def test_update_aborted_from_pending(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        """update_aborted migrates PENDING → ABORTED and sets completed_at."""
+        run_id = _generate_uuid()
+
+        bot_run_repository.insert_run(
+            run_id=run_id,
+            bot_id=_generate_uuid(),
+            api_key_prefix="sk-abort",
+            message_long="Will be aborted",
+            metadata=None,
+        )
+        # Sanity: PENDING after insert
+        record = bot_run_repository.get_by_run_id(run_id)
+        assert record is not None
+        assert record.status == "PENDING"
+        assert record.completed_at is None
+
+        bot_run_repository.update_aborted(run_id=run_id)
+
+        record = bot_run_repository.get_by_run_id(run_id)
+        assert record is not None
+        assert record.status == "ABORTED"
+        assert record.completed_at is not None
+        assert isinstance(record.completed_at, datetime)
+        # error is not set for intentional abort
+        assert record.error is None
+
+    def test_update_aborted_from_running(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        """update_aborted migrates RUNNING → ABORTED."""
+        run_id = _generate_uuid()
+
+        bot_run_repository.insert_run(
+            run_id=run_id,
+            bot_id=_generate_uuid(),
+            api_key_prefix="sk-abort",
+            message_long="Will be aborted while running",
+            metadata=None,
+        )
+        bot_run_repository.update_status(run_id=run_id, status="RUNNING")
+
+        bot_run_repository.update_aborted(run_id=run_id)
+
+        record = bot_run_repository.get_by_run_id(run_id)
+        assert record is not None
+        assert record.status == "ABORTED"
+        assert record.completed_at is not None
+
+    def test_update_aborted_skipped_on_terminal(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        """update_aborted is a no-op on terminal records (COMPLETED)."""
+        run_id = _generate_uuid()
+
+        bot_run_repository.insert_run(
+            run_id=run_id,
+            bot_id=_generate_uuid(),
+            api_key_prefix="sk-abort",
+            message_long="Already completed",
+            metadata=None,
+        )
+        bot_run_repository.update_result(
+            run_id=run_id,
+            content_long="done",
+            extra={"usage": {"prompt_tokens": 1}},
+        )
+        record_before = bot_run_repository.get_by_run_id(run_id)
+        assert record_before is not None
+        assert record_before.status == "COMPLETED"
+        completed_at_before = record_before.completed_at
+
+        # No-op: COMPLETED is terminal, update_aborted must not migrate
+        bot_run_repository.update_aborted(run_id=run_id)
+
+        record_after = bot_run_repository.get_by_run_id(run_id)
+        assert record_after is not None
+        assert record_after.status == "COMPLETED"
+        assert record_after.completed_at == completed_at_before
+
+    def test_update_aborted_on_nonexistent_run(
+        self, bot_run_repository: BotRunRepository, db_transaction
+    ):
+        """update_aborted on a missing run_id should not raise — it's a no-op."""
+        bot_run_repository.update_aborted(run_id="nonexistent-run-id")
+
     # ── 6. Full lifecycle: insert → status → result ──
 
     def test_full_lifecycle_insert_status_result(

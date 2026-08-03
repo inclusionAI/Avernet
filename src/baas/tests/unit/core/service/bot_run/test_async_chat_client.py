@@ -49,6 +49,7 @@ def mock_bot_ws_instance(mock_bot_ws):
     instance.close = AsyncMock()
     instance.chat_send = AsyncMock()
     instance.chat_inject = AsyncMock()
+    instance.chat_abort = AsyncMock()
     instance.connected = True
     return instance
 
@@ -402,6 +403,97 @@ class TestSendMessage:
         assert content == "new content"
         assert agent_payloads == []
         assert sk not in client._sessions
+
+
+# ==================== chat_abort tests ====================
+
+
+class TestChatAbort:
+    """Tests for AsyncChatClient.chat_abort — delegates to BotWebSocketClient.chat_abort."""
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_delegates_to_underlying_client(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        await client.chat_abort(session_key="sk-abort-1", run_id="run-001")
+
+        mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
+            session_key="sk-abort-1", run_id="run-001"
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_without_run_id(self, mock_bot_ws, mock_bot_ws_instance):
+        """chat_abort without run_id forwards run_id=None."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        await client.chat_abort(session_key="sk-abort-2")
+
+        mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
+            session_key="sk-abort-2", run_id=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_raises_when_not_connected(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort on a disconnected client raises NotConnectedError."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+            NotConnectedError,
+        )
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        # Never connected — _client is None
+        with pytest.raises(NotConnectedError):
+            await client.chat_abort(session_key="sk-abort-3", run_id="run-003")
+
+        mock_bot_ws_instance.chat_abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_releases_concurrency_semaphore(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort acquires and releases the concurrency semaphore."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+
+        client = AsyncChatClient(uri="ws://host/ws", max_concurrent_sessions=1)
+        await client.connect()
+        sem = client._concurrency_sem
+        assert sem is not None
+
+        await client.chat_abort(session_key="sk-abort-4", run_id="run-004")
+
+        # Semaphore should be fully released after abort returns
+        assert sem._value == 1
 
 
 # ==================== close tests ====================

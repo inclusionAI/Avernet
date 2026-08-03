@@ -161,6 +161,33 @@ class OrmBotRunRepository(OrmConnectionMixin, BotRunRepository):
             log.info("[bot-run:update_timeout] result: done")
 
     @with_orm_session
+    def update_aborted(self, run_id: str) -> None:
+        log.info("update_aborted: run_id=%s", run_id)
+        from sqlalchemy import func
+
+        updated = (
+            self._session.query(BotRunModel)
+            .filter(
+                BotRunModel.run_id == run_id,
+                BotRunModel.status.in_(("PENDING", "RUNNING")),
+            )
+            .update(
+                {
+                    "status": "ABORTED",
+                    "completed_at": func.now(),
+                    "gmt_modified": func.now(),
+                },
+                synchronize_session=False,
+            )
+        )
+        if updated == 0:
+            log.warning(
+                "[bot-run:update_aborted] skipped (already terminal) run_id=%s", run_id
+            )
+        else:
+            log.info("[bot-run:update_aborted] result: done")
+
+    @with_orm_session
     def update_session_id(self, run_id: str, session_id: str) -> None:
         log.info("update_session_id: run_id=%s, session_id=%s", run_id, session_id)
         from sqlalchemy import func

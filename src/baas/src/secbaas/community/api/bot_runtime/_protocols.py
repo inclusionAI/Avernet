@@ -417,3 +417,23 @@ class BotRunner(Protocol):
             KeyError: run_id 不存在
         """
         ...
+
+    async def cancel_run(self, *, run_id: str) -> Any:
+        """中止指定 run_id 的对话执行
+
+        按 run_id 中止正在进行的对话：向 engine 下发 chat.abort 并将 run 置为
+        ABORTED。对终态 run（COMPLETED/FAILED/TIME_OUT/ABORTED）幂等返回当前
+        终态记录，不重复下发 abort。
+
+        归属校验由调用方负责（与 get_result 一致）。
+
+        Args:
+            run_id: 运行 ID
+
+        Returns:
+            BotRunRecord: 中止后的最终记录（终态幂等命中时为原终态记录）
+
+        Raises:
+            KeyError: run_id 不存在
+        """
+        ...

@@ -140,6 +140,30 @@ class BotService(Protocol):
         """
         ...
 
+    async def abort_run(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> None:
+        """中止正在进行的对话执行
+
+        向 engine 下发 ``chat.abort``，中止 session_id 上正在进行的推理。
+        与 send_message 不同，abort_run 不等待响应，仅发送中止指令后立即返回；
+        engine 侧 abort 后产生的 ``state=aborted`` 事件由调用方/上层处理。
+
+        实现方应保证：transport 不支持 abort 时 raise 明确错误（避免静默 noop）。
+
+        Args:
+            session_id: 会话 ID（与 send_message 的 session_id 一致）
+            run_id: 运行 ID，透传给 engine 用于定位具体 run
+            binding_info: 已解析的 binding 信息（用于创建底层连接）
+            context: 可选的请求上下文（身份认证、调用者信息等）
+        """
+        ...
+
     async def get_session(
         self,
         *,

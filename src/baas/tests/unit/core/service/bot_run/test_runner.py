@@ -70,6 +70,7 @@ def mock_bot_service():
     )
     svc.send_message = AsyncMock(return_value=MagicMock(content="reply", usage={}))
     svc.inject_message = AsyncMock()
+    svc.abort_run = AsyncMock()
     svc.get_messages = AsyncMock(return_value=[])
     return svc
 
@@ -88,6 +89,7 @@ def mock_run_repo():
     repo.update_status = MagicMock()
     repo.update_result = MagicMock()
     repo.update_error = MagicMock()
+    repo.update_aborted = MagicMock()
     repo.update_session_id = MagicMock()
     repo.get_by_run_id = MagicMock(return_value=None)
     return repo
@@ -1249,6 +1251,179 @@ class TestGetResult:
 
         assert result is mock_record
         mock_run_repo.get_by_run_id.assert_called_once_with("known-run-id")
+
+
+# ==================== Tests: cancel_run ====================
+
+
+def _make_run_record_for_cancel(
+    *,
+    run_id="run-cancel-001",
+    bot_id=f"{BOT_ID}:{ENTITY_ID}",
+    status="PENDING",
+    session_id="agent:main:sess-001",
+    metadata=None,
+):
+    """Build a BotRunRecord-like mock for cancel_run tests.
+
+    extract_session_id_from_record reads result_extra first, then metadata.
+    We mimic the real dataclass shape via MagicMock with real attributes.
+    """
+    from datetime import datetime
+
+    from secbaas.community.core.repository.bot_run import BotRunRecord
+
+    result_extra = {"session_id": session_id} if session_id else None
+    return BotRunRecord(
+        id=1,
+        gmt_create=datetime.now(),
+        gmt_modified=datetime.now(),
+        run_id=run_id,
+        bot_id=bot_id,
+        api_key_prefix=API_KEY_PREFIX,
+        message="hello",
+        message_long="hello",
+        metadata=metadata,
+        status=status,
+        result_content=None,
+        result_content_long=None,
+        result_extra=result_extra,
+        error=None,
+        completed_at=None,
+    )
+
+
+class TestCancelRun:
+    """Tests for BotRunner.cancel_run — orchestration of run cancellation."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_aborts_pending_and_marks_aborted(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+    ):
+        """PENDING run with session_id → abort_run called + update_aborted called."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        pending = _make_run_record_for_cancel(status="PENDING")
+        aborted = _make_run_record_for_cancel(status="ABORTED")
+        mock_run_repo.get_by_run_id.side_effect = [pending, aborted]
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run(run_id="run-cancel-001")
+
+        assert result.status == "ABORTED"
+        mock_bot_service.abort_run.assert_awaited_once()
+        call_kw = mock_bot_service.abort_run.call_args.kwargs
+        assert call_kw["session_id"] == "agent:main:sess-001"
+        assert call_kw["run_id"] == "run-cancel-001"
+        assert isinstance(call_kw["binding_info"], BotBindingInfo)
+        mock_run_repo.update_aborted.assert_called_once_with("run-cancel-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_idempotent_on_terminal_completed(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        """COMPLETED run → no abort_run, no update_aborted, returns record as-is."""
+        completed = _make_run_record_for_cancel(status="COMPLETED")
+        mock_run_repo.get_by_run_id.return_value = completed
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run(run_id="run-cancel-001")
+
+        assert result is completed
+        assert result.status == "COMPLETED"
+        mock_bot_service.abort_run.assert_not_awaited()
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_idempotent_on_already_aborted(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        """ABORTED run → idempotent return, no re-abort."""
+        aborted = _make_run_record_for_cancel(status="ABORTED")
+        mock_run_repo.get_by_run_id.return_value = aborted
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run(run_id="run-cancel-001")
+
+        assert result is aborted
+        mock_bot_service.abort_run.assert_not_awaited()
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_skips_engine_abort_when_no_session_id(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+    ):
+        """PENDING run without session_id → skip abort_run, still update_aborted."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        pending = _make_run_record_for_cancel(status="PENDING", session_id=None)
+        aborted = _make_run_record_for_cancel(status="ABORTED", session_id=None)
+        mock_run_repo.get_by_run_id.side_effect = [pending, aborted]
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run(run_id="run-cancel-001")
+
+        assert result.status == "ABORTED"
+        mock_bot_service.abort_run.assert_not_awaited()
+        mock_run_repo.update_aborted.assert_called_once_with("run-cancel-001")
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_raises_keyerror_when_not_found(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        """Missing run → KeyError (router maps to 404)."""
+        mock_run_repo.get_by_run_id.return_value = None
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        with pytest.raises(KeyError, match="Run not found"):
+            await runner.cancel_run(run_id="nonexistent-run")
+
+        mock_bot_service.abort_run.assert_not_awaited()
+        mock_run_repo.update_aborted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_cancel_run_engine_abort_failure_still_marks_aborted(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+    ):
+        """If engine abort raises, update_aborted still runs (DB reflects cancel)."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.abort_run.side_effect = RuntimeError("engine down")
+        pending = _make_run_record_for_cancel(status="PENDING")
+        aborted = _make_run_record_for_cancel(status="ABORTED")
+        mock_run_repo.get_by_run_id.side_effect = [pending, aborted]
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+        result = await runner.cancel_run(run_id="run-cancel-001")
+
+        # DB still migrated to ABORTED despite engine abort failure
+        assert result.status == "ABORTED"
+        mock_bot_service.abort_run.assert_awaited_once()
+        mock_run_repo.update_aborted.assert_called_once_with("run-cancel-001")
 
 
 # ==================== Tests: TaskConcurrencyPool integration ====================

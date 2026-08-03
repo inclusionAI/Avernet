@@ -542,6 +542,51 @@ class BaasBotService(BotService):
                 f"Failed to inject message: {_safe_client_msg(e)}"
             ) from e
 
+    async def abort_run(
+        self,
+        *,
+        session_id: str,
+        run_id: str,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+    ) -> None:
+        """中止正在进行的对话执行
+
+        向 engine 下发 ``chat.abort``，中止 session_id 上正在进行的推理。
+        通过连接池获取已握手的 AsyncChatClient 并调用其 chat_abort，
+        不等待响应，仅发送中止指令后立即返回。
+
+        与 send_message/inject_message 不同，abort_run 不更新 baas_bot_session
+        的状态（中止是 run 级别语义，不影响 session 生命周期标记）。
+
+        Args:
+            session_id: 会话 ID（与 send_message 的 session_id 一致）
+            run_id: 运行 ID，透传给 engine 用于定位具体 run
+            binding_info: Binding info for WS connection.
+            context: 可选的请求上下文（用于 tenant 解析）
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, session_id, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        pool_key = conn_info.target
+        headers = {"x-proxypass-token": conn_info.token}
+
+        client = await self._client_pool.get(pool_key, conn_info.ws_url, headers)
+        try:
+            await client.chat_abort(session_key=session_id, run_id=run_id)
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to abort run: %s", e)
+            raise BotServiceError(f"Failed to abort run: {_safe_client_msg(e)}") from e
+
     async def get_messages(
         self,
         *,

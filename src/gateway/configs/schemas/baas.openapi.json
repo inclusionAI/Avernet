@@ -376,6 +376,89 @@
         "title": "MessageResultResponseData",
         "type": "object"
       },
+      "RunCancelResponse": {
+        "description": "Run cancellation standard response",
+        "properties": {
+          "code": {
+            "default": 0,
+            "description": "响应码，0 表示成功",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunCancelResponseData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run cancellation data"
+          },
+          "message": {
+            "default": "success",
+            "description": "响应消息",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "title": "RunCancelResponse",
+        "type": "object"
+      },
+      "RunCancelResponseData": {
+        "description": "Run cancellation response data",
+        "properties": {
+          "bot_id": {
+            "description": "Bot ID",
+            "title": "Bot Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Completion time",
+            "title": "Completed At"
+          },
+          "created_at": {
+            "description": "Creation time",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "run_id": {
+            "description": "Run ID",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "session_id": {
+            "description": "Session ID",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "Run status after cancellation: aborted/completed/failed/time_out",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "bot_id",
+          "session_id",
+          "status",
+          "created_at"
+        ],
+        "title": "RunCancelResponseData",
+        "type": "object"
+      },
       "RunRequest": {
         "description": "Single-turn conversation request model",
         "properties": {
@@ -1173,6 +1256,77 @@
           }
         },
         "summary": "Query conversation result",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/openapi/v1/runs/{run_id}/cancel": {
+      "post": {
+        "description": "Cancel an in-progress conversation run by run_id. Idempotent for terminal runs.",
+        "operationId": "cancel_run_openapi_v1_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCancelResponse"
+                }
+              }
+            },
+            "description": "Cancellation successful (or run already terminal)"
+          },
+          "400": {
+            "description": "Bot service error"
+          },
+          "401": {
+            "description": "Authentication failed"
+          },
+          "404": {
+            "description": "Run not found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "summary": "Cancel a run",
         "tags": [
           "runs"
         ]

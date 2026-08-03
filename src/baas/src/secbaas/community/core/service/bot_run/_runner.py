@@ -37,7 +37,11 @@ from secbaas.community.api.bot_runtime import (
 )
 from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.api.sse import StreamChunk
-from secbaas.community.core.repository.bot_run import BotRunRecord, BotRunRepository
+from secbaas.community.core.repository.bot_run import (
+    BotRunRecord,
+    BotRunRepository,
+    RunStatus,
+)
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot_service import BotServicePlugin, LogRelationPayload
 
@@ -450,6 +454,81 @@ class BotRunner:
         if record is None:
             raise KeyError(f"Run not found: {run_id}")
         return record
+
+    async def cancel_run(self, *, run_id: str) -> BotRunRecord:
+        """中止指定 run_id 的对话执行
+
+        流程：
+          1. 读取 run 记录（不存在 → KeyError）
+          2. 若已是终态（COMPLETED/FAILED/TIME_OUT/ABORTED）→ 幂等返回当前记录，
+             不下发 abort、不更新 DB
+          3. 从 record 提取 session_id；若存在则 resolve route → bot_service.abort_run
+             向 engine 下发 chat.abort
+          4. update_aborted(run_id)（仅 PENDING/RUNNING → ABORTED，与自然完成竞态互斥）
+          5. 重新读取记录并返回（携带最新 status 与 completed_at）
+
+        session_id 缺失语义（PENDING 阶段 session 未创建）：跳过 engine abort，
+        仅迁 DB ABORTED 并返回成功（engine 侧无 run 进行中，等价取消排队）。
+
+        归属校验由调用方（router）负责，与 get_result 一致；本方法只关心
+        run 级别的中止编排。
+
+        Args:
+            run_id: 运行 ID
+
+        Returns:
+            BotRunRecord: 中止后的最终记录（终态幂等命中时为原终态记录）
+
+        Raises:
+            KeyError: run_id 不存在
+        """
+        record = self._run_repository.get_by_run_id(run_id)
+        if record is None:
+            raise KeyError(f"Run not found: {run_id}")
+
+        terminal_statuses = {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.TIME_OUT.value,
+            RunStatus.ABORTED.value,
+        }
+        if record.status in terminal_statuses:
+            logger.info(
+                "[runner.cancel_run] run already terminal, idempotent return: "
+                "run_id=%s, status=%s",
+                run_id,
+                record.status,
+            )
+            return record
+
+        session_id = extract_session_id_from_record(record)
+        if session_id:
+            try:
+                route = await self._resolve_bot_route(
+                    record.bot_id, record.metadata or {}
+                )
+                await route.bot_service.abort_run(
+                    session_id=session_id,
+                    run_id=run_id,
+                    binding_info=route.binding_info,
+                )
+            except Exception:
+                logger.exception(
+                    "[runner.cancel_run] engine abort failed (still mark ABORTED): "
+                    "run_id=%s, session_id=%s",
+                    run_id,
+                    session_id,
+                )
+        else:
+            logger.info(
+                "[runner.cancel_run] no session_id, skip engine abort: run_id=%s",
+                run_id,
+            )
+
+        self._run_repository.update_aborted(run_id)
+
+        final_record = self._run_repository.get_by_run_id(run_id)
+        return final_record if final_record is not None else record
 
     # ── 私有方法：步骤提取 ──────────────────────────────────────────────
 

@@ -493,6 +493,45 @@ class AsyncChatClient:
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
+    async def chat_abort(
+        self,
+        session_key: str,
+        run_id: str | None = None,
+    ) -> None:
+        """中止正在进行的对话执行
+
+        向 engine 下发 ``chat.abort`` WS 请求，中止指定 sessionKey 上正在
+        进行的推理。与 send_message 不同，chat_abort 不等待 chat_complete
+        事件，仅发送请求后立即返回；engine 侧 abort 后产生的 ``state=aborted``
+        事件会被 AsyncChatClient 自然丢弃（不归属于任何活跃 session state）。
+
+        受并发信号量约束（max_concurrent_sessions）以提供背压，但不参与
+        同一 sessionKey 的排队机制（abort 不等待响应，无会话状态竞争）。
+
+        Args:
+            session_key: 会话 key（与 send_message 的 sessionKey 一致）
+            run_id: 可选的运行 ID，透传给 engine 用于定位具体 run
+        """
+        if not self.is_connected:
+            raise NotConnectedError(
+                "Not connected. Call connect() first or wait for reconnection."
+            )
+
+        if self._concurrency_sem is not None:
+            await self._concurrency_sem.acquire()
+
+        try:
+            logger.info("[abort] Sending chat.abort: session_key=%s", session_key)
+            assert self._client is not None
+            await self._client.chat_abort(
+                session_key=session_key,
+                run_id=run_id,
+            )
+            logger.info("[abort] chat.abort sent: session_key=%s", session_key)
+        finally:
+            if self._concurrency_sem is not None:
+                self._concurrency_sem.release()
+
     async def inject_message(
         self,
         message: str,

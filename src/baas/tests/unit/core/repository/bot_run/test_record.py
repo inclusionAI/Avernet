@@ -24,9 +24,22 @@ class TestRunStatus:
     def test_failed_value(self):
         assert RunStatus.FAILED.value == "FAILED"
 
+    def test_time_out_value(self):
+        assert RunStatus.TIME_OUT.value == "TIME_OUT"
+
+    def test_aborted_value(self):
+        assert RunStatus.ABORTED.value == "ABORTED"
+
     def test_all_statuses(self):
         values = {s.value for s in RunStatus}
-        assert values == {"PENDING", "RUNNING", "COMPLETED", "FAILED", "TIME_OUT"}
+        assert values == {
+            "PENDING",
+            "RUNNING",
+            "COMPLETED",
+            "FAILED",
+            "TIME_OUT",
+            "ABORTED",
+        }
 
     def test_from_value(self):
         assert RunStatus("PENDING") is RunStatus.PENDING
@@ -34,6 +47,7 @@ class TestRunStatus:
         assert RunStatus("COMPLETED") is RunStatus.COMPLETED
         assert RunStatus("FAILED") is RunStatus.FAILED
         assert RunStatus("TIME_OUT") is RunStatus.TIME_OUT
+        assert RunStatus("ABORTED") is RunStatus.ABORTED
 
     def test_invalid_value_raises(self):
         with pytest.raises(ValueError):

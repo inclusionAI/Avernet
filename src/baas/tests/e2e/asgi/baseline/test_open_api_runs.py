@@ -172,37 +172,43 @@ class TestGetRunResult:
 class TestCancelRun:
     """POST /openapi/v1/runs/{run_id}/cancel — run cancellation endpoint.
 
-    The run_router does not define a cancel endpoint, so expect 405 or 404.
+    The endpoint is registered on the open_api router. Without a seeded run,
+    valid auth yields 404 (run not found); invalid/missing auth yields 401.
     """
 
     @pytest.mark.asyncio
     async def test_cancel_run_no_auth(self, api: APITestHelper) -> None:
-        """POST /openapi/v1/runs/{run_id}/cancel without auth → 401/405."""
+        """POST /openapi/v1/runs/{run_id}/cancel without auth → 401."""
         response = await api.client.post(
             f"{api.open_api_run_url()}/test-run-id/cancel",
             json={},
         )
 
-        assert response.status_code in (401, 404, 405)
+        assert response.status_code in (401, 404)
 
     @pytest.mark.asyncio
     async def test_cancel_run_not_found(self, api: APITestHelper) -> None:
-        """POST /openapi/v1/runs/{run_id}/cancel with nonexistent run → 401/405/404."""
+        """POST /openapi/v1/runs/{run_id}/cancel with nonexistent run → 401/404."""
         response = await api.client.post(
             f"{api.open_api_run_url()}/nonexistent-run/cancel",
             json={},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (401, 404, 405)
+        # Invalid token → 401, valid token but missing run → 404
+        assert response.status_code in (401, 404)
 
     @pytest.mark.asyncio
     async def test_cancel_run_with_auth_valid_key(self, api: APITestHelper) -> None:
-        """POST /openapi/v1/runs/{run_id}/cancel with valid auth header."""
+        """POST /openapi/v1/runs/{run_id}/cancel with valid auth header.
+
+        Without a seeded run, the valid key yields 404 (run not found); if the
+        key is not seeded in this environment, 401 is also acceptable.
+        """
         response = await api.client.post(
             f"{api.open_api_run_url()}/test-run-id/cancel",
             json={},
             headers={"Authorization": "Bearer sk-test-key"},
         )
 
-        assert response.status_code in (200, 401, 404, 405)
+        assert response.status_code in (200, 401, 404)

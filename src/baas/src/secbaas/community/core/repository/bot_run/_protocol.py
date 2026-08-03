@@ -91,6 +91,18 @@ class BotRunRepository(Protocol):
         """
         ...
 
+    def update_aborted(self, run_id: str) -> None:
+        """更新中止信息（标记为 ABORTED 状态）
+
+        仅当当前状态为 PENDING/RUNNING 时迁移至 ABORTED 并设置 completed_at，
+        与 update_error/update_timeout 的“仅非终态迁移”模式一致，天然与 run
+        自然完成竞态互斥。对终态记录为 no-op（幂等）。
+
+        Args:
+            run_id: 运行ID
+        """
+        ...
+
     def update_session_id(self, run_id: str, session_id: str) -> None:
         """更新运行记录的会话 ID
 

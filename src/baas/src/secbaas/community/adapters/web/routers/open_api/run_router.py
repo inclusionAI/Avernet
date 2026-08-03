@@ -14,6 +14,8 @@ from secbaas.community.adapters.web.routers.open_api.dependencies import (
 )
 from secbaas.community.adapters.web.routers.open_api.model import (
     ExtraInfo,
+    RunCancelResponse,
+    RunCancelResponseData,
     RunRequest,
     RunResponse,
     RunResponseData,
@@ -242,4 +244,119 @@ async def get_run_result(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": 40401, "message": f"Run not found: {run_id}"},
+        )
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    response_model=RunCancelResponse,
+    summary="Cancel a run",
+    description="Cancel an in-progress conversation run by run_id. Idempotent for terminal runs.",
+    responses={
+        200: {"description": "Cancellation successful (or run already terminal)"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Run not found"},
+        400: {"description": "Bot service error"},
+        500: {"description": "Internal server error"},
+    },
+)
+@inject
+async def cancel_run(
+    run_id: str,
+    api_key_record: APIKeyRecord = Depends(validate_api_key),
+    bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
+) -> RunCancelResponse:
+    """Cancel an in-progress conversation run
+
+    Issues ``chat.abort`` to the engine for in-progress runs (PENDING/RUNNING)
+    and marks the run as ``ABORTED``. For terminal runs (COMPLETED/FAILED/
+    TIME_OUT/ABORTED) returns the current terminal status idempotently without
+    re-issuing abort.
+
+    Ownership is verified against the API key (api_key_prefix + bot_id); a
+    mismatch returns a not-found semantic response (no existence leak), mirroring
+    ``get_run_result``.
+
+    Args:
+        run_id: Run ID
+        api_key_record: Record from API Key validation
+        bot_runner: BotRunner instance
+
+    Returns:
+        RunCancelResponse: Cancellation response with final run status
+    """
+    try:
+        logger.info(
+            f"cancel_run: run_id={run_id}, api_key_prefix={api_key_record.api_key_prefix}"
+        )
+
+        # 1. Fetch run record (KeyError → 404)
+        run_info = bot_runner.get_result(run_id)
+
+        # 2. Verify run ownership (mirror get_run_result: not-found semantic on mismatch)
+        if (
+            run_info.api_key_prefix != api_key_record.api_key_prefix
+            or run_info.bot_id != api_key_record.app_id
+        ):
+            logger.warning(
+                f"cancel_run ownership mismatch: run_id={run_id}, "
+                f"expected api_key_prefix={api_key_record.api_key_prefix}/bot_id={api_key_record.app_id}, "
+                f"actual api_key_prefix={run_info.api_key_prefix}/bot_id={run_info.bot_id}"
+            )
+            return RunCancelResponse(
+                code=OpenAPICode.BUSINESS_ERROR,
+                message=f"Run not found: {run_id}",
+                data=None,
+            )
+
+        # 3. Perform cancel (idempotent for terminal runs; aborts PENDING/RUNNING)
+        final_record = await bot_runner.cancel_run(run_id=run_id)
+
+        # 4. Extract session_id (mirror get_run_result precedence)
+        if final_record.metadata and "session_id" in final_record.metadata:
+            session_id = final_record.metadata.get("session_id")
+        elif final_record.result_extra and "session_id" in final_record.result_extra:
+            session_id = final_record.result_extra.get("session_id")
+        else:
+            session_id = ""
+
+        logger.info(
+            f"cancel_run success: run_id={run_id}, status={final_record.status}"
+        )
+
+        return RunCancelResponse(
+            code=0,
+            message="success",
+            data=RunCancelResponseData(
+                run_id=final_record.run_id,
+                bot_id=final_record.bot_id,
+                session_id=session_id,
+                status=final_record.status,
+                created_at=final_record.gmt_create,
+                completed_at=final_record.completed_at,
+            ),
+        )
+
+    except KeyError:
+        logger.warning(f"cancel_run not found: run_id={run_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": 40401, "message": f"Run not found: {run_id}"},
+        )
+    except BotServiceError as e:
+        logger.error(
+            f"cancel_run bot service error: run_id={run_id}, error={e}",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": OpenAPICode.BUSINESS_ERROR, "message": str(e)},
+        )
+    except Exception as e:
+        logger.error(
+            f"cancel_run unexpected error: run_id={run_id}, error={e}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
