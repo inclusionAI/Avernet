@@ -30,7 +30,9 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 
 **目标：** 实现公共 `/openapi/v1` API，其调用方是**外部注册租户**。它位于
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**
-与 **mcp** 类别已经实现（PR #494、#610）；其余四个仍然是**带桩（stub）处理器的路由定义**。
+与 **mcp** 类别已经实现（PR #494、#610）；**resources**、**routines**、**identity**
+的处理器已接到服务上，但尚未达到可对外提供的状态；只有 **skills** 仍然是**带桩（stub）
+处理器的路由定义**。
 
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
 > `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
@@ -60,7 +62,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
-> Track B —— bots 与 mcp 已完成，其余四个仍是桩。
+> Track B —— bots 与 mcp 已完成；resources、routines、identity 已接线但尚未可对外；
+> 只有 skills 仍是桩。
 >
 > ⚠️ **Track C 没有对应的 Track A 阶段，这是对的。** Track A 与 Track B 是成对的
 > （先隔离一个类别，再接通它的端点）；Track C 不是。它的数据在 Bot 的设备上，
@@ -872,3 +875,10 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   渠道路由，另外 29 项是这份产物一直没有跟上的漂移（resources/routines 上的
   `bot_id` now required、`engine_options` / `cluster_name` / `sync_mode` 被移除、
   校验相关 schema 更名）。这里没有任何东西发生回退 —— 只是描述追上了 `dev`。
+
+- **2026-08-03** —— **修正 Track B 状态摘要**（PR #688 评审发现）。开头段落与"唯一需要
+  避免的误解"提示框此前都称其余类别全是桩处理器。实际只有 `skills` 仍在抛
+  `NotImplementedError`；`resources`、`routines`、`identity` 都已接到各自服务上，卡点
+  在认证工作流，而不是 handler 本身。英文看板的 `routines` 与 `identity` 两行也存在同样
+  的过期问题（标为 `⬜ TODO` / *(桩)*，而中文看板早已标为 PARTIAL），现已对齐。以路由
+  代码为准核对，而非以看板为准。

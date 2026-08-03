@@ -35,8 +35,9 @@ that file holds the inventory.
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
 `src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**
-and **mcp** categories are implemented (PRs #494, #610); the other four are
-still **route definitions with stub handlers**.
+and **mcp** categories are implemented (PRs #494, #610); **resources**,
+**routines** and **identity** have their handlers wired to services but are not
+public-ready; only **skills** is still **route definitions with stub handlers**.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -74,7 +75,8 @@ The work therefore splits into **three tracks**:
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
 > reusable mechanism + that category's records). The API endpoints land in
-> Track B — done for bots and mcp, still stubs for the other four.
+> Track B — done for bots and mcp; resources, routines and identity are wired
+> but not public-ready; only skills is still stubs.
 >
 > ⚠️ **Track C has no Track A stage, and that is correct.** Tracks A and B pair
 > up (isolate a category, then wire its endpoints); Track C does not. Its data
@@ -150,8 +152,8 @@ _Ordered by priority tier._
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
-| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
-| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
+| routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS (PARTIAL) — 7 handlers all wired but NOT PUBLIC-READY | Track A routines: no table of its own, isolated indirectly through `ac_bots`; Track B all 7 endpoints wired; gated on gateway principal seam + tenant resolver before public exposure |
+| identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS (PARTIAL) — 3 handlers all wired but NOT PUBLIC-READY | bots isolation (Stage 1 ✅); Track B all 3 endpoints wired; gated on gateway principal seam + tenant resolver before public exposure |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
 
 ### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
@@ -1021,3 +1023,12 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   (`bot_id` now required on resources/routines, `engine_options` /
   `cluster_name` / `sync_mode` dropped, validation schemas renamed). Nothing
   regressed here — the description caught up with `dev`.
+
+- **2026-08-03** — **Corrected the Track B status summary** (review catch on
+  PR #688). The intro and the "one confusion to avoid" callout both said every
+  remaining category was stub handlers. Only `skills` still raises
+  `NotImplementedError`; `resources`, `routines` and `identity` are wired to
+  their services and gated on the auth workstream, not on handler work. The
+  English board's `routines` and `identity` rows were stale in the same way —
+  marked `⬜ TODO` / *(stub)* while the zh-CN board already had them as
+  PARTIAL — and now match. Verified against the routers, not the board.
