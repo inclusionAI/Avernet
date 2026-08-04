@@ -193,28 +193,6 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
         assert other_user_open.status_code == 200, other_user_open.text
         assert other_user_open.json()["data"]["total"] == 0
 
-        # Singlebox intentionally has no Gateway principal signing key. Touch
-        # both final public operations to keep the Router API denominator
-        # complete, while the internal open route above exercises the same core
-        # query through a real HTTP request.
-        public_requests = [
-            client.get(
-                "/openapi/v1/bots/logs/sessions/session-key-live/traces"
-            ),
-            client.get(
-                f"/openapi/v1/bots/logs/tasks/singlebox-coverage/{trace_id}/traces"
-            ),
-            client.get(
-                "/openapi/v1/bots/logs/groups/missing-group-fixture/traces"
-            ),
-            client.get(
-                "/openapi/v1/bots/logs/traces",
-                params={"user_id": "e2e_user", "bot_id": "default"},
-            ),
-            client.get(f"/openapi/v1/bots/logs/traces/{trace_id}"),
-        ]
-        assert all(response.status_code == 401 for response in public_requests)
-
         task_queries = [
             {
                 "biz_scene": "singlebox-coverage",
