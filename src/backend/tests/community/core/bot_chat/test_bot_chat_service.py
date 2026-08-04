@@ -13,7 +13,13 @@ from agentclaw.community.core.bot_chat.service import (
     _apply_client_side_filters,
     _matches_session_key,
 )
-from agentclaw.community.core.bot_chat.schemas import ConversationDetail, ConversationObservation, ConversationSession, SessionMetadata
+from agentclaw.community.core.bot_chat.schemas import (
+    ConversationDetail,
+    ConversationObservation,
+    ConversationSession,
+    SessionListResponse,
+    SessionMetadata,
+)
 from agentclaw.community.core.bot_chat.errors import SessionNotFoundError, LangfuseAPIError
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.di.config import BotChatConfig
@@ -531,6 +537,146 @@ class TestBotChatServiceListSessions:
         service._db_repo.has_bot_access.assert_called_once_with("collaborator-1", "bot-a")
         _, kwargs = service._db_repo.list_traces.call_args
         assert kwargs["bot_id"] == "bot-a"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_without_bot_ignores_requested_resource_owner(
+        self, service
+    ):
+        service._db_repo = MagicMock()
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_sessions(
+            owner_id="actor-1",
+            resource_owner_id="victim-owner",
+        )
+
+        _, kwargs = service._db_repo.list_traces.call_args
+        assert kwargs["owner_id"] == "actor-1"
+        service._db_repo.has_bot_access.assert_not_called()
+        service._db_repo.has_bot_access_for_owner.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_non_default_bot_uses_verified_resource_owner(
+        self, service
+    ):
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = True
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_sessions(
+            owner_id="collaborator-1",
+            resource_owner_id="bot-owner",
+            bot_id="bot-a",
+        )
+
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "collaborator-1", "bot-a", "bot-owner"
+        )
+        _, kwargs = service._db_repo.list_traces.call_args
+        assert kwargs["owner_id"] == "bot-owner"
+        assert kwargs["bot_id"] == "bot-a"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_spoofed_non_default_owner_is_denied(self, service):
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = False
+
+        result = await service.list_sessions(
+            owner_id="attacker",
+            resource_owner_id="victim-owner",
+            bot_id="bot-a",
+        )
+
+        assert result.sessions == []
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "attacker", "bot-a", "victim-owner"
+        )
+        service._db_repo.list_ocb_traces.assert_not_called()
+        service._db_repo.list_traces.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_default_bot_collaborator_uses_owner_scope(
+        self, service
+    ):
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = True
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_sessions(
+            owner_id="collaborator-1",
+            resource_owner_id="bot-owner",
+            bot_id="default",
+        )
+
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "collaborator-1", "default", "bot-owner"
+        )
+        _, kwargs = service._db_repo.list_traces.call_args
+        assert kwargs["owner_id"] == "bot-owner"
+        assert kwargs["bot_id"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_spoofed_default_owner_is_denied(self, service):
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = False
+
+        result = await service.list_sessions(
+            owner_id="attacker",
+            resource_owner_id="victim-owner",
+            bot_id="default",
+        )
+
+        assert result.sessions == []
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "attacker", "default", "victim-owner"
+        )
+        service._db_repo.list_ocb_traces.assert_not_called()
+        service._db_repo.list_traces.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_owner_default_alias_is_normalized_for_db(
+        self, service
+    ):
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = True
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_sessions(
+            owner_id="collaborator-1",
+            resource_owner_id="bot-owner",
+            bot_id="bot-owner_default",
+        )
+
+        _, kwargs = service._db_repo.list_traces.call_args
+        assert kwargs["owner_id"] == "bot-owner"
+        assert kwargs["bot_id"] == "default"
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_langfuse_uses_verified_resource_owner(
+        self, service
+    ):
+        expected = SessionListResponse(
+            sessions=[], total=0, page=1, limit=20, has_more=False
+        )
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = True
+        service._list_sessions_langfuse = AsyncMock(return_value=expected)
+
+        result = await service.list_sessions(
+            owner_id="collaborator-1",
+            resource_owner_id="bot-owner",
+            bot_id="bot-owner_default",
+            log_source="langfuse",
+        )
+
+        assert result is expected
+        kwargs = service._list_sessions_langfuse.call_args.kwargs
+        assert kwargs["owner_id"] == "bot-owner"
+        assert kwargs["bot_id"] == "bot-owner_default"
 
     @pytest.mark.asyncio
     async def test_list_sessions_explicit_db_uses_db_source(self, service):
@@ -1371,14 +1517,35 @@ class TestBotChatServiceGetSession:
             await service.get_session(trace_id="missing", owner_id="user1")
 
     @pytest.mark.asyncio
+    async def test_get_session_db_missing_bot_id_remains_owner_only(self, service):
+        row = self._row(user_id="user1", bot_id=None)
+        detail = self._detail("trace-1")
+        service._db_repo = MagicMock()
+        service._db_repo.get_ocb_trace.return_value = None
+        service._db_repo.get_trace.return_value = row
+        service._db_repo.list_legacy_observations.return_value = []
+        service._db_repo._row_to_detail.return_value = detail
+
+        result = await service.get_session(trace_id="trace-1", owner_id="user1")
+
+        assert result is detail
+        service._db_repo.has_bot_access.assert_not_called()
+        service._db_repo.has_bot_access_for_owner.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_get_session_db_default_bot_owner_mismatch(self, service):
         """Default-bot traces still require user_id to match owner_id."""
         service._db_repo = MagicMock()
         service._db_repo.get_ocb_trace.return_value = None
         service._db_repo.get_trace.return_value = self._row(user_id="other-user", bot_id="default")
+        service._db_repo.has_bot_access_for_owner.return_value = False
 
         with pytest.raises(SessionNotFoundError):
             await service.get_session(trace_id="trace-1", owner_id="user1")
+
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "user1", "default", "other-user"
+        )
 
     @pytest.mark.asyncio
     async def test_get_session_db_default_bot_owner_match(self, service):
@@ -1398,6 +1565,26 @@ class TestBotChatServiceGetSession:
         service._db_repo.has_bot_access.assert_not_called()
         service._db_repo.list_legacy_observations.assert_called_once_with("trace-1")
         service._fetch_observations_from_langfuse.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_get_session_db_default_bot_collaborator_allowed(self, service):
+        row = self._row(user_id="bot-owner", bot_id="default")
+        detail = self._detail("trace-1")
+        service._db_repo = MagicMock()
+        service._db_repo.get_ocb_trace.return_value = None
+        service._db_repo.get_trace.return_value = row
+        service._db_repo.has_bot_access_for_owner.return_value = True
+        service._db_repo.list_legacy_observations.return_value = []
+        service._db_repo._row_to_detail.return_value = detail
+
+        result = await service.get_session(
+            trace_id="trace-1", owner_id="collaborator-1"
+        )
+
+        assert result is detail
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "collaborator-1", "default", "bot-owner"
+        )
 
     @pytest.mark.asyncio
     async def test_get_session_db_ocb_trace_does_not_mix_legacy_observations(self, service):
@@ -1659,6 +1846,52 @@ class TestBotChatServiceGetSession:
         assert result.id == "trace-1"
         assert result.user_id == "user1"
         service._db_repo.enrich_labels.assert_called_once_with([result])
+
+    @pytest.mark.asyncio
+    async def test_get_session_langfuse_default_bot_collaborator_allowed(
+        self, service
+    ):
+        trace_response = AsyncMock()
+        trace_response.status = 200
+        trace_response.json = AsyncMock(return_value={
+            "id": "trace-1",
+            "name": "Session",
+            "userId": "bot-owner",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "success": True,
+            "metadata": {"attributes": {"identity.bot_id": "default"}},
+        })
+        trace_response.__aenter__ = AsyncMock(return_value=trace_response)
+        trace_response.__aexit__ = AsyncMock(return_value=False)
+
+        obs_response = AsyncMock()
+        obs_response.status = 200
+        obs_response.json = AsyncMock(return_value={"data": []})
+        obs_response.__aenter__ = AsyncMock(return_value=obs_response)
+        obs_response.__aexit__ = AsyncMock(return_value=False)
+
+        responses = iter((trace_response, obs_response))
+        mock_aiohttp_session = AsyncMock()
+        mock_aiohttp_session.get = MagicMock(side_effect=lambda *args, **kwargs: next(responses))
+        mock_aiohttp_session.__aenter__ = AsyncMock(return_value=mock_aiohttp_session)
+        mock_aiohttp_session.__aexit__ = AsyncMock(return_value=False)
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access_for_owner.return_value = True
+
+        with patch(
+            "agentclaw.community.core.bot_chat.service.aiohttp.ClientSession",
+            return_value=mock_aiohttp_session,
+        ):
+            result = await service.get_session(
+                trace_id="trace-1",
+                owner_id="collaborator-1",
+                log_source="langfuse",
+            )
+
+        assert result.id == "trace-1"
+        service._db_repo.has_bot_access_for_owner.assert_called_once_with(
+            "collaborator-1", "default", "bot-owner"
+        )
 
     @pytest.mark.asyncio
     async def test_get_session_langfuse_non_default_bot_unauthorized(self, service):

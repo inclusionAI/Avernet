@@ -34,6 +34,7 @@ class BotChatServiceProtocol(Protocol):
         include_output_match: bool = False,
         time_scope: str = "default",
         log_source: str | None = None,
+        resource_owner_id: str | None = None,
     ) -> SessionListResponse: ...
 
     async def get_session(

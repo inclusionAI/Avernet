@@ -392,6 +392,57 @@ class TestBotOwnershipRules:
 
         assert repo.has_bot_access("user2", "bot-a") is False
 
+    def test_owner_scoped_access_distinguishes_duplicate_default_bots(self):
+        db = SqliteTestDb()
+        _insert_bot(db, id=101, entity_id="entity1", owner_id="owner1", bot_id="default")
+        _insert_bot(db, id=202, entity_id="entity2", owner_id="owner2", bot_id="default")
+        _insert_bot_collaborator(
+            db,
+            bot_pk=101,
+            bot_id="default",
+            owner_id="owner1",
+            user_id="collaborator1",
+        )
+        repo = BotChatDbRepository(db)
+
+        assert repo.has_bot_access_for_owner(
+            "collaborator1", "default", "owner1"
+        ) is True
+        assert repo.has_bot_access_for_owner(
+            "collaborator1", "default", "owner2"
+        ) is False
+
+    def test_owner_scoped_access_accepts_legacy_owner_default_alias(self):
+        db = SqliteTestDb()
+        _insert_bot(
+            db,
+            id=303,
+            entity_id="entity1",
+            owner_id="owner1",
+            bot_id="owner1_default",
+        )
+        _insert_bot_collaborator(
+            db,
+            bot_pk=303,
+            bot_id="owner1_default",
+            owner_id="owner1",
+            user_id="collaborator1",
+        )
+        repo = BotChatDbRepository(db)
+
+        assert repo.has_bot_access_for_owner(
+            "owner1", "default", "owner1"
+        ) is True
+        assert repo.has_bot_access_for_owner(
+            "collaborator1", "default", "owner1"
+        ) is True
+        assert repo.has_bot_access_for_owner(
+            "collaborator1", "owner1_default", "owner1"
+        ) is True
+        assert repo.has_bot_access_for_owner(
+            "collaborator1", "default", "missing-owner"
+        ) is False
+
 
 class TestBotIdQueryRules:
     """Test bot_id query rules per spec."""

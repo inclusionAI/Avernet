@@ -457,6 +457,55 @@ class BotChatDbRepository:
         """Check if user_id is either owner or collaborator of bot_id."""
         return self.is_bot_owner(user_id, bot_id) or self.is_bot_collaborator(user_id, bot_id)
 
+    def has_bot_access_for_owner(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> bool:
+        """Check access to the exact Bot identified by owner and Bot ID.
+
+        Legacy ``default`` Bot IDs are only unique within one owner scope.  The
+        exact Bot primary key is therefore resolved first and collaborator
+        access is matched against that key, rather than against ``bot_id``
+        alone.
+        """
+        candidate_bot_ids = [bot_id]
+        legacy_owner_alias = f"{owner_id}_default"
+        if bot_id == "default":
+            candidate_bot_ids.append(legacy_owner_alias)
+        elif bot_id == legacy_owner_alias:
+            candidate_bot_ids.append("default")
+
+        with self._db.orm_session() as session:
+            # COSEC: Resolve the resource inside the claimed owner scope before
+            # accepting either owner or collaborator authorization.
+            bot_rows = (
+                session.query(BotModel.id)
+                .filter(
+                    BotModel.owner_id == owner_id,
+                    BotModel.bot_id.in_(candidate_bot_ids),
+                    BotModel.is_delete == 0,
+                    BotModel.env == get_current_env(),
+                )
+                .all()
+            )
+            bot_pks = [row[0] for row in bot_rows]
+            if not bot_pks:
+                return False
+            if user_id == owner_id:
+                return True
+
+            collaborator = (
+                session.query(BotCollaboratorModel.id)
+                .filter(
+                    BotCollaboratorModel.bot_pk.in_(bot_pks),
+                    BotCollaboratorModel.bot_id.in_(candidate_bot_ids),
+                    BotCollaboratorModel.owner_id == owner_id,
+                    BotCollaboratorModel.user_id == user_id,
+                    BotCollaboratorModel.env == get_current_env(),
+                )
+                .first()
+            )
+            return collaborator is not None
+
     def enrich_labels(
         self,
         rows: list[Any],

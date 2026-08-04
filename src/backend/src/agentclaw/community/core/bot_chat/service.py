@@ -351,6 +351,20 @@ class BotChatService(OpenBotChatServiceMixin):
         """Check access: owner (ac_bots) or collaborator (ac_bot_collaborator)."""
         return self._db_repo.has_bot_access(user_id, bot_id)
 
+    def _check_bot_access_for_owner(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> bool:
+        """Check access to an owner-scoped Bot resource."""
+        return self._db_repo.has_bot_access_for_owner(user_id, bot_id, owner_id)
+
+    def _can_access_legacy_default_bot(
+        self, user_id: str, bot_id: str, owner_id: str
+    ) -> bool:
+        """Authorize an owner-scoped legacy default Bot."""
+        if user_id == owner_id:
+            return True
+        return self._check_bot_access_for_owner(user_id, bot_id, owner_id)
+
     @staticmethod
     def _is_legacy_default_bot_id(bot_id: str | None, owner_id: str) -> bool:
         """True iff ``bot_id`` is a legacy per-owner default alias (pre-retirement).
@@ -388,8 +402,14 @@ class BotChatService(OpenBotChatServiceMixin):
         include_output_match: bool = False,
         time_scope: str = "default",
         log_source: str | None = None,
+        resource_owner_id: str | None = None,
     ) -> SessionListResponse:
-        """List conversation sessions for a given owner."""
+        """List sessions visible to the authenticated actor in ``owner_id``.
+
+        ``resource_owner_id`` is an optional Bot locator supplied by the caller.
+        It is never used as a query scope until access to that exact Bot has
+        been verified.
+        """
         limit = min(max(1, limit), _MAX_PAGE_SIZE)
         page = max(1, page)
 
@@ -438,27 +458,33 @@ class BotChatService(OpenBotChatServiceMixin):
         if group_id or biz_scene or biz_task_id:
             effective_source = "db"
 
-        if effective_source == "langfuse":
-            return await self._list_sessions_langfuse(
-                owner_id=owner_id,
-                from_date=from_date,
-                to_date=to_date,
-                page=page,
-                limit=limit,
-                bot_id=bot_id,
-                trace_id=trace_id,
-                session_id=session_id,
-                session_key=session_key,
-                query=query,
-                match_mode=match_mode,
-                include_output_match=include_output_match,
+        query_owner_id = owner_id
+        query_bot_id = bot_id
+        if bot_id:
+            requested_owner_id = resource_owner_id or owner_id
+            is_legacy_default = self._is_legacy_default_bot_id(
+                bot_id, requested_owner_id
             )
+            if resource_owner_id is not None:
+                # COSEC: A caller-provided owner is only accepted after the
+                # actor is authorized against that exact owner-scoped Bot.
+                has_access = (
+                    self._can_access_legacy_default_bot(
+                        owner_id, bot_id, requested_owner_id
+                    )
+                    if is_legacy_default
+                    else self._check_bot_access_for_owner(
+                        owner_id, bot_id, requested_owner_id
+                    )
+                )
+                query_owner_id = requested_owner_id
+            elif is_legacy_default:
+                has_access = self._can_access_legacy_default_bot(
+                    owner_id, bot_id, requested_owner_id
+                )
+            else:
+                has_access = self._check_bot_access(owner_id, bot_id)
 
-        # Default DB mode: for non-(legacy-default) bot, check access (owner or collaborator).
-        # Legacy default aliases short-circuit (see _is_legacy_default_bot_id): the
-        # subsequent DB list is already scoped by owner_id, so access is implicit.
-        if bot_id and not self._is_legacy_default_bot_id(bot_id, owner_id):
-            has_access = self._check_bot_access(owner_id, bot_id)
             if not has_access:
                 return SessionListResponse(
                     sessions=[],
@@ -468,14 +494,36 @@ class BotChatService(OpenBotChatServiceMixin):
                     has_more=False,
                 )
 
-        # Default: DB mode (no fallback to Langfuse)
+            if effective_source == "db" and is_legacy_default:
+                # DB ingestion normalizes legacy ``{owner}_default`` aliases.
+                query_bot_id = "default"
+
+        if effective_source == "langfuse":
+            return await self._list_sessions_langfuse(
+                owner_id=query_owner_id,
+                from_date=from_date,
+                to_date=to_date,
+                page=page,
+                limit=limit,
+                bot_id=query_bot_id,
+                trace_id=trace_id,
+                session_id=session_id,
+                session_key=session_key,
+                query=query,
+                match_mode=match_mode,
+                include_output_match=include_output_match,
+            )
+
+        # Default: DB mode (no fallback to Langfuse).  Without bot_id the
+        # caller-provided resource owner is deliberately ignored and the query
+        # remains scoped to the authenticated actor.
         return await self._list_sessions_db(
-            owner_id=owner_id,
+            owner_id=query_owner_id,
             from_date=from_date,
             to_date=to_date,
             page=page,
             limit=limit,
-            bot_id=bot_id,
+            bot_id=query_bot_id,
             trace_id=trace_id,
             session_id=session_id,
             session_key=session_key,
@@ -810,21 +858,25 @@ class BotChatService(OpenBotChatServiceMixin):
         if row is None:
             raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
 
-        # Bot access check based on row's bot_id.
-        # - legacy default alias (or null bot_id): require trace's user_id to match
-        #   caller — see _is_legacy_default_bot_id; has_bot_access can't disambiguate
-        #   a literal "default" across owners.
-        # - non-legacy bot: require caller to be owner or collaborator.
+        # Bot access check based on row's bot_id.  The trace owner identifies
+        # the exact resource scope for legacy default Bot IDs.
         if owner_id:
-            if (
-                row.bot_id is None
-                or self._is_legacy_default_bot_id(row.bot_id, owner_id)
+            if row.bot_id is None:
+                has_access = row.user_id == owner_id
+            elif row.user_id and self._is_legacy_default_bot_id(
+                row.bot_id, row.user_id
             ):
-                if row.user_id != owner_id:
-                    raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+                # COSEC: Default Bot IDs are owner-scoped, so collaborators are
+                # checked against the exact owner/Bot primary key.
+                has_access = self._can_access_legacy_default_bot(
+                    owner_id, row.bot_id, row.user_id
+                )
             else:
-                if not self._db_repo.has_bot_access(owner_id, row.bot_id):
-                    raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+                has_access = self._db_repo.has_bot_access(owner_id, row.bot_id)
+            if not has_access:
+                raise SessionNotFoundError(
+                    f"Trace {trace_id} not found or not accessible"
+                )
 
         if is_ocb_row:
             observations = self._db_repo.list_ocb_observations(trace_id)
@@ -866,15 +918,24 @@ class BotChatService(OpenBotChatServiceMixin):
                 trace_bot_id = attributes.get("identity.bot_id")
                 trace_owner_id = _trace_owner_id(trace_data, attributes)
 
-                if (
-                    trace_bot_id is None
-                    or self._is_legacy_default_bot_id(trace_bot_id, owner_id)
+                if trace_bot_id is None:
+                    has_access = trace_owner_id == owner_id
+                elif trace_owner_id and self._is_legacy_default_bot_id(
+                    trace_bot_id, trace_owner_id
                 ):
-                    if trace_owner_id != owner_id:
-                        raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+                    # COSEC: Default Bot IDs are owner-scoped, so collaborators
+                    # are checked against the exact owner/Bot primary key.
+                    has_access = self._can_access_legacy_default_bot(
+                        owner_id, trace_bot_id, trace_owner_id
+                    )
                 else:
-                    if not self._db_repo.has_bot_access(owner_id, trace_bot_id):
-                        raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
+                    has_access = self._db_repo.has_bot_access(
+                        owner_id, trace_bot_id
+                    )
+                if not has_access:
+                    raise SessionNotFoundError(
+                        f"Trace {trace_id} not found or not accessible"
+                    )
 
         observations = await self._fetch_observations_from_langfuse(trace_id)
 

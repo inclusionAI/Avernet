@@ -19,7 +19,10 @@ router = APIRouter(prefix="/api/v1/bot-chats", tags=["bot-chats"])
 
 @router.get("", response_model=ApiResponse[SessionListResponse])
 async def list_sessions(
-    owner_id: str | None = Query(default=None, description="Owner ID (defaults to current user)"),
+    owner_id: str | None = Query(
+        default=None,
+        description="Bot owner ID used to locate an authorized Bot resource",
+    ),
     bot_id: str | None = Query(default=None, description="Filter by bot_id"),
     trace_id: str | None = Query(default=None, description="Filter by trace ID"),
     session_id: str | None = Query(
@@ -58,10 +61,11 @@ async def list_sessions(
 ):
     """List bot conversation sessions."""
     try:
-        # COSEC: Bind the owner scope to the authenticated identity; never trust query owner_id.
-        effective_owner_id = user.staffId
         result = await service.list_sessions(
-            owner_id=effective_owner_id,
+            # COSEC: Authentication supplies the actor; the query value is only
+            # a resource locator and is authorized by the service before use.
+            owner_id=user.staffId,
+            resource_owner_id=owner_id,
             from_date=from_date,
             to_date=to_date,
             page=page,

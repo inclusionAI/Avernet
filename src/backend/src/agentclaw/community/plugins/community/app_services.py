@@ -24,7 +24,13 @@ class NoopCodePlatformService:
 class NoopBotChatService:
     """No bot-chat trace store in the community build — empty/neutral results."""
 
-    async def list_sessions(self, owner_id: str, *args: Any, **kwargs: Any) -> Any:
+    async def list_sessions(
+        self,
+        owner_id: str,
+        *args: Any,
+        resource_owner_id: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         return []
 
     async def get_session(

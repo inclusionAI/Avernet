@@ -130,13 +130,13 @@ class TestListSessions:
         assert result.success is True
         assert result.data.total == 1
         assert len(result.data.sessions) == 1
-        # Verify owner_id defaults to user's staffId
         mock_service.list_sessions.assert_called_once()
-        call_kwargs = mock_service.list_sessions.call_args
-        assert call_kwargs.kwargs.get("owner_id") == "361618" or call_kwargs[1].get("owner_id") == "361618"
+        call_kwargs = mock_service.list_sessions.call_args.kwargs
+        assert call_kwargs["owner_id"] == "361618"
+        assert call_kwargs["resource_owner_id"] is None
 
     @pytest.mark.asyncio
-    async def test_owner_id_query_cannot_override_authenticated_user(
+    async def test_owner_id_query_is_separate_from_authenticated_user(
         self, mock_service, mock_user
     ):
         from agentclaw.community.adapters.http.bot_chat.router import list_sessions
@@ -166,6 +166,7 @@ class TestListSessions:
 
         call_kwargs = mock_service.list_sessions.call_args.kwargs
         assert call_kwargs["owner_id"] == mock_user.staffId
+        assert call_kwargs["resource_owner_id"] == "victim_owner"
         assert call_kwargs["bot_id"] == "bot_123"
         assert call_kwargs["session_id"] == "gen-ai-sess-456"
 
@@ -313,6 +314,7 @@ class TestGetSession:
         assert result.success is True
         assert result.data.id == "trace-1"
         assert len(result.data.observations) == 1
+        assert mock_service.get_session.call_args.kwargs["owner_id"] == mock_user.staffId
 
     @pytest.mark.asyncio
     async def test_get_session_not_found(self, mock_service, mock_user):
