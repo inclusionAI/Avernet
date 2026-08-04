@@ -92,14 +92,37 @@ def _resolve_caller(request: Request) -> VerifiedCaller | None:
 
 def _verify_from_headers(request: Request) -> VerifiedCaller | None:
     """Verify the request's principal header, logging why if it fails."""
+    config = get_principal_verifier_config()
     token = request.headers.get(PRINCIPAL_HEADER, "").strip()
     if not token:
+        # Distinguished from a rejected token, and on its own log line, because
+        # the two point at completely different things. A *missing* header is
+        # not an auth failure at all: the gateway injects it on every forwarded
+        # request, so its absence means this request did not come through the
+        # gateway, or came through one whose route table does not require an
+        # identity for this path. Chasing signing keys for that is chasing the
+        # wrong half of the system, which is exactly what the previous silence
+        # invited.
+        logger.warning(
+            "no %s header on %s %s (request did not arrive through the "
+            "gateway's authenticated path; verifier key fp=%s)",
+            PRINCIPAL_HEADER,
+            request.method,
+            request.url.path,
+            config.key_fingerprint,
+        )
         return None
     try:
-        return verify_principal_token(token, get_principal_verifier_config())
+        return verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         # Log the reason (never the token) and treat the caller as absent. The
-        # request goes on to answer 401 from require_principal.
+        # request goes on to answer 401 from require_principal. The reason
+        # carries the fingerprint of the key this component judged the token
+        # against, plus the token's own JOSE header marked as caller-supplied —
+        # see ``core/gateway_principal/verifier.py``. The fingerprint is the
+        # part to reason from: compared against the gateway's boot line it
+        # separates a key mismatch from an expiry or a wrong audience, while
+        # the header is unauthenticated and can say anything a forger likes.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
             request.method,
