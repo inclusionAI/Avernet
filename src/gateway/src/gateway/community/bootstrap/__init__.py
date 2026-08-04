@@ -17,8 +17,8 @@ from dependency_injector.wiring import Provide
 
 from gateway.community.core.access_key import AccessKeyIssuer
 from gateway.community.core.app import AppRegistrar
-from gateway.community.core.authn import Authenticator as _Authn
-from gateway.community.core.forwarding import Forwarding as _Fwd
+from gateway.community.core.authn import Authenticator
+from gateway.community.core.forwarding import Forwarding
 from gateway.community.spi.principal_signer import PrincipalSigner
 
 from ._authn import build_authenticator
@@ -32,9 +32,6 @@ from ._credential_issuance import build_access_key_issuer, build_app_registrar
 from ._database import initialize_database
 from ._forwarding import build_forwarding
 from ._principal_signer import build_principal_signer
-
-Authenticator = _Authn
-Forwarding = _Fwd
 
 _container: ApplicationContainer | None = None
 
@@ -111,29 +108,20 @@ def bootstrap_app() -> BootstrapResult:
     )
 
 
-def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
-    try:
-        from gateway.community.plugin_registry import (
-            has_enterprise_plugins,
-            inject_into_plugin_container,
-        )
-
-        if has_enterprise_plugins():
-            inject_into_plugin_container(container)
-    except ImportError:
-        pass
-
-
 def get_container() -> ApplicationContainer:
     global _container
     if _container is None:
         _container = ApplicationContainer()
+        from ._container import _inject_enterprise_plugins
+
         _inject_enterprise_plugins(_container)
     return _container
 
 
 def set_container(container: ApplicationContainer) -> None:
     global _container
+    from ._container import _inject_enterprise_plugins
+
     _inject_enterprise_plugins(container)
     _container = container
 

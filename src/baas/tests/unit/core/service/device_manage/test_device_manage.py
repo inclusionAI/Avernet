@@ -117,25 +117,25 @@ class TestSafeFormatHook:
     """Test _safe_format_hook standalone function."""
 
     def test_format_simple(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("echo {token}", token="abc")
         assert result == "echo abc"
 
     def test_unknown_placeholder_preserved(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("echo {unknown}", token="abc")
         assert result == "echo {unknown}"
 
     def test_partial_known_placeholders(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("{token} and {unknown}", token="hello")
         assert result == "hello and {unknown}"
 
     def test_no_placeholders(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("plain script")
         assert result == "plain script"

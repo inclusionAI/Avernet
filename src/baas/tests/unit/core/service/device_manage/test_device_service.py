@@ -109,14 +109,14 @@ def _make_record(**overrides):
 
 class TestSafeFormatHookEdgeCases:
     def test_value_error_is_caught(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("echo {token} and {other}", token="hello")
         assert result == "echo hello and {other}"
         assert "{other}" in result  # unknown placeholder preserved
 
     def test_client_id_placeholder(self):
-        from secbaas.community.core.service.device_manage import _safe_format_hook
+        from secbaas.community.core.service.device_manage._device_service import _safe_format_hook
 
         result = _safe_format_hook("register --id {client_id}", client_id="DEVICE-001")
         assert result == "register --id DEVICE-001"
