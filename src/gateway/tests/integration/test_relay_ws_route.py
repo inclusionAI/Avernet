@@ -680,7 +680,7 @@ def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
             ws.send_text("ping")
             ws.receive_text()
             ws.close(1000)
-        _settled(forwarder)
+_settled(forwarder)
     assert forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/T%40x/ws"
 
 
@@ -698,7 +698,7 @@ def test_an_encoded_tail_still_relays_verbatim() -> None:
             ws.send_text("ping")
             ws.receive_text()
             ws.close(1000)
-        _settled(forwarder)
+_settled(forwarder)
     assert forwarder.opened[0].request.url == (
         "wss://proxy.internal/proxypass/ARCA_x%400%3A20003/api/ws"
     )
@@ -718,7 +718,7 @@ def test_a_dot_inside_a_name_still_relays() -> None:
             ws.send_text("ping")
             ws.receive_text()
             ws.close(1000)
-        _settled(forwarder)
+_settled(forwarder)
     assert (
         forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/a.b/c..d/ws"
     )
