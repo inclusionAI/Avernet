@@ -17,6 +17,7 @@ from secbaas.community.api.bot_manage import (
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.device_manage import DeployConfig
+from secbaas.community.api.device_manage._models import ResourceSpecification
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     PublishStatus,
@@ -27,6 +28,7 @@ from secbaas.community.core.service.bot_manage import (
     DefaultBotManagementService as BotManagementService,
 )
 from secbaas.community.core.service.bot_manage import (
+    merge_deploy_config,
     resolve_callback_timeout,
 )
 
@@ -640,6 +642,60 @@ class TestListBots:
         assert call_kwargs["page_size"] == 100
 
 
+class TestMergeDeployConfig:
+    """Tests for merge_deploy_config field-level merge behavior."""
+
+    def test_merge_current_none_returns_override_only(self):
+        """When current is None, result is equivalent to the override alone."""
+        override = DeployConfig(ttl_in_minutes=120, docker_image="img:v2")
+        result = merge_deploy_config(None, override)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+        assert result.envs is None
+        assert result.mount_points is None
+
+    def test_merge_override_none_fields_preserved(self):
+        """Current fields NOT in override are preserved."""
+        current = DeployConfig(
+            envs={"KEY": "val"},
+            mount_points=[],
+            ttl_in_minutes=60,
+            resource_spec=ResourceSpecification(cpu=2, memory=4096),
+        )
+        override = DeployConfig(docker_image="img:v2", ttl_in_minutes=120)
+        result = merge_deploy_config(current, override)
+        assert result.envs == {"KEY": "val"}
+        assert result.mount_points == []
+        assert result.resource_spec == ResourceSpecification(cpu=2, memory=4096)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+
+    def test_merge_override_only_fields(self):
+        """Override-only fields are set without touching current fields."""
+        current = DeployConfig(ttl_in_minutes=60)
+        override = DeployConfig(docker_image="img:v2")
+        result = merge_deploy_config(current, override)
+        assert result.ttl_in_minutes == 60
+        assert result.docker_image == "img:v2"
+
+    def test_merge_dict_override(self):
+        """Plain dict override works the same as DeployConfig instance."""
+        current = DeployConfig(envs={"K": "V"}, ttl_in_minutes=60)
+        override_dict = {"ttl_in_minutes": 120, "docker_image": "img:v2"}
+        result = merge_deploy_config(current, override_dict)
+        assert result.envs == {"K": "V"}
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+
+    def test_merge_current_empty_none_fields(self):
+        """When current's fields are all None, override fills everything."""
+        current = DeployConfig()
+        override = DeployConfig(ttl_in_minutes=120)
+        result = merge_deploy_config(current, override)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image is None
+
+
 class TestScaleBot:
     """Tests for BotManagementService.scale_bot"""
 
@@ -1093,6 +1149,87 @@ class TestScaleBot:
         assert publish_config.callback_timeout_seconds == 600
         assert publish_config.deploy_config is not None
         assert publish_config.deploy_config.ttl_in_minutes == 120
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_deploy_config_field_level_merge(self):
+        """scale_bot with partial deploy_config override preserves non-overridden fields."""
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 789
+
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        mock_bot_repo = MagicMock()
+        mock_record = MagicMock()
+        mock_record.extra_config = {
+            "deploy_config": {
+                "envs": {"EXISTING": "val"},
+                "mount_points": [],
+                "ttl_in_minutes": 60,
+            }
+        }
+        mock_bot_repo.list_by_bot_uuid.return_value = [mock_record]
+
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        bot_config = BotConfig(
+            deploy_config=DeployConfig(ttl_in_minutes=120, docker_image="img:v2"),
+        )
+
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                target_count=3,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                bot_config=bot_config,
+            )
+
+        call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+        publish_config = call_kwargs["config"]
+        assert publish_config.deploy_config is not None
+        assert publish_config.deploy_config.envs == {"EXISTING": "val"}
+        assert publish_config.deploy_config.mount_points == []
+        assert publish_config.deploy_config.ttl_in_minutes == 120
+        assert publish_config.deploy_config.docker_image == "img:v2"
 
     @pytest.mark.asyncio
     async def test_scale_bot_without_bot_config_reads_db_config(self):
