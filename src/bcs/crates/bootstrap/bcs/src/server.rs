@@ -1268,9 +1268,9 @@ async fn build_gateway_principal_verifier_from_secret_access(
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str =
     "test-only-group-session-key-at-least-32-bytes";
 
-fn group_session_test_secret_access() -> Arc<dyn SecretAccessPort> {
+fn group_session_test_secret_access(config: &GroupSessionWsConfig) -> Arc<dyn SecretAccessPort> {
     Arc::new(InMemorySecretAccess::with_entries([(
-        GroupSessionWsConfig::default().signing_key_secret,
+        config.signing_key_secret.trim().to_string(),
         String::new(),
         GROUP_SESSION_WS_TEST_SIGNING_KEY.to_string(),
     )]))
@@ -2851,12 +2851,13 @@ impl BcsServer {
     }
 
     pub fn new_allowing_private_outbound_for_tests(config: BcsConfig) -> Self {
+        let group_session_secret_access = group_session_test_secret_access(&config.group_session_ws);
         Self::new_with_outbound_url_guards(
             config,
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
-            group_session_test_secret_access(),
+            group_session_secret_access,
             gateway_principal_verifier_for_tests(),
         )
     }
@@ -4416,6 +4417,25 @@ mod tests {
     #[derive(Default)]
     struct RecordingSessionChannelOutbound {
         events: tokio::sync::Mutex<Vec<HumanInputReadyEvent>>,
+    }
+
+    #[tokio::test]
+    async fn new_allowing_private_outbound_for_tests_seeds_configured_group_session_secret() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = BcsConfig::default();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+        config.group_session_ws.signing_key_secret =
+            "custom-group-session-ws-test-secret".to_string();
+
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+
+        let _ = server
+            .build_router()
+            .await
+            .expect("test constructor should seed group-session signing material under configured name");
     }
 
     #[tokio::test]

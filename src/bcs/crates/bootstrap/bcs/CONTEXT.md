@@ -43,9 +43,14 @@
 
 - This crate owns config file discovery, env parsing, and CLI/bootstrap flags.
 - Only this crate selects local, test, or remote concrete implementations.
-- Production resolves `bcn-group-session-ws-jwt` through `EnvSecretAccess`
-  using `BCS_SECRET_BCN_GROUP_SESSION_WS_JWT`; missing or empty material aborts
-  Router construction and is never replaced by another JWT secret.
+- Production resolves group-session WebSocket JWT signing material through the
+  configured `SecretAccessPort` using `[group_session_ws].signing_key_secret`
+  as the logical secret name. The default logical name remains
+  `bcn-group-session-ws-jwt` for backward compatibility; with the default
+  `EnvSecretAccess` prefix this maps to `BCS_SECRET_BCN_GROUP_SESSION_WS_JWT`.
+  Mist or other non-env deployments may set the field to their deployment-specific
+  logical secret name. Missing or empty material aborts Router construction and
+  is never replaced by another JWT secret.
 
 ## Runtime ownership
 
