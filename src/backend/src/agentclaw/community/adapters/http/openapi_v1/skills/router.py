@@ -50,7 +50,6 @@ router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
-
 def _tags(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(tag) for tag in value]
@@ -130,7 +129,7 @@ async def get_skill(
     responses={
         200: {
             "model": Envelope[SkillUpload],
-            "description": "Existing Local Skill safely replaced.",
+            "description": "Same-name Local Skill replaced successfully.",
         },
         413: {
             "model": ErrorEnvelope,
