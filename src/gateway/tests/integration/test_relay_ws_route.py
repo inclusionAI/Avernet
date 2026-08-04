@@ -632,7 +632,8 @@ def test_a_nested_rewrite_still_relays_its_own_paths() -> None:
         with client.websocket_connect("/openapi/v1/bots/messages/v2/T%40x/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
-        _settled(forwarder)
+            ws.close(1000)
+            _settled(forwarder)
     assert forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/T%40x/ws"
 
 
@@ -649,7 +650,8 @@ def test_an_encoded_tail_still_relays_verbatim() -> None:
         ) as ws:
             ws.send_text("ping")
             ws.receive_text()
-        _settled(forwarder)
+            ws.close(1000)
+            _settled(forwarder)
     assert forwarder.opened[0].request.url == (
         "wss://proxy.internal/proxypass/ARCA_x%400%3A20003/api/ws"
     )
@@ -668,7 +670,8 @@ def test_a_dot_inside_a_name_still_relays() -> None:
         with client.websocket_connect("/openapi/v1/bots/messages/a.b/c..d/ws") as ws:
             ws.send_text("ping")
             ws.receive_text()
-        _settled(forwarder)
+            ws.close(1000)
+            _settled(forwarder)
     assert (
         forwarder.opened[0].request.url == "wss://proxy.internal/proxypass/a.b/c..d/ws"
     )
