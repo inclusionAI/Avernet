@@ -15,7 +15,7 @@ from dependency_injector.wiring import Provide, inject
 from fastapi import Depends, Header, HTTPException, status
 
 from secbaas.community.adapters.web.routers.open_api.dependencies import (
-    _normalize_bot_id,
+    normalize_bot_id,
 )
 from secbaas.community.api.api_gateway import (
     ResourceKeyRepository,
@@ -33,6 +33,7 @@ class GatewayAuthContext:
     resource_key: str
     resource_key_id: int
     tenant: str
+    app: str
 
 
 def _get_token_from_header(principal: str | None) -> str:
@@ -113,19 +114,21 @@ def validate_jwt_token(
         resource_key=resource_key,
         resource_key_id=record.id,
         tenant=record.tenant,
+        app=record.app,
     )
 
 
 def get_bot_chat_context(
     auth_ctx: GatewayAuthContext = Depends(validate_jwt_token),
 ) -> BotChatContext:
-    """Build BotChatContext from resource_key.
+    """Build BotChatContext from GatewayAuthContext.
 
+    app comes from the baas_resource_key record looked up during JWT validation.
     api_key_prefix uses the first 8 chars of resource_key for log tracing.
     """
     return BotChatContext.from_api_key(
         api_key_prefix=auth_ctx.resource_key[:8],
-        app_id="",
+        app_id=auth_ctx.app,
         app_type="app",
         tenant=auth_ctx.tenant,
     )
@@ -147,7 +150,7 @@ def check_bot_access(
         HTTPException 400: invalid bot_id format
         HTTPException 403: mapping does not exist
     """
-    normalized = _normalize_bot_id(bot_id)
+    normalized = normalize_bot_id(bot_id)
 
     if not resource_key_repository.exists_bot_mapping(
         auth_ctx.resource_key_id, normalized

@@ -109,7 +109,7 @@ def get_bot_chat_context(
     )
 
 
-def _normalize_bot_id(bot_id: str) -> str:
+def normalize_bot_id(bot_id: str) -> str:
     """Compatibility handling for bot IDs whose employee number is zero-padded. bot_id format is ``<real_bot_id>:<entity_id>``; strips leading zeros from entity_id."""
     if ":" in bot_id:
         real_bot_id, entity_id = bot_id.rsplit(":", 1)
@@ -127,7 +127,7 @@ def resolve_bot_id_from_api_key(api_key_record: APIKeyRecord) -> str:
     Returns:
         str: Parsed and normalized bot_id
     """
-    return _normalize_bot_id(api_key_record.app_id)
+    return normalize_bot_id(api_key_record.app_id)
 
 
 def parse_bot_id(bot_id: str) -> tuple[str, str]:

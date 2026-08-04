@@ -8,14 +8,24 @@ import pytest
 
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._configs import DatabaseConfig
-from gateway.community.core.access_key import AccessKeyRepository
+from gateway.community.core.access_key import AccessKeyRepository, AccessKeyRow
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.access_key import RegisteredAccessKey
 
 
 def _make_db():
     db = SqliteDatabasePlugin()
-    return initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    db = initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    with db.orm_session() as session:
+        session.add(
+            AccessKeyRow(
+                token="ak-token",
+                access_key="ak-1",
+                tenant="t",
+                expire_at=datetime(2027, 1, 1, 0, 0, 0),
+            )
+        )
+    return db
 
 
 @pytest.fixture(scope="module")

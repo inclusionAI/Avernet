@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from secbaas.community.adapters.web.routers.open_api.message_router import (
-    _normalize_bot_id,
+    normalize_bot_id,
     deliver_message,
     deliver_message_stream,
     get_message_result,
@@ -108,19 +108,19 @@ def _make_stream_message_request(
 
 class TestNormalizeBotId:
     def test_no_colon_passthrough(self):
-        assert _normalize_bot_id("simple") == "simple"
+        assert normalize_bot_id("simple") == "simple"
 
     def test_colon_strips_leading_zeros(self):
-        assert _normalize_bot_id("bot:000123") == "bot:123"
+        assert normalize_bot_id("bot:000123") == "bot:123"
 
     def test_colon_no_leading_zeros_unchanged(self):
-        assert _normalize_bot_id("bot:123") == "bot:123"
+        assert normalize_bot_id("bot:123") == "bot:123"
 
     def test_colon_all_zeros_returns_zero(self):
-        assert _normalize_bot_id("bot:000") == "bot:0"
+        assert normalize_bot_id("bot:000") == "bot:0"
 
     def test_multiple_colons_strips_last_part(self):
-        assert _normalize_bot_id("a:b:007") == "a:b:7"
+        assert normalize_bot_id("a:b:007") == "a:b:7"
 
 
 # ── deliver_message ──────────────────────────────────────────

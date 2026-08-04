@@ -6,7 +6,7 @@ import pytest
 
 from gateway.community.bootstrap import initialize_database
 from gateway.community.bootstrap._configs import DatabaseConfig
-from gateway.community.core.app import AppRepository
+from gateway.community.core.app import AppRepository, AppRow
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.app import RegisteredApp
 
@@ -15,6 +15,16 @@ from gateway.community.spi.app import RegisteredApp
 def registry() -> AppRepository:
     db = SqliteDatabasePlugin()
     initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
+    with db.orm_session() as session:
+        session.add(
+            AppRow(
+                app_name="Demo App",
+                app_type="assistant",
+                token="app-key",
+                owners="org-1",
+                tenant="t",
+            )
+        )
     return AppRepository(db)
 
 
