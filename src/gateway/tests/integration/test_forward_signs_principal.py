@@ -142,7 +142,7 @@ async def test_collaboration_forward_signs_bcs_audience_and_replaces_forgery(
     token = forwarder.captured.headers[_PRINCIPAL_HEADER]
     decoded = jwt.decode(
         token,
-        _DEV_FALLBACK_KEY,
+        _TEST_KEY,
         algorithms=["HS256"],
         audience="bcs",
         issuer="gateway",
@@ -167,7 +167,7 @@ async def test_session_token_post_keeps_the_required_signed_bcs_principal(
     token = forwarder.captured.headers[_PRINCIPAL_HEADER]
     decoded = jwt.decode(
         token,
-        _DEV_FALLBACK_KEY,
+        _TEST_KEY,
         algorithms=["HS256"],
         audience="bcs",
         issuer="gateway",
