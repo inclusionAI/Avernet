@@ -365,6 +365,20 @@ def test_restart_success_enqueues_restart_poll():
     assert tq.enqueue.call_args.args[1] == {"publish_id": 1}
 
 
+def test_restart_poll_enqueue_failure_does_not_retry_the_restart():
+    # execute_restart has already COMPLETED its ledger op by this point, and
+    # open_publish_operation opens a *new attempt* past a terminal op — so
+    # letting a queue write raise would redeliver the task and issue a SECOND
+    # BaaS restart. Degrade to "no poll" (i.e. /restart_status settles it)
+    # instead of re-deploying the bot.
+    flow = _FakeRestartFlow()
+    restart, _poll, tq = _restart_handlers(flow)
+    tq.enqueue.side_effect = RuntimeError("queue down")
+    outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert isinstance(outcome, Complete)  # NOT a Fail/raise → no redelivery
+    tq.enqueue.assert_called_once()
+
+
 def test_restart_failure_preserves_a_concurrent_restarts_marker():
     # Every ``success: False`` return in execute_restart is a preflight check that
     # runs BEFORE the marker is written, so a failing handler never set it. Since

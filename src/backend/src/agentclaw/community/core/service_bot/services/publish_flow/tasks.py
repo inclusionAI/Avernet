@@ -411,7 +411,23 @@ class PublishRestartHandler(_PublishTaskBase):
         # the workflow id is recorded (ledger + ext.restart.<stage>), so the poll
         # cannot read ext.restart before the restart wrote it — the same-batch
         # race that forces ``_retry_via_restart`` to run its restart inline.
-        enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
+        #
+        # A raise here must NOT propagate. execute_restart has already COMPLETED
+        # its ledger op, and ``open_publish_operation`` resumes only a
+        # *non-terminal* op — past a terminal one it opens the next attempt. So a
+        # redelivery of this task would issue a second BaaS restart. Degrading to
+        # "no poll for this restart" (its completion falls back to
+        # /restart_status, the behaviour before this task existed) is strictly
+        # better than re-deploying the bot.
+        try:
+            enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
+        except Exception as exc:
+            logger.warning(
+                "[PublishRestartHandler] restart submitted but the poll enqueue "
+                "failed; completion falls back to /restart_status rather than "
+                "risking a second restart on redelivery: publish_id=%s error=%s",
+                publish_id, exc,
+            )
         return Complete()
 
 
