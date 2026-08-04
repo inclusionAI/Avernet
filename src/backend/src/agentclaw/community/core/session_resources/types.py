@@ -54,6 +54,7 @@ class SessionResourceRecord:
     deleted_at: datetime | None = None
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
+    binding_id: int | None = None
 
 
 @dataclass(frozen=True)
