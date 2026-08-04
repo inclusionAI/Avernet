@@ -161,6 +161,19 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
     logger.info("All components initialised successfully")
 
 
+def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
+    try:
+        from gateway.community.plugin_registry import (
+            has_enterprise_plugins,
+            inject_into_plugin_container,
+        )
+
+        if has_enterprise_plugins():
+            inject_into_plugin_container(container)
+    except ImportError:
+        pass
+
+
 def shutdown_services(container: containers.DeclarativeContainer) -> None:
     import logging
 

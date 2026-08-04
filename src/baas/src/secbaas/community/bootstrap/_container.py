@@ -271,3 +271,21 @@ def _log_config_summary(container: containers.DeclarativeContainer) -> None:
         return
     formatted = json.dumps(config_dict, indent=2, default=str, ensure_ascii=False)
     logger.info("Container config:\n%s", formatted)
+
+
+def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
+    """Inject enterprise plugin options into a container instance's Selectors.
+
+    Runs at instance level (not class level) so that only this container
+    is affected.  Called after every container creation.
+    """
+    try:
+        from secbaas.community.plugin_registry import (
+            has_enterprise_plugins,
+            inject_into_plugin_container,
+        )
+
+        if has_enterprise_plugins():
+            inject_into_plugin_container(container)
+    except ImportError:
+        pass

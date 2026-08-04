@@ -20,9 +20,7 @@ GATEWAY = Path(__file__).resolve().parents[2] / "src" / "gateway" / "community"
 
 # Packages where private exports are intentional (plugin registries, type
 # forwarding, etc.). Add file-relative paths (from GATEWAY root) here.
-_KNOWN_PRIVATE_EXPORTS: dict[str, set[str]] = {
-    "bootstrap/__init__.py": {"_Authn", "_Fwd", "_inject_enterprise_plugins"},
-}
+_KNOWN_PRIVATE_EXPORTS: dict[str, set[str]] = {}
 
 
 def _is_dunder(name: str) -> bool:

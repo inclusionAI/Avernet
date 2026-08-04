@@ -13,12 +13,12 @@ from typing import Any
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot.teclaw import (
+    BotCreateResult,
+    BotDestroyResult,
+    BotInfo,
+    BotRestartResult,
+    BotUpdateResult,
     TeClawBotPlugin,
-    _BotCreateResult,
-    _BotDestroyResult,
-    _BotInfo,
-    _BotRestartResult,
-    _BotUpdateResult,
 )
 
 logger = get_logger("plugin-bot-teclaw")
@@ -38,14 +38,14 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         self._bots: dict[str, dict[str, Any]] = {}
         # Storage keys ("bot_config", "status", "outbound_rule") align with TeClaw API v2 response field names
 
-    async def create_bot(self, bot_config: dict[str, Any]) -> _BotCreateResult:
+    async def create_bot(self, bot_config: dict[str, Any]) -> BotCreateResult:
         """Create a new bot in the in-memory store.
 
         Args:
             bot_config: Bot configuration dict (opaque passthrough).
 
         Returns:
-            _BotCreateResult with generated stubbed bot_id and ONLINE status.
+            BotCreateResult with generated stubbed bot_id and ONLINE status.
         """
         bot_id = f"stub-teclaw-{uuid.uuid4().hex[:12]}"
         self._bots[bot_id] = {
@@ -54,13 +54,13 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             "outbound_rule": None,
         }
         logger.info("[stub-teclaw] bot created bot_id=%s", bot_id)
-        return _BotCreateResult(
+        return BotCreateResult(
             teclaw_bot_id=bot_id,
             status="ONLINE",
             teclaw_bot_config=bot_config,
         )
 
-    async def destroy_bot(self, bot_id: str) -> _BotDestroyResult:
+    async def destroy_bot(self, bot_id: str) -> BotDestroyResult:
         """Remove a bot from the in-memory store.
 
         Lenient — does not raise if bot_id is unknown.
@@ -69,15 +69,15 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             bot_id: The teclaw_bot_id to destroy.
 
         Returns:
-            _BotDestroyResult with DELETED status.
+            BotDestroyResult with DELETED status.
         """
         self._bots.pop(bot_id, None)
         logger.info("[stub-teclaw] bot destroyed bot_id=%s", bot_id)
-        return _BotDestroyResult(teclaw_bot_id=bot_id, status="DELETED")
+        return BotDestroyResult(teclaw_bot_id=bot_id, status="DELETED")
 
     async def update_bot(
         self, bot_id: str, bot_config: dict[str, Any]
-    ) -> _BotUpdateResult:
+    ) -> BotUpdateResult:
         """Update a bot's config in the in-memory store.
 
         Uses ``setdefault`` to create the entry with all known keys when
@@ -89,7 +89,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             bot_config: New bot configuration dict.
 
         Returns:
-            _BotUpdateResult with ONLINE status.
+            BotUpdateResult with ONLINE status.
         """
         entry = self._bots.setdefault(
             bot_id,
@@ -98,7 +98,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         entry["bot_config"] = bot_config
         entry["status"] = "ONLINE"
         logger.info("[stub-teclaw] bot updated bot_id=%s", bot_id)
-        return _BotUpdateResult(
+        return BotUpdateResult(
             teclaw_bot_id=bot_id,
             status="ONLINE",
             teclaw_bot_config=bot_config,
@@ -127,7 +127,7 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         logger.info("[stub-teclaw] outbound rule updated bot_id=%s", bot_id)
         return True
 
-    async def restart_bot(self, bot_id: str) -> _BotRestartResult:
+    async def restart_bot(self, bot_id: str) -> BotRestartResult:
         """Restart a bot by re-applying its stored config.
 
         Delegates to update_bot internally with the stored bot_config.
@@ -136,28 +136,28 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             bot_id: The teclaw_bot_id to restart.
 
         Returns:
-            _BotRestartResult with ONLINE status.
+            BotRestartResult with ONLINE status.
         """
         stored = self._bots.get(bot_id, {})
         await self.update_bot(bot_id, stored.get("bot_config", {}))
         logger.info("[stub-teclaw] bot restarted bot_id=%s", bot_id)
-        return _BotRestartResult(teclaw_bot_id=bot_id, status="ONLINE")
+        return BotRestartResult(teclaw_bot_id=bot_id, status="ONLINE")
 
-    async def get_bot(self, bot_id: str) -> _BotInfo:
+    async def get_bot(self, bot_id: str) -> BotInfo:
         """Get current bot info from the in-memory store.
 
         Args:
             bot_id: The teclaw_bot_id to query.
 
         Returns:
-            _BotInfo with stored data. UNKNOWN status for unknown IDs.
+            BotInfo with stored data. UNKNOWN status for unknown IDs.
         """
         stored = self._bots.get(
             bot_id,
             {"bot_config": None, "status": "UNKNOWN", "outbound_rule": None},
         )
         logger.info("[stub-teclaw] bot queried bot_id=%s", bot_id)
-        return _BotInfo(
+        return BotInfo(
             teclaw_bot_id=bot_id,
             status=stored["status"],
             teclaw_bot_config=stored["bot_config"],
