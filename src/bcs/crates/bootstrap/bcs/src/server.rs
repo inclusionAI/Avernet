@@ -1242,6 +1242,29 @@ fn build_gateway_principal_verifier_from_process(
     build_gateway_principal_verifier(config, material.as_deref())
 }
 
+async fn build_gateway_principal_verifier_from_secret_access(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let secret_name = config
+        .signing_key_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(secret_name) = secret_name {
+        let record = secret_access.get_secret(secret_name).await.map_err(|_| {
+            crate::BcsError::InvalidConfig(format!(
+                "Gateway Principal signing key secret '{secret_name}' is required"
+            ))
+        })?;
+        return build_gateway_principal_verifier(config, Some(record.value.as_str()));
+    }
+
+    build_gateway_principal_verifier_from_process(config)
+}
+
 const GROUP_SESSION_WS_SECRET_NAME: &str = "bcn-group-session-ws-jwt";
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str =
     "test-only-group-session-key-at-least-32-bytes";
@@ -1451,6 +1474,28 @@ mod gateway_principal_tests {
                 .expect("explicit material"),
             "explicit-test-key"
         );
+    }
+
+    #[tokio::test]
+    async fn gateway_principal_signing_key_can_come_from_secret_access() {
+        let mut config = trust_config();
+        config.signing_key_secret =
+            Some("other_manual_teamclawgw_principal_signing_key".to_string());
+        let access: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
+            InMemorySecretAccess::with_entries([(
+                "other_manual_teamclawgw_principal_signing_key",
+                "teamclawgw".to_string(),
+                "mist-test-signing-key".to_string(),
+            )]),
+        );
+
+        let result = build_gateway_principal_verifier_from_secret_access(&config, access).await;
+
+        if let Err(error) = result {
+            let message = error.to_string();
+            assert!(!message.contains("mist-test-signing-key"));
+            panic!("Mist-backed Gateway Principal signing key must be accepted: {message}");
+        }
     }
 
     #[test]
@@ -2770,9 +2815,19 @@ impl BcsServer {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
             .expect("Secret provider configuration must be valid");
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
-            &config.gateway_principal,
-        )
+        let gateway_principal_verifier = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Runtime::new()
+                        .expect("temp runtime for Gateway Principal verifier build")
+                        .block_on(build_gateway_principal_verifier_from_secret_access(
+                            &config.gateway_principal,
+                            group_session_secret_access.clone(),
+                        ))
+                })
+                .join()
+                .expect("Gateway Principal verifier build thread panicked")
+        })
         .expect("Gateway Principal verifier configuration must be valid");
         Self::new_with_outbound_url_guards(
             config,
@@ -3212,9 +3267,12 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier =
-            build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
+        let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
+            &config.gateway_principal,
+            group_session_secret_access.clone(),
+        )
+        .await?;
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {

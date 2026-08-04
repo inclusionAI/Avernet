@@ -259,7 +259,8 @@ fn default_collaboration_templates_default_language() -> String {
 /// Gateway Principal verification trust and signing-key lookup configuration.
 ///
 /// The signing key itself is intentionally not configuration: bootstrap resolves
-/// it from `signing_key_env` at process startup.
+/// it from `signing_key_secret` through the configured SecretAccessPort, or
+/// falls back to `signing_key_env` at process startup for compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayPrincipalConfig {
@@ -274,6 +275,9 @@ pub struct GatewayPrincipalConfig {
 
     #[serde(default = "default_gateway_principal_signing_key_env")]
     pub signing_key_env: String,
+
+    #[serde(default)]
+    pub signing_key_secret: Option<String>,
 }
 
 impl Default for GatewayPrincipalConfig {
@@ -283,6 +287,7 @@ impl Default for GatewayPrincipalConfig {
             audience: default_gateway_principal_audience(),
             key_id: default_gateway_principal_key_id(),
             signing_key_env: default_gateway_principal_signing_key_env(),
+            signing_key_secret: None,
         }
     }
 }
@@ -298,6 +303,13 @@ impl GatewayPrincipalConfig {
             if value.trim().is_empty() {
                 return Err(format!("gateway_principal.{field} must not be blank"));
             }
+        }
+        if self
+            .signing_key_secret
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err("gateway_principal.signing_key_secret must not be blank".to_string());
         }
         Ok(())
     }
