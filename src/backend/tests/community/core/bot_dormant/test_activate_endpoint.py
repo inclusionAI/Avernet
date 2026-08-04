@@ -11,8 +11,10 @@ from injector import Injector, InstanceProvider, singleton
 
 from agentclaw.community.adapters.http.bot_dormant import router as dormant_router_module
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    BotNotFoundError,
+)
 
 
 def _build_app(activate_svc: ActivateBotService) -> TestClient:
