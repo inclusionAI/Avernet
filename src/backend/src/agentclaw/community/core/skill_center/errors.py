@@ -33,6 +33,10 @@ class LocalSkillNotReadyError(Exception):
     """The Bot cannot safely accept a mutation yet."""
 
 
+class LocalSkillActiveError(Exception):
+    """An active Local Skill must be explicitly deactivated before deletion."""
+
+
 class LocalSkillDuplicateError(Exception):
     """A same-name Local Skill already exists; replacement is not supported."""
 
