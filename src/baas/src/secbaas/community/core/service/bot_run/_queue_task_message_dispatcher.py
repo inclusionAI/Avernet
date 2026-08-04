@@ -383,8 +383,8 @@ class QueueTaskMessageDispatcher:
         if session_id:
             metadata["session_id"] = session_id
         if context:
-            metadata.setdefault("app_id", context.app_id)
-            metadata.setdefault("app_type", context.app_type)
-            metadata.setdefault("tenant", context.tenant)
+            metadata["app_id"] = context.app_id
+            metadata["app_type"] = context.app_type
+            metadata["tenant"] = context.tenant
         metadata["request_type"] = request_type
         return metadata
