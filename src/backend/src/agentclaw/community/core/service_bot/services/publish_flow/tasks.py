@@ -390,6 +390,17 @@ class PublishRestartHandler(_PublishTaskBase):
         return asyncio.run(self._run(publish_id, stage, operator))
 
     async def _run(self, publish_id: int, stage: str, operator: str) -> TaskOutcome:
+        # Redelivery guard. The queue is at-least-once and ``execute_restart``
+        # COMPLETEs its ledger op before returning, so past that point a second
+        # delivery would open the next attempt and issue a second BaaS restart.
+        # When the record already carries a submitted-but-unreconciled restart
+        # for this stage, re-run only the handoff. That is what lets the enqueue
+        # below propagate its failures instead of swallowing them: the task
+        # retries, lands here, and re-enqueues the poll without re-deploying.
+        if self._flow.has_unreconciled_restart(publish_id, stage):
+            enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
+            return Complete()
+
         result = await self._flow.execute_restart(
             publish_id=publish_id, stage=stage, operator=operator
         )
@@ -412,22 +423,11 @@ class PublishRestartHandler(_PublishTaskBase):
         # cannot read ext.restart before the restart wrote it — the same-batch
         # race that forces ``_retry_via_restart`` to run its restart inline.
         #
-        # A raise here must NOT propagate. execute_restart has already COMPLETED
-        # its ledger op, and ``open_publish_operation`` resumes only a
-        # *non-terminal* op — past a terminal one it opens the next attempt. So a
-        # redelivery of this task would issue a second BaaS restart. Degrading to
-        # "no poll for this restart" (its completion falls back to
-        # /restart_status, the behaviour before this task existed) is strictly
-        # better than re-deploying the bot.
-        try:
-            enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
-        except Exception as exc:
-            logger.warning(
-                "[PublishRestartHandler] restart submitted but the poll enqueue "
-                "failed; completion falls back to /restart_status rather than "
-                "risking a second restart on redelivery: publish_id=%s error=%s",
-                publish_id, exc,
-            )
+        # A failure propagates (AGENTS.md: never swallow a failed persistence
+        # write and return success). The redelivery guard at the top of this
+        # method is what makes that safe — the retry re-enqueues the poll without
+        # issuing a second restart.
+        enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
         return Complete()
 
 

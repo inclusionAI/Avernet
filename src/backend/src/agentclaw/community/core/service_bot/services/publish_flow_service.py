@@ -894,24 +894,6 @@ class PublishFlowService(
         """Fetch a publish record by id (``None`` if absent)."""
         return self._publish_service.get_publish_by_id(publish_id)
 
-    def is_restart_in_progress(self, publish_id: int) -> bool:
-        """True while a restart issued for this record is still awaiting its BaaS
-        workflow — ``ext.restart.restarting`` is set *and* the record is in a
-        status ``sync_restart_progress`` can still resolve a stage for.
-
-        The restart poll's wait-state test, standing in for the publish status
-        the restart path never transitions. The status half matters as much as
-        the marker: once a record leaves the restartable statuses the sync can
-        never reconcile it, so the poll must stop rather than spin to its
-        deadline."""
-        record = self._publish_service.get_publish_by_id(publish_id)
-        if record is None:
-            return False
-        if self._determine_restart_stage(PublishStatus(record.status)) is None:
-            return False
-        restart_ext = (record.ext or {}).get("restart")
-        return isinstance(restart_ext, dict) and bool(restart_ext.get("restarting"))
-
     def is_current_online_deployment(self, publish_id: int) -> bool:
         """True when this record's online release is the *current live* deployment
         on its bot — i.e. the latest version-setting op that has landed on the

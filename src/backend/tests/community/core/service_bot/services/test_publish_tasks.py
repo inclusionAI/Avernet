@@ -309,11 +309,15 @@ class _FakeRestartFlow:
         restarting=True,
         sync_statuses=None,
         missing=False,
+        unreconciled=False,
     ):
         self.calls: list[str] = []
         self.restarting = restarting
         self._restart_succeeds = restart_succeeds
         self._missing = missing
+        # Whether the record already carries a submitted-but-unreconciled
+        # restart for the stage — the redelivery guard's signal.
+        self._unreconciled = unreconciled
         # Successive BaaS statuses returned by sync_restart_progress; the last one
         # repeats. ``None`` models the no-data early returns (unresolved workflow
         # id / progress-fetch error).
@@ -323,6 +327,9 @@ class _FakeRestartFlow:
         if self._missing:
             return None
         return SimpleNamespace(id=publish_id, status=PublishStatus.SUCCESS.value)
+
+    def has_unreconciled_restart(self, publish_id, stage):
+        return self._unreconciled
 
     async def execute_restart(self, *, publish_id, stage, operator):
         self.calls.append("execute_restart")
@@ -365,18 +372,37 @@ def test_restart_success_enqueues_restart_poll():
     assert tq.enqueue.call_args.args[1] == {"publish_id": 1}
 
 
-def test_restart_poll_enqueue_failure_does_not_retry_the_restart():
-    # execute_restart has already COMPLETED its ledger op by this point, and
-    # open_publish_operation opens a *new attempt* past a terminal op — so
-    # letting a queue write raise would redeliver the task and issue a SECOND
-    # BaaS restart. Degrade to "no poll" (i.e. /restart_status settles it)
-    # instead of re-deploying the bot.
+def test_restart_poll_enqueue_failure_propagates():
+    # AGENTS.md: never swallow a failed persistence write and return success.
+    # The redelivery guard below is what makes propagating safe.
     flow = _FakeRestartFlow()
     restart, _poll, tq = _restart_handlers(flow)
     tq.enqueue.side_effect = RuntimeError("queue down")
+    with pytest.raises(RuntimeError):
+        restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert flow.calls == ["execute_restart"]
+
+
+def test_restart_redelivery_enqueues_poll_without_reissuing():
+    # execute_restart COMPLETEs its ledger op before returning, and
+    # open_publish_operation opens a *new attempt* past a terminal op — so an
+    # at-least-once redelivery would issue a SECOND BaaS restart. A record that
+    # already carries a submitted-but-unreconciled restart re-runs only the
+    # handoff. This is what the propagating enqueue above relies on.
+    flow = _FakeRestartFlow(unreconciled=True)
+    restart, _poll, tq = _restart_handlers(flow)
     outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
-    assert isinstance(outcome, Complete)  # NOT a Fail/raise → no redelivery
+    assert isinstance(outcome, Complete)
+    assert flow.calls == []  # execute_restart NOT called again
     tq.enqueue.assert_called_once()
+    assert tq.enqueue.call_args.args[0] == RESTART_POLL_TASK
+
+
+def test_restart_first_delivery_is_not_treated_as_a_redelivery():
+    flow = _FakeRestartFlow(unreconciled=False)
+    restart, _poll, tq = _restart_handlers(flow)
+    restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    assert flow.calls == ["execute_restart"]  # the restart really was issued
 
 
 def test_restart_failure_preserves_a_concurrent_restarts_marker():
