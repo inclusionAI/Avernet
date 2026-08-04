@@ -100,19 +100,20 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Depends on:** Tasks 3, 4
 - **Note:** These tests were the fix for the CI changed-line coverage gate — the keyed insert path and `_is_active_idem_conflict` were entirely uncovered, putting changed-line coverage at 56.25% against an 80% minimum. Module coverage went 81% → 98%; the two lines still uncovered (`_now_plus`'s mysql branch, `claim_batch`'s `limit <= 0` guard) are pre-existing and outside this PR's diff.
 
-## Task 8: Verify spec acceptance
+## Task 8 `[x]`: Verify spec acceptance
 - **Goal:** Confirm every acceptance criterion in `spec.md` holds.
 - **Files:** —
 - **Done when:**
-  - [ ] Acceptance 1 — columns + unique index exist in ORM and in the checked-in prod DDL.
-  - [ ] Acceptance 2 — `enqueue` takes an optional key and returns `(record, created)`.
-  - [ ] Acceptance 3 — a keyed enqueue against a live holder returns it with `created=False` and inserts no row.
-  - [ ] Acceptance 4 — every terminal transition releases the key; re-enqueue then creates a new task.
-  - [ ] Acceptance 5 — **un-keyed enqueues behave exactly as today**; all 22 pre-existing repository tests pass unmodified in behavior.
-  - [ ] Acceptance 6 — README and protocol describe insert-time dedup; the eight tests pass on SQLite.
-  - [ ] Zero call sites changed — `grep` confirms no adopter passes `idempotency_key` in this PR.
-  - [ ] Backend module gates pass (`OCB_PRE_PUSH_RUN_CI=1` per `AGENTS.md`).
+  - [x] Acceptance 1 — columns + unique index exist in ORM (`models.py`) and in the checked-in prod DDL (`sql/2026_08_04_task_queue_idempotency.sql`); SQLite `create_all` reports the index as `unique=1`.
+  - [x] Acceptance 2 — `enqueue` takes an optional key and returns `(record, created)` across all three layers (protocol, service, repository).
+  - [x] Acceptance 3 — `test_duplicate_keyed_enqueue_returns_existing_and_inserts_nothing` asserts `created=False`, same id, and a row count of 1.
+  - [x] Acceptance 4 — `test_terminal_transition_releases_key_and_allows_reenqueue`, parametrized over all four terminal paths.
+  - [x] Acceptance 5 — un-keyed enqueues behave exactly as today: all pre-existing tests pass with only their helper unwrapping the pair, and `test_unkeyed_enqueue_creates_a_row_with_both_key_columns_null` pins it directly.
+  - [x] Acceptance 6 — README and protocol describe insert-time dedup; 39 repository tests pass on SQLite.
+  - [x] Zero call sites changed — the only `idempotency_key` hits outside `core/task_queue/` are an unrelated local variable in `data_init_service.py` (a message-API `idempotencyKey`).
+  - [x] Backend module gate passes locally: **10323 passed, 3 skipped**; `report_check.py` against `origin/dev` reports case pass rate 100.00%, line coverage 84.78% (≥75), **change line coverage 100.00% (48/48, ≥80)** — the same 48-line denominator CI reported, up from 27/48.
 - **Depends on:** Tasks 5, 6, 7
+- **Open, not blocking:** the past-deadline-but-unscanned edge (documented in `protocol.py`, `README.md`, and pinned by `test_past_deadline_task_not_yet_scanned_still_holds_its_key`) is recorded as current behavior awaiting a decision. Changing it would be a spec change.
 
 ---
 
