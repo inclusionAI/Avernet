@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -83,6 +84,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool: ...
 
@@ -92,6 +94,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool: ...
 

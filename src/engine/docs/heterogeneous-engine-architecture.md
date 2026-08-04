@@ -1092,6 +1092,13 @@ class SkillExecutionResult:
       "relative_path": "business/reviewer",
       "link_name": "reviewer"
     }
+  ],
+  "retired_mappings": [
+    {
+      "corpus": "repo",
+      "relative_path": "legacy/reviewer",
+      "link_name": "reviewer"
+    }
   ]
 }
 ```
@@ -1104,6 +1111,12 @@ class SkillExecutionResult:
   home 投影物理 source/active target；publish/verify 返回
   `resolved_mappings`，activation/rollback 返回 `local_locators`。这些路径是
   Engine evidence，Backend 只能校验和持久化，不能按 engine 重建。
+- `retired_mappings` 是可选的精确旧 logical identity 集合，用于数据面 cutover
+  与产品 activate/deactivate 并发时删除旧受管入口。Engine 必须先整批校验
+  `mappings` 与 `retired_mappings`，且只删除 target 仍指向声明旧 source 的项；
+  同名最新 mapping、外部 entry 和未登记文件系统 entry 不得被旧快照覆盖或删除。
+  Backend 在 `POOL_ACTIVE` 提交前重读产品集合；变化时只重复 publish/verify，
+  不重复物理 cutover。
 - READY Probe 已进入 cutover evidence（存在 active marker）后，
   `checks.stable_repo_bridge_valid` 只在 AICoding/Hermes 已进入 `active`
   且稳定 repo bridge 已实际校验时存在并为 `true`。OpenClaw/Claude Code

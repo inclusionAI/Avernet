@@ -53,7 +53,7 @@ def _publish_repo_delivery_bridge(path: Path, source: Path) -> None:
     if path.is_symlink() and _lexical_target(path) == source:
         return
     if path.exists() and not path.is_symlink():
-        raise OSError(f"Pool repo entry is not a symlink: {path}")
+        raise OSError(f"Repo compatibility entry is not a symlink: {path}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.prepare")
     try:
@@ -63,10 +63,79 @@ def _publish_repo_delivery_bridge(path: Path, source: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _canonicalize_downloaded_repo(
+    *,
+    pool_repo: Path,
+    repo_source: Path,
+) -> None:
+    """Move one legacy Desktop download into canonical Pool storage.
+
+    The source is replaced by a temporary reverse compatibility bridge. A
+    pre-existing independent Pool tree is never overwritten or merged because
+    that would silently select between two complete corpora.
+    """
+
+    pool_repo = Path(os.path.abspath(pool_repo))
+    repo_source = Path(os.path.abspath(repo_source))
+    pool_repo.parent.mkdir(parents=True, exist_ok=True)
+    if repo_source == pool_repo:
+        if not pool_repo.is_dir() or pool_repo.is_symlink():
+            raise OSError(f"Canonical Pool repo is not a directory: {pool_repo}")
+        return
+    if pool_repo.is_symlink():
+        raise OSError(f"Canonical Pool repo must not be a symlink: {pool_repo}")
+    if pool_repo.exists():
+        if not pool_repo.is_dir():
+            raise OSError(f"Canonical Pool repo is not a directory: {pool_repo}")
+        if repo_source.is_symlink() and _lexical_target(repo_source) == pool_repo:
+            return
+        if not repo_source.exists() and not repo_source.is_symlink():
+            _publish_repo_delivery_bridge(repo_source, pool_repo)
+            return
+        raise OSError("Legacy and Pool repo directories both exist")
+    if repo_source.is_symlink():
+        raise OSError(f"Legacy repo source points elsewhere: {repo_source}")
+    if not repo_source.is_dir():
+        raise OSError(f"Legacy repo source is not a directory: {repo_source}")
+    moved_repo = False
+    try:
+        os.replace(repo_source, pool_repo)
+        moved_repo = True
+    except FileNotFoundError:
+        if (
+            pool_repo.is_dir()
+            and not pool_repo.is_symlink()
+            and (not repo_source.exists() and not repo_source.is_symlink())
+        ):
+            _publish_repo_delivery_bridge(repo_source, pool_repo)
+            return
+        raise
+    try:
+        _publish_repo_delivery_bridge(repo_source, pool_repo)
+    except OSError:
+        if moved_repo and not repo_source.exists() and not repo_source.is_symlink():
+            os.replace(pool_repo, repo_source)
+        raise
+
+
+def _publish_legacy_repo_bridge(
+    *,
+    path: Path,
+    pool_repo: Path,
+    previous_source: Path,
+) -> None:
+    if path.is_symlink() and _lexical_target(path) not in {
+        Path(os.path.abspath(previous_source)),
+        Path(os.path.abspath(pool_repo)),
+    }:
+        raise OSError(f"Legacy repo entry points elsewhere: {path}")
+    _publish_repo_delivery_bridge(path, pool_repo)
+
+
 def _pre_cutover_structural_bridges(
     *,
     engine: str,
-    repo_source: Path,
+    pool_repo: Path,
     local_bridge: Path,
     legacy_local: Path,
     repo_bridge: Path,
@@ -86,18 +155,17 @@ def _pre_cutover_structural_bridges(
                 ),
             }
         )
-        bridges.append(
-            {
-                "name": "legacy_repo_delivery",
-                "path": str(legacy_repo),
-                "target": str(repo_source),
-                "valid": (
-                    legacy_repo.is_symlink()
-                    and _lexical_target(legacy_repo)
-                    == Path(os.path.abspath(repo_source))
-                ),
-            }
-        )
+    bridges.append(
+        {
+            "name": "legacy_repo_delivery",
+            "path": str(legacy_repo),
+            "target": str(pool_repo),
+            "valid": (
+                legacy_repo.is_symlink()
+                and _lexical_target(legacy_repo) == Path(os.path.abspath(pool_repo))
+            ),
+        }
+    )
     if engine == "claude_code":
         bridges.append(
             {
@@ -182,19 +250,6 @@ def prepare_desktop_pool(
         )
 
     repo_source = Path(os.path.abspath(repo_source))
-    try:
-        if not repo_source.is_dir():
-            return DesktopPreparationResult(
-                DesktopPreparationStatus.FAILED,
-                reason="repo_source_not_directory",
-            )
-        with os.scandir(repo_source):
-            pass
-    except OSError:
-        return DesktopPreparationResult(
-            DesktopPreparationStatus.FAILED,
-            reason="repo_source_unreadable",
-        )
 
     existing = inspect_runtime_layout(
         engine=engine,
@@ -225,14 +280,10 @@ def prepare_desktop_pool(
             raise OSError(f"Pool local is not a directory: {layout.pool_local}")
         layout.pool_local.mkdir(exist_ok=True)
         if layout.legacy_local.is_symlink():
-            raise OSError(
-                f"Legacy local is not a directory: {layout.legacy_local}"
-            )
+            raise OSError(f"Legacy local is not a directory: {layout.legacy_local}")
         layout.legacy_local.mkdir(parents=True, exist_ok=True)
         if not layout.legacy_local.is_dir():
-            raise OSError(
-                f"Legacy local is not a directory: {layout.legacy_local}"
-            )
+            raise OSError(f"Legacy local is not a directory: {layout.legacy_local}")
 
         mirror_local_tree(
             source_root=layout.legacy_local,
@@ -240,20 +291,29 @@ def prepare_desktop_pool(
             staging_root=staging,
             remove_missing=False,
         )
-        _publish_repo_delivery_bridge(layout.pool_repo, repo_source)
+        _canonicalize_downloaded_repo(
+            pool_repo=layout.pool_repo,
+            repo_source=repo_source,
+        )
+        if layout.legacy_repo != repo_source:
+            _publish_legacy_repo_bridge(
+                path=layout.legacy_repo,
+                pool_repo=layout.pool_repo,
+                previous_source=repo_source,
+            )
+        with os.scandir(layout.pool_repo):
+            pass
 
         structural_bridges = _pre_cutover_structural_bridges(
             engine=engine,
-            repo_source=repo_source,
+            pool_repo=layout.pool_repo,
             local_bridge=layout.local_bridge,
             legacy_local=layout.legacy_local,
             repo_bridge=layout.repo_bridge,
             legacy_repo=layout.legacy_repo,
         )
         if any(bridge["valid"] is not True for bridge in structural_bridges):
-            raise OSError(
-                "pre-cutover structural bridge is invalid"
-            )
+            raise OSError("pre-cutover structural bridge is invalid")
 
         preparation_id = str(uuid4())
         prepared_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
@@ -265,7 +325,7 @@ def prepare_desktop_pool(
             "pool_local_root": str(layout.pool_local),
             "pool_repo_root": str(layout.pool_repo),
             "repo_delivery": RepoDelivery.DOWNLOAD.value,
-            "repo_delivery_source": str(repo_source),
+            "repo_delivery_source": str(layout.pool_repo),
             "validation_summary": {
                 "all_valid": True,
                 "pool_local": {
@@ -274,13 +334,13 @@ def prepare_desktop_pool(
                 },
                 "pool_repo": {
                     "path": str(layout.pool_repo),
-                    "source": str(repo_source),
+                    "source": str(layout.pool_repo),
                     "readable_delivery": True,
                     "valid": True,
                 },
-                "repo_delivery_bridge": {
+                "repo_delivery_root": {
                     "path": str(layout.pool_repo),
-                    "target": str(repo_source),
+                    "actual_directory": True,
                     "valid": True,
                 },
                 "structural_bridges": structural_bridges,
@@ -295,11 +355,7 @@ def prepare_desktop_pool(
                         layout.pool_repo,
                     ),
                 ),
-                **(
-                    {"legacy_bridge_verified": True}
-                    if engine == "hermes"
-                    else {}
-                ),
+                **({"legacy_bridge_verified": True} if engine == "hermes" else {}),
             },
         }
         _write_marker(layout.ready_marker, marker)

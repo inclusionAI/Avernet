@@ -206,17 +206,16 @@ def _marker_contract_valid(
         return False
     if repo_delivery is RepoDelivery.DOWNLOAD:
         delivery_source = marker.get("repo_delivery_source")
-        delivery_bridge = summary.get("repo_delivery_bridge")
+        delivery_root = summary.get("repo_delivery_root")
         delivery_valid = (
             marker.get("repo_delivery") == RepoDelivery.DOWNLOAD.value
-            and isinstance(delivery_source, str)
-            and bool(delivery_source)
+            and delivery_source == str(layout.pool_repo)
             and pool_repo.get("readable_delivery") is True
             and pool_repo.get("source") == delivery_source
-            and isinstance(delivery_bridge, dict)
-            and delivery_bridge.get("path") == str(layout.pool_repo)
-            and delivery_bridge.get("target") == delivery_source
-            and delivery_bridge.get("valid") is True
+            and isinstance(delivery_root, dict)
+            and delivery_root.get("path") == str(layout.pool_repo)
+            and delivery_root.get("actual_directory") is True
+            and delivery_root.get("valid") is True
         )
         if not delivery_valid:
             return False
@@ -230,14 +229,14 @@ def _marker_contract_valid(
                     "valid": True,
                 }
             )
-            expected_bridges.append(
-                {
-                    "name": "legacy_repo_delivery",
-                    "path": str(layout.legacy_repo),
-                    "target": delivery_source,
-                    "valid": True,
-                }
-            )
+        expected_bridges.append(
+            {
+                "name": "legacy_repo_delivery",
+                "path": str(layout.legacy_repo),
+                "target": str(layout.pool_repo),
+                "valid": True,
+            }
+        )
         if expected_engine == "claude_code":
             expected_bridges.append(
                 {
@@ -606,11 +605,10 @@ def inspect_runtime_layout(
             )
     else:
         try:
-            delivery_source = Path(str(marker["repo_delivery_source"]))
             pool_repo_delivered = (
-                layout.pool_repo.is_symlink()
-                and _lexical_symlink_target(layout.pool_repo)
-                == Path(os.path.abspath(delivery_source))
+                layout.pool_repo.is_dir()
+                and not layout.pool_repo.is_symlink()
+                and marker.get("repo_delivery_source") == str(layout.pool_repo)
             )
         except OSError as error:
             return _transient(
@@ -830,17 +828,12 @@ def inspect_runtime_layout(
             ),
         )
     if effective_repo_delivery is RepoDelivery.DOWNLOAD:
-        required_bridges = []
+        required_bridges = [
+            ("legacy_repo_delivery", layout.legacy_repo, layout.pool_repo)
+        ]
         if engine != "openclaw":
-            required_bridges.append(
-                ("stable_local", layout.local_bridge, layout.legacy_local)
-            )
-            required_bridges.append(
-                (
-                    "legacy_repo_delivery",
-                    layout.legacy_repo,
-                    Path(str(marker["repo_delivery_source"])),
-                )
+            required_bridges.insert(
+                0, ("stable_local", layout.local_bridge, layout.legacy_local)
             )
         if engine == "claude_code":
             required_bridges.append(

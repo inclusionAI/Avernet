@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import tarfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -16,6 +17,7 @@ from engine.community.core.skills.layout_planner import (
     resolve_filesystem_skill_layout,
 )
 from engine.community.plugins.skills_pool import desktop_preparation
+from engine.community.core.skills import skills_repo_download
 from engine.community.plugins.skills_pool.desktop_preparation import (
     DesktopPreparationStatus,
     prepare_desktop_pool,
@@ -23,6 +25,13 @@ from engine.community.plugins.skills_pool.desktop_preparation import (
 from engine.community.plugins.skills_pool.layout_probe import (
     RuntimeLayoutInspectionStatus,
     inspect_runtime_layout,
+)
+from engine.community.plugins.skills_pool.layout_activation import (
+    PoolActivationStatus,
+    SkillMapping,
+    activate_claude_code_pool,
+    activate_hermes_pool,
+    activate_openclaw_pool,
 )
 
 FILESYSTEM_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
@@ -168,11 +177,6 @@ def test_preparation_reuses_downloaded_repo_and_preserves_legacy_layout(
 ) -> None:
     home = tmp_path / "home/admin"
     layout, repo_source, managed, external = _legacy_runtime(home, engine)
-    repo_bridge_before = (
-        _target(layout.repo_bridge)
-        if layout.repo_bridge.is_symlink()
-        else layout.repo_bridge
-    )
     managed_before = _target(managed)
     external_before = _target(external)
 
@@ -186,20 +190,23 @@ def test_preparation_reuses_downloaded_repo_and_preserves_legacy_layout(
     assert result.preparation_id is not None
     assert (layout.pool_local / "registered/SKILL.md").read_text() == "registered"
     assert (layout.pool_local / "handmade/SKILL.md").read_text() == "handmade"
-    assert layout.pool_repo.is_symlink()
-    assert _target(layout.pool_repo) == repo_source
+    assert layout.pool_repo.is_dir()
+    assert not layout.pool_repo.is_symlink()
+    assert (layout.pool_repo / "business/reviewer/SKILL.md").read_text() == "repo"
+    assert repo_source.is_symlink()
+    assert _target(repo_source) == layout.pool_repo
     assert _target(managed) == managed_before
     assert _target(external) == external_before
     assert layout.legacy_local.is_dir() and not layout.legacy_local.is_symlink()
-    assert (
-        _target(layout.repo_bridge)
-        if layout.repo_bridge.is_symlink()
-        else layout.repo_bridge
-    ) == repo_bridge_before
+    assert layout.legacy_repo.is_symlink()
+    assert _target(layout.legacy_repo) == layout.pool_repo
+    if engine == "claude_code":
+        assert layout.repo_bridge.is_symlink()
+        assert _target(layout.repo_bridge) == layout.legacy_repo
 
     marker = json.loads(layout.ready_marker.read_text())
     assert marker["repo_delivery"] == "download"
-    assert marker["repo_delivery_source"] == str(repo_source)
+    assert marker["repo_delivery_source"] == str(layout.pool_repo)
     probe = inspect_runtime_layout(
         engine=engine,
         home=home,
@@ -215,6 +222,73 @@ def test_preparation_reuses_downloaded_repo_and_preserves_legacy_layout(
     )
     assert repeated.status is DesktopPreparationStatus.ALREADY_PREPARED
     assert repeated.preparation_id == result.preparation_id
+
+
+@pytest.mark.parametrize(
+    ("engine", "activate"),
+    [
+        ("openclaw", activate_openclaw_pool),
+        ("claude_code", activate_claude_code_pool),
+        ("hermes", activate_hermes_pool),
+    ],
+)
+def test_downloaded_repo_cutover_leaves_corpus_outside_active_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    engine: str,
+    activate,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source, _managed, external = _legacy_runtime(home, engine)
+    prepared = prepare_desktop_pool(
+        engine=engine,
+        repo_source=repo_source,
+        home=home,
+    )
+    assert prepared.status is DesktopPreparationStatus.PREPARED
+    monkeypatch.setenv("MAC_CONTAINER", "true")
+    mapping = SkillMapping(
+        source=str(layout.pool_repo / "business/reviewer"),
+        target=str(layout.active_root / "reviewer"),
+    )
+
+    activated = activate(
+        migration_generation="generation-1",
+        preparation_id=prepared.preparation_id,
+        registered_local_names=["registered"],
+        mappings=[mapping],
+        home=home,
+    )
+
+    assert activated.status is PoolActivationStatus.COMMITTED
+    assert layout.pool_repo.is_dir() and not layout.pool_repo.is_symlink()
+    assert (layout.active_root / "reviewer").is_symlink()
+    assert _target(layout.active_root / "reviewer") == (
+        layout.pool_repo / "business/reviewer"
+    )
+    assert external.is_symlink()
+    if engine in {"openclaw", "claude_code"}:
+        assert not layout.repo_bridge.exists()
+        assert not layout.repo_bridge.is_symlink()
+    else:
+        assert layout.repo_bridge.is_symlink()
+        assert _target(layout.repo_bridge) == layout.pool_repo
+
+    refreshed = tmp_path / f"{engine}-repo-refresh"
+    (refreshed / "business/reviewer").mkdir(parents=True)
+    (refreshed / "business/reviewer/SKILL.md").write_text("refreshed")
+    archive = tmp_path / f"{engine}-repo-refresh.tar.gz"
+    with tarfile.open(archive, "w:gz") as stream:
+        stream.add(refreshed, arcname="skills-repo")
+    monkeypatch.setattr(skills_repo_download, "TARGET_DIR", layout.pool_repo)
+    monkeypatch.setattr(
+        skills_repo_download,
+        "BACKUP_DIR",
+        layout.pool_root / ".skills-repo-backups",
+    )
+
+    assert skills_repo_download._extract_atomic(archive)
+    assert (layout.active_root / "reviewer/SKILL.md").read_text() == ("refreshed")
 
 
 @pytest.mark.parametrize("engine", ("teclaw", "unknown"))
@@ -375,3 +449,53 @@ def test_wrong_legacy_repo_delivery_never_publishes_ready_marker(
     assert result.status is DesktopPreparationStatus.FAILED
     assert not layout.ready_marker.exists()
     assert _target(layout.legacy_repo) == wrong
+
+
+def test_two_independent_repo_corpora_fail_without_selecting_either(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, "openclaw")
+    (repo_source / "legacy.txt").write_text("legacy")
+    layout.pool_repo.mkdir(parents=True)
+    (layout.pool_repo / "pool.txt").write_text("pool")
+
+    result = prepare_desktop_pool(
+        engine="openclaw",
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.FAILED
+    assert (repo_source / "legacy.txt").read_text() == "legacy"
+    assert (layout.pool_repo / "pool.txt").read_text() == "pool"
+    assert not layout.ready_marker.exists()
+
+
+def test_repo_bridge_publish_failure_restores_legacy_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, "openclaw")
+    (repo_source / "legacy.txt").write_text("legacy")
+
+    def fail_bridge(path: Path, source: Path) -> None:
+        raise OSError("injected bridge publish failure")
+
+    monkeypatch.setattr(
+        desktop_preparation,
+        "_publish_repo_delivery_bridge",
+        fail_bridge,
+    )
+    result = prepare_desktop_pool(
+        engine="openclaw",
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.FAILED
+    assert repo_source.is_dir() and not repo_source.is_symlink()
+    assert (repo_source / "legacy.txt").read_text() == "legacy"
+    assert not layout.pool_repo.exists()
+    assert not layout.ready_marker.exists()
