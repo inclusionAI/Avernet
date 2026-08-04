@@ -2035,6 +2035,70 @@ class TestConvertChunksToSse:
         assert results == []
 
 
+# ==================== TestListSessions ====================
+
+
+class TestListSessions:
+    """BotRunner.list_sessions() coverage."""
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_bot_service(self, mock_bot_service, mock_selector, mock_run_repo, context):
+        """list_sessions resolves route and delegates to bot_service."""
+        from secbaas.community.api.bot_runtime import SessionInfo
+        from datetime import datetime, UTC
+
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id="entity-1",
+            sandbox_id="sandbox-1",
+            device_id="device-1",
+            device_provider="arca",
+            binding_id=100,
+            device_props={},
+            bot_type="personal",
+        )
+
+        expected_sessions = [
+            SessionInfo(
+                session_id="sess-001",
+                bot_id=BOT_ID,
+                status="active",
+                created_at=datetime.now(tz=UTC),
+            )
+        ]
+        mock_bot_service.list_sessions = AsyncMock(return_value=expected_sessions)
+
+        runner = BotRunner(
+            service_selector=mock_selector,
+            run_repo=mock_run_repo,
+            bot_service_plugin=None,
+            task_pool=None,
+            message_dispatcher=None,
+        )
+
+        # Patch _resolve_bot_route to return our binding and service
+        route = MagicMock()
+        route.binding_info = binding
+        route.bot_service = mock_bot_service
+
+        with patch.object(runner, "_resolve_bot_route", new_callable=AsyncMock, return_value=route):
+            result = await runner.list_sessions(
+                bot_id=BOT_ID,
+                context=context,
+                metadata={"source": "openapi"},
+                limit=5,
+                offset=2,
+            )
+
+        assert result == expected_sessions
+        mock_bot_service.list_sessions.assert_awaited_once_with(
+            binding_info=binding,
+            context=context,
+            limit=5,
+            offset=2,
+        )
+
+
 class _DummyConverter:
     """Minimal StreamConverter stub for testing convert_chunks_to_sse."""
 
