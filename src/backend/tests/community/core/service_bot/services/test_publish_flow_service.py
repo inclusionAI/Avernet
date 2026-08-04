@@ -22,6 +22,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
+    RESTART_POLL_TASK,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
@@ -680,12 +681,48 @@ async def test_retry_restart_enqueues_progress_poll_on_success():
     result = await svc.retry(publish_id=1, operator='u1')
 
     assert result.action == 'restart'
-    # The poll was enqueued for this record; the retry flag was NOT cleared.
-    svc._task_queue_service.enqueue.assert_called_once()
-    args = svc._task_queue_service.enqueue.call_args.args
-    assert args[0] == PROGRESS_POLL_TASK
-    assert args[1] == {'publish_id': 1}
+    # Both polls were enqueued for this record; the retry flag was NOT cleared.
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert enqueued == [PROGRESS_POLL_TASK, RESTART_POLL_TASK]
+    for call in svc._task_queue_service.enqueue.call_args_list:
+        assert call.args[1] == {'publish_id': 1}
     publish_service.update_publish_ext.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_restart_from_success_enqueues_restart_poll():
+    """A restart retry whose rollback target is SUCCESS is outside
+    _POLL_ACTIVE_STATES, so the progress poll completes immediately and cannot
+    drive it. Without the restart poll this path still depended on a client
+    calling /restart_status — leaving ext.restart.restarting set and a recreated
+    binding PENDING."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    ext = {
+        'source_status': PublishStatus.SUCCESS.value,
+        'retry': False,
+        'binding': {'online': 123},
+    }
+    records = [
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.SUCCESS.value, ext={**ext, 'retry': True}),
+    ]
+    publish_service.get_publish_by_id.side_effect = records
+    publish_service.update_publish_status_with_ext.return_value = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={**ext, 'retry': True},
+    )
+    svc.execute_restart = AsyncMock(return_value={'success': True, 'message': 'ok', 'stage': 'online'})
+
+    result = await svc.retry(publish_id=1, operator='u1')
+
+    assert result.action == 'restart'
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert RESTART_POLL_TASK in enqueued
 
 
 @pytest.mark.asyncio
