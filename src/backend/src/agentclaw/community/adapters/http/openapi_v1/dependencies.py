@@ -92,14 +92,35 @@ def _resolve_caller(request: Request) -> VerifiedCaller | None:
 
 def _verify_from_headers(request: Request) -> VerifiedCaller | None:
     """Verify the request's principal header, logging why if it fails."""
+    config = get_principal_verifier_config()
     token = request.headers.get(PRINCIPAL_HEADER, "").strip()
     if not token:
+        # Distinguished from a rejected token, and on its own log line, because
+        # the two point at completely different things. A *missing* header is
+        # not an auth failure at all: the gateway injects it on every forwarded
+        # request, so its absence means this request did not come through the
+        # gateway, or came through one whose route table does not require an
+        # identity for this path. Chasing signing keys for that is chasing the
+        # wrong half of the system, which is exactly what the previous silence
+        # invited.
+        logger.warning(
+            "no %s header on %s %s (request did not arrive through the "
+            "gateway's authenticated path; verifier key fp=%s)",
+            PRINCIPAL_HEADER,
+            request.method,
+            request.url.path,
+            config.key_fingerprint,
+        )
         return None
     try:
-        return verify_principal_token(token, get_principal_verifier_config())
+        return verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         # Log the reason (never the token) and treat the caller as absent. The
-        # request goes on to answer 401 from require_principal.
+        # request goes on to answer 401 from require_principal. The reason now
+        # carries the token's ``alg``/``kid`` and the fingerprint of the key it
+        # was judged against — see ``core/gateway_principal/verifier.py`` — so
+        # this one line separates a key mismatch from an expiry, a wrong
+        # audience, or a token no gateway of ours minted.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
             request.method,

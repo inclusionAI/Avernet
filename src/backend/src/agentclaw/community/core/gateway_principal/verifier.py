@@ -26,6 +26,7 @@ resolves the signing key through ``SecretResolver``.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 import jwt
@@ -57,6 +58,36 @@ _REQUIRED_CLAIMS = ("exp", "iat", "aud", "iss")
 
 _PRINCIPAL_ADAPTER: TypeAdapter[GatewayPrincipal] = TypeAdapter(GatewayPrincipal)
 
+# How much of a JOSE header field reaches a log line. The header is unverified
+# attacker-controlled input, so it is clipped before it is ever formatted.
+_MAX_HEADER_FIELD = 32
+
+# What a fingerprint of no key at all reads as, so a log line never shows a
+# hash of the empty string as though it were a configured key.
+_UNSET_FINGERPRINT = "unset"
+
+
+def key_fingerprint(key: str) -> str:
+    """A short, non-reversible fingerprint of a shared signing key.
+
+    **This algorithm is a cross-component contract.** The gateway computes the
+    same fingerprint over its own copy of the key
+    (``plugins/principal_signer/bare/_plugin.py``) and both sides log it at
+    boot, so that "do the two ends hold the same secret?" is answered by
+    comparing two log lines rather than by printing a credential. Change it on
+    one side only and the comparison silently becomes meaningless — the golden
+    values pinned in both test suites exist to stop that.
+
+    Safe to log: SHA-256 is not reversible, and the key is required to be at
+    least 32 random bytes (RFC 7518 §3.2), so the truncated digest is not a
+    practical brute-force oracle for anyone who can already read the logs.
+    Safe to log is not safe to *serve* — never put this on an HTTP endpoint,
+    where it would let an unauthenticated caller confirm a guessed key.
+    """
+    if not key:
+        return _UNSET_FINGERPRINT
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
 
 @dataclass(frozen=True)
 class PrincipalVerifierConfig:
@@ -75,6 +106,11 @@ class PrincipalVerifierConfig:
     signing_key: str
     audience: str
     issuer: str
+
+    @property
+    def key_fingerprint(self) -> str:
+        """This config's key as :func:`key_fingerprint` renders it for a log."""
+        return key_fingerprint(self.signing_key)
 
 
 @dataclass(frozen=True)
@@ -153,12 +189,64 @@ def verify_principal_token(
             options={"require": list(_REQUIRED_CLAIMS)},
         )
     except jwt.PyJWTError as exc:
-        raise PrincipalVerificationError(f"principal token rejected: {exc}") from exc
+        # PyJWT's own message already separates the failure modes ("Signature
+        # verification failed" vs "Signature has expired" vs "Invalid
+        # audience"), so it is kept verbatim. What it cannot say is *which key
+        # and which contract* we judged the token against, and that is the
+        # difference between "the gateway and this component disagree about the
+        # shared secret" and "someone forged a token" — indistinguishable from
+        # the PyJWT message alone. The suffix supplies exactly that, all of it
+        # our own configuration plus the token's unverified JOSE header.
+        #
+        # None of this reaches the caller: every failure here funnels into one
+        # fixed ``401 Unauthorized`` (``openapi_v1/responses.py``), so naming
+        # the mismatch for the operator does not tell a forger what to fix.
+        raise PrincipalVerificationError(
+            f"principal token rejected: {exc} "
+            f"[{_token_provenance(token)}; verifier key fp="
+            f"{config.key_fingerprint}, expects aud={config.audience!r} "
+            f"iss={config.issuer!r}]"
+        ) from exc
 
     principals = _parse_principals(claims.get("principals"))
     _reject_contradictory_tenant(principals)
     _require_user_principal(principals)
     return VerifiedCaller(principals=principals)
+
+
+def _clip(value: object) -> str:
+    """Render an unverified header field for a log line, bounded and escaped.
+
+    ``repr`` rather than the bare string: it escapes newlines and control
+    characters, so a crafted ``kid`` cannot forge extra log lines around itself.
+    """
+    text = str(value)
+    if len(text) > _MAX_HEADER_FIELD:
+        text = text[:_MAX_HEADER_FIELD] + "…"
+    return repr(text)
+
+
+def _token_provenance(token: str) -> str:
+    """Describe *which signer* produced ``token``, from its JOSE header.
+
+    Read **without verifying**, which is the only option available: on a
+    signature failure there is nothing to verify against. ``alg`` and ``kid``
+    are what separate "our gateway, wrong shared key" (``alg=HS256 kid=bare``,
+    the values its ``bare`` signer stamps) from "not our gateway at all" — the
+    single most useful fact when the signature does not check out, and one the
+    PyJWT message never carries.
+
+    The header is attacker-controlled, so it is used for **nothing but this log
+    string**: no decision reads it, the verifier's ``alg`` stays pinned to
+    :data:`_ALGORITHMS`, and :func:`_clip` bounds and escapes it on the way out.
+    Only the header is read — never the payload, whose claims are exactly the
+    unverified assertions this function exists to be sceptical of.
+    """
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError:
+        return "token has an unparseable JOSE header"
+    return f"token alg={_clip(header.get('alg'))} kid={_clip(header.get('kid'))}"
 
 
 def _parse_principals(raw: object) -> tuple[GatewayPrincipal, ...]:

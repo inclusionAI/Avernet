@@ -32,8 +32,9 @@ What comes from where:
   registered, no such secret, an empty value, or a resolver that raises. Those
   environments legitimately have no key, and that is the pre-auth state this
   replaces. We ship **no fallback key** either way, because a committed shared
-  secret is a committed credential. Use at least 32 bytes — RFC 7518 §3.2 for
-  SHA-256, and PyJWT warns below it.
+  secret is a committed credential — and since 2026-08-04 the gateway ships none
+  either, so both ends of this contract fail closed by the same rule. Use at
+  least 32 bytes — RFC 7518 §3.2 for SHA-256, and PyJWT warns below it.
 
 - **``aud`` and ``iss``** are fixed in code, not configuration — a deliberate
   call, so that one wire contract has one spelling rather than a knob per side.
@@ -58,7 +59,10 @@ re-read, so rotating the shared secret requires a restart on both sides.
 
 from __future__ import annotations
 
-from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
+from agentclaw.community.core.gateway_principal import (
+    PrincipalVerifierConfig,
+    key_fingerprint,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 
@@ -124,7 +128,25 @@ def init_principal_verifier_config(
         signing_key=signing_key, audience=_AUDIENCE, issuer=_ISSUER
     )
     if signing_key:
-        logger.info("gateway principal verification is configured")
+        # The fingerprint is the whole point of this line. The two halves of
+        # this contract never meet at request time — the gateway signs
+        # successfully every time, and only this component ever observes a
+        # mismatch — so boot is the one place their keys can be compared at
+        # all. Emitting a non-reversible fingerprint on both sides turns "do we
+        # hold the same secret?" into a diff of two log lines, instead of a
+        # ``Signature verification failed`` with no way to tell a wrong secret
+        # from a stale one. ``len`` rides along because two keys that differ
+        # only by stray whitespace hash differently but look identical in a
+        # secret store.
+        logger.info(
+            "gateway principal verification is configured "
+            "(secret=%r, key fp=%s, key len=%d, aud=%r, iss=%r)",
+            secret_name,
+            _config.key_fingerprint,
+            len(signing_key),
+            _AUDIENCE,
+            _ISSUER,
+        )
     else:
         logger.warning(
             "gateway principal verification has no signing key — every "
@@ -176,12 +198,34 @@ def _resolve_signing_key(resolver: SecretResolver, secret_name: str) -> str:
         )
         return ""
 
-    key = str(getattr(secret, "secret_value", "") or "").strip()
+    raw = str(getattr(secret, "secret_value", "") or "")
+    key = raw.strip()
     if not key:
         logger.warning(
             "secret %r resolved with an empty value — no principal signing "
             "key resolved",
             secret_name,
+        )
+        return key
+
+    if key != raw:
+        # Stripping is silent otherwise, and silence is what makes this bite: a
+        # trailing newline (routine when a secret is injected from a file) is
+        # invisible in a secret store, and the two ends then hash different
+        # bytes from what looks like one value. The gateway strips too, so the
+        # contract still holds — but a gateway released before it did signs
+        # with the untrimmed bytes, and this line names the fingerprint that
+        # such a peer would report, so a mixed-version rollout is one grep
+        # rather than a second incident.
+        logger.warning(
+            "secret %r carries %d character(s) of surrounding whitespace, "
+            "which this side strips before use (fp untrimmed=%s, trimmed=%s). "
+            "Provision the value without it so both ends of the contract hash "
+            "the same bytes",
+            secret_name,
+            len(raw) - len(key),
+            key_fingerprint(raw),
+            key_fingerprint(key),
         )
     return key
 

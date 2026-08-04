@@ -26,6 +26,7 @@ from agentclaw.community.core.gateway_principal.models import (
 from agentclaw.community.core.gateway_principal.verifier import (
     PrincipalVerifierConfig,
     VerifiedCaller,
+    key_fingerprint,
     verify_principal_token,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "PrincipalVerifierConfig",
     "UserPrincipal",
     "VerifiedCaller",
+    "key_fingerprint",
     "verify_principal_token",
 ]

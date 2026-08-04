@@ -324,6 +324,12 @@ from agentclaw.community.core.errors import (  # noqa: E402
     Unauthorized,
     ValidationError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    MissingPrincipalError,
+)
+from agentclaw.community.core.gateway_principal import (  # noqa: E402
+    PrincipalVerificationError,
+)
 from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerCallTypeInvalidError,
     CallerIdentityAmbiguousError,
@@ -499,6 +505,54 @@ async def _data_proxy_error_handler(
     )
 
 
+@app.exception_handler(MissingPrincipalError)
+@app.exception_handler(PrincipalVerificationError)
+async def _principal_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Answer an unverifiable caller with a 401 — and *only* a 401.
+
+    Both errors are raised in a **dependency** (``require_principal``, which
+    every public route declares), so they surface inside
+    ``solve_dependencies`` before the handler runs and ``@envelope_errors``
+    never sees them. The catch-all below already mapped them to the right
+    status via ``ENVELOPE_ERRORS``, so this handler exists for a different
+    reason: *where* it is registered.
+
+    Starlette splits registered handlers by key. ``Exception`` becomes
+    ``ServerErrorMiddleware``'s handler, and that middleware sends the response
+    and then unconditionally re-raises ("We always continue to raise the
+    exception", ``starlette/middleware/errors.py``) so the server can log a
+    crash. The result was a correct 401 on the wire followed by a hundred-odd
+    lines of ASGI traceback per request — precisely what the catch-all's
+    warning-without-a-traceback was written to avoid, and ruinous on this path
+    because an auth misconfiguration makes *every* request take it.
+
+    Registering the concrete types instead puts them in the inner
+    ``ExceptionMiddleware``, which answers and does not re-raise. The status
+    and body still come from ``ENVELOPE_ERRORS`` via ``_public_mapped_error``,
+    so this adds a route out of the stack, not a second opinion on the answer.
+    """
+    # ``exc`` carries the operator-facing diagnosis on the verification path —
+    # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
+    # against. It is logged, never returned: the response is the same fixed
+    # "Unauthorized" the table gives every failure here, so a forger still
+    # cannot tell which part of a token was rejected.
+    logger.warning(
+        "[Public 401] %s on %s %s: %s",
+        type(exc).__name__, request.method, request.url.path, exc,
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    # Raised off the public surface — an internal ``/api`` route reaching the
+    # verifier directly. Those keep the ``{"detail": ...}`` shape their clients
+    # parse rather than being handed an Envelope they do not expect.
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers=_trace_headers(request),
+    )
+
+
 # Catch-all for unhandled non-DomainError exceptions. Returns the same
 # {"detail": ...} JSON shape (status 500) instead of Starlette's default
 # plain-text "Internal Server Error" body, so the wire format is uniform
@@ -508,11 +562,17 @@ async def _data_proxy_error_handler(
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # A mapped public error can still land here: @envelope_errors only wraps the
-    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** — the auth
-    # seam every public route declares — is raised before the handler runs and
-    # arrives as an "unhandled" exception. Consulting the same table here is what
-    # makes an unauthenticated public request a 401 rather than a 500, wherever
-    # the error was raised. One table, two entry points.
+    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** is raised
+    # before the handler runs and arrives as an "unhandled" exception.
+    # Consulting the same table here is what makes such a request its mapped
+    # status rather than a 500, wherever the error was raised. One table, two
+    # entry points.
+    #
+    # The auth seam's two errors no longer reach this handler — they have their
+    # own registration above, so that a routine 401 does not pay for
+    # ServerErrorMiddleware's re-raise. Everything else mapped still arrives
+    # here, and the traceback note below is why that is tolerable for the rest:
+    # they are rare, where an unverifiable caller is not.
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
         # Expected client-side flow (missing/invalid credentials, bad input).

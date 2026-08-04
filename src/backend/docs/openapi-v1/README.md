@@ -364,6 +364,52 @@ route dependency        → require_principal(request)       ─┘  cache on sc
   Either way the trigger is the same: no such secret, an empty value, or a
   resolver that raises.
 
+  **The gateway now behaves identically** — one contract, one rule. It shipped a
+  committed dev fallback key until 2026-08-04; that was removed rather than made
+  louder, because no peer ever accepted those tokens (this side has never had a
+  fallback to match) and all it bought was a gateway that looked healthy while
+  every request failed one hop away. Missing key there ⇒ boot refused in
+  `pre`/`prod`, otherwise every signature attempt refuses and the forwarder
+  answers `500 principal signing failed`.
+
+### Diagnosing a 401 on this surface
+
+Both halves log a **key fingerprint** at boot — a truncated SHA-256, safe in a
+log, useless to a reader. They are the same eight characters when and only when
+the two ends hold the same secret, so the first question is answered by diffing
+two lines rather than by printing a credential:
+
+```text
+backend:  gateway principal verification is configured (secret='...', key fp=eb128a7a, key len=38, aud='backend', iss='gateway')
+gateway:  principal signer configured (secret='principal_signing_key', key fp=eb128a7a, key len=38, kid='bare', iss='gateway', ttl=60s)
+```
+
+| What you see | What it means |
+| --- | --- |
+| fingerprints differ | the two ends hold different secrets — the usual cause |
+| gateway `key fp=unset` | the gateway resolved no key and cannot sign at all |
+| same fp, different `key len` | one side's value carries whitespace (both strip, so this only appears across a mixed-version rollout) |
+| fingerprints match | not a key problem — check `iss`, clock skew, and whether either process predates the last rotation (each resolves once at boot) |
+
+Per-request, the backend logs one line per failure, and it names the cause:
+
+```text
+rejected forwarded principal on GET /openapi/v1/bots: principal token rejected:
+Signature verification failed [token alg='HS256' kid='bare'; verifier key
+fp=eb128a7a, expects aud='backend' iss='gateway']
+```
+
+`alg`/`kid` come from the token's unverified JOSE header — the only readable
+part when a signature fails, and what distinguishes "our gateway, wrong key"
+(`kid='bare'`) from a token no gateway of ours minted. None of it reaches the
+caller: every failure answers the same fixed `401 Unauthorized`.
+
+A **missing** header logs distinctly (`no X-Avernet-Principal header on ...`)
+and is not an auth failure at all — the gateway injects that header on every
+forwarded request, so its absence means the request did not come through the
+gateway's authenticated path. Chasing signing keys for that one is chasing the
+wrong half of the system.
+
 - `aud` and `iss` are fixed in code here, not configurable — one wire contract,
   one spelling. They are **not** symmetric on the signing side, though:
   - `aud` is not configurable there either (the gateway signs it from the
