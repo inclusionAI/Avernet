@@ -70,7 +70,11 @@ class UserPrincipal(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     type: Literal[PrincipalType.USER] = PrincipalType.USER
-    tenant: str = Field(description="Tenant id the caller belongs to (stable id).")
+    tenant: str | None = Field(
+        default=None,
+        description="Tenant id the caller belongs to, if any; None when the "
+        "user has no tenant (the gateway does not fabricate a default).",
+    )
     subject: AuthenticatedUser = Field(description="The authenticated end user.")
 
 
