@@ -20,6 +20,10 @@ status-guarded checkpoint:
 * ``progress_poll`` — drives the BaaS-publish wait to terminal (VALIDATE_PUB→
   VALIDATING, ONLINE_PUB→SUCCESS) by reusing ``advance_publish_progress``;
   reschedules until the record leaves the ``*_PUB`` state.
+* ``restart_poll`` — the same job for a restart, which has no status transition
+  of its own to key on; its wait state is ``ext.restart.restarting`` and it
+  reuses ``sync_restart_progress``. Enqueued by ``restart`` on a successful
+  submit.
 
 The create sub-step's rare "crash between BaaS create and status/ext persist"
 window re-creates a bot (the accepted Option-C orphan) — bounded because the
@@ -72,6 +76,7 @@ ONLINE_RELEASE_TASK = "service_bot.publish.online_release"
 PROGRESS_POLL_TASK = "service_bot.publish.progress_poll"
 DRAFT_RESTORE_TASK = "service_bot.publish.draft_restore"
 RESTART_TASK = "service_bot.publish.restart"
+RESTART_POLL_TASK = "service_bot.publish.restart_poll"
 DESTROY_TASK = "service_bot.publish.destroy"
 EVAL_TEARDOWN_TASK = "service_bot.publish.eval_teardown"
 APPROVAL_TRIGGER_TASK = "service_bot.publish.approval_trigger"
@@ -81,6 +86,10 @@ APPROVAL_TRIGGER_TASK = "service_bot.publish.approval_trigger"
 _STAGE_TASK_DEADLINE_SECONDS = 3600
 _POLL_TASK_DEADLINE_SECONDS = 86400
 _POLL_DELAY_SECONDS = 8.0
+# The restart poll waits on a BaaS deploy workflow just like the publish poll, so
+# it shares its cadence and give-up horizon.
+_RESTART_POLL_DELAY_SECONDS = 8.0
+_RESTART_POLL_TASK_DEADLINE_SECONDS = 86400
 _DRAFT_RESTORE_POLL_DELAY_SECONDS = 2.0
 # The operation itself expires at 30 minutes. Keep the queue alive one extra
 # minute so a final handler run can persist operation=FAILED before the task
@@ -151,6 +160,16 @@ def enqueue_progress_poll(
         PROGRESS_POLL_TASK,
         build_poll_payload(publish_id=publish_id),
         deadline_seconds=_POLL_TASK_DEADLINE_SECONDS,
+    )
+
+
+def enqueue_restart_poll(
+    task_queue_service: TaskQueueService, *, publish_id: int
+) -> None:
+    task_queue_service.enqueue(
+        RESTART_POLL_TASK,
+        build_poll_payload(publish_id=publish_id),
+        deadline_seconds=_RESTART_POLL_TASK_DEADLINE_SECONDS,
     )
 
 
@@ -355,9 +374,10 @@ class PublishRestartHandler(_PublishTaskBase):
 
     The restart work runs through the operation runner (``execute_restart``), so a
     crash-resume adopts the in-doubt restart workflow (existing bot) instead of
-    issuing a second one. Approval is server-side (all-auto). Progress stays
-    user-driven via ``sync_restart_progress`` (``ext.restart.<stage>``, written by
-    the runner step), so no poll is enqueued here."""
+    issuing a second one. Approval is server-side (all-auto). On success the
+    restart poll is enqueued to observe the BaaS workflow's outcome — see
+    :class:`PublishRestartPollHandler` for why that observation is load-bearing
+    rather than cosmetic."""
 
     @property
     def task_type(self) -> str:
@@ -375,7 +395,21 @@ class PublishRestartHandler(_PublishTaskBase):
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
+            # execute_restart sets ext.restart.restarting *before* it issues, and
+            # only the sync clears it — so a restart that never got issued would
+            # leave the record reading "restarting" forever. Clear it here,
+            # mirroring retry's own cleanup of its restart flag on a failed
+            # submit. (A raised exception deliberately does NOT clear it: the task
+            # retries and the same op resumes, so the restart really is still in
+            # flight.)
+            self._flow.clear_restart_in_progress(publish_id)
             return Fail(f"restart failed: publish_id={publish_id}, {message}")
+
+        # Enqueue the poll HERE rather than alongside ``enqueue_restart``: by now
+        # the workflow id is recorded (ledger + ext.restart.<stage>), so the poll
+        # cannot read ext.restart before the restart wrote it — the same-batch
+        # race that forces ``_retry_via_restart`` to run its restart inline.
+        enqueue_restart_poll(self._task_queue_service, publish_id=publish_id)
         return Complete()
 
 
@@ -513,6 +547,76 @@ class PublishProgressPollHandler(_PublishTaskBase):
         return Complete()
 
 
+class PublishRestartPollHandler(_PublishTaskBase):
+    """Drive a BaaS *restart* to terminal by reusing ``sync_restart_progress``.
+
+    Distinct from ``progress_poll`` because a restart has no publish-status
+    transition to key on: it runs on a stable record (VALIDATING / SUCCESS, per
+    ``_determine_restart_stage``) and ``execute_restart`` deliberately does not
+    advance the status, so ``progress_poll`` would short-circuit on
+    ``_POLL_ACTIVE_STATES`` and complete without doing anything. The wait state
+    here is ``ext.restart.restarting`` instead, and the terminal signal is the
+    BaaS restart workflow's own status.
+
+    That observation is load-bearing, not cosmetic — everything the restart still
+    owes happens inside ``sync_restart_progress``:
+
+    * a recreate leg (target bot gone / a non-UPGRADE online decision) mints its
+      new binding PENDING, and only the sync activates it — otherwise it stays
+      PENDING and binding consumers reject it;
+    * a recreated teclaw container only gets its post-deploy MCP outbound/auth
+      rule there;
+    * a BaaS-side restart failure is only marked there (record FAILED, plus the
+      ledger outcome correction that stops a failed deploy from reading as the
+      live deployment on the next online release);
+    * the ``restarting`` marker is only cleared there.
+
+    Before this task those all depended on a client polling ``/restart_status``.
+    """
+
+    def __init__(
+        self,
+        *,
+        flow: "PublishFlowService",
+        task_queue_service: TaskQueueService,
+        poll_delay_seconds: float = _RESTART_POLL_DELAY_SECONDS,
+    ) -> None:
+        super().__init__(flow=flow, task_queue_service=task_queue_service)
+        self._poll_delay = poll_delay_seconds
+
+    @property
+    def task_type(self) -> str:
+        return RESTART_POLL_TASK
+
+    def handle(self, payload: Optional[dict]) -> TaskOutcome:
+        publish_id = _require_int(payload, "publish_id")
+        record, _status = self._status(publish_id)
+        if record is None:
+            return Fail(f"publish record not found: publish_id={publish_id}")
+
+        # Already reconciled: a /restart_status call (or an earlier run of this
+        # task) observed the workflow terminal and cleared the marker, or the
+        # record left the statuses the sync can resolve a stage for.
+        if not self._flow.is_restart_in_progress(publish_id):
+            return Complete()
+
+        sync_result = self._flow.sync_restart_progress(publish_id)
+        baas_status = (sync_result.data or {}).get("status", "")
+        if baas_status == "SUCCESS":
+            return Complete()
+        if baas_status == "FAILED":
+            # The sync already marked the record FAILED with ext.error_message —
+            # mirror it onto the task row rather than a dishonest SUCCEEDED.
+            return Fail(
+                f"BaaS restart failed: publish_id={publish_id}, {sync_result.message}"
+            )
+        # Non-terminal (INIT/PENDING/APPROVING/...), or the sync could not resolve
+        # the restart workflow / its progress fetch errored — those return no
+        # data, and a fetch error must retry. Keep polling; the task's own
+        # deadline is the give-up horizon.
+        return Reschedule(self._poll_delay)
+
+
 class PublishDraftRestoreHandler(_PublishTaskBase):
     """Run or resume one draft restore attempt from its durable ledger row."""
 
@@ -616,6 +720,11 @@ class PublishTaskLifecycle(LifecycleBase):
         )
         self._registry.register(
             PublishProgressPollHandler(
+                flow=self._flow, task_queue_service=self._task_queue_service
+            )
+        )
+        self._registry.register(
+            PublishRestartPollHandler(
                 flow=self._flow, task_queue_service=self._task_queue_service
             )
         )
