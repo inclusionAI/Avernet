@@ -3285,6 +3285,12 @@ impl BcsServer {
             group_session_secret_access.clone(),
         )
         .await?;
+        info!(
+            issuer = %config.gateway_principal.issuer,
+            audience = %config.gateway_principal.audience,
+            key_id = %config.gateway_principal.key_id,
+            "Gateway Principal verifier initialized"
+        );
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {

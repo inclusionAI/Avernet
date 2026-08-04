@@ -6,6 +6,7 @@ use bcs_service_api::application::v1::{
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use tracing::warn;
 
 use super::wire::{GatewayClaims, GatewayPrincipal};
 use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
@@ -72,18 +73,26 @@ impl GatewayPrincipalTokenVerifier {
         token: &str,
         now: u64,
     ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
+        let token_prefix = token_preview(token);
+
         if token.is_empty() {
+            warn!("Gateway Principal token is empty");
             return Err(GatewayPrincipalVerificationError::EmptyToken);
         }
-        let header =
-            decode_header(token).map_err(|_| GatewayPrincipalVerificationError::InvalidHeader)?;
+        let header = decode_header(token).map_err(|e| {
+            warn!(error = %e, token_prefix, "Gateway Principal token header is malformed");
+            GatewayPrincipalVerificationError::InvalidHeader
+        })?;
         if header.alg != Algorithm::HS256 {
+            warn!(alg = ?header.alg, kid = ?header.kid, token_prefix, "Gateway Principal token uses unsupported algorithm");
             return Err(GatewayPrincipalVerificationError::UnsupportedAlgorithm);
         }
         if header.typ.as_deref() != Some("JWT") {
+            warn!(typ = ?header.typ, kid = ?header.kid, token_prefix, "Gateway Principal token has invalid type");
             return Err(GatewayPrincipalVerificationError::InvalidTokenType);
         }
         if header.kid.as_deref() != Some(self.trust.key_id.as_str()) {
+            warn!(token_kid = ?header.kid, expected_kid = %self.trust.key_id, token_prefix, "Gateway Principal token key id mismatch");
             return Err(GatewayPrincipalVerificationError::InvalidKeyId);
         }
 
@@ -94,21 +103,36 @@ impl GatewayPrincipalTokenVerifier {
         validation.leeway = 0;
         validation.validate_exp = false;
 
-        let claims = decode::<GatewayClaims>(token, &self.decoding_key, &validation)
+        let token_data = decode::<GatewayClaims>(token, &self.decoding_key, &validation)
             .map_err(|error| match error.kind() {
                 jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+                    warn!(kid = ?header.kid, token_prefix, "Gateway Principal token signature is invalid");
                     GatewayPrincipalVerificationError::InvalidSignature
                 }
-                _ => GatewayPrincipalVerificationError::InvalidClaims,
-            })?
-            .claims;
+                other => {
+                    warn!(kid = ?header.kid, error_kind = ?other, token_prefix, "Gateway Principal token claims are invalid");
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
+            })?;
+        let claims = token_data.claims;
 
-        if claims.iss != self.trust.issuer || claims.aud != self.trust.audience {
+        if claims.iss != self.trust.issuer {
+            warn!(token_iss = %claims.iss, expected_iss = %self.trust.issuer, kid = ?header.kid, token_prefix, "Gateway Principal token issuer mismatch");
             return Err(GatewayPrincipalVerificationError::InvalidClaims);
         }
-        validate_times(claims.iat, claims.exp, now)?;
+        if claims.aud != self.trust.audience {
+            warn!(token_aud = %claims.aud, expected_aud = %self.trust.audience, kid = ?header.kid, token_prefix, "Gateway Principal token audience mismatch");
+            return Err(GatewayPrincipalVerificationError::InvalidClaims);
+        }
+        if let Err(e) = validate_times(claims.iat, claims.exp, now) {
+            warn!(iat = claims.iat, exp = claims.exp, now, kid = ?header.kid, token_prefix, "Gateway Principal token time validation failed");
+            return Err(e);
+        }
 
-        project_principals(claims.principals)
+        project_principals(claims.principals).map_err(|e| {
+            warn!(kid = ?header.kid, token_prefix, "Gateway Principal set is invalid");
+            e
+        })
     }
 }
 
@@ -152,6 +176,18 @@ fn validate_times(iat: u64, exp: u64, now: u64) -> Result<(), GatewayPrincipalVe
 
 fn is_non_blank(value: &str) -> bool {
     !value.trim().is_empty()
+}
+
+/// Return the header segment plus first ~20 chars of the payload for
+/// correlation.  The header is base64url of `{alg,kid,typ}` — public
+/// metadata only, never the signature or user identity.
+fn token_preview(token: &str) -> &str {
+    let bytes = token.as_bytes();
+    let Some(first_dot) = bytes.iter().position(|&b| b == b'.') else {
+        return token;
+    };
+    let prefix_end = (first_dot + 21).min(token.len());
+    &token[..prefix_end]
 }
 
 fn project_principals(
