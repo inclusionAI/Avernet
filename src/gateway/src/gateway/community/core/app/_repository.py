@@ -51,14 +51,14 @@ class AppRepository(AppRegistry):
         status: str = "ACTIVE",
         env: str = "",
         config: dict[str, Any] | None = None,
-        creator: str | None = None,
-        modifier: str | None = None,
+        creator: str = "",
+        modifier: str = "",
     ) -> int:
         """Persist a freshly registered app; return its inserted surrogate ``id``.
 
         ``token`` is the app's JWT (the unique lookup key). Optional ``status`` /
         ``env`` / ``config`` default to ``ACTIVE`` / ``""`` / ``{}``; ``creator`` /
-        ``modifier`` default to ``None`` (the unauthenticated admin has no caller).
+        ``modifier`` default to ``""`` (the unauthenticated admin has no caller).
         """
         with self._db.orm_session() as session:
             row = AppRow(

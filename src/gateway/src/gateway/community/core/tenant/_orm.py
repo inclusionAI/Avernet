@@ -27,8 +27,8 @@ class TenantRow(Base):  # type: ignore[misc]
     description: Mapped[str] = mapped_column(default="")
     owner: Mapped[str] = mapped_column(default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    creator: Mapped[str | None] = mapped_column(default=None)
-    modifier: Mapped[str | None] = mapped_column(default=None)
+    creator: Mapped[str] = mapped_column(default="")
+    modifier: Mapped[str] = mapped_column(default="")
     gmt_create: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP")
     )

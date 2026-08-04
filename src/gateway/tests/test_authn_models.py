@@ -37,9 +37,13 @@ def test_user_principal_defaults() -> None:
     assert p.subject.id == "u1"
 
 
-def test_user_principal_requires_tenant_and_subject() -> None:
-    with pytest.raises(ValidationError):
-        UserPrincipal(subject=_subject())  # type: ignore[call-arg]
+def test_user_principal_tenant_defaults_to_none() -> None:
+    """Tenant is optional — a user with no tenant is None, not a fabricated default."""
+    p = UserPrincipal(subject=_subject())
+    assert p.tenant is None
+
+
+def test_user_principal_requires_subject() -> None:
     with pytest.raises(ValidationError):
         UserPrincipal(tenant="t-1")  # type: ignore[call-arg]
 
