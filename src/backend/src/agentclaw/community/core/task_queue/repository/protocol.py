@@ -13,19 +13,28 @@ is evaluated DB-side too. No Python-generated ``now`` ever crosses this
 boundary — so clock skew between worker pods cannot affect claim, lease, or
 deadline decisions.
 
-**Claiming** is where idempotency is enforced: a row-level compare-and-swap
-UPDATE whose predicate only matches an unclaimed (or lease-expired) row, so
-across N racing workers each task is won by at most one. Past-deadline
-candidates are marked ``TIMED_OUT`` instead of claimed. ``complete`` /
-``reschedule`` / ``fail`` are CAS-guarded on ``claimed_by == worker_id AND
-status == RUNNING`` so a worker that lost its lease cannot clobber a task
-another worker took over.
+Idempotency is enforced at **two** points, answering two different questions.
+
+**Claim time — "who runs it?"** A row-level compare-and-swap UPDATE whose
+predicate only matches an unclaimed (or lease-expired) row, so across N racing
+workers each task is won by at most one. Past-deadline candidates are marked
+``TIMED_OUT`` instead of claimed. ``complete`` / ``reschedule`` / ``fail`` are
+CAS-guarded on ``claimed_by == worker_id AND status == RUNNING`` so a worker
+that lost its lease cannot clobber a task another worker took over.
+
+**Enqueue time — "should this row exist at all?"** Opt-in, via
+``idempotency_key``. See :meth:`TaskQueueRepositoryProtocol.enqueue`. A caller
+that supplies no key gets exactly the old behavior: every enqueue is a new row.
 """
 from __future__ import annotations
 
 from typing import List, Optional, Protocol, runtime_checkable
 
-from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    EnqueueResult,
+    TaskRecord,
+    TaskStatus,
+)
 
 
 @runtime_checkable
@@ -41,13 +50,39 @@ class TaskQueueRepositoryProtocol(Protocol):
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
-    ) -> TaskRecord:
-        """Persist a new ``PENDING`` task and return its stored record.
+        idempotency_key: Optional[str] = None,
+    ) -> EnqueueResult:
+        """Persist a ``PENDING`` task and return ``(record, created)``.
 
         ``run_at`` is set to ``now() + delay_seconds`` and ``deadline_at`` to
         ``now() + deadline_seconds``, both computed DB-side. ``payload`` is
-        JSON-serialized on write. Duplicate enqueues create distinct rows —
-        idempotency is a claim-time guarantee, not an insert-time one.
+        JSON-serialized on write.
+
+        **Without a key** (the default) every enqueue creates a distinct row —
+        insert-time dedup is opt-in, so un-keyed callers are unaffected by it.
+
+        **With a key** dedup is *active-only*: at most one **live** task per
+        ``idempotency_key`` within an ``(env, task_type)``. If a live task
+        already holds the key, no row is inserted and that task is returned with
+        ``created=False``; otherwise a new row is created with ``created=True``.
+        Never raises for a plain duplicate.
+
+        A terminal transition (``SUCCEEDED`` / ``FAILED`` / ``TIMED_OUT``)
+        **releases** the key, so the same key may legitimately be re-enqueued
+        afterwards — which is what makes retry, re-poll, and repeated restart
+        work. Scope your key to a generation only when you want the *opposite*.
+
+        Key convention::
+
+            <entity>:<entity_id>[:<qualifier>][:<generation>]
+            publish:1234:online_release
+            skills_pool:prod:e-9:bot-7
+
+        One edge worth knowing: a task whose deadline has passed but which no
+        worker has scanned yet is still non-terminal, so it still holds its key
+        and a duplicate enqueue joins it. The next claim scan retires it
+        ``TIMED_OUT`` and frees the key. This only bites when the worker is down
+        or behind by longer than the task's own deadline.
         """
         ...
 

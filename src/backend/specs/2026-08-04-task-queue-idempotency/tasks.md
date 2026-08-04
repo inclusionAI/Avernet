@@ -57,17 +57,20 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Note:** The `_enqueue` test-helper unwrap (originally listed under Task 6) was pulled forward into this task — the return-type change breaks all 21 pre-existing tests otherwise, and leaving the tree red across two tasks is worse than the small reordering.
 - **Depends on:** Tasks 2, 3
 
-## Task 5: Update the contract and the docs that promise the opposite
+## Task 5 `[x]`: Update the contract and the docs that promise the opposite
 - **Goal:** The protocol, the facade, and the README describe insert-time dedup.
-- **Files:** `core/task_queue/repository/protocol.py`, `core/task_queue/services/task_queue_service.py`, `core/task_queue/README.md`
+- **Files:** `core/task_queue/repository/protocol.py`, `core/task_queue/services/task_queue_service.py`, `core/task_queue/README.md`, `core/task_queue/__init__.py`, plus two test helpers (see note)
 - **Done when:**
-  - [ ] `TaskQueueRepositoryProtocol.enqueue` takes `idempotency_key: Optional[str] = None` and returns `EnqueueResult`.
-  - [ ] `protocol.py:49-50`'s "Duplicate enqueues create distinct rows — idempotency is a claim-time guarantee, not an insert-time one" is replaced per `plan.md`.
-  - [ ] The module docstring at `protocol.py:16-22` ("**Claiming** is where idempotency is enforced") is reconciled — claim-time is no longer the only enforcement point.
-  - [ ] `TaskQueueService.enqueue` forwards `idempotency_key` and returns `EnqueueResult`.
-  - [ ] `README.md`'s "How idempotency works" gains an insert-time section alongside claim-time, states that terminal tasks release their key, and documents the convention `<entity>:<entity_id>[:<qualifier>][:<generation>]`.
-  - [ ] README notes that multiple `NULL` keys coexisting is a **relied-upon** engine property, not an assumption.
-  - [ ] The README Context Boundary block still reflects what the module provides.
+  - [x] `TaskQueueRepositoryProtocol.enqueue` takes `idempotency_key: Optional[str] = None` and returns `EnqueueResult`.
+  - [x] `protocol.py`'s "Duplicate enqueues create distinct rows — idempotency is a claim-time guarantee, not an insert-time one" is replaced per `plan.md`.
+  - [x] The protocol module docstring is reconciled — it now frames claim-time and enqueue-time as two guarantees answering two different questions.
+  - [x] `TaskQueueService.enqueue` forwards `idempotency_key` and returns `EnqueueResult`.
+  - [x] `README.md`'s "How idempotency works" gains an insert-time section alongside claim-time, states that terminal tasks release their key, and documents the convention `<entity>:<entity_id>[:<qualifier>][:<generation>]`.
+  - [x] README notes that multiple `NULL` keys coexisting is a **relied-upon** engine property, not an assumption.
+  - [x] The README Context Boundary block still reflects what the module provides (unchanged — no new provides/consumes).
+  - [x] The package `__init__.py` docstring mentions enqueue dedup alongside claim-time.
+  - [x] The past-deadline-but-unscanned edge found during Group B review is documented in both the protocol docstring and the README.
+- **Note:** The return-type change reached two test files the plan did not anticipate: `tests/community/core/task_queue/test_task_worker.py` (its `_World.enqueue` helper, now unwrapping `.record`) and `tests/community/endpoints/test_draft_restore_durable_task.py` (which destructures the pair). Full backend suite: 10305 passed.
 - **Depends on:** Task 4
 - **Note:** protocol.py and README.md change together in one commit, per spec (g).
 

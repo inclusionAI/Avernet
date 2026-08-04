@@ -39,7 +39,7 @@ async def _run_draft_restore_task(world, operation_id: int):
     registry = injector.get(HandlerRegistry)
     if registry.get(DRAFT_RESTORE_TASK) is None:
         await injector.get(PublishTaskLifecycle).bootstrap()
-    task = injector.get(TaskQueueService).enqueue(
+    task, _created = injector.get(TaskQueueService).enqueue(
         DRAFT_RESTORE_TASK,
         {
             "draft_publish_id": _DRAFT_ID,
