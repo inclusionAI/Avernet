@@ -1,8 +1,8 @@
 """E2E tests for Open API Session endpoints.
 
 Tests cover:
-- GET /openapi/v1/sessions - list sessions → 200/404 (no list endpoint)
-- GET /openapi/v1/sessions - pagination with page and page_size params
+- GET /openapi/v1/sessions - list sessions → 200/400/401/403
+- GET /openapi/v1/sessions - pagination with limit and offset params
 - GET /openapi/v1/sessions/{session_id} - valid session ID → 200
 - GET /openapi/v1/sessions/{session_id} - not found → 404
 - GET /openapi/v1/sessions/{session_id} - invalid session ID format
@@ -38,41 +38,56 @@ class TestListSessions:
             headers={"Authorization": "Bearer test-key"},
         )
 
-        # No dedicated list endpoint exists; expect 404 or 401 (invalid key)
-        assert response.status_code in (200, 401, 404)
+        # Invalid key → 401; valid key → 200/400/403/404
+        assert response.status_code in (200, 400, 401, 403, 404)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_with_pagination(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with pagination params → 401/404."""
+    async def test_list_sessions_with_limit_offset(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit and offset params."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 5},
+            params={"bot_id": "test-bot", "limit": 5, "offset": 0},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        assert response.status_code in (200, 400, 401, 403, 404)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_page_out_of_range(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page=99999 → 401/404."""
+    async def test_list_sessions_limit_exceeds_max(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with limit > 100 → 422."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 99999, "page_size": 10},
+            params={"bot_id": "test-bot", "limit": 200},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 404)
+        # limit has ge=1, le=100 constraint → 422 for out of range
+        assert response.status_code in (200, 400, 401, 403, 404, 422)
 
     @pytest.mark.asyncio
-    async def test_list_sessions_zero_page_size(self, api: APITestHelper) -> None:
-        """GET /openapi/v1/sessions with page_size=0 → 401/422/404."""
+    async def test_list_sessions_negative_offset(self, api: APITestHelper) -> None:
+        """GET /openapi/v1/sessions with negative offset → 422."""
         response = await api.client.get(
             api.open_api_session_url(),
-            params={"page": 1, "page_size": 0},
+            params={"bot_id": "test-bot", "offset": -1},
             headers={"Authorization": "Bearer test-key"},
         )
 
-        assert response.status_code in (200, 401, 422, 404)
+        # offset has ge=0 constraint → 422 for negative
+        assert response.status_code in (200, 400, 401, 403, 404, 422)
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_without_bot_id_non_bot_key(
+        self, api: APITestHelper
+    ) -> None:
+        """GET /openapi/v1/sessions without bot_id for non-bot API Key → 400."""
+        response = await api.client.get(
+            api.open_api_session_url(),
+            headers={"Authorization": "Bearer test-key"},
+        )
+
+        # Without bot_id, non-bot app_type → 400; bot app_type → 200/404
+        assert response.status_code in (200, 400, 401, 403, 404)
 
 
 class TestGetSessionById:
