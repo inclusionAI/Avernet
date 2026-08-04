@@ -333,8 +333,21 @@ def test_list_requires_bot_id_and_shared_page_limits():
     )
 
 
-def test_openapi_declares_exact_state_command_paths_and_response_shape():
+def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     schema = _client(_Query()).app.openapi()
+    skill_paths = {
+        path: operations
+        for path, operations in schema["paths"].items()
+        if path.startswith("/openapi/v1/bots/skills")
+        or path.startswith("/openapi/v1/bots/{bot_id}/skills")
+    }
+    assert {path: set(operations) for path, operations in skill_paths.items()} == {
+        "/openapi/v1/bots/skills": {"get"},
+        "/openapi/v1/bots/skills/upload": {"post"},
+        "/openapi/v1/bots/skills/{skill_id}": {"get", "delete"},
+        "/openapi/v1/bots/skills/{skill_id}/activate": {"post"},
+        "/openapi/v1/bots/skills/{skill_id}/deactivate": {"post"},
+    }
     for path in (
         "/openapi/v1/bots/skills/{skill_id}/activate",
         "/openapi/v1/bots/skills/{skill_id}/deactivate",
@@ -353,6 +366,23 @@ def test_openapi_declares_exact_state_command_paths_and_response_shape():
     assert state_schema["required"] == ["skill", "changed"]
     upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
+    assert set(upload["requestBody"]["content"]) == {"application/zip"}
+    assert upload["responses"]["413"]["content"]["application/json"]["example"] == {
+        "code": 413101,
+        "message": "Skill package is too large",
+        "request_id": "",
+    }
+    error_schema = upload["responses"]["413"]["content"]["application/json"]["schema"]
+    assert error_schema["$ref"].endswith("ErrorEnvelope")
+    assert schema["components"]["schemas"]["ErrorEnvelope"]["properties"]["data"] == {
+        "type": "null",
+        "title": "Data",
+        "description": "Always null on an error response.",
+    }
+    for path, methods in skill_paths.items():
+        for method, operation in methods.items():
+            if path != "/openapi/v1/bots/skills/upload" or method != "post":
+                assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
             "Envelope_SkillUpload_"
