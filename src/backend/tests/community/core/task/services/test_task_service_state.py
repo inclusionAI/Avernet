@@ -212,12 +212,12 @@ def test_claim_node_records_attempt_with_routed_trigger():
 
 def test_claim_node_sets_lease_until_and_run_mode():
     import datetime as _dt
-    from agentclaw.community.core.task.services import task_service as ts_mod
+    from agentclaw.community.core.task.services import bbs_lease_ops as lease_mod
     svc = _service()
     task = _graph_with_n1(svc)  # PENDING node n1
     frozen = _dt.datetime(2026, 8, 4, 12, 0, tzinfo=_dt.timezone.utc)
-    expected = (frozen + _dt.timedelta(seconds=ts_mod.BBS_LEASE_FALLBACK_SECONDS)).isoformat()
-    with _Monkey(ts_mod) as m:
+    expected = (frozen + _dt.timedelta(seconds=lease_mod.BBS_LEASE_FALLBACK_SECONDS)).isoformat()
+    with _Monkey(lease_mod) as m:
         m.set_utcnow(frozen)
         res = svc.claim_node(task.id, "n1", "bot-A", run_mode=RunMode.BBS)
     assert res.run_mode is RunMode.BBS
