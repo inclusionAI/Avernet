@@ -26,8 +26,6 @@ SessionParticipantInput:
   properties:
     bot_uuid:
       type: string
-    mode:
-      $ref: ../domain-models.yaml#/BotParticipantMode
 
 UpdateSessionRequest:
   type: object
@@ -338,57 +336,6 @@ SessionPath:
         description: Principal cannot delete the session.
         x-error-codes:
           - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
-
-SessionCompletionPath:
-  post:
-    operationId: complete_session
-    tags: ["Collaboration / Sessions"]
-    summary: Complete a running chat session; idempotent after completion.
-    x-avernet-security:
-      user: required
-    parameters:
-      - $ref: ../shared.yaml#/SessionIdPath
-    responses:
-      "200":
-        description: Session completion result. Returns the same result when repeated.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/SessionCompletionEnvelope
-      "400":
-        description: Invalid session identifier encoding.
-        x-error-codes:
-          - invalid_request
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: Principal cannot complete the session.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Session is missing or intentionally hidden.
-        x-error-codes:
-          - session_not_found
         content:
           application/json:
             schema:

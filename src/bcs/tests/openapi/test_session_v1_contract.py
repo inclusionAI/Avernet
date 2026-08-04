@@ -41,7 +41,7 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
 def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operations = [
-        contract["paths"]["/openapi/v1/collaboration/groups"]["get"],
+        contract["paths"]["/openapi/v1/collaboration/bots/{bot_id}/groups"]["get"],
         contract["paths"][
             "/openapi/v1/collaboration/groups/{group_id}/sessions"
         ]["get"],
@@ -76,3 +76,27 @@ def test_session_detail_uses_implicit_human_or_owned_bot_participant_access() ->
     assert "Human Actor" in description
     assert "created by that Human" in description
     assert "Session Participant" in description
+
+
+def test_session_completion_endpoint_is_not_in_public_contract() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+
+    assert (
+        "/openapi/v1/collaboration/sessions/{session_id}/completion"
+        not in contract["paths"]
+    )
+
+
+def test_add_session_participant_accepts_only_bot_uuid() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}/participants"
+    ]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["bot_uuid"],
+        "properties": {"bot_uuid": {"type": "string"}},
+    }

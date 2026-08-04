@@ -1,12 +1,12 @@
-GroupsPath:
+BotGroupsPath:
   get:
     operationId: list_groups
     tags: ["Collaboration / Groups"]
-    summary: List groups visible from the selected View Actor.
+    summary: List groups visible to the path Bot.
     x-avernet-security:
       user: required
     parameters:
-      - $ref: ../shared.yaml#/ViewBotIdQuery
+      - $ref: ../shared.yaml#/BotIdPath
       - name: offset
         in: query
         schema:
@@ -54,10 +54,10 @@ GroupsPath:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after selected-Actor relation, strategy, kind, and
-          search filtering and deduplication, then paginated with offset/limit.
-          Both items and total are scoped before pagination. An authorized View
-          Actor with no matching Group relation receives an empty page.
+          tie-breaker) after path-Bot relation, strategy, kind, and search
+          filtering and deduplication, then paginated with offset/limit. Both
+          items and total are scoped before pagination. An authorized Bot with
+          no matching Group relation receives an empty page.
         content:
           application/json:
             schema:
@@ -80,8 +80,7 @@ GroupsPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          The explicit View Actor is not the authenticated Human or a Bot
-          created by that Human.
+          The path Bot is not managed by the authenticated Human.
         x-error-codes:
           - forbidden
         content:
@@ -91,6 +90,7 @@ GroupsPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
+GroupsPath:
   post:
     operationId: create_group
     tags: ["Collaboration / Groups"]
@@ -361,6 +361,15 @@ CreateParticipant:
         - worker
         - observer
 
+AddGroupParticipantRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+  properties:
+    actor_id:
+      type: string
+
 CreateDeliveryPolicy:
   $ref: ../domain-models.yaml#/DeliveryPolicy
 
@@ -496,7 +505,7 @@ AddGroupParticipantPath:
       content:
         application/json:
           schema:
-            $ref: "#/CreateParticipant"
+            $ref: "#/AddGroupParticipantRequest"
     responses:
       "200":
         description: Added participant.
@@ -553,72 +562,6 @@ AddGroupParticipantPath:
         $ref: ../shared.yaml#/InternalErrorResponse
 
 GroupParticipantPath:
-  patch:
-    operationId: update_group_participant
-    tags: ["Collaboration / Groups"]
-    summary: Update the mutable properties of a Group participant.
-    x-avernet-security:
-      user: required
-    parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
-      - $ref: ../shared.yaml#/ActorIdPath
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/UpdateGroupParticipantRequest"
-    responses:
-      "200":
-        description: Updated participant.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/ParticipantEnvelope
-      "400":
-        description: Invalid patch.
-        x-error-codes:
-          - invalid_request
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: Principal cannot manage the participant.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Group, participant, or referenced actor is missing or hidden.
-        x-error-codes:
-          - group_not_found
-          - participant_not_found
-          - actor_not_found
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "409":
-        description: Patch conflicts with role or group invariants.
-        x-error-codes:
-          - conflict
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
   delete:
     operationId: remove_group_participant
     tags: ["Collaboration / Groups"]

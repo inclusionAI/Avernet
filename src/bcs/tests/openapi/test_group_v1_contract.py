@@ -16,6 +16,7 @@ from scripts.validate_openapi_contract import (  # noqa: E402
 
 GROUPS_PATH = "/openapi/v1/collaboration/groups"
 GROUP_PATH = "/openapi/v1/collaboration/groups/{group_id}"
+BOT_GROUPS_PATH = "/openapi/v1/collaboration/bots/{bot_id}/groups"
 
 
 def test_contract_obeys_bcn_openapi_rules() -> None:
@@ -34,7 +35,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert "sender_routes" not in serialized
     assert "routing_policy" not in serialized
 
-    list_operation = contract["paths"][GROUPS_PATH]["get"]
+    list_operation = contract["paths"][BOT_GROUPS_PATH]["get"]
     assert list_operation["operationId"] == "list_groups"
     query_names = {
         parameter["name"]
@@ -48,15 +49,13 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "membership",
         "kind",
         "strategy",
-        "view_bot_id",
     }
-    view_actor = next(
-        parameter
+    path_names = {
+        parameter["name"]
         for parameter in list_operation["parameters"]
-        if parameter["name"] == "view_bot_id"
-    )
-    assert view_actor["schema"] == {"type": "string", "minLength": 1}
-    assert view_actor.get("required", False) is False
+        if parameter["in"] == "path"
+    }
+    assert path_names == {"bot_id"}
 
     assert (
         contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
@@ -179,3 +178,60 @@ def test_bundled_discriminator_mappings_resolve_inside_the_document(
             visit(item)
 
     visit(contract)
+
+
+def test_add_group_participant_accepts_only_actor_id() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/participants"
+    ]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert schema == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["actor_id"],
+        "properties": {"actor_id": {"type": "string"}},
+    }
+
+
+def test_update_group_participant_endpoint_is_not_in_public_contract() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path_item = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"
+    ]
+
+    assert "patch" not in path_item
+    assert "delete" in path_item
+
+
+def test_list_groups_is_scoped_by_path_bot_without_view_bot_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    path = "/openapi/v1/collaboration/bots/{bot_id}/groups"
+
+    assert path in contract["paths"]
+    operation = contract["paths"][path]["get"]
+    assert operation["operationId"] == "list_groups"
+    path_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "path"
+    }
+    query_names = {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert path_names == {"bot_id"}
+    assert query_names == {
+        "offset",
+        "limit",
+        "q",
+        "membership",
+        "kind",
+        "strategy",
+    }
+    assert "view_bot_id" not in query_names
+    assert "get" not in contract["paths"]["/openapi/v1/collaboration/groups"]
+    assert "post" in contract["paths"]["/openapi/v1/collaboration/groups"]
