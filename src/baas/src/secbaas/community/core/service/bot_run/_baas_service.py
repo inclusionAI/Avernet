@@ -462,6 +462,7 @@ class BaasBotService(BotService):
         app_id = context.app_id if context else None
 
         try:
+            stream_error = False
             async for chunk in client.send_message_stream(
                 message=message,
                 session_key=session_id,
@@ -469,8 +470,13 @@ class BaasBotService(BotService):
                 auth_token=auth_token,
                 app_id=app_id,
             ):
+                if chunk.type == "error":
+                    stream_error = True
                 yield replace(chunk, engine_type=engine_type)
-            self._mark_session_completed(baas_session_id)
+            if stream_error:
+                self._mark_session_failed(baas_session_id)
+            else:
+                self._mark_session_completed(baas_session_id)
         except ConcurrentSessionError as e:
             self._mark_session_failed(
                 baas_session_id, err_msg=f"Concurrent request: {e}"
