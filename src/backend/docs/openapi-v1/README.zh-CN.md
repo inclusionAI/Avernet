@@ -632,17 +632,17 @@ Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上
 Local Skill 仍归 Bot owner 所有，有权限的协作者只记录为操作人。读取使用数据库期望状态，
 Bot 离线时仍可用；变更操作要求 Bot ready，运行时同步失败时必须补偿。
 
-**状态**列中，`桩内` 表示路径和语义与当前路由桩一致；`已定案（待同步桩）`
-表示 Track B 契约已确认，但当前路由桩仍需在实现 PR 中新增或替换。
+router stub 现已精确暴露这份定案契约。它们只定义 transport shape；Track B 的实现切片
+负责在其后接入持久化、包存储、权限与 runtime 同步。
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` | 已定案（待同步桩） |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[Skill]` | 已定案（待同步桩） |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[BotSkill]` | 已定案（待同步桩） |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 已定案（待同步桩） |
+| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[LocalSkill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[LocalSkill]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[LocalSkillUpload]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[LocalSkillState]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[LocalSkillState]` | 桩内 |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 桩内 |
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。

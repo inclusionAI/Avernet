@@ -717,19 +717,18 @@ collaborator is recorded only as the operation actor. Reads use database desired
 state and remain available while the Bot is offline; mutations require a ready
 Bot and must compensate on runtime synchronization failure.
 
-In the **Status** column, `in stub` means the current router stub already has
-the ratified path and semantics. `ratified (stub update pending)` means the
-Track B contract is settled, but the implementation PR must add or replace the
-current stub.
+The router stubs now expose exactly this ratified contract. They define the
+transport shape only; the Track B implementation slices wire persistence,
+package storage, authorization, and runtime synchronization behind it.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` | ratified (stub update pending) |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[Skill]` | ratified (stub update pending) |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[BotSkill]` | ratified (stub update pending) |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | ratified (stub update pending) |
+| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[LocalSkill]]` | in stub |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[LocalSkill]` | in stub |
+| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[LocalSkillUpload]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[LocalSkillState]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[LocalSkillState]` | in stub |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | in stub |
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.

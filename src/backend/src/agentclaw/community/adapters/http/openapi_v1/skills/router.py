@@ -1,91 +1,110 @@
-"""Skills group — ``/openapi/v1/bots/skills``: catalog + a bot's installed
-skills (definition only).
+"""Public contract stubs for Bot-owned Local Skill lifecycle operations.
 
-This component owns two resource families. A bot's installed skills are
-bot-scoped and take ``{bot_id}`` as the first segment after the component, as
-everywhere on this surface. The catalog is *not* bot-scoped, and a catalog
-detail at ``/openapi/v1/bots/skills/{skill_id}`` would occupy the same slot as
-``/openapi/v1/bots/skills/{bot_id}`` with a different meaning — two wildcards
-at one depth, which no ordering rule can tell apart. So the catalog takes a
-literal ``catalog`` segment, the same device the surface already uses for
-``check-name`` and ``ceiling``.
-
-Handlers are stubs; every route requires an authenticated user principal.
+The public surface deliberately has no catalog, marketplace, or installation
+relationship. Every operation requires an authenticated principal; Track B
+implementation slices wire these definitions to the domain services.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends, Query
 
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
     Envelope,
+    ErrorEnvelope,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
 
-from .schemas import BotSkill, Skill, SkillDetail, SkillInstall
+from .schemas import LocalSkill, LocalSkillState, LocalSkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
-# Declaration order below is load-bearing. ``/catalog`` and
-# ``/catalog/{skill_id}`` compete with ``/{bot_id}`` and ``/{bot_id}/{skill_id}``
-# at the same depth, and FastAPI resolves first-registered — so the two catalog
-# routes must stay above the two bot-scoped ones, or ``GET .../skills/catalog``
-# starts meaning "the installed skills of the bot named ``catalog``". This is
-# the same ordering contract ``openapi_v1/__init__.py`` documents at the mount
-# level, applied within one router.
 
-
-@router.get("/catalog", response_model=Envelope[Page[Skill]])
+@router.get("", response_model=Envelope[Page[LocalSkill]])
 async def list_skills(
-    page: PageParamsDep, principal: PrincipalDep, keyword: str | None = None
-) -> Envelope[Page[Skill]]:
-    """List the skill catalog (filter + paginate)."""
+    page: PageParamsDep,
+    principal: PrincipalDep,
+    bot_id: str = Query(..., description="Bot ID whose Local Skills are listed."),
+    owner_entity_id: str | None = Query(
+        default=None, description="Verified Bot owner locator."
+    ),
+    active: bool | None = Query(
+        default=None, description="Filter by desired Active state."
+    ),
+    keyword: str | None = Query(
+        default=None, description="Case-insensitive name or description filter."
+    ),
+) -> Envelope[Page[LocalSkill]]:
+    """List one Bot's Local Skills from persisted desired state."""
     raise NotImplementedError
 
 
-@router.get("/catalog/{skill_id}", response_model=Envelope[SkillDetail])
-async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillDetail]:
-    """Get a skill's detail."""
-    raise NotImplementedError
-
-
-@router.get(
-    "/{bot_id}",
-    response_model=Envelope[list[BotSkill]],
-)
-async def list_bot_skills(
-    bot_id: str, principal: PrincipalDep
-) -> Envelope[list[BotSkill]]:
-    """List the skills installed on a bot."""
+@router.get("/{skill_id}", response_model=Envelope[LocalSkill])
+async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[LocalSkill]:
+    """Get public metadata for one Local Skill selected by its Skill ID."""
     raise NotImplementedError
 
 
 @router.post(
-    "/{bot_id}",
+    "/upload",
     status_code=201,
-    response_model=Envelope[BotSkill],
+    response_model=Envelope[LocalSkillUpload],
+    responses={
+        200: {
+            "model": Envelope[LocalSkillUpload],
+            "description": "Same-name Local Skill replaced successfully.",
+        },
+        413: {
+            "model": ErrorEnvelope,
+            "description": "ZIP package exceeds an upload limit.",
+        },
+    },
 )
-async def install_bot_skill(
-    bot_id: str, body: SkillInstall, principal: PrincipalDep
-) -> Envelope[BotSkill]:
-    """Install a skill on a bot."""
+async def upload_skill(
+    content: Annotated[bytes, Body(media_type="application/zip")],
+    principal: PrincipalDep,
+    bot_id: str = Query(..., description="Bot that owns and stores the Local Skill."),
+    owner_entity_id: str | None = Query(
+        default=None, description="Verified Bot owner locator."
+    ),
+) -> Envelope[LocalSkillUpload]:
+    """Create or safely replace one Local Skill from a raw ZIP body."""
     raise NotImplementedError
 
 
-@router.delete(
-    "/{bot_id}/{skill_id}",
-    response_model=Envelope[Deleted],
+@router.post(
+    "/{skill_id}/activate",
+    response_model=Envelope[LocalSkillState],
 )
-async def remove_bot_skill(
-    bot_id: str, skill_id: str, principal: PrincipalDep
-) -> Envelope[Deleted]:
-    """Remove a skill from a bot."""
+async def activate_skill(
+    skill_id: str, principal: PrincipalDep
+) -> Envelope[LocalSkillState]:
+    """Set one Local Skill's desired state to Active."""
+    raise NotImplementedError
+
+
+@router.post(
+    "/{skill_id}/deactivate",
+    response_model=Envelope[LocalSkillState],
+)
+async def deactivate_skill(
+    skill_id: str, principal: PrincipalDep
+) -> Envelope[LocalSkillState]:
+    """Set one Local Skill's desired state to Inactive."""
+    raise NotImplementedError
+
+
+@router.delete("/{skill_id}", response_model=Envelope[Deleted])
+async def delete_skill(skill_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
+    """Delete one Inactive Local Skill selected by its Skill ID."""
     raise NotImplementedError
