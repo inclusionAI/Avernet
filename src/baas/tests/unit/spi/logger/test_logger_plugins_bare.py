@@ -89,7 +89,9 @@ class TestBaasLoggerPlugin:
 
         with (
             patch("os.makedirs"),
-            patch("secbaas.community.plugins.logger.bare._plugin.TimedRotatingFileHandler"),
+patch(
+                "secbaas.community.plugins.logger.bare._plugin.TimedRotatingFileHandler"
+            ),
         ):
             plugin.configure(app_name="test", log_dir="/tmp/test_logs")
 
