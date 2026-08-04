@@ -103,7 +103,7 @@
     "husky": "^8.0.1",
     "jest": "^30.3.0",
     "lint-staged": "^13.0.3",
-    "postcss": "^8.5.6",
+    "postcss": "^8.5.23",
     "prettier": "^2.7.1",
     "react-refresh": "^0.18.0",
     "tailwindcss": "^3",
