@@ -19,6 +19,7 @@ is mapped from the DB ``created_by`` column.
 
 from __future__ import annotations
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.authn import (
     Bot,
     BotPrincipal,
@@ -27,6 +28,8 @@ from gateway.community.spi.authn import (
     PrincipalType,
 )
 from gateway.community.spi.bot import BotRegistry
+
+logger = get_logger("authn-bot-token")
 
 _AUTH_HEADER = "authorization"
 
@@ -78,7 +81,11 @@ class BotTokenStrategy:
             return None  # no bot token → not applicable
         bot = await self._registry.find_bot_by_token(token)
         if bot is None:
+            logger.debug("bot token not found in registry")
             return None  # unknown / empty token → soft miss
+        logger.debug(
+            "bot token resolved: bot_uuid=%s tenant=%s", bot.bot_uuid, bot.tenant
+        )
         return BotPrincipal(
             tenant=bot.tenant,
             bot=Bot(

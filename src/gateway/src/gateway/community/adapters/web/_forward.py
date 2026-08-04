@@ -117,6 +117,7 @@ async def forward_request(request: Request) -> Response:
     # resolves to the domain that serves the prefix above it.
     domain = request.app.state.domain_map.http_domain_for(path)
     if domain is None:
+        logger.info("no route for %s %s", request.method, path)
         return _error(404, 1, "no route for path")
     server = domain.server
     upstream_path = domain.upstream_path(path)
@@ -126,6 +127,7 @@ async def forward_request(request: Request) -> Response:
             request.method, path, _bundle(request)
         )
     except AuthError as exc:
+        logger.warning("auth failed for %s %s: %s", request.method, path, exc)
         return _error(401, 1, str(exc))
 
     body = await request.body()
@@ -155,6 +157,9 @@ async def forward_request(request: Request) -> Response:
     try:
         upstream = await cm.__aenter__()
     except Exception:
+        logger.warning(
+            "upstream unavailable for %s %s", request.method, path, exc_info=True
+        )
         return _error(502, 1, "upstream unavailable")
 
     async def stream() -> AsyncIterator[bytes]:
@@ -165,6 +170,13 @@ async def forward_request(request: Request) -> Response:
             await cm.__aexit__(None, None, None)
 
     response = StreamingResponse(stream(), status_code=upstream.status_code)
+    logger.info(
+        "forward %s %s -> %s status=%d",
+        request.method,
+        path,
+        forward.url,
+        upstream.status_code,
+    )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
     response.raw_headers = [
         (k.encode("latin-1"), v.encode("latin-1")) for k, v in upstream.headers
