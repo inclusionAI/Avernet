@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from injector import inject
 
+from agentclaw.community.core.errors import Forbidden
 from agentclaw.community.core.task.protocols import (
     BcsCollaborationProtocol,
     DispatchResult,
@@ -294,6 +295,54 @@ class TaskService(GraphStateOpsMixin):
             accept_token=token,
             lease_until=lease_iso,
         )
+
+    def release_node(
+        self, task_id: str, node_id: str, executor_id: str
+    ) -> Optional[Task]:
+        """BBS 接单主动让出(§10.4):仅当前 assignee 可调;RUNNING→FAILED(outcome=handoff),
+        下个 bot 立即接力。不泵 scheduler tick、不升 HUMAN(经 NODE_RELEASED fold)。"""
+        task = self._load(task_id)
+        if task is None:
+            return None
+        node = self._find_node(task, node_id)
+        if node is None:
+            raise TaskNotFoundError(f"node {node_id} not in task {task_id}")
+        if node.assignee != executor_id:
+            raise Forbidden(f"only assignee {node.assignee} may release node {node_id}")
+        require_node_transition(node.status, NodeStatus.FAILED)
+        node.status = NodeStatus.FAILED
+        node.assignee = None
+        node.properties["release_outcome"] = "handoff"
+        self._emit(task, EventKind.NODE_RELEASED, node_id=node_id, outcome="handoff")
+        self._task_repo.save(task)
+        logger.info(
+            "[Task] task=%s release_node node=%s by=%s → failed(handoff)",
+            task_id, node_id, executor_id,
+        )
+        return self._task_repo.get_by_id(task_id)
+
+    def expire_lease(self, task_id: str, node_id: str) -> Optional[Task]:
+        """兜底租期到期收回(§10.3,清扫器调):RUNNING→FAILED(outcome=lease_expired)。
+        节点可能已被 bot release/complete → 此时 RUNNING→FAILED 非法,吞 IllegalTransitionError。"""
+        task = self._load(task_id)
+        if task is None:
+            return None
+        node = self._find_node(task, node_id)
+        if node is None:
+            return None
+        try:
+            require_node_transition(node.status, NodeStatus.FAILED)
+        except IllegalTransitionError:
+            return self._task_repo.get_by_id(task_id)  # 已非 RUNNING,无需收回
+        node.status = NodeStatus.FAILED
+        node.assignee = None
+        node.properties["release_outcome"] = "lease_expired"
+        self._emit(task, EventKind.NODE_RELEASED, node_id=node_id, outcome="lease_expired")
+        self._task_repo.save(task)
+        logger.info(
+            "[Task] task=%s expire_lease node=%s → failed(lease_expired)", task_id, node_id
+        )
+        return self._task_repo.get_by_id(task_id)
 
     # --- query face --------------------------------------------------------
 

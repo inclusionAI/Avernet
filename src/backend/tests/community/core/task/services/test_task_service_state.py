@@ -58,6 +58,13 @@ def _graph_with_n1(svc: TaskService) -> Task:
     return svc.get(task.id)
 
 
+def _running_claimed_node(svc: TaskService) -> tuple[str, str]:
+    """n1 已被 bot-A claim(RUNNING, run_mode=BBS),供 release/expire 测试。"""
+    task = _graph_with_n1(svc)
+    svc.claim_node(task.id, "n1", "bot-A", run_mode=RunMode.BBS)
+    return task.id, "n1"
+
+
 class _Monkey:
     """Swap module-level _utcnow for a test, restore on exit."""
     def __init__(self, mod): self._mod, self._orig = mod, mod._utcnow
@@ -255,3 +262,43 @@ def test_add_sibling_node_links_edge():
         e.from_node == "n1" and e.to_node == "n3" and e.kind is EdgeKind.DEPENDENCY
         for e in task.execution_graph.edges
     )
+
+
+# --- release_node / expire_lease (BBS 接力通路, Task 3) ---------------------
+
+
+def test_release_node_by_assignee_handoff():
+    svc = _service()
+    task_id, node_id = _running_claimed_node(svc)
+    task = svc.release_node(task_id, node_id, "bot-A")
+    node = next(n for n in task.execution_graph.nodes if n.node_id == node_id)
+    assert node.status is NodeStatus.FAILED
+    assert node.assignee is None
+    assert node.properties.get("release_outcome") == "handoff"
+
+
+def test_release_node_rejects_non_assignee():
+    svc = _service()
+    task_id, node_id = _running_claimed_node(svc)
+    from agentclaw.community.core.errors import Forbidden
+    with pytest.raises(Forbidden):
+        svc.release_node(task_id, node_id, "bot-B")  # 不是持有者
+
+
+def test_expire_lease_marks_lease_expired():
+    svc = _service()
+    task_id, node_id = _running_claimed_node(svc)
+    task = svc.expire_lease(task_id, node_id)
+    node = next(n for n in task.execution_graph.nodes if n.node_id == node_id)
+    assert node.status is NodeStatus.FAILED
+    assert node.properties.get("release_outcome") == "lease_expired"
+
+
+def test_release_then_reclaim_relays():
+    svc = _service()
+    task_id, node_id = _running_claimed_node(svc)
+    svc.release_node(task_id, node_id, "bot-A")
+    # 接力:bot-B claim 同一节点(FAILED→RUNNING 合法)
+    res = svc.claim_node(task_id, node_id, "bot-B", run_mode=RunMode.BBS)
+    assert res is not None
+    assert res.executor_id == "bot-B"

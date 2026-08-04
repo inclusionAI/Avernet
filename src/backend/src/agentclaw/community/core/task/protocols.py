@@ -181,6 +181,16 @@ class TaskService(Protocol):
         Raises if the node is already claimed or terminal."""
         ...
 
+    def release_node(
+        self, task_id: str, node_id: str, executor_id: str
+    ) -> Optional[Task]:
+        """BBS 主动让出(仅 assignee):RUNNING→FAILED(handoff),不升人工。"""
+        ...
+
+    def expire_lease(self, task_id: str, node_id: str) -> Optional[Task]:
+        """兜底租期到期收回(清扫器):RUNNING→FAILED(lease_expired)。"""
+        ...
+
     # --- history / trace face (plan §6.6) ---------------------------------
     def history(self, task_id: str, after_seq: int = 0) -> list[TaskEvent]:
         """Return the append-only event log for ``task_id`` in seq order

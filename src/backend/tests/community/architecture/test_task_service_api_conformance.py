@@ -80,6 +80,7 @@ def test_api_protocol_surface_is_stable():
         "clarify",
         "on_event",
         "claim_node",
+        "release_node",
         "history",
         "latest_seq",
     }
