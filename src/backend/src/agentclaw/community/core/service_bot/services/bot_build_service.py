@@ -455,6 +455,7 @@ class BotBuildService:
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -550,6 +551,8 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     create_kwargs["template_uuid"] = template_uuid
+                if docker_image:
+                    create_kwargs["template_config"] = {"image": docker_image}
                 new_bot = self._baas_service.create_bot(**create_kwargs)
 
             bot_uuid = new_bot.get("bot_uuid")
@@ -577,6 +580,7 @@ class BotBuildService:
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -605,9 +609,17 @@ class BotBuildService:
         )
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
-            self.release, bot, user_id, migration_path, device_count, publish_stage, version,
-            delivery, ext_info,
-            extra_envs,
+            self.release,
+            bot=bot,
+            user_id=user_id,
+            migration_path=migration_path,
+            device_count=device_count,
+            publish_stage=publish_stage,
+            version=version,
+            delivery=delivery,
+            ext_info=ext_info,
+            extra_envs=extra_envs,
+            docker_image=docker_image,
         )
 
     def _sync_skill_links(
@@ -1065,6 +1077,7 @@ class BotBuildService:
             version: str = "1",
             delivery: DeliveryArtifact = DeliveryArtifact(None),
             extra_envs: Optional[Dict[str, Any]] = None,
+            docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1138,6 +1151,8 @@ class BotBuildService:
                 )
                 if template_uuid is not None:
                     upgrade_kwargs["template_uuid"] = template_uuid
+                if docker_image:
+                    upgrade_kwargs["template_config"] = {"image": docker_image}
                 upgrade_result = self._baas_service.upgrade_bot(**upgrade_kwargs)
 
             logger.info(
@@ -1555,6 +1570,7 @@ class BotBuildService:
         version: str = "1",
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         extra_envs: Optional[Dict[str, Any]] = None,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1567,7 +1583,15 @@ class BotBuildService:
 
         # 使用 asyncio.to_thread 在线程池中执行同步方法
         return await asyncio.to_thread(
-            self.upgrade, bot_uuid, bot, user_id, migration_path, device_count, publish_stage, version,
-            delivery,
-            extra_envs,
+            self.upgrade,
+            bot_uuid=bot_uuid,
+            bot=bot,
+            user_id=user_id,
+            migration_path=migration_path,
+            device_count=device_count,
+            publish_stage=publish_stage,
+            version=version,
+            delivery=delivery,
+            extra_envs=extra_envs,
+            docker_image=docker_image,
         )

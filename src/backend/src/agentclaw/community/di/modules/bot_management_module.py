@@ -71,6 +71,7 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository,
@@ -270,6 +271,7 @@ class BotManagementModule(Module):
         system_config_service: SystemConfigService,
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
+        common_config_service: CommonConfigService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -307,6 +309,7 @@ class BotManagementModule(Module):
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
+            common_config_service=common_config_service,
         )
 
     @singleton

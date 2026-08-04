@@ -15,6 +15,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
     BAAS_RESTART_PUBLISH_POLL_TASK,
@@ -65,6 +67,9 @@ def _make_service(
         "status": "ACTIVE",
     }
     svc._bot_publish_provider = lambda: MagicMock()
+    svc._teclaw_provision_provider = lambda: SimpleNamespace(
+        is_teclaw=lambda engine: engine == "teclaw"
+    )
     svc._oss_record_repo = MagicMock()
     svc._skill_set_factory = MagicMock()
     svc._device_binding_repo = MagicMock()
@@ -118,6 +123,122 @@ def _make_bot(
 # ===========================================================================
 # extra_envs / template_config 透传
 # ===========================================================================
+
+
+class TestRestartBaasImagePin:
+    def test_restart_uses_pinned_image_without_mutating_template_snapshot(self):
+        template_config = {"image": "registry/arka:v1", "envs": {"A": "1"}}
+        svc, baas, _ = _make_service(
+            template_config=template_config,
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            },
+        }
+
+        svc._restart_bot_baas(
+            bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+        )
+
+        assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
+            "image": "registry/arka:v2",
+            "envs": {"A": "1"},
+        }
+        assert template_config["image"] == "registry/arka:v1"
+
+    def test_restart_failure_does_not_persist_resolved_pin(self):
+        svc, baas, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        baas.upgrade_bot.side_effect = RuntimeError("baas rejected")
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            },
+        }
+
+        with pytest.raises(RuntimeError, match="baas rejected"):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._repository.update_by_owner.assert_not_called()
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("bot_type", "active_engine"),
+        [("personal", "openclaw"), ("service", "teclaw")],
+    )
+    def test_pin_persistence_skips_non_arka_service_bot(
+        self,
+        bot_type: str,
+        active_engine: str,
+    ):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type=bot_type,
+            active_engine=active_engine,
+        )
+        bot = {
+            **_make_bot(bot_type=bot_type, active_engine=active_engine),
+            "ext": {
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            },
+        }
+
+        svc._persist_service_bot_arka_image_pin(bot, user_id="user001")
+
+        svc._repository.update_by_owner.assert_not_called()
+        svc._bot_publish_repo.get_draft_by_publish_bot_id.assert_not_called()
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+
+    def test_restart_success_persists_bot_and_current_draft_pin(self):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        svc._bot_publish_repo.get_draft_by_publish_bot_id.return_value = SimpleNamespace(
+            id=6643,
+            status="draft",
+            ext={"migration_path": "/old"},
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {
+                "service_bot_config": {"device_count": 1},
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            },
+        }
+
+        svc._restart_bot_baas(
+            bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+        )
+
+        svc._repository.update_by_owner.assert_any_call(
+            "bot001", "user001", {"ext": bot["ext"]}
+        )
+        svc._bot_publish_repo.update_status_with_ext.assert_called_once_with(
+            publish_id=6643,
+            target_status="draft",
+            ext={
+                "migration_path": "/old",
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            },
+            source_status="draft",
+        )
 
 
 class TestRestartBaasEnvInjection:
