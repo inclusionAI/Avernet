@@ -1,9 +1,10 @@
 """Skills router HTTP schemas."""
+
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from engine.community.api.response import ApiResponse
 
@@ -127,6 +128,9 @@ class PoolLayoutActivateApiResponse(ApiResponse):
 class PoolMappingVerifyRequest(BaseModel):
     mapping_contract_version: str | None = None
     mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping]
+    retired_mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping] = Field(
+        default_factory=list
+    )
     source_layout: Literal["pool", "legacy"] = "pool"
 
 

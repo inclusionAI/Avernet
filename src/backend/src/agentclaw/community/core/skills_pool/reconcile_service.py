@@ -1,8 +1,4 @@
-"""已认领 Bot 的 Skills Pool 激活闭环。
-
-本模块只编排控制面步骤；最终同步和原子 bridge 由当前运行时完成，数据库
-仓储负责 locator 与 ``POOL_ACTIVE`` 的同事务提交。
-"""
+"""编排已认领 Bot 的 Skills Pool 激活闭环。"""
 
 from __future__ import annotations
 
@@ -32,8 +28,13 @@ from agentclaw.community.core.skills_pool.models import (
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
+    logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
     local_skill_name,
+)
+from agentclaw.community.core.skills_pool.mapping_convergence import (
+    MappingConvergenceStatus,
+    converge_post_cutover_mappings,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -345,6 +346,9 @@ class SkillsPoolReconcileService:
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
             mappings = build_logical_skill_mappings(active_assets)
+            durable_retired_mappings = logical_skill_mappings_from_evidence(
+                state.last_failure_evidence
+            )
         except ValueError as error:
             evidence = {"reason": str(error)}
             recorded = self._record_failure_for_boundary(
@@ -643,44 +647,56 @@ class SkillsPoolReconcileService:
                     )
             locator_evidence = cutover.evidence
 
-        if not self._layouts.holds_lease(
+        convergence = await converge_post_cutover_mappings(
+            layouts=self._layouts,
+            skills=self._skills,
+            runtime=self._runtime,
             scope=scope,
-            migration_generation=generation,
+            generation=generation,
             lease_owner=lease_owner,
-        ):
+            user_id=user_id,
+            engine=engine,
+            cutover_mappings=mappings,
+            durable_retired_mappings=durable_retired_mappings,
+        )
+        if convergence.status is MappingConvergenceStatus.LEASE_NOT_HELD:
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.LEASE_NOT_HELD,
                 preparation_id=probe.preparation_id,
             )
-        if not await self._runtime.publish_mappings(
-            bot_id=scope.bot_id,
-            user_id=user_id,
-            mappings=mappings,
-        ):
+        convergence_failure = {
+            MappingConvergenceStatus.INVALID: (
+                SkillsPoolReconcileOutcome.INVALID,
+                "MAPPING_DATA_INVALID",
+                "mapping_snapshot",
+            ),
+            MappingConvergenceStatus.PUBLISH_FAILED: (
+                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                "MAPPING_PUBLISH_FAILED",
+                "mapping_publish",
+            ),
+            MappingConvergenceStatus.VERIFY_FAILED: (
+                SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                "MAPPING_VERIFY_FAILED",
+                "mapping_verify",
+            ),
+            MappingConvergenceStatus.SNAPSHOT_CHANGED: (
+                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                "MAPPING_SNAPSHOT_CHANGED",
+                "mapping_convergence",
+            ),
+        }.get(convergence.status)
+        if convergence_failure is not None:
+            outcome, failure_code, failure_stage = convergence_failure
             return self._record_post_cutover_failure(
                 scope=scope,
                 generation=generation,
                 lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
-                outcome=SkillsPoolReconcileOutcome.MAPPING_FAILED,
-                failure_code="MAPPING_PUBLISH_FAILED",
-                failure_stage="mapping_publish",
-                evidence={"mapping_count": len(mappings)},
-            )
-        if not await self._runtime.verify_mappings(
-            bot_id=scope.bot_id,
-            user_id=user_id,
-            mappings=mappings,
-        ):
-            return self._record_post_cutover_failure(
-                scope=scope,
-                generation=generation,
-                lease_owner=lease_owner,
-                preparation_id=probe.preparation_id,
-                outcome=SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
-                failure_code="MAPPING_VERIFY_FAILED",
-                failure_stage="mapping_verify",
-                evidence={"mapping_count": len(mappings)},
+                outcome=outcome,
+                failure_code=failure_code,
+                failure_stage=failure_stage,
+                evidence=convergence.evidence,
             )
 
         try:
@@ -859,6 +875,7 @@ class SkillsPoolReconcileService:
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
                 mappings=mappings,
+                retired_mappings=[],
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_FAILED,
@@ -869,6 +886,7 @@ class SkillsPoolReconcileService:
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
                 mappings=mappings,
+                retired_mappings=[],
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
@@ -977,10 +995,3 @@ class SkillsPoolReconcileService:
             SkillsPoolReconcileOutcome.BOT_CHANGED,
             evidence=evidence,
         )
-
-
-__all__ = [
-    "SkillsPoolReconcileOutcome",
-    "SkillsPoolReconcileResult",
-    "SkillsPoolReconcileService",
-]

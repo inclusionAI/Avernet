@@ -58,11 +58,12 @@ class _SkillsPortMixin:
         params: dict[str, Any],
         *,
         source_layout: MappingSourceLayout,
+        key: str = "mappings",
     ) -> ResolvedMappingPayload:
         return resolve_mapping_payload(
             engine="claude_code",
             source_layout=source_layout,
-            payload=params.get("mappings", []),
+            payload=params.get(key, []),
             mapping_contract_version=params.get("mapping_contract_version"),
         )
 
@@ -91,9 +92,7 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             rollback_claude_code_pool,
             rollback_generation=params["rollback_generation"],
-            registered_local_names=list(
-                params.get("registered_local_names", [])
-            ),
+            registered_local_names=list(params.get("registered_local_names", [])),
         )
         return result.to_data()
 
@@ -133,18 +132,28 @@ class _SkillsPortMixin:
                 )
             ),
         )
-        result = await asyncio.to_thread(
-            publish_claude_code_pool_mappings,
-            mappings=list(resolved.mappings),
+        retired = self._pool_mappings(
+            params,
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            key="retired_mappings",
+        )
+        publish_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            publish_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            publish_claude_code_pool_mappings,
+            **publish_kwargs,
         )
         data = result.to_data()
         if result.published and resolved.resolved_locators:
-            data["evidence"]["resolved_mappings"] = list(
-                resolved.resolved_locators
-            )
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
 
     async def verify_pool_mappings(
@@ -160,18 +169,28 @@ class _SkillsPortMixin:
                 )
             ),
         )
-        result = await asyncio.to_thread(
-            verify_claude_code_pool_mappings,
-            mappings=list(resolved.mappings),
+        retired = self._pool_mappings(
+            params,
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            key="retired_mappings",
+        )
+        verify_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            verify_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            verify_claude_code_pool_mappings,
+            **verify_kwargs,
         )
         data = result.to_data()
         if result.valid and resolved.resolved_locators:
-            data["evidence"]["resolved_mappings"] = list(
-                resolved.resolved_locators
-            )
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
 
     async def skills_list(self, token: str | None = None) -> list[dict]:

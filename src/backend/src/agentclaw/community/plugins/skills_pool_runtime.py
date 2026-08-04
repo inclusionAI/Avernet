@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from injector import inject
@@ -131,6 +132,7 @@ class SkillsPoolRuntime:
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         try:
@@ -141,6 +143,9 @@ class SkillsPoolRuntime:
                 body={
                     "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
+                    "retired_mappings": [
+                        mapping.to_dict() for mapping in retired_mappings
+                    ],
                     "source_layout": source_layout.value,
                 },
             )
@@ -271,6 +276,7 @@ class SkillsPoolRuntime:
         bot_id: str,
         user_id: str,
         mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
     ) -> bool:
         try:
@@ -281,6 +287,9 @@ class SkillsPoolRuntime:
                 body={
                     "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
+                    "retired_mappings": [
+                        mapping.to_dict() for mapping in retired_mappings
+                    ],
                     "source_layout": source_layout.value,
                 },
             )

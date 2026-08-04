@@ -30,6 +30,7 @@ OpenClaw keeps those operations outside its adapter.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
@@ -452,6 +453,7 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
@@ -460,6 +462,10 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
         }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
         raw = await self._port.publish_pool_mappings(payload)
@@ -472,6 +478,7 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
@@ -480,6 +487,10 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
         }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
         raw = await self._port.verify_pool_mappings(payload)
