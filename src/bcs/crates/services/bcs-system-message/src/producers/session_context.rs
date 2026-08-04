@@ -105,25 +105,10 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                 delivery_type,
             });
         }
-        let user_message = if render_group.group_strategy == GroupStrategy::ManagerWorker {
-            Some(depersonalized_service_group_context(
-                &render_group,
-                session_id,
-                render_group.context.as_deref(),
-                &bot_summaries,
-                task_input_text.as_deref(),
-                task_ledger.as_ref(),
-            ))
-        } else {
-            Some(depersonalized_chat_group_context(
-                &render_group,
-                session_id,
-                reason,
-                render_group.context.as_deref(),
-                has_provider_downlink_bot,
-                task_input_text.as_deref(),
-            ))
-        };
+        // SessionContext does not emit a user-facing WS message: the bot
+        // context messages are delivered per-recipient and persisted with
+        // owner=recipient, but no session-level frontend broadcast is produced.
+        let user_message: Option<String> = None;
         (messages, user_message)
     }
 }
@@ -261,49 +246,6 @@ fn routing_instruction_block(use_at_mention_routing: bool) -> &'static str {
     }
 }
 
-/// Depersonalized `[GROUP CONTEXT]` for the frontend WebSocket broadcast:
-/// keeps group facts and the routing instruction, strips the
-/// recipient-tailored `你是:` / `你的角色:` / role instruction. Rendered
-/// purely from group-level state (no recipient dependence, no bot-message
-/// iteration order).
-fn depersonalized_chat_group_context(
-    group: &Group,
-    session_id: &str,
-    topic: &str,
-    user_context: Option<&str>,
-    use_at_mention_routing: bool,
-    task_input: Option<&str>,
-) -> String {
-    let base_context = base_context_block(user_context);
-    let task_line = task_block(task_input);
-    let routing_instruction = routing_instruction_block(use_at_mention_routing);
-    let roster = if use_at_mention_routing {
-        format_roster_with_mentions(group)
-    } else {
-        format_roster(group)
-    };
-
-    format!(
-        "[GROUP CONTEXT]\n\
-         群组ID: {}\n\
-         会话ID: {}\n\
-         主题: {}\n\
-         {}\
-         参与者:\n{}\n\
-         {}\
-         \n\
-         {}\n\
-         [/GROUP CONTEXT]",
-        group.id,
-        session_id,
-        topic,
-        base_context,
-        roster,
-        task_line,
-        routing_instruction,
-    )
-}
-
 fn format_roster_with_mentions(group: &Group) -> String {
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     for participant in group.participants.iter().filter(|participant| participant.is_bot()) {
@@ -431,43 +373,6 @@ fn mw_status_block(task_ledger: Option<&LedgerSummary>) -> String {
         .filter(|line| !line.is_empty())
         .map(|line| format!("\n{}", line))
         .unwrap_or_default()
-}
-
-/// Depersonalized `[SERVICE GROUP CONTEXT]` for the frontend WebSocket
-/// broadcast: keeps `模式: manager_worker`, roster (name/ID/role/summary),
-/// background, `[任务]`, `[任务状态]` rendered unconditionally from facts;
-/// strips `你的角色: manager`, the coordination reminder, and the recipient
-/// tail `你是:` / `你的角色:`. Rendered purely from group-level facts — even
-/// when no Manager is a participant.
-fn depersonalized_service_group_context(
-    group: &Group,
-    session_id: &str,
-    context: Option<&str>,
-    bot_summaries: &HashMap<String, String>,
-    task_input: Option<&str>,
-    task_ledger: Option<&LedgerSummary>,
-) -> String {
-    let context_line = mw_context_block(context);
-    let task_line = mw_task_block(task_input);
-    let status_line = mw_status_block(task_ledger);
-
-    format!(
-        "[SERVICE GROUP CONTEXT]\n\
-         群组ID: {}\n\
-         会话ID: {}\n\
-         模式: manager_worker\n\
-         参与者:\n{}\n\
-         {}\
-         {}\
-         {}\n\
-         [/SERVICE GROUP CONTEXT]",
-        group.id,
-        session_id,
-        format_roster_with_role(group, bot_summaries),
-        context_line,
-        task_line,
-        status_line,
-    )
 }
 
 fn manager_worker_coordination_instruction(
