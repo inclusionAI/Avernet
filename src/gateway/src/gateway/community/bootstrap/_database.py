@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from gateway.community.spi.database import DataSourcePlugin
+
 from ._configs import DatabaseConfig
 
 
 def initialize_database(
-        db_plugin: DataSourcePlugin,
-        config: DatabaseConfig,
+    db_plugin: DataSourcePlugin,
+    config: DatabaseConfig,
 ) -> DataSourcePlugin:
     """Initialise the DI-resolved database plugin and return it.
 
