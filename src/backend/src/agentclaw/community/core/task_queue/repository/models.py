@@ -149,6 +149,7 @@ class TaskQueueModel(Base):
             attempts=self.attempts,
             last_error=self.last_error,
             env=self.env,
+            idempotency_key=self.idempotency_key,
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )

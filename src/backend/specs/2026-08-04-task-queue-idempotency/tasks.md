@@ -16,15 +16,15 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Depends on:** —
 - **Note:** This task is inert at runtime — nothing writes the columns yet.
 
-## Task 2: Add `EnqueueResult` and project the key onto `TaskRecord`
+## Task 2 `[x]`: Add `EnqueueResult` and project the key onto `TaskRecord`
 - **Goal:** The value types can express "(record, created)" and carry the audit key.
 - **Files:** `core/task_queue/types.py`, `core/task_queue/repository/models.py`
 - **Done when:**
-  - [ ] `EnqueueResult(NamedTuple)` with `record: TaskRecord` and `created: bool`, docstringed to say `created=False` only when a keyed enqueue joined a live task.
-  - [ ] `TaskRecord` gains `idempotency_key: Optional[str] = None`, placed after `env` (all following fields already have defaults).
-  - [ ] `to_record()` projects `idempotency_key`.
-  - [ ] `active_idempotency_key` is **not** projected — it is an enforcement detail (asserted in tests by querying the model directly).
-  - [ ] Exported from `core/task_queue/types.py`'s public surface consistently with `TaskRecord`.
+  - [x] `EnqueueResult(NamedTuple)` with `record: TaskRecord` and `created: bool`, docstringed to say `created=False` only when a keyed enqueue joined a live task.
+  - [x] `TaskRecord` gains `idempotency_key: Optional[str] = None`, placed after `env` (all following fields already have defaults).
+  - [x] `to_record()` projects `idempotency_key`.
+  - [x] `active_idempotency_key` is **not** projected — it is an enforcement detail (asserted in tests by querying the model directly).
+  - [x] Exported from `core/task_queue/types.py`'s public surface consistently with `TaskRecord`. No-op: neither `types.py` nor the package `__init__.py` declares `__all__` or re-exports, so `EnqueueResult` is reachable exactly as `TaskRecord` is.
 - **Depends on:** Task 1
 - **Note:** `Optional[str]` here is contract-intentional (opt-out is a real state), so it does not violate the `T | None` rule in `CLAUDE.md`.
 
