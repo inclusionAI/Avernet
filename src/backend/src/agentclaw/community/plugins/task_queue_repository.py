@@ -14,12 +14,40 @@ detail is "now plus N seconds" — :meth:`_now_plus` renders the right SQL for
 SQLite vs MySQL/OceanBase. No Python ``now`` is ever used for scheduling, so
 clock skew between worker pods cannot affect claim/lease/deadline decisions.
 
-**Idempotency** is enforced in :meth:`claim_batch`: per-row compare-and-swap
-whose WHERE reproduces eligibility, so across N racing workers each row is won
-by exactly one (the DB serializes the row write; the rest see it already
-``RUNNING`` with a live lease → ``affected == 0``). No ``SELECT ... FOR
+**Claim-time idempotency** is enforced in :meth:`claim_batch`: per-row
+compare-and-swap whose WHERE reproduces eligibility, so across N racing workers
+each row is won by exactly one (the DB serializes the row write; the rest see it
+already ``RUNNING`` with a live lease → ``affected == 0``). No ``SELECT ... FOR
 UPDATE``. The same CAS shape guards ``complete`` / ``reschedule`` / ``fail`` on
 ``claimed_by == worker_id AND status == RUNNING``.
+
+**Enqueue-time idempotency** is opt-in and *active-only*: at most one **live**
+task per ``idempotency_key`` within an ``(env, task_type)``. A ``None`` key opts
+out entirely and can never collide (engines treat NULLs as distinct in a unique
+index) — so un-keyed callers behave exactly as they always have.
+
+The scope is active-only rather than all-time because several call sites
+legitimately re-enqueue the same logical key after the previous task went
+terminal — a publish poll runs once per stage, a retry re-runs a failed stage, a
+bot restarts more than once, and skills-pool reconcile is level-triggered. An
+all-time key would silently swallow those.
+
+It is enforced by a second column: ``active_idempotency_key`` mirrors
+``idempotency_key`` while the task is live and is set to ``NULL`` by **every**
+terminal transition, which releases the key. MySQL/OceanBase have no partial
+indexes, so nulling a plain column is the portable way to say "unique among live
+rows only". There are exactly four such transitions, and each nulls the key
+*inside the same UPDATE* as its status change — so "terminal but key still held"
+is unrepresentable and there is no ordering window to get wrong:
+
+1. :meth:`claim_batch` — a past-deadline candidate retired ``TIMED_OUT``.
+2. :meth:`complete` — ``SUCCEEDED``.
+3. :meth:`reschedule` — a retry that would overshoot the deadline → ``TIMED_OUT``.
+4. :meth:`fail` — ``FAILED``.
+
+:meth:`reschedule`'s ``PENDING`` branch, :meth:`claim_batch`'s ``RUNNING`` claim,
+and :meth:`renew_lease` deliberately do **not** clear it: those tasks are still
+live and keep holding their key.
 
 ``gmt_created`` / ``gmt_modified`` are left entirely to the database (column
 default + ``ON UPDATE CURRENT_TIMESTAMP``); this body never sets them.
@@ -201,6 +229,8 @@ class TaskQueueRepository:
                         self.Model.last_error: "deadline elapsed before execution",
                         self.Model.claimed_by: None,
                         self.Model.lease_expires_at: None,
+                        # Terminal → release the dedup key (see module docstring).
+                        self.Model.active_idempotency_key: None,
                     },
                     synchronize_session=False,
                 )
@@ -232,6 +262,8 @@ class TaskQueueRepository:
                 self.Model.status: TaskStatus.SUCCEEDED.value,
                 self.Model.claimed_by: None,
                 self.Model.lease_expires_at: None,
+                # Terminal → release the dedup key (see module docstring).
+                self.Model.active_idempotency_key: None,
             },
         )
 
@@ -279,6 +311,8 @@ class TaskQueueRepository:
                         self.Model.last_error: (error or "deadline elapsed"),
                         self.Model.claimed_by: None,
                         self.Model.lease_expires_at: None,
+                        # Terminal → release the dedup key (see module docstring).
+                        self.Model.active_idempotency_key: None,
                     },
                     synchronize_session=False,
                 )
@@ -294,6 +328,8 @@ class TaskQueueRepository:
                 self.Model.last_error: error,
                 self.Model.claimed_by: None,
                 self.Model.lease_expires_at: None,
+                # Terminal → release the dedup key (see module docstring).
+                self.Model.active_idempotency_key: None,
             },
         )
 

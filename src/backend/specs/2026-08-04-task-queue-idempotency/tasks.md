@@ -28,16 +28,17 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Depends on:** Task 1
 - **Note:** `Optional[str]` here is contract-intentional (opt-out is a real state), so it does not violate the `T | None` rule in `CLAUDE.md`.
 
-## Task 3: Release the key on every terminal transition
+## Task 3 `[x]`: Release the key on every terminal transition
 - **Goal:** All four terminal writes null `active_idempotency_key` in the same `UPDATE` as the status change.
 - **Files:** `plugins/task_queue_repository.py`
 - **Done when:**
-  - [ ] `claim_batch` past-deadline `TIMED_OUT` (`:200`) clears the key.
-  - [ ] `complete()` → `SUCCEEDED` (`:232`) clears the key.
-  - [ ] `reschedule()` deadline-overshoot → `TIMED_OUT` (`:278`) clears the key.
-  - [ ] `fail()` → `FAILED` (`:293`) clears the key.
-  - [ ] `reschedule()`'s `PENDING` branch (`:250-255`), `claim_batch`'s `RUNNING` claim (`:168-176`), and `renew_lease` (`:308-311`) are **unchanged** — those tasks are still live and keep their key.
-  - [ ] Each clear is inside the existing `SET` dict, not a separate statement.
+  - [x] `claim_batch` past-deadline `TIMED_OUT` (now `:205`) clears the key.
+  - [x] `complete()` → `SUCCEEDED` (now `:238`) clears the key.
+  - [x] `reschedule()` deadline-overshoot → `TIMED_OUT` (now `:287`) clears the key.
+  - [x] `fail()` → `FAILED` (now `:304`) clears the key.
+  - [x] `reschedule()`'s `PENDING` branch, `claim_batch`'s `RUNNING` claim, and `renew_lease` are **unchanged** — those tasks are still live and keep their key.
+  - [x] Each clear is inside the existing `SET` dict, not a separate statement.
+  - [x] The module docstring documents the active-only invariant, enumerates the four releasing transitions, and names the three that deliberately retain the key. 21 existing tests pass.
 - **Depends on:** Task 1
 - **Note:** Sequenced **before** the insert path deliberately. Shipping release-without-insert is a no-op; shipping insert-without-release would silently behave as all-time-unique — the exact failure mode this design exists to avoid.
 
