@@ -384,6 +384,26 @@ def test_enable_common_config_returns_404_when_missing():
     assert resp.data is None
 
 
+def test_enable_common_config_returns_business_error_when_protected():
+    service = MagicMock()
+    service.enable_config.side_effect = ValueError(
+        "skills_pool layout rollout must use its operator API"
+    )
+
+    resp = _run(
+        router.enable_common_config(
+            ToggleCommonConfigRequest(id=1),
+            user=_USER,
+            service=service,
+        )
+    )
+
+    assert resp.success is False
+    assert resp.message == "skills_pool layout rollout must use its operator API"
+    assert resp.error_code == 40001
+    assert resp.data is None
+
+
 def test_disable_common_config_returns_success():
     service = MagicMock()
     service.disable_config.return_value = True
@@ -418,4 +438,24 @@ def test_disable_common_config_returns_404_when_missing():
     assert resp.success is False
     assert resp.message == "配置不存在"
     assert resp.error_code == 40401
+    assert resp.data is None
+
+
+def test_disable_common_config_returns_business_error_when_protected():
+    service = MagicMock()
+    service.disable_config.side_effect = ValueError(
+        "skills_pool layout rollout must use its operator API"
+    )
+
+    resp = _run(
+        router.disable_common_config(
+            ToggleCommonConfigRequest(id=1),
+            user=_USER,
+            service=service,
+        )
+    )
+
+    assert resp.success is False
+    assert resp.message == "skills_pool layout rollout must use its operator API"
+    assert resp.error_code == 40001
     assert resp.data is None
