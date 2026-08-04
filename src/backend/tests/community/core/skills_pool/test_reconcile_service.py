@@ -419,6 +419,13 @@ class FakeRuntime:
         self.probe_results: list[RuntimeLayoutProbeResult] = []
         self.publish_success = True
         self.verify_success = True
+        self.publish_results: list[bool] = []
+        self.verify_results: list[bool] = []
+        self.after_cutover = None
+        self.after_publish = None
+        self.after_verify = None
+        self.published_batches: list[dict[str, list[dict[str, str]]]] = []
+        self.verified_batches: list[dict[str, list[dict[str, str]]]] = []
         self.physical_cutovers = 0
         self.expected_registered_local_names = ["local-a", "local-b"]
         self.cutover_result = PoolCutoverResult(
@@ -486,7 +493,7 @@ class FakeRuntime:
         ):
             self.physical_cutovers += 1
         if self.cutover_result.committed:
-            return replace(
+            result = replace(
                 self.cutover_result,
                 evidence={
                     **self.cutover_result.evidence,
@@ -496,14 +503,42 @@ class FakeRuntime:
                     },
                 },
             )
-        return self.cutover_result
+        else:
+            result = self.cutover_result
+        if self.after_cutover is not None:
+            self.after_cutover()
+        return result
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
+        self.published_batches.append(
+            {
+                "mappings": [mapping.to_dict() for mapping in kwargs["mappings"]],
+                "retired_mappings": [
+                    mapping.to_dict() for mapping in kwargs["retired_mappings"]
+                ],
+            }
+        )
+        if self.after_publish is not None:
+            self.after_publish()
+        if self.publish_results:
+            return self.publish_results.pop(0)
         return self.publish_success
 
     async def verify_mappings(self, **kwargs: object) -> bool:
         self.events.append("verify")
+        self.verified_batches.append(
+            {
+                "mappings": [mapping.to_dict() for mapping in kwargs["mappings"]],
+                "retired_mappings": [
+                    mapping.to_dict() for mapping in kwargs["retired_mappings"]
+                ],
+            }
+        )
+        if self.after_verify is not None:
+            self.after_verify()
+        if self.verify_results:
+            return self.verify_results.pop(0)
         return self.verify_success
 
 
@@ -544,6 +579,254 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
             "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "hermes"])
+async def test_product_deactivation_during_cutover_retires_stale_mapping(
+    engine: str,
+) -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository(engine)
+    runtime = FakeRuntime(engine=engine)
+    runtime.after_cutover = lambda: skills.active.pop()
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=engine,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.published_batches == [
+        {
+            "mappings": [
+                {
+                    "corpus": "local",
+                    "relative_path": "local-a",
+                    "link_name": "local-a",
+                },
+                {
+                    "corpus": "local",
+                    "relative_path": "local-b",
+                    "link_name": "local-b",
+                },
+            ],
+            "retired_mappings": [
+                {
+                    "corpus": "repo",
+                    "relative_path": "business/repo-skill",
+                    "link_name": "repo-skill",
+                }
+            ],
+        }
+    ]
+    assert runtime.verified_batches == runtime.published_batches
+
+
+@pytest.mark.asyncio
+async def test_product_activation_after_verify_republishes_without_recutover() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    late = RegisteredSkillAsset(
+        skill_id=22,
+        name="late",
+        git_path="git://business/late",
+    )
+
+    def activate_after_first_verify() -> None:
+        if late not in skills.active:
+            skills.active.append(late)
+            runtime.after_verify = None
+
+    runtime.after_verify = activate_after_first_verify
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.events == [
+        "probe",
+        "cutover",
+        "mapping",
+        "verify",
+        "mapping",
+        "verify",
+    ]
+    assert runtime.published_batches[-1]["mappings"][-1] == {
+        "corpus": "repo",
+        "relative_path": "business/late",
+        "link_name": "late",
+    }
+
+
+@pytest.mark.asyncio
+async def test_same_name_recreated_during_cutover_retires_old_identity() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+
+    def replace_repo_skill() -> None:
+        skills.active[-1] = RegisteredSkillAsset(
+            skill_id=22,
+            name="repo-skill",
+            git_path="git://replacement/repo-skill",
+        )
+
+    runtime.after_cutover = replace_repo_skill
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.published_batches[0]["mappings"][-1] == {
+        "corpus": "repo",
+        "relative_path": "replacement/repo-skill",
+        "link_name": "repo-skill",
+    }
+    assert runtime.published_batches[0]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mapping_publish_retry_keeps_retirement_candidate() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.published_batches[1]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mapping_verify_retry_keeps_retirement_candidate() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.verify_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.verified_batches[1]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exact_reactivation_cancels_durable_retirement() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    original = skills.active[-1]
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    skills.active.append(original)
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.published_batches[1]["retired_mappings"] == []
+    assert runtime.published_batches[1]["mappings"][-1]["link_name"] == ("repo-skill")
+
+
+@pytest.mark.asyncio
+async def test_continuous_product_churn_is_bounded_without_database_commit() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    late = RegisteredSkillAsset(
+        skill_id=22,
+        name="late",
+        git_path="git://business/late",
+    )
+
+    def toggle_after_verify() -> None:
+        if late in skills.active:
+            skills.active.remove(late)
+        else:
+            skills.active.append(late)
+
+    runtime.after_verify = toggle_after_verify
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    assert result.retryable is True
+    assert layouts.state.last_failure_code == "MAPPING_SNAPSHOT_CHANGED"
+    assert runtime.physical_cutovers == 1
+    assert len(runtime.published_batches) == 4
+    assert "database" not in layouts.events
+
+
+@pytest.mark.asyncio
+async def test_malformed_durable_retirement_fails_before_retry_mutation() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    layouts.state = replace(
+        layouts.state,
+        last_failure_evidence={"retired_mappings": "not-a-list"},
+    )
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert len(runtime.published_batches) == 1
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -226,10 +226,7 @@ def _retired_storage_entries(
     entries = [layout.legacy_local, layout.local_bridge]
     if engine == "aicoding":
         entries.append(layout.active_root / "skills-repo")
-    if engine in {"openclaw", "claude_code"} and not (
-        engine == "openclaw"
-        and current_repo_delivery() is RepoDelivery.DOWNLOAD
-    ):
+    if engine in {"openclaw", "claude_code"}:
         entries.append(layout.repo_bridge)
     return tuple(dict.fromkeys(entries))
 
@@ -240,6 +237,15 @@ class _MappingPlan:
     external: tuple[Path, ...]
     failures: tuple[dict[str, str], ...]
     conflicts: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _MappingRetirementPlan:
+    remove: tuple[Path, ...]
+    absent: tuple[Path, ...]
+    replaced: tuple[Path, ...]
+    external: tuple[Path, ...]
+    failures: tuple[dict[str, str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,9 +402,7 @@ def _restore_legacy_repo_bridge(
     """Restore the descriptor's Legacy repo view after rollback."""
 
     repo_delivery = current_repo_delivery()
-    if repo_delivery is RepoDelivery.DOWNLOAD and engine == "openclaw":
-        return
-    if repo_delivery is RepoDelivery.MOUNT:
+    if repo_delivery is RepoDelivery.MOUNT or engine == "openclaw":
         target = layout.pool_repo
     elif layout.repo_bridge != layout.legacy_repo:
         target = layout.legacy_repo
@@ -510,10 +514,7 @@ def _finalize_active_root(
     repo_delivery = current_repo_delivery()
     if repo_delivery is RepoDelivery.DOWNLOAD and engine in {"aicoding", "hermes"}:
         _publish_structural_bridge(layout.repo_bridge, layout.pool_repo)
-    if engine in {"openclaw", "claude_code"} and not (
-        engine == "openclaw"
-        and repo_delivery is RepoDelivery.DOWNLOAD
-    ):
+    if engine in {"openclaw", "claude_code"}:
         _retire_bridge(
             layout.repo_bridge,
             allowed_targets=(layout.legacy_repo, layout.pool_repo),
@@ -792,6 +793,7 @@ def _mapping_plan(
     layout: _Layout,
     mappings: list[SkillMapping],
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
+    retired_targets: frozenset[Path] = frozenset(),
 ) -> _MappingPlan:
     desired: dict[Path, Path] = {}
     failures: list[dict[str, str]] = []
@@ -850,6 +852,8 @@ def _mapping_plan(
 
     discovered, external, occupied = _active_entry_inventory(layout)
     for target, pool_source in discovered.items():
+        if target in retired_targets:
+            continue
         source = _source_for_layout(
             layout,
             pool_source,
@@ -899,6 +903,134 @@ def _mapping_plan(
         external=external,
         failures=tuple(failures),
         conflicts=tuple(conflicts),
+    )
+
+
+def _mapping_target_invalid(layout: _Layout, target: Path) -> bool:
+    return (
+        not target.is_absolute()
+        or target.parent != layout.active_root
+        or target
+        in {
+            layout.legacy_local,
+            layout.legacy_repo,
+            layout.local_bridge,
+            layout.repo_bridge,
+        }
+        or (
+            layout.engine_type == "aicoding"
+            and target == layout.active_root / "skills-repo"
+        )
+    )
+
+
+def _mapping_source_outside_layout(
+    layout: _Layout,
+    source: Path,
+    *,
+    source_layout: MappingSourceLayout,
+) -> bool:
+    roots = (
+        (layout.legacy_local, layout.legacy_repo)
+        if source_layout is MappingSourceLayout.LEGACY
+        else (layout.pool_local, layout.pool_repo)
+    )
+    normalized = Path(os.path.abspath(source))
+    return not any(
+        normalized.is_relative_to(Path(os.path.abspath(root))) for root in roots
+    )
+
+
+def _retirement_plan(
+    *,
+    layout: _Layout,
+    mappings: list[SkillMapping],
+    retired_mappings: list[SkillMapping],
+    source_layout: MappingSourceLayout,
+) -> _MappingRetirementPlan:
+    """Validate exact managed identities that may be removed.
+
+    Retirement is deliberately narrower than full-set cleanup: an entry is
+    removed only while it still points lexically to the exact old managed
+    source. Filesystem-only managed entries and external symlinks remain
+    outside Backend product-state authority.
+    """
+
+    desired = {
+        Path(item.target): Path(os.path.abspath(Path(item.source)))
+        for item in mappings
+        if Path(item.target).is_absolute()
+    }
+    remove: list[Path] = []
+    absent: list[Path] = []
+    replaced: list[Path] = []
+    external: list[Path] = []
+    failures: list[dict[str, str]] = []
+    seen: dict[Path, Path] = {}
+    for mapping in retired_mappings:
+        source_input = Path(mapping.source)
+        source = Path(os.path.abspath(source_input))
+        target = Path(mapping.target)
+        reason = ""
+        if not source_input.is_absolute() or _mapping_source_outside_layout(
+            layout,
+            source,
+            source_layout=source_layout,
+        ):
+            reason = (
+                "source_outside_legacy"
+                if source_layout is MappingSourceLayout.LEGACY
+                else "source_outside_pool"
+            )
+        elif _mapping_target_invalid(layout, target):
+            reason = "target_invalid"
+        elif target in seen and seen[target] != source:
+            reason = "retired_target_ambiguous"
+        if reason:
+            failures.append(
+                {"source": str(source), "target": str(target), "reason": reason}
+            )
+            continue
+        seen[target] = source
+        if desired.get(target) == source:
+            replaced.append(target)
+            continue
+        if not target.exists() and not target.is_symlink():
+            absent.append(target)
+            continue
+        if not target.is_symlink():
+            failures.append(
+                {
+                    "source": str(source),
+                    "target": str(target),
+                    "reason": "retired_target_occupied",
+                }
+            )
+            continue
+        current = _lexical_target(target)
+        if current == source:
+            remove.append(target)
+            continue
+        if _canonical_pool_source(layout, current) is None:
+            external.append(target)
+            continue
+        if desired.get(target) == current:
+            replaced.append(target)
+            continue
+        failures.append(
+            {
+                "source": str(source),
+                "target": str(target),
+                "existing_source": str(current),
+                "reason": "retired_target_identity_mismatch",
+            }
+        )
+    return _MappingRetirementPlan(
+        remove=tuple(remove),
+        absent=tuple(absent),
+        replaced=tuple(replaced),
+        external=tuple(external),
+        failures=tuple(failures),
     )
 
 
@@ -2143,6 +2275,7 @@ def rollback_hermes_pool(
 def verify_skill_mappings(
     *,
     mappings: list[SkillMapping],
+    retired_mappings: Sequence[SkillMapping] = (),
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
@@ -2150,12 +2283,24 @@ def verify_skill_mappings(
     """验证受管激活入口精确解析到声明 layout 的 source。"""
 
     layout = _Layout.for_engine(engine, Path(home))
+    retirement = _retirement_plan(
+        layout=layout,
+        mappings=mappings,
+        retired_mappings=list(retired_mappings),
+        source_layout=source_layout,
+    )
     plan = _mapping_plan(
         layout=layout,
         mappings=mappings,
         source_layout=source_layout,
+        retired_targets=frozenset(Path(item.target) for item in retired_mappings),
     )
     failures: list[dict[str, str]] = []
+    failures.extend(retirement.failures)
+    for target in retirement.remove:
+        failures.append(
+            {"target": str(target), "reason": "retired_target_still_present"}
+        )
     failures.extend(plan.failures)
     for conflict in plan.conflicts:
         failures.append({**conflict, "reason": "managed_source_conflict"})
@@ -2175,6 +2320,8 @@ def verify_skill_mappings(
             "checked": len(mappings),
             "managed_checked": len(plan.managed),
             "external_ignored": len(plan.external),
+            "retired_checked": len(retired_mappings),
+            "retired_external_ignored": len(retirement.external),
             "failures": failures,
         },
     )
@@ -2183,6 +2330,7 @@ def verify_skill_mappings(
 def publish_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    retired_mappings: Sequence[SkillMapping] = (),
     home: str | Path = "/home/admin",
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
@@ -2190,10 +2338,17 @@ def publish_pool_mappings(
     """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
     layout = _Layout.for_engine(engine, Path(home))
+    retirement = _retirement_plan(
+        layout=layout,
+        mappings=mappings,
+        retired_mappings=list(retired_mappings),
+        source_layout=source_layout,
+    )
     plan = _mapping_plan(
         layout=layout,
         mappings=mappings,
         source_layout=source_layout,
+        retired_targets=frozenset(Path(item.target) for item in retired_mappings),
     )
     if plan.conflicts:
         return MappingPublishResult(
@@ -2201,6 +2356,14 @@ def publish_pool_mappings(
             evidence={
                 "reason": "managed_active_entry_conflict",
                 "conflicts": list(plan.conflicts),
+            },
+        )
+    if retirement.failures:
+        return MappingPublishResult(
+            published=False,
+            evidence={
+                "reason": "retired_mapping_invalid",
+                "failures": list(retirement.failures),
             },
         )
     if plan.failures:
@@ -2217,6 +2380,9 @@ def publish_pool_mappings(
     kept: list[str] = []
     removed: list[str] = []
     try:
+        for target in retirement.remove:
+            target.unlink()
+            removed.append(str(target))
         for target, source in plan.managed.items():
             if target.is_symlink():
                 if _lexical_target(target) == Path(os.path.abspath(source)):
@@ -2254,6 +2420,9 @@ def publish_pool_mappings(
             "kept": kept,
             "removed": removed,
             "external_ignored": [str(path) for path in plan.external],
+            "retired_absent": [str(path) for path in retirement.absent],
+            "retired_replaced": [str(path) for path in retirement.replaced],
+            "retired_external_ignored": [str(path) for path in retirement.external],
         },
     )
 

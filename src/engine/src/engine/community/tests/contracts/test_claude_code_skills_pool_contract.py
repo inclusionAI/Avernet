@@ -166,6 +166,11 @@ async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
         relative_path="business/reviewer",
         link_name="reviewer",
     )
+    retired_mapping = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="legacy/writer",
+        link_name="writer",
+    )
     version = "skills-pool-mapping-v2"
 
     await adapter.activate_pool_layout(
@@ -178,10 +183,12 @@ async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
     )
     await adapter.publish_pool_mappings(
         [mapping],
+        retired_mappings=[retired_mapping],
         mapping_contract_version=version,
     )
     await adapter.verify_pool_mappings(
         [mapping],
+        retired_mappings=[retired_mapping],
         mapping_contract_version=version,
     )
 
@@ -190,17 +197,24 @@ async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
         "relative_path": "business/reviewer",
         "link_name": "reviewer",
     }
+    expected_retired_mapping = {
+        "corpus": "repo",
+        "relative_path": "legacy/writer",
+        "link_name": "writer",
+    }
     activation = port.activate_pool_layout.await_args.args[0]
     assert activation["mapping_contract_version"] == version
     assert activation["mappings"] == [expected_mapping]
     assert port.publish_pool_mappings.await_args.args[0] == {
         "mapping_contract_version": version,
         "mappings": [expected_mapping],
+        "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
     assert port.verify_pool_mappings.await_args.args[0] == {
         "mapping_contract_version": version,
         "mappings": [expected_mapping],
+        "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
 

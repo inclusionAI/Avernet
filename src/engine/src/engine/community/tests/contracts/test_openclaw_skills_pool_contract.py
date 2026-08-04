@@ -180,14 +180,17 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
     port.publish_pool_mappings = AsyncMock(
         return_value={"published": True, "evidence": {}}
     )
-    port.verify_pool_mappings = AsyncMock(
-        return_value={"valid": True, "evidence": {}}
-    )
+    port.verify_pool_mappings = AsyncMock(return_value={"valid": True, "evidence": {}})
     adapter = OpenClawSkillsAdapter(port)
     mapping = PoolSkillMappingIntent(
         corpus="repo",
         relative_path="business/reviewer",
         link_name="reviewer",
+    )
+    retired_mapping = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="legacy/writer",
+        link_name="writer",
     )
     version = "skills-pool-mapping-v2"
 
@@ -201,10 +204,12 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
     )
     await adapter.publish_pool_mappings(
         [mapping],
+        retired_mappings=[retired_mapping],
         mapping_contract_version=version,
     )
     await adapter.verify_pool_mappings(
         [mapping],
+        retired_mappings=[retired_mapping],
         mapping_contract_version=version,
     )
 
@@ -212,6 +217,11 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
         "corpus": "repo",
         "relative_path": "business/reviewer",
         "link_name": "reviewer",
+    }
+    expected_retired_mapping = {
+        "corpus": "repo",
+        "relative_path": "legacy/writer",
+        "link_name": "writer",
     }
     assert port.activate_pool_layout.await_args.args[0] == {
         "migration_generation": "generation-1",
@@ -223,11 +233,13 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
     assert port.publish_pool_mappings.await_args.args[0] == {
         "mapping_contract_version": version,
         "mappings": [expected_mapping],
+        "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
     assert port.verify_pool_mappings.await_args.args[0] == {
         "mapping_contract_version": version,
         "mappings": [expected_mapping],
+        "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
 
@@ -238,9 +250,7 @@ async def test_openclaw_adapter_keeps_unversioned_physical_mapping() -> None:
     port.publish_pool_mappings = AsyncMock(
         return_value={"published": True, "evidence": {}}
     )
-    port.verify_pool_mappings = AsyncMock(
-        return_value={"valid": True, "evidence": {}}
-    )
+    port.verify_pool_mappings = AsyncMock(return_value={"valid": True, "evidence": {}})
     adapter = OpenClawSkillsAdapter(port)
     mapping = SymlinkItem(source="/pool/writer", target="/active/writer")
 
@@ -248,9 +258,7 @@ async def test_openclaw_adapter_keeps_unversioned_physical_mapping() -> None:
     await adapter.verify_pool_mappings([mapping])
 
     expected = {
-        "mappings": [
-            {"source": "/pool/writer", "target": "/active/writer"}
-        ],
+        "mappings": [{"source": "/pool/writer", "target": "/active/writer"}],
         "source_layout": "pool",
     }
     port.publish_pool_mappings.assert_awaited_once_with(expected)
