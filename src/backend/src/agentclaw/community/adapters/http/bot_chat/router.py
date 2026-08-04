@@ -58,7 +58,8 @@ async def list_sessions(
 ):
     """List bot conversation sessions."""
     try:
-        effective_owner_id = owner_id or user.staffId
+        # COSEC: Bind the owner scope to the authenticated identity; never trust query owner_id.
+        effective_owner_id = user.staffId
         result = await service.list_sessions(
             owner_id=effective_owner_id,
             from_date=from_date,

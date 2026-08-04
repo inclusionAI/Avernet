@@ -136,7 +136,9 @@ class TestListSessions:
         assert call_kwargs.kwargs.get("owner_id") == "361618" or call_kwargs[1].get("owner_id") == "361618"
 
     @pytest.mark.asyncio
-    async def test_list_sessions_with_filters(self, mock_service, mock_user):
+    async def test_owner_id_query_cannot_override_authenticated_user(
+        self, mock_service, mock_user
+    ):
         from agentclaw.community.adapters.http.bot_chat.router import list_sessions
 
         mock_service.list_sessions = AsyncMock(return_value=SessionListResponse(
@@ -149,7 +151,7 @@ class TestListSessions:
 
         await list_sessions(
             service=mock_service,
-            owner_id="custom_owner",
+            owner_id="victim_owner",
             bot_id="bot_123",
             trace_id=None,
             session_id="gen-ai-sess-456",
@@ -163,7 +165,7 @@ class TestListSessions:
         )
 
         call_kwargs = mock_service.list_sessions.call_args.kwargs
-        assert call_kwargs["owner_id"] == "custom_owner"
+        assert call_kwargs["owner_id"] == mock_user.staffId
         assert call_kwargs["bot_id"] == "bot_123"
         assert call_kwargs["session_id"] == "gen-ai-sess-456"
 
