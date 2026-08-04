@@ -42,18 +42,19 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Depends on:** Task 1
 - **Note:** Sequenced **before** the insert path deliberately. Shipping release-without-insert is a no-op; shipping insert-without-release would silently behave as all-time-unique — the exact failure mode this design exists to avoid.
 
-## Task 4: Implement the keyed insert path
+## Task 4 `[x]`: Implement the keyed insert path
 - **Goal:** `enqueue` dedupes a keyed submission against the live holder and returns `EnqueueResult`.
-- **Files:** `plugins/task_queue_repository.py`
+- **Files:** `plugins/task_queue_repository.py`, `tests/community/plugins/test_task_queue_repository.py` (helper only)
 - **Done when:**
-  - [ ] `enqueue` accepts `idempotency_key: Optional[str] = None` and returns `EnqueueResult`.
-  - [ ] `idempotency_key is None` → plain insert, `created=True`, both columns `NULL`, no conflict machinery on the path.
-  - [ ] A keyed insert writes the value to **both** columns.
-  - [ ] `_is_active_idem_conflict(exc)` is a module-level pure function over the exception, matching the MySQL/OceanBase form (index name in the message) **and** the SQLite form (column list). Anything else re-raises.
-  - [ ] `_find_active_by_key(env, task_type, key)` filters on `active_idempotency_key`, so terminal rows are invisible by construction.
-  - [ ] The `try` wraps the whole `with self._db.orm_session()` block — the context manager already rolls back and closes on exception (`plugins/local/database.py:207-217`), so the re-`SELECT` runs in a fresh session with no savepoint.
-  - [ ] The insert/re-`SELECT` race is bounded to two attempts; two consecutive losses raise rather than looping.
-  - [ ] The existing `[task_queue.enqueue]` log line distinguishes created from joined.
+  - [x] `enqueue` accepts `idempotency_key: Optional[str] = None` and returns `EnqueueResult`.
+  - [x] `idempotency_key is None` → plain insert, `created=True`, both columns `NULL`, no conflict machinery on the path.
+  - [x] A keyed insert writes the value to **both** columns.
+  - [x] `_is_active_idem_conflict(exc)` is a module-level pure function over the exception, matching the MySQL/OceanBase form (index name in the message) **and** the SQLite form (column list). Anything else re-raises.
+  - [x] `_find_active_by_key(env, task_type, key)` filters on `active_idempotency_key`, so terminal rows are invisible by construction.
+  - [x] The `try` wraps the whole `with self._db.orm_session()` block — via the extracted `_insert` helper, so the failed INSERT is rolled back and closed by the context manager and the re-`SELECT` runs in a fresh session with no savepoint.
+  - [x] The insert/re-`SELECT` race is bounded to two attempts; two consecutive losses raise rather than looping.
+  - [x] The existing `[task_queue.enqueue]` log line distinguishes created from joined.
+- **Note:** The `_enqueue` test-helper unwrap (originally listed under Task 6) was pulled forward into this task — the return-type change breaks all 21 pre-existing tests otherwise, and leaving the tree red across two tasks is worse than the small reordering.
 - **Depends on:** Tasks 2, 3
 
 ## Task 5: Update the contract and the docs that promise the opposite
@@ -74,7 +75,7 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Goal:** Cover spec (g) cases 1–4 plus the opt-out regression guard.
 - **Files:** `tests/community/plugins/test_task_queue_repository.py`
 - **Done when:**
-  - [ ] The `_enqueue` helper at `:60` unwraps `.record` so the **22 existing call sites stay untouched**; a separate `_enqueue_result` helper returns the full `EnqueueResult` for new tests.
+  - [x] The `_enqueue` helper unwraps `.record` so the **22 existing call sites stay untouched**; a separate `_enqueue_result` helper returns the full `EnqueueResult` for new tests. *(Landed in Task 4 — see its note.)*
   - [ ] Duplicate keyed enqueue returns the existing record with `created=False` and inserts no second row (row count asserted).
   - [ ] Multiple `NULL` keys coexist — the relied-upon engine property, asserted explicitly.
   - [ ] The same key under a different `task_type` does not collide.

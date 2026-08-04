@@ -58,14 +58,32 @@ def repo():
     return TaskQueueRepository(InMemorySqliteDB(engine))
 
 
-def _enqueue(repo, *, payload=None, delay_seconds=0, deadline_seconds=3600, env=ENV):
+def _enqueue_result(
+    repo,
+    *,
+    payload=None,
+    delay_seconds=0,
+    deadline_seconds=3600,
+    env=ENV,
+    task_type="demo",
+    idempotency_key=None,
+):
+    """The full ``EnqueueResult`` — for tests that care about ``created``."""
     return repo.enqueue(
-        task_type="demo",
+        task_type=task_type,
         payload=payload if payload is not None else {"k": "v"},
         delay_seconds=delay_seconds,
         deadline_seconds=deadline_seconds,
         env=env,
+        idempotency_key=idempotency_key,
     )
+
+
+def _enqueue(repo, **kwargs):
+    """Just the ``TaskRecord``. Keeps every pre-existing test that predates the
+    idempotency key reading naturally, and makes those tests a regression guard
+    for "un-keyed enqueue behaves exactly as before"."""
+    return _enqueue_result(repo, **kwargs).record
 
 
 def _claim(repo, worker, *, limit=10, lease=60, env=ENV):

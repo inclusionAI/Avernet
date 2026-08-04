@@ -59,14 +59,56 @@ from typing import List, Optional
 
 from injector import inject
 from sqlalchemy import and_, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
-from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
+from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 logger = get_logger()
+
+#: The unique index backing active-only enqueue dedup. Named here because the
+#: two engines report a violation of it differently and both spellings must be
+#: recognised — see :func:`_is_active_idem_conflict`.
+_ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idem"
+
+#: How many times :meth:`TaskQueueRepository.enqueue` will try to insert a keyed
+#: task. A second attempt is only ever reached when the conflicting row went
+#: terminal (releasing the key) between the failed INSERT and the re-SELECT, so
+#: two is enough to cover the race without risking an unbounded loop.
+_KEYED_INSERT_ATTEMPTS = 2
+
+
+def _is_active_idem_conflict(exc: IntegrityError) -> bool:
+    """Is this ``IntegrityError`` a violation of the active-idempotency index?
+
+    Scoped deliberately: a blanket ``except IntegrityError`` would turn an
+    unrelated constraint violation into a bogus "duplicate" and hand the caller
+    somebody else's row.
+
+    The two engines name the violation differently, so both spellings are
+    matched:
+
+    - MySQL / OceanBase report the **index**::
+
+          Duplicate entry 'dev-demo-k1' for key 'uk_env_task_type_active_idem'
+
+    - SQLite reports the **columns**::
+
+          UNIQUE constraint failed: ac_task_queue.env, ac_task_queue.task_type,
+          ac_task_queue.active_idempotency_key
+
+    A pure function over the exception so it is unit-testable against both
+    message forms without a MySQL instance.
+    """
+    message = str(getattr(exc, "orig", None) or exc)
+    if _ACTIVE_IDEM_INDEX in message:
+        return True
+    # SQLite names the columns instead of the index. active_idempotency_key
+    # appears in no other constraint on this table, so it alone identifies it.
+    return "UNIQUE constraint failed" in message and "active_idempotency_key" in message
 
 
 class TaskQueueRepository:
@@ -121,18 +163,20 @@ class TaskQueueRepository:
             self.Model.status == TaskStatus.RUNNING.value,
         )
 
-    # ── enqueue (plain INSERT — never an upsert) ────────────────────────
+    # ── enqueue (INSERT; deduped against live rows when keyed) ──────────
 
-    def enqueue(
+    def _insert(
         self,
         *,
         task_type: str,
-        payload: dict,
+        payload_json: str,
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
+        idempotency_key: Optional[str],
     ) -> TaskRecord:
-        payload_json = json.dumps(payload, ensure_ascii=False)
+        """INSERT one PENDING row and return it. Raises ``IntegrityError`` when
+        a keyed insert loses to a live holder of the same key."""
         with self._db.orm_session() as db:
             row = self.Model(
                 task_type=task_type,
@@ -142,20 +186,111 @@ class TaskQueueRepository:
                 deadline_at=self._now_plus(db, deadline_seconds),
                 attempts=0,
                 env=env,
+                idempotency_key=idempotency_key,
+                # Mirrors the key while the task is live; nulled on terminal.
+                active_idempotency_key=idempotency_key,
             )
             db.add(row)
             db.flush()
             new_id = row.id
-            logger.info(
-                "[task_queue.enqueue] type=%s id=%s delay=%ss deadline=%ss",
-                task_type,
-                new_id,
-                delay_seconds,
-                deadline_seconds,
-            )
         record = self.get_by_id(new_id)
         assert record is not None  # just inserted
         return record
+
+    def _find_active_by_key(
+        self, *, env: str, task_type: str, idempotency_key: str
+    ) -> Optional[TaskRecord]:
+        """The **live** holder of ``idempotency_key``, or ``None``.
+
+        Filters on ``active_idempotency_key``, so terminal rows — which released
+        the key — are invisible here by construction; there is no need to
+        restate the status predicate.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.env == env,
+                    self.Model.task_type == task_type,
+                    self.Model.active_idempotency_key == idempotency_key,
+                )
+                .first()
+            )
+            return row.to_record() if row else None
+
+    def enqueue(
+        self,
+        *,
+        task_type: str,
+        payload: dict,
+        delay_seconds: int,
+        deadline_seconds: int,
+        env: str,
+        idempotency_key: Optional[str] = None,
+    ) -> EnqueueResult:
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        insert_kwargs = dict(
+            task_type=task_type,
+            payload_json=payload_json,
+            delay_seconds=delay_seconds,
+            deadline_seconds=deadline_seconds,
+            env=env,
+            idempotency_key=idempotency_key,
+        )
+
+        # Un-keyed: the caller opted out of dedup, so this stays a plain INSERT
+        # with none of the conflict machinery on the path.
+        if idempotency_key is None:
+            record = self._insert(**insert_kwargs)
+            self._log_enqueued(record, delay_seconds, deadline_seconds, created=True)
+            return EnqueueResult(record, True)
+
+        # Keyed: try-insert, and on a conflict with *this* index hand back the
+        # live holder. ``orm_session()`` rolls back and closes on exception
+        # (and the corp engine runs at AUTOCOMMIT), so the failed INSERT leaves
+        # nothing to clean up and the lookup below runs in a fresh session.
+        for _ in range(_KEYED_INSERT_ATTEMPTS):
+            try:
+                record = self._insert(**insert_kwargs)
+            except IntegrityError as exc:
+                if not _is_active_idem_conflict(exc):
+                    raise  # unrelated constraint — never read as a duplicate
+                existing = self._find_active_by_key(
+                    env=env, task_type=task_type, idempotency_key=idempotency_key
+                )
+                if existing is not None:
+                    logger.info(
+                        "[task_queue.enqueue] type=%s joined existing id=%s key=%s",
+                        task_type,
+                        existing.id,
+                        idempotency_key,
+                    )
+                    return EnqueueResult(existing, False)
+                # The holder reached a terminal state between our INSERT and
+                # this lookup, releasing the key — it is free again, so retry.
+                continue
+            self._log_enqueued(record, delay_seconds, deadline_seconds, created=True)
+            return EnqueueResult(record, True)
+
+        raise RuntimeError(
+            "[task_queue.enqueue] could not insert or resolve a holder for "
+            f"key={idempotency_key!r} type={task_type} env={env} after "
+            f"{_KEYED_INSERT_ATTEMPTS} attempts"
+        )
+
+    @staticmethod
+    def _log_enqueued(
+        record: TaskRecord, delay_seconds: int, deadline_seconds: int, *, created: bool
+    ) -> None:
+        logger.info(
+            "[task_queue.enqueue] type=%s id=%s delay=%ss deadline=%ss key=%s created=%s",
+            record.task_type,
+            record.id,
+            delay_seconds,
+            deadline_seconds,
+            record.idempotency_key,
+            created,
+        )
 
     # ── claim (the single-winner CAS) ───────────────────────────────────
 
