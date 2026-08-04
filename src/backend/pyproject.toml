@@ -48,7 +48,7 @@ dependencies = [
   "httpx>=0.27.0",
   "pyyaml>=6.0",
   "requests>=2.31",
-  "aiohttp>=3.9",
+  "aiohttp>=3.14.3",
   "websockets>=13.0.0",
   # python-multipart: the community app mounts multipart/file-upload routers
   # (resources file upload, skill-center, aicoding workitem upload) that FastAPI
