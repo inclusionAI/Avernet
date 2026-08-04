@@ -693,40 +693,42 @@ _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (7 endpoints: 5 in stub + 2 proposed ★) · `openapi_v1/skills/router.py`
-Two resource families under one component: a global catalog at
-`/openapi/v1/bots/skills/catalog`, and a bot's installed skills at
-`/openapi/v1/bots/skills/{bot_id}`.
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (6 endpoints: Track B contract ratified) · `openapi_v1/skills/router.py`
+The Skills public API uses the `/openapi/v1/bots/skills` route group. Local
+Skill upload and lifecycle operations belong to a specific bot.
 
-> **Why the catalog needs a literal `catalog` segment.** Under the addressing
-> rule the bot-scoped family takes `/openapi/v1/bots/skills/{bot_id}`. A catalog
-> detail at `/openapi/v1/bots/skills/{skill_id}` would occupy the same slot with
-> a different meaning — two wildcards at one depth, which no ordering rule can
-> tell apart. `catalog` is the same device the surface already uses for
-> `check-name` and `ceiling`. Declaration order inside the router is what keeps
-> the literal ahead of `{bot_id}`; the file says so.
+> **Ratified with totalfrank.** Existing Local Skills are stored through a bot's
+> device file system; they are not reusable tenant-global assets. Track B
+> therefore uses a per-bot **upload** → **activate/deactivate** → **delete**
+> lifecycle and does not expose a separate installation concept. Reusable
+> tenant-level Skills are deferred until Skill Center provides independent
+> storage and distribution. The public API does not expose a cross-bot Skill
+> catalog: list and upload require `bot_id` as a query parameter, and list uses
+> the optional `active` filter instead of a separate active-list route.
+> `skill_id` maps to `ac_skill.id` and uniquely identifies a Skill, so operations
+> on a specific Skill do not repeat `bot_id`.
 
-> **Co-owned — the trickiest category.** Skills has a three-layer lifecycle
-> (global **upload** → per-bot **install** → per-bot **enable/disable**), two ★
-> endpoints not yet ratified into the stubs, and an open question on whether the
-> richer backend skill-set model gets promoted to a first-class concept. Because
-> of that, **both** own it. Agree a shared sub-plan first — e.g. split
-> catalog/upload vs. per-bot install/lifecycle — and give it its own SDD before
-> writing code. Do it after your P1/P2 slices.
+Upload accepts one raw `application/zip` body and creates an Inactive Skill.
+A same-name upload updates the existing Skill in that Bot scope while preserving
+its ID and desired Active/Inactive state. For a service Bot, the optional
+`owner_entity_id` on list/upload locates the owner scope only after permission
+verification: the Bot owner remains the Local Skill owner, while an authorized
+collaborator is recorded only as the operation actor. Reads use database desired
+state and remain available while the Bot is offline; mutations require a ready
+Bot and must compensate on runtime synchronization failure.
 
-The **Status** column marks whether each endpoint is already in the router stub
-(`in stub`) or a proposed addition from PR #363 (`★ proposed` — not in the stubs
-yet; ratify with totalfrank before implementing).
+The router stubs now expose exactly this ratified contract. They define the
+transport shape only; the Track B implementation slices wire persistence,
+package storage, authorization, and runtime synchronization behind it.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills/catalog` | Skill catalog (`keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
-| GET | `/openapi/v1/bots/skills/catalog/{skill_id}` | Skill detail | `Envelope[SkillDetail]` | in stub |
-| POST ★ | `/openapi/v1/bots/skills/catalog/upload` | Upload a custom skill (global, owned by caller) | `Envelope[Skill]` | ★ proposed |
-| GET | `/openapi/v1/bots/skills/{bot_id}` | List a bot's installed skills | `Envelope[list[BotSkill]]` | in stub |
-| POST | `/openapi/v1/bots/skills/{bot_id}` | Install a skill on a bot (default enabled) | `201 Envelope[BotSkill]` | in stub |
-| PATCH ★ | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | Enable/disable an installed skill (`status`) | `Envelope[BotSkill]` | ★ proposed |
-| DELETE | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | Remove (unbind) a skill from a bot | `Envelope[Deleted]` | in stub |
+| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[Skill]` | in stub |
+| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[SkillUpload]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[SkillState]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[SkillState]` | in stub |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | in stub |
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
@@ -1082,7 +1084,6 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
-
 - **2026-08-03** — **`/openapi/v1/bots` path normalization + channels removed.**
   Every component's routes now live under `/openapi/v1/bots/<component>/…` with
   `{bot_id}` as the first segment *inside* the component — see the new
@@ -1105,3 +1106,9 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   file's reserved-name list — against the generated document, so both fail here
   rather than in review. SDD:
   `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`.
+- **2026-08-04** — **Track B Skills contract finalized at six endpoints.** Removed
+  the separate `/skills/active` route in favor of the collection's optional
+  `active` filter. Pinned Bot-scoped raw ZIP upload, same-name replacement,
+  owner-versus-collaborator semantics, offline reads, ready-Bot mutation gating,
+  and compensation on runtime synchronization failure. Skill Center publication
+  and reusable tenant-level Skills remain a later contract.
