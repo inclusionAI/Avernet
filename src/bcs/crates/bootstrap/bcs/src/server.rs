@@ -27,8 +27,8 @@ use tracing::{debug, info, warn};
 use crate::Result;
 use crate::auth_wiring::AuthPluginFactory;
 use crate::config::{
-    BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, LlmConfig,
-    LlmProviderType,
+    BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, GroupSessionWsConfig,
+    LlmConfig, LlmProviderType,
 };
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
@@ -1265,13 +1265,12 @@ async fn build_gateway_principal_verifier_from_secret_access(
     build_gateway_principal_verifier_from_process(config)
 }
 
-const GROUP_SESSION_WS_SECRET_NAME: &str = "bcn-group-session-ws-jwt";
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str =
     "test-only-group-session-key-at-least-32-bytes";
 
 fn group_session_test_secret_access() -> Arc<dyn SecretAccessPort> {
     Arc::new(InMemorySecretAccess::with_entries([(
-        GROUP_SESSION_WS_SECRET_NAME,
+        GroupSessionWsConfig::default().signing_key_secret,
         String::new(),
         GROUP_SESSION_WS_TEST_SIGNING_KEY.to_string(),
     )]))
@@ -1291,29 +1290,32 @@ fn build_secret_access_blocking(config: &BcsConfig) -> crate::Result<Arc<dyn Sec
 }
 
 async fn build_group_session_token_port(
+    config: &GroupSessionWsConfig,
     secret_access: Arc<dyn SecretAccessPort>,
 ) -> crate::Result<Arc<dyn GroupSessionTokenPort>> {
+    let secret_name = config.signing_key_secret.trim();
     let secret = secret_access
-        .get_secret(GROUP_SESSION_WS_SECRET_NAME)
+        .get_secret(secret_name)
         .await
         .map_err(|_| {
-            crate::BcsError::InvalidConfig(
-                "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required".to_string(),
-            )
+            crate::BcsError::InvalidConfig(format!(
+                "group_session_ws.signing_key_secret '{secret_name}' is required"
+            ))
         })?;
     let tokens = GroupSessionJwtService::new(&secret.value).map_err(|_| {
-        crate::BcsError::InvalidConfig(
-            "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT must be non-empty".to_string(),
-        )
+        crate::BcsError::InvalidConfig(format!(
+            "group_session_ws.signing_key_secret '{secret_name}' must resolve to non-empty material"
+        ))
     })?;
     Ok(Arc::new(tokens))
 }
 
 async fn build_group_session_connection_service(
     sessions: Arc<dyn bcs_service_api::application::v1::SessionService>,
+    config: &GroupSessionWsConfig,
     secret_access: Arc<dyn SecretAccessPort>,
 ) -> crate::Result<Arc<dyn GroupSessionConnectionService>> {
-    let tokens = build_group_session_token_port(secret_access).await?;
+    let tokens = build_group_session_token_port(config, secret_access).await?;
     Ok(Arc::new(GroupSessionConnectionServiceImpl::new(
         sessions, tokens,
     )))
@@ -1520,20 +1522,26 @@ mod gateway_principal_tests {
     async fn group_session_websocket_signing_key_is_required_and_non_empty() {
         let missing: Arc<dyn bcs_service_api::port::SecretAccessPort> =
             Arc::new(InMemorySecretAccess::new());
-        let missing_error = match build_group_session_token_port(missing).await {
+        let config = GroupSessionWsConfig::default();
+        let missing_error = match build_group_session_token_port(&config, missing).await {
             Ok(_) => panic!("missing group-session WebSocket key must fail"),
             Err(error) => error,
         };
         assert!(matches!(missing_error, crate::BcsError::InvalidConfig(_)));
+        assert!(
+            missing_error
+                .to_string()
+                .contains("group_session_ws.signing_key_secret 'bcn-group-session-ws-jwt' is required")
+        );
 
         let empty: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
             InMemorySecretAccess::with_entries([(
-                GROUP_SESSION_WS_SECRET_NAME,
+                config.signing_key_secret.clone(),
                 String::new(),
                 "   ".to_string(),
             )]),
         );
-        let empty_error = match build_group_session_token_port(empty).await {
+        let empty_error = match build_group_session_token_port(&config, empty).await {
             Ok(_) => panic!("empty group-session WebSocket key must fail"),
             Err(error) => error,
         };
@@ -1544,15 +1552,18 @@ mod gateway_principal_tests {
     #[tokio::test]
     async fn explicit_group_session_websocket_signing_key_is_accepted() {
         let secret_material = "test-only-group-session-key-at-least-32-bytes";
+        let config = GroupSessionWsConfig {
+            signing_key_secret: "other_manual_teamclawgw_principal_signing_key".to_string(),
+        };
         let access: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
             InMemorySecretAccess::with_entries([(
-                GROUP_SESSION_WS_SECRET_NAME,
+                config.signing_key_secret.clone(),
                 String::new(),
                 secret_material.to_string(),
             )]),
         );
 
-        let result = build_group_session_token_port(access).await;
+        let result = build_group_session_token_port(&config, access).await;
 
         if let Err(error) = result {
             let message = error.to_string();
@@ -3942,6 +3953,7 @@ impl BcsServer {
         );
         let group_session_connections = build_group_session_connection_service(
             self.state.openapi_v1.session_service.clone(),
+            &self.config.group_session_ws,
             self.state.group_session_secret_access.clone(),
         )
         .await?;
@@ -4437,7 +4449,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required")
+                .contains("group_session_ws.signing_key_secret 'bcn-group-session-ws-jwt' is required")
         );
     }
 
