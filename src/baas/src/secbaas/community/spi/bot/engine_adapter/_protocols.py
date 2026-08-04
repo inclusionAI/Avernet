@@ -60,6 +60,28 @@ class BotEngineAdapter(Protocol):
         """
         ...
 
+    def build_session_id(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        """Construct a deterministic session ID without calling the engine.
+
+        Returns the constructed session ID if this engine supports deterministic
+        IDs, or ``None`` if the engine does not support them (and the caller
+        should fall back to the synchronous session-creation path).
+
+        Args:
+            tc_bot_id: Teamclaw bot id / agent id.
+            user_id: User id for session affinity.
+            run_id: Run id used in the ID construction.
+            session_id: Caller-supplied session id — returned as-is when present.
+        """
+        ...
+
     async def create_adapter_session(
         self,
         *,

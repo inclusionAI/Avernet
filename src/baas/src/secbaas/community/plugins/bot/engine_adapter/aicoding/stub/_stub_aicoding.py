@@ -30,6 +30,16 @@ class NoopAICodingAdapter:
     ) -> str | None:
         return None
 
+    def build_session_id(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        return None
+
     async def create_adapter_session(
         self,
         *,
@@ -75,6 +85,19 @@ class MockAICodingAdapter:
         )
         if session_id is not None:
             return session_id
+        return None
+
+    def build_session_id(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        self.calls.append(
+            ("build_session_id", tc_bot_id, user_id, run_id, session_id)
+        )
         return None
 
     async def create_adapter_session(

@@ -281,6 +281,38 @@ class BotRunRequestExecutor:
             self._repo.update_error(run.run_id, "session_id missing")
             return
 
+        # Deferred session materialisation: when the runner deferred session
+        # creation, the executor must create the engine session before sending.
+        session_deferred = metadata.get("session_deferred") == "true"
+        if session_deferred:
+            logger.info(
+                "[BotRunExecutor] Session deferred, materialising: "
+                "run_id=%s, session_id=%s, resolved_bot_id=%s",
+                run.run_id,
+                session_id,
+                resolved_bot_id,
+            )
+            try:
+                await bot_service.create_session(
+                    bot_id=resolved_bot_id,
+                    session_id=session_id,
+                    metadata=metadata,
+                    binding_info=binding_info,
+                    context=context,
+                    run_id=run.run_id,
+                )
+            except Exception as e:
+                logger.error(
+                    "[BotRunExecutor] Deferred session creation failed: "
+                    "run_id=%s, session_id=%s, error=%s",
+                    run.run_id,
+                    session_id,
+                    e,
+                    exc_info=True,
+                )
+                self._repo.update_error(run.run_id, "Session creation failed")
+                return
+
         logger.info(
             "[BotRunExecutor] start by executor, session_id=%s, resolved_bot_id=%s, run_id=%s, request_type=%s, stream=%s",
             session_id,

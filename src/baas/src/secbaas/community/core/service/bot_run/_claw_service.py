@@ -98,6 +98,37 @@ class ClawBotService(BotService):
 
     # ── 公开方法 (BotService Protocol) ───────────────────────────────────────
 
+    def build_session_id(
+        self,
+        *,
+        engine_type: str,
+        bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+        binding_info: BotBindingInfo | None = None,
+    ) -> str | None:
+        """Construct a deterministic session ID for the openclaw engine path.
+
+        Returns the rule-based ID for openclaw, delegates to adapter for
+        registered engine types, or returns ``None`` for unsupported engines.
+        """
+        if session_id is not None:
+            return session_id
+
+        _adapter = self._adapter_for(engine_type)
+        if _adapter is not None:
+            tc_bot_id = binding_info.bot_id if binding_info else bot_id
+            return _adapter.build_session_id(
+                tc_bot_id=tc_bot_id,
+                user_id=user_id,
+                run_id=run_id,
+                session_id=session_id,
+            )
+
+        # openclaw (arca/sandbox path)
+        return f"agent:main:session:{run_id}:user:{user_id}"
+
     async def create_session(
         self,
         *,

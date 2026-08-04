@@ -24,6 +24,10 @@ class NoopMessageDispatcher:
     所有分发调用记录 warning 日志但不执行任何操作。
     """
 
+    # Logging-only stub: never materialises sessions, so the runner must not
+    # enable the defer path when this dispatcher is selected.
+    supports_session_defer: bool = False
+
     @property
     def order(self) -> int:
         return 0
@@ -45,6 +49,7 @@ class NoopMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        session_deferred: bool = False,
     ) -> None:
         logger.warning(
             "NoopMessageDispatcher.dispatch_send called: run_id=%s, "
@@ -63,6 +68,7 @@ class NoopMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         logger.warning(
             "NoopMessageDispatcher.dispatch_send_stream called: run_id=%s, "
@@ -87,6 +93,7 @@ class NoopMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> None:
         logger.warning(
             "NoopMessageDispatcher.dispatch_inject called: run_id=%s, "

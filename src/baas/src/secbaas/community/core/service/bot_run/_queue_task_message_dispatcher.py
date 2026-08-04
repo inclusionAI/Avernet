@@ -51,6 +51,12 @@ class QueueTaskMessageDispatcher:
     - dispatch_inject: 同上，request_type 标记为 inject
     """
 
+    # This dispatcher writes ``session_deferred`` into the queue meta; the
+    # queue Worker's ``BotRunRequestExecutor`` materialises the engine session
+    # before sending. Declaring this capability lets ``BotRunner`` defer
+    # session creation only when the selected dispatcher can honour it.
+    supports_session_defer: bool = True
+
     def __init__(
         self,
         run_repository: BotRunRepository,
@@ -88,11 +94,15 @@ class QueueTaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        session_deferred: bool = False,
     ) -> None:
         """队列化消息发送：只入库（PENDING），Worker 异步执行。
 
         bot_service / binding_info 等参数不在此处使用（Worker 从 DB 重建上下文），
         但保留在签名中以兼容 MessageDispatcher 协议。
+
+        ``session_deferred`` 为 True 时把 ``session_deferred="true"`` 写入队列
+        meta，``BotRunRequestExecutor`` 据此在 worker 侧补建引擎会话。
         """
         self._check_backpressure(bot_id)
         meta: dict[str, Any] = {
@@ -103,12 +113,15 @@ class QueueTaskMessageDispatcher:
             meta["callback_function"] = callback
         if timeout is not None:
             meta["timeout"] = timeout
+        if session_deferred:
+            meta["session_deferred"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
-            "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s",
+            "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s session_deferred=%s",
             run_id,
             bot_id,
             session_id,
+            session_deferred,
         )
 
     async def dispatch_inject(
@@ -121,20 +134,26 @@ class QueueTaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> None:
         """队列化消息注入：只入库（PENDING），Worker 异步执行。
 
         inject 不触发推理但需与同 session 的 send 串行，
         串行由 Worker 端 DistributedLockService 的 session 锁保证。
+
+        ``session_deferred`` 语义同 ``dispatch_send``。
         """
         self._check_backpressure(bot_id)
         meta: dict[str, Any] = {"request_type": "inject"}
+        if session_deferred:
+            meta["session_deferred"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
-            "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s",
+            "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s session_deferred=%s",
             run_id,
             bot_id,
             session_id,
+            session_deferred,
         )
 
     # ── 私有方法 ──────────────────────────────────────────────────────────
@@ -150,6 +169,7 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: int | None = None,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """队列化流式发送：入队 + 轮询 chunk 表。
 
@@ -165,12 +185,15 @@ class QueueTaskMessageDispatcher:
         meta: dict[str, Any] = {"request_type": "chat", "stream": "true"}
         if timeout is not None:
             meta["timeout"] = timeout
+        if session_deferred:
+            meta["session_deferred"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
         logger.info(
-            "[queue_dispatcher.dispatch_send_stream] run_id=%s bot_id=%s",
+            "[queue_dispatcher.dispatch_send_stream] run_id=%s bot_id=%s session_deferred=%s",
             run_id,
             bot_id,
+            session_deferred,
         )
 
         async for chunk in self._poll_chunks(run_id, timeout=timeout):

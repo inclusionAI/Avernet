@@ -32,7 +32,13 @@ class TaskMessageDispatcher:
 
     当前策略：通过 asyncio.create_task 在 fire-and-forget 的后台任务中执行。
     TaskConcurrencyPool 槽位在任务内部通过 acquire() 排队获取。
+
+    ``supports_session_defer`` 为 False：本 dispatcher 直接在进程内发送，
+    不做 workerside materialisation，因此 ``BotRunner`` 不会对它启用 defer
+    路径——会话必须在 runner 阶段同步创建。
     """
+
+    supports_session_defer: bool = False
 
     def __init__(
         self,
@@ -66,6 +72,7 @@ class TaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        session_deferred: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_send_message(
@@ -98,6 +105,7 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
 
@@ -160,6 +168,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_inject_message(

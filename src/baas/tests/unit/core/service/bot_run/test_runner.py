@@ -71,6 +71,8 @@ def mock_bot_service():
     svc.send_message = AsyncMock(return_value=MagicMock(content="reply", usage={}))
     svc.inject_message = AsyncMock()
     svc.get_messages = AsyncMock(return_value=[])
+    # Default: engine does NOT support deterministic session IDs → sync path.
+    svc.build_session_id = MagicMock(return_value=None)
     return svc
 
 

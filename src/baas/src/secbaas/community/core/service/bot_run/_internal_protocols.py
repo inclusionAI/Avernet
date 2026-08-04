@@ -79,6 +79,32 @@ class BotService(Protocol):
         """
         ...
 
+    def build_session_id(
+        self,
+        *,
+        engine_type: str,
+        bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+        binding_info: BotBindingInfo | None = None,
+    ) -> str | None:
+        """Construct a deterministic session ID without calling the engine.
+
+        Returns the constructed session ID if the engine supports deterministic
+        IDs, or ``None`` when the engine does not, in which case the caller
+        should fall back to the synchronous session-creation path.
+
+        Args:
+            engine_type: Engine type (e.g. "openclaw", "claude_code").
+            bot_id: Bot identifier.
+            user_id: User id for session affinity.
+            run_id: Run id used in the ID construction.
+            session_id: Caller-supplied session id — returned as-is when present.
+            binding_info: Optional binding info for tc_bot_id resolution.
+        """
+        ...
+
     async def send_message(
         self,
         *,
@@ -199,7 +225,14 @@ class MessageDispatcher(Protocol):
 
     ``order`` 越大优先级越高，BotRunner 按 order 降序遍历，
     第一个 ``accepts(bot_id)`` 返回 True 的 dispatcher 被选中。
+
+    ``supports_session_defer`` 声明该 dispatcher 是否能 Honour
+    ``session_deferred=True``：只有声明 True 的 dispatcher 会在
+    worker/materialisation 侧补建引擎会话，BotRunner 仅对这类 dispatcher
+    启用 build_session_id defer 路径；其他 dispatcher 必须走同步 create_session。
     """
+
+    supports_session_defer: bool = False
 
     @property
     def order(self) -> int:
@@ -229,6 +262,7 @@ class MessageDispatcher(Protocol):
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        session_deferred: bool = False,
     ) -> None:
         """分发消息发送以进行异步执行
 
@@ -248,6 +282,7 @@ class MessageDispatcher(Protocol):
             callback: 可选的完成回调，签名与
                       asyncio.Task.add_done_callback 一致
             chat_metadata: 可选的 chat 请求元数据，透传给 BotService.send_message
+            session_deferred: Whether session creation was deferred to the executor.
         """
         ...
 
@@ -262,6 +297,7 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
 
@@ -270,6 +306,9 @@ class MessageDispatcher(Protocol):
         - Queue 模式：入队后轮询 chunk 表，封装为迭代器返回
 
         调用方统一 async for 消费，不感知模式差异。
+
+        Args:
+            session_deferred: Whether session creation was deferred to the executor.
         """
         ...
 
@@ -283,6 +322,7 @@ class MessageDispatcher(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        session_deferred: bool = False,
     ) -> None:
         """分发消息注入以进行异步执行
 
@@ -297,6 +337,7 @@ class MessageDispatcher(Protocol):
             binding_info: 已解析的绑定信息
             context: 可选的请求上下文
             bot_id: 用于队列模式下的每键限制
+            session_deferred: Whether session creation was deferred to the executor.
         """
         ...
 

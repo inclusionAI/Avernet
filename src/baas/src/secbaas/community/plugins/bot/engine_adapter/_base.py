@@ -37,6 +37,17 @@ class BaseEngineAdapter:
         """默认：session_id 优先，否则无 device 亲和（aicoding 语义）。"""
         return session_id
 
+    def build_session_id(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        """默认：引擎不支持确定性 session ID，返回 None。"""
+        return None
+
     async def create_adapter_session(
         self,
         *,
