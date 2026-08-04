@@ -93,7 +93,7 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
 
         sessions = client.get(
             "/api/v1/bot-chats",
-            params={"owner_id": "e2e_user", "trace_id": trace_id},
+            params={"trace_id": trace_id},
         )
         assert sessions.status_code == 200, sessions.text
         sessions_body = sessions.json()
