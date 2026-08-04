@@ -10,7 +10,7 @@ denies — never an open proxy).
 The pattern usually goes unwritten: a domain that declares no ``match`` claims
 ``{base_path}/{name}/**``, which is the leading-segment routing every domain had
 before patterns existed. Writing one lets a domain sit *beneath* another —
-``/openapi/v1/bots/messages/**`` is served by the engine proxy while
+``/openapi/v1/bots/messages/ws/**`` is served by the engine proxy while
 ``/openapi/v1/bots/**`` is served by the backend — so the public address space
 can follow ownership rather than process topology.
 

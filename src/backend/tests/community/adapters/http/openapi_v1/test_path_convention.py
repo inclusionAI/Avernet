@@ -173,7 +173,7 @@ def test_the_socket_prefix_is_reserved():
     """`messages` is claimed by the gateway on the socket plane.
 
     Recorded here because nothing in *this* service publishes it: an HTTP
-    request to `/openapi/v1/bots/messages/...` still arrives here, so without
+    request to `/openapi/v1/bots/messages/ws/...` still arrives here, so without
     the reservation a bot could take the id and the intended component could
     never have the address.
     """

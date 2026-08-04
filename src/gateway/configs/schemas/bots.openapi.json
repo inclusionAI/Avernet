@@ -348,7 +348,7 @@
           "sockets": [
             {
               "kind": "chat",
-              "url": "wss://gateway.example/openapi/v1/bots/messages/abc/api/openclaw/ws?x-proxypass-token=…"
+              "url": "wss://gateway.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=…"
             }
           ]
         },
@@ -3516,7 +3516,7 @@
         "description": "One WebSocket you may open against the bot.",
         "example": {
           "kind": "chat",
-          "url": "wss://gateway.example/openapi/v1/bots/messages/abc/api/openclaw/ws?x-proxypass-token=…"
+          "url": "wss://gateway.example/openapi/v1/bots/messages/ws/abc/api/openclaw/ws?x-proxypass-token=…"
         },
         "properties": {
           "kind": {
