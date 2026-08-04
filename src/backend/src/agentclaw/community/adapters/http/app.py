@@ -37,7 +37,7 @@ from agentclaw.community.di import (
     validate_deploy_environment,
 )
 from agentclaw.community.di.config_bootstrap import register_config_provider
-from agentclaw.community.di.modules_bootstrap import register_corp_modules
+from agentclaw.community.di.modules_bootstrap import register_corp_modules, resolve_extra_modules
 
 # Single mandatory switch: read the deploy profile once, here at the
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
@@ -55,7 +55,7 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-injector = build_injector(profile=_deploy_profile)
+injector = build_injector(profile=_deploy_profile, extra_modules=resolve_extra_modules(_deploy_profile))
 
 # Startup integrity check: resolve a small set of critical bindings
 # now so misconfiguration surfaces at boot instead of on first request.
@@ -246,9 +246,30 @@ attach_injector(app, injector)
 # Middleware (delegated to api/middleware.py)
 # =============================================================================
 from agentclaw.community.adapters.http.middleware import install_middleware  # noqa: E402
-from agentclaw.community.di.config import CorsConfig  # noqa: E402
+from agentclaw.community.di.config import CorsConfig, SecretNamesConfig  # noqa: E402
 from agentclaw.community.plugin_api.auth import AuthPlugin  # noqa: E402
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver  # noqa: E402
 from agentclaw.community.plugin_api.tracer import TracerPlugin  # noqa: E402
+from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
+    init_principal_verifier_config,
+)
+
+# Resolve the key the gateway signs /openapi/v1 principals with. Done here
+# because AvernetTenantMiddleware reads the verifier config from the raw ASGI
+# layer, before any route and outside the injector — so the composition root
+# pushes it in rather than the middleware pulling it out.
+#
+# Strict in ``pre``/``prod``, matching the eager binding check above and gated
+# on the same SERVER_ENV: a deployment that serves the public API without a
+# signing key answers 401 to every request while looking healthy, so it must
+# fail the rollout instead. Local, dev, and singlebox legitimately have no key
+# (singlebox ships it empty on purpose), so there it degrades to deny-everything
+# rather than refusing to boot.
+init_principal_verifier_config(
+    injector.get(SecretResolver),
+    injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    strict=get_current_env() in ("pre", "prod"),
+)
 
 install_middleware(
     app,
@@ -370,6 +391,21 @@ def _public_error_envelope(
     return unmapped_error_response(status, request, headers=headers)
 
 
+def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | None:
+    """The public envelope for ``exc`` if this surface maps it, else ``None``.
+
+    ``None`` for every internal ``/api`` request too: those keep the
+    ``{"detail": ...}`` shape their existing clients parse.
+    """
+    if not _is_public_api(request):
+        return None
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        mapped_error_response,
+    )
+
+    return mapped_error_response(exc, request)
+
+
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
@@ -467,10 +503,37 @@ async def _data_proxy_error_handler(
 # Catch-all for unhandled non-DomainError exceptions. Returns the same
 # {"detail": ...} JSON shape (status 500) instead of Starlette's default
 # plain-text "Internal Server Error" body, so the wire format is uniform
-# across every error path. Always logs the traceback — by definition we
-# didn't expect this exception, so the trace is the only debug signal.
+# across every error path. Logs the traceback for anything genuinely
+# unexpected — by definition we didn't expect it, so the trace is the only
+# debug signal.
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # A mapped public error can still land here: @envelope_errors only wraps the
+    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** — the auth
+    # seam every public route declares — is raised before the handler runs and
+    # arrives as an "unhandled" exception. Consulting the same table here is what
+    # makes an unauthenticated public request a 401 rather than a 500, wherever
+    # the error was raised. One table, two entry points.
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        # Expected client-side flow (missing/invalid credentials, bad input).
+        # A traceback per unauthenticated request would bury the real 5xx ones,
+        # so log at warning without one — matching how the DomainError handler
+        # treats 4xx.
+        if mapped.status_code < 500:
+            logger.warning(
+                "[Public %s] %s on %s %s",
+                mapped.status_code, type(exc).__name__, request.method,
+                request.url.path,
+            )
+            return mapped
+        logger.exception(
+            "[Public %s] %s on %s %s",
+            mapped.status_code, type(exc).__name__, request.method,
+            request.url.path,
+        )
+        return mapped
+
     logger.exception(
         "[Unhandled exception] %s on %s %s",
         type(exc).__name__, request.method, request.url.path,

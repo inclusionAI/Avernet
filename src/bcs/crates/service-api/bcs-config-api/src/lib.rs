@@ -13,13 +13,11 @@ use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 
 pub mod bcsfuse;
-pub mod mist;
 pub mod mysql;
 pub mod redis;
 pub mod redis_route_type;
 
 pub use bcsfuse::BcsFuseConfig;
-pub use mist::MistConfig;
 pub use mysql::{DataSourceConfig, MysqlDbConfig, StatementProtocol};
 pub use redis::{
     CacheConfig, RedisAuthCredentials, RedisAuthMode, RedisCacheConfig, RedisConnectionConfig,
@@ -403,6 +401,40 @@ impl AuthSdkConfig {
 /// Abstract env view for AuthSdk completeness check, injected by caller.
 pub trait AuthSdkEnvView {
     fn has(&self, var: &str) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// Secret backend
+// ---------------------------------------------------------------------------
+
+/// Provider-specific secret-backend options.
+pub type SecretProviderConfig = BTreeMap<String, serde_json::Value>;
+
+/// Secret backend selector.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SecretConfig {
+    /// Secret provider to load. Public/local builds support `noop` and `env`;
+    /// linked extension crates can register additional providers.
+    #[serde(default = "default_secret_provider")]
+    pub provider: String,
+
+    /// Provider-specific options keyed by provider name.
+    #[serde(default)]
+    pub providers: BTreeMap<String, SecretProviderConfig>,
+}
+
+impl Default for SecretConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_secret_provider(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+fn default_secret_provider() -> String {
+    "noop".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -871,6 +903,8 @@ pub enum LlmProviderType {
     None,
     /// OpenAI Chat Completions compatible HTTP API.
     OpenAiCompatible,
+    /// Anthropic Messages HTTP API.
+    Anthropic,
     /// A linked extension-provided LLM provider.
     Other(String),
 }
@@ -880,6 +914,7 @@ impl LlmProviderType {
         match self {
             Self::None => "none",
             Self::OpenAiCompatible => "openai_compatible",
+            Self::Anthropic => "anthropic",
             Self::Other(value) => value.as_str(),
         }
     }
@@ -903,6 +938,7 @@ impl<'de> Deserialize<'de> for LlmProviderType {
         Ok(match value.trim().to_ascii_lowercase().as_str() {
             "none" => Self::None,
             "openai_compatible" => Self::OpenAiCompatible,
+            "anthropic" => Self::Anthropic,
             _ => Self::Other(value),
         })
     }
@@ -918,11 +954,11 @@ impl Default for LlmProviderType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuredOutputMode {
-    /// Send OpenAI `response_format = { type = "json_schema", ... }`.
+    /// Use the provider's native JSON Schema constrained-output mechanism.
     JsonSchema,
-    /// Send OpenAI JSON mode and rely on local schema validation.
+    /// Use JSON-object mode and rely on local schema validation when supported.
     JsonObject,
-    /// Convert the schema to a forced OpenAI-compatible tool call.
+    /// Convert the schema to a provider-native forced tool call.
     ToolCall,
 }
 

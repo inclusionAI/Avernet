@@ -55,10 +55,17 @@ def _bind_bot(app):
         "bot": MOCK_BOT_ITEM,
         "passport": {"agent_code": "ac_001", "status": "AUTHORIZED"},
     }
+    # Task 1 retired bot_id=="default"; Task 2 derives is_first_bot from the
+    # owner's bot count via bot_service.is_first_bot. Stub it so the mock
+    # returns a real boolean instead of a MagicMock leaking into the response.
+    svc.is_first_bot.return_value = True
     svc.update_bot.return_value = {**MOCK_BOT_ITEM, "bot_name": "updated-bot"}
     svc.delete_bot.return_value = True
     svc.check_bot_name_exists.return_value = False
     svc.restart_bot.return_value = {"bot_id": "bot_test_001", "status": "RESTARTING"}
+    # create_flow asks the service whether this is the owner's first bot, and the
+    # response contract types passport.is_first_bot as a boolean.
+    svc.is_first_bot.return_value = True
     bind_mock_service(BotService, svc, app)
     return svc
 

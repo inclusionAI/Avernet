@@ -37,6 +37,13 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Runtime lookup only; set this environment variable to real secret material.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "https://bcs.example.com",
@@ -70,6 +77,21 @@ structured_output = "json_schema"
 
 [database]
 type = "mysql"
+
+# Select a linked secret backend in deployments that do not use environment
+# variables. Group-session WebSocket JWT signing material is resolved through
+# [group_session_ws].signing_key_secret. The default logical name remains
+# "bcn-group-session-ws-jwt" for backward compatibility.
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
+[group_session_ws]
+# Optional. Override when the deployment secret backend uses a different
+# logical secret name for group-session WebSocket JWT signing material.
+signing_key_secret = "bcn-group-session-ws-jwt"
 
 [cache]
 type = "redis"

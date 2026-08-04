@@ -12,6 +12,17 @@ fn rust_files_under(directory: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
+fn manifest_declares_dependency(manifest: &str, dependency: &str) -> bool {
+    manifest.lines().any(|line| {
+        let line = line.trim_start();
+        if line.starts_with('#') {
+            return false;
+        }
+        line.split_once('=')
+            .is_some_and(|(name, _)| name.trim().trim_matches('"') == dependency)
+    })
+}
+
 #[test]
 fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -21,18 +32,43 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
     for forbidden in [
         "bcs-protocol",
         "bcs-http",
+        "bcs-jwt",
         "bcs-group",
         "bcs-session",
         "bcs-friend",
         "bcs-bot",
         "bcs-relation",
+        "bcs-app-bot",
+        "bcs-app-group",
+        "bcs-app-session",
+        "bcs-app-invitation",
     ] {
-        let dependency_prefix = format!("{forbidden} ");
         assert!(
-            !manifest
-                .lines()
-                .any(|line| line.trim_start().starts_with(&dependency_prefix)),
+            !manifest_declares_dependency(&manifest, forbidden),
             "versioned HTTP adapter must not depend on {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn production_bootstrap_composes_the_versioned_http_adapter_and_v1_facades() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let bootstrap_manifest =
+        match fs::read_to_string(manifest_dir.join("../../../bootstrap/bcs/Cargo.toml")) {
+            Ok(source) => source,
+            Err(_) => panic!("read production bootstrap manifest"),
+        };
+
+    for dependency in [
+        "bcs-api-http",
+        "bcs-app-bot",
+        "bcs-app-group",
+        "bcs-app-session",
+        "bcs-app-invitation",
+    ] {
+        assert!(
+            manifest_declares_dependency(&bootstrap_manifest, dependency),
+            "production bootstrap must compose {dependency}"
         );
     }
 }

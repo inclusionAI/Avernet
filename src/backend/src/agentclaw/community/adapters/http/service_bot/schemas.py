@@ -48,3 +48,13 @@ class ReadOnlyTreeResponse(BaseModel):
     items: list[ReadOnlyTreeItem] = Field(default_factory=list, description="目录树条目列表")
     default_rules: list[ReadOnlyRuleItem] = Field(default_factory=list, description="默认只读规则列表")
     custom_rules: list[ReadOnlyRuleItem] = Field(default_factory=list, description="用户自定义只读规则列表")
+
+
+class BotRsyncExcludesResponse(BaseModel):
+    """Bot rsync excludes 配置响应。"""
+    bot_id: str = Field(..., description="Bot ID")
+    engine_type: str = Field(..., description="引擎类型（openclaw/claude_code）")
+    default_excludes: list[str] = Field(..., description="引擎默认的rsync排除规则")
+    custom_excludes: Optional[list[str]] = Field(None, description="Bot自定义配置（可能为null）")
+    merged_excludes: list[str] = Field(..., description="合并后的最终排除规则（去重）")
+    excludes_source: str = Field(..., description="配置来源标识：default_only 或 default_plus_custom")

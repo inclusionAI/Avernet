@@ -812,6 +812,7 @@ class TestRestartGuardOrchestration:
             template_uuid="TEMPLATE-claude-code",
             source="system_config",
         )
+        resolver.resolve_template_uid.return_value = "claude_code_bot_template"
         template_config = {"image": "reg.example/custom:latest"}
         svc = _make_service(
             repo,
@@ -847,10 +848,23 @@ class TestRestartGuardOrchestration:
             template_type="normalCC",
             template_config=template_config,
         )
-        resolver.resolve_template_uid.assert_not_called()
+        resolver.resolve_template_uid.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            env=get_current_env(),
+            bot_type="service",
+            engine_type="claude_code",
+            template_type="normalCC",
+            template_config=template_config,
+        )
         resolver.resolve_template_uuid.assert_not_called()
-        assert baas.upgrade_bot.call_args.kwargs["template_uuid"] == "TEMPLATE-claude-code"
-        assert baas.upgrade_bot.call_args.kwargs["migration_path"] is None
+        upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
+        assert upgrade_kwargs["template_uuid"] == "TEMPLATE-claude-code"
+        assert upgrade_kwargs["template_config"] == {
+            "image": "reg.example/custom:latest",
+            "template_uid": "claude_code_bot_template",
+        }
+        assert upgrade_kwargs["migration_path"] is None
         publish_repo.get_by_publish_bot_id.assert_not_called()
 
     def test_restart_baas_service_does_not_require_published_version(self):

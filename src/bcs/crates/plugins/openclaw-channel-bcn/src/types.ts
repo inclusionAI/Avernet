@@ -125,6 +125,8 @@ export type ChannelSource = 'webui' | 'dingtalk' | 'api';
 export interface ChannelInfo {
   source: ChannelSource;
   user_id?: string;
+  actor_id?: string;
+  actor_name?: string;
   thread_id?: string;
 }
 

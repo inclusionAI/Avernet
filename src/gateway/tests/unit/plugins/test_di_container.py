@@ -9,6 +9,7 @@ from gateway.community.bootstrap._configs import (
     DatabasePluginConfig,
     PluginConfig,
     init_container_config,
+    load_container_config,
 )
 from gateway.community.bootstrap._container import ApplicationContainer
 from gateway.community.plugin_registry import (
@@ -77,12 +78,6 @@ class TestPluginContainerSelectors:
 
         cache = plugins.cache_plugin()
         assert cache is not None
-
-        validator = plugins.app_token_validator()
-        assert validator is not None
-
-        resolver = plugins.tenant_resolver()
-        assert resolver is not None
 
 
 class TestPluginRegistryInjection:
@@ -163,6 +158,11 @@ class TestApplicationContainer:
         assert container.config.plugins.forwarder() == "sofa"
         assert container.config.plugins.cache() == "real"
 
+    def test_load_container_config_returns_dict(self) -> None:
+        cfg = load_container_config()
+        assert isinstance(cfg, dict)
+        assert "plugins" in cfg
+
 
 class TestRenderProviderTree:
     """Cover the new Singleton/Callable branches in _render_provider_tree."""
@@ -242,57 +242,59 @@ class TestRenderProviderTree:
 
 
 class TestInjectEnterprisePlugins:
-    """Cover _inject_enterprise_plugins and the new inject_extra_authn_strategies path."""
+    """Cover _inject_enterprise_plugins and authn provider extension path."""
 
-    def test_inject_runs_authn_strategies(self) -> None:
-        """When enterprise plugins are registered, _inject_enterprise_plugins
-        calls inject_extra_authn_strategies which populates AuthnStrategyRegistry."""
-        import gateway.community.bootstrap.plugins._registry as reg_mod
+    def test_inject_runs_authn_strategy_providers(self) -> None:
+        import gateway.community.bootstrap as bootstrap_mod
         import gateway.community.plugin_registry as registry_mod
-        from gateway.community.bootstrap import get_container, set_container
+        from gateway.community.bootstrap import get_container
+        from gateway.community.bootstrap._configs import init_container_config
         from gateway.community.plugin_registry import (
             has_enterprise_plugins,
-            register_extra_authn_strategy,
+            register_authn_strategy_provider,
             register_plugin_option,
         )
 
-        # Reset state
-        reg_mod._authn_registry = None
         registry_mod._extra_options.clear()
+        registry_mod._authn_strategy_providers.clear()
+        bootstrap_mod._container = None
 
-        # Register an enterprise authn strategy
         result = object()
-        register_extra_authn_strategy("test_strategy", lambda: result)
-        # Also register a selector plugin to trigger has_enterprise_plugins
+        from dependency_injector import providers
+
+        register_authn_strategy_provider(
+            "test_strategy", lambda _plugins: providers.Object(result)
+        )
         register_plugin_option("cache_plugin", "test", lambda: "test-cache")
         assert has_enterprise_plugins()
 
-        # Create container — _inject_enterprise_plugins runs here
         container = get_container()
-        set_container(container)
+        init_container_config(container)
 
-        # AuthnStrategyRegistry should now have the test strategy
-        pool = reg_mod.get_authn_registry().resolve_all()
+        pool = container.plugins().authn_strategies()
         assert "test_strategy" in pool
         assert pool["test_strategy"] is result
 
-        # Cleanup
-        reg_mod._authn_registry = None
+        bootstrap_mod._container = None
         registry_mod._extra_options.clear()
+        registry_mod._authn_strategy_providers.clear()
 
     def test_no_enterprise_plugins_no_injection(self) -> None:
-        """When no enterprise plugins are registered, inject paths are skipped."""
-        import gateway.community.bootstrap.plugins._registry as reg_mod
+        import gateway.community.bootstrap as bootstrap_mod
         import gateway.community.plugin_registry as registry_mod
         from gateway.community.bootstrap import get_container
+        from gateway.community.bootstrap._configs import init_container_config
 
-        reg_mod._authn_registry = None
         registry_mod._extra_options.clear()
+        registry_mod._authn_strategy_providers.clear()
+        bootstrap_mod._container = None
 
-        get_container()
+        container = get_container()
+        init_container_config(container)
 
-        pool = reg_mod.get_authn_registry().resolve_all()
-        assert pool == {}
+        pool = container.plugins().authn_strategies()
+        assert set(pool) >= {"google", "bot_token", "app_token", "access_key_token"}
 
-        reg_mod._authn_registry = None
+        bootstrap_mod._container = None
         registry_mod._extra_options.clear()
+        registry_mod._authn_strategy_providers.clear()

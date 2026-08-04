@@ -7,6 +7,7 @@ The model is used in local development mode (DATABASE_MODE=sqlite).
 from sqlalchemy import Column, Integer, String, Text, DateTime, Index, func
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
 
 class EntityDeviceBinding(Base):
@@ -85,12 +86,13 @@ class DefaultSkillsetMcpExclusion(Base):
     bot_id = Column(String(64), nullable=False, index=True)
     skill_set_id = Column(Integer, nullable=False, index=True)
     server_code = Column(String(255), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     excluded_at = Column(DateTime, nullable=False, default=func.now())
     gmt_create = Column(DateTime, nullable=False, default=func.now())
     gmt_modified = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        Index("uk_user_bot_skillset_mcp", "user_id", "bot_id", "skill_set_id", "server_code", unique=True),
+        Index("uk_user_bot_skillset_mcp", "avernet_tenant", "user_id", "bot_id", "skill_set_id", "server_code", unique=True),
         {"extend_existing": True},
     )
 
@@ -107,11 +109,16 @@ class DefaultSkillsetSkillExclusion(Base):
     bot_id = Column(String(64), nullable=False, index=True)
     skill_set_id = Column(Integer, nullable=False, index=True)
     skill_id = Column(Integer, nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     excluded_at = Column(DateTime, nullable=False, default=func.now())
     gmt_create = Column(DateTime, nullable=False, default=func.now())
     gmt_modified = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        Index("uk_user_bot_skillset_skill", "user_id", "bot_id", "skill_set_id", "skill_id", unique=True),
+        Index("uk_user_bot_skillset_skill", "avernet_tenant", "user_id", "bot_id", "skill_set_id", "skill_id", unique=True),
         {"extend_existing": True},
     )
+
+
+register_avernet_tenant_guard(DefaultSkillsetMcpExclusion)
+register_avernet_tenant_guard(DefaultSkillsetSkillExclusion)

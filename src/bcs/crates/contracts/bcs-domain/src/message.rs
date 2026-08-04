@@ -203,9 +203,16 @@ pub struct MessageQuery {
 }
 
 /// Paginated message result page.
+///
+/// `next_cursor` is a composite `(created_at, session_seq)` tuple so that
+/// messages sharing a `created_at` at a page boundary are not permanently
+/// skipped on the next page (VYQHI). Legacy `query_messages` callers that
+/// surface only a `created_at` cursor to clients extract `.0` at the
+/// application/HTTP boundary; the V1 `list_session_history` path encodes the
+/// full tuple into an opaque string cursor.
 #[derive(Debug, Clone)]
 pub struct MessagePage {
     pub messages: Vec<PersistedMessage>,
-    pub next_cursor: Option<u64>,
+    pub next_cursor: Option<(u64, i64)>,
     pub has_more: bool,
 }

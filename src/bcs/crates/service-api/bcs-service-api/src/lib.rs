@@ -56,7 +56,8 @@ pub use application::session_files::{
 };
 pub use application::collaboration_runtime::{
     AuthenticatedHumanCaller, CancelStateMachineRunCommand,
-    CollaborationDefinitionParticipantSlot,
+    CollaborationDefinitionGraphEdge, CollaborationDefinitionGraphNode,
+    CollaborationDefinitionGraphPreview, CollaborationDefinitionParticipantSlot,
     CollaborationDefinitionValidationDiagnostic, CollaborationDefinitionValidationOutcome,
     CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
@@ -152,6 +153,7 @@ pub use application::{
 pub use port::{
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
+    BotControlPlaneRepoPort,
     BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
@@ -190,6 +192,9 @@ pub use workbench_use_cases::{
 };
 
 pub use types::{
+    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneRecord,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
@@ -206,13 +211,15 @@ pub use types::{
 
 pub use core::{
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
-    BotCapabilities, BotConnectParams, BotConnectResult, BotDynamicStatus, BotRegistryCoreService,
+    BotCapabilities, BotConnectParams, BotConnectResult, BotControlPlaneCandidate,
+    BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,
+    BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,
     ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
     DeliveryType, DmActorSpec, DynamicStatusResponse, EnsureHumanResult, EnsureOwnerEdgesResult,
     FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
-    FriendRequestStatus, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
+    FriendRequestStatus, Friendship, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, MessageRole,
     Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,
     ProviderBotCoreService, ProviderCoreService, RegisterProviderBotParams, RegisteredBot,
@@ -233,7 +240,7 @@ pub use core::{
 
 pub use bcs_domain::{
     GENERATED_SESSION_ID_SUFFIX_CHARS, GROUP_ID_PREFIX, GroupIdBuildError,
-    InviteTokenPayload, InviteTokenError,
+    InviteTargetType, InviteTokenPayload, InviteTokenError,
     MAX_GENERATED_GROUP_ID_CHARS, MAX_SESSION_ID_CHARS, channel_group_id,
     generated_group_id,
     invite_token_encode, invite_token_decode_and_verify, invite_token_decode_no_expiry,

@@ -42,6 +42,21 @@ InternalErrorResponse:
       schema:
         $ref: "#/ErrorEnvelope"
 
+ViewBotIdQuery:
+  name: view_bot_id
+  in: query
+  required: false
+  description: >-
+    Selects the Actor whose collaboration relations or Participant visibility
+    scope the response. Omit to select the authenticated User's
+    `human_<subject.id>` Actor. An explicit Human Actor ID must identify that
+    same User. An explicit Bot UUID is allowed only when the Bot's `created_by`
+    equals the authenticated User ID. Selecting a Bot scopes returned data; it
+    does not change the Human caller or grant management authority.
+  schema:
+    type: string
+    minLength: 1
+
 BotUuidPath:
   name: bot_uuid
   in: path
@@ -50,8 +65,56 @@ BotUuidPath:
     type: string
     minLength: 1
 
+BotIdPath:
+  name: bot_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
 GroupIdPath:
   name: group_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+SessionIdPath:
+  name: session_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+ActorIdPath:
+  name: actor_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+FriendBotUuidPath:
+  name: friend_bot_uuid
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+FriendRequestIdPath:
+  name: request_id
+  in: path
+  required: true
+  schema:
+    type: string
+    minLength: 1
+
+InvitationTokenPath:
+  name: token
   in: path
   required: true
   schema:

@@ -13,7 +13,8 @@ use bcs_config::resolve_env_str as resolve_env;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 pub use bcs_service_api::port::repo::{FriendRepoPort, FriendRequestRepoPort};
 use bcs_service_api::{
-    FriendRequest, FriendRequestDirection, FriendRequestStatus, ServiceError, ServiceResult,
+    FriendRequest, FriendRequestDirection, FriendRequestStatus, Friendship, ServiceError,
+    ServiceResult,
 };
 
 pub type FriendSqlFlavor = DbSqlFlavor;
@@ -73,6 +74,19 @@ impl DbFriendStore {
                 warn!(operation, error = %err, "db_friend: execute failed");
                 service_db_error(operation, err)
             })
+    }
+
+    /// Per-flavor SELECT fragment for the `gmt_create` column on
+    /// `bcs_friendships`, emitted under alias `gmt_create_ts` as Unix-epoch
+    /// seconds (TZ-correct in both backends). Mirrors the timestamp helpers on
+    /// `DbFriendRequestStore`.
+    fn select_created_at_column(&self) -> &'static str {
+        match self.flavor {
+            FriendSqlFlavor::Mysql => "UNIX_TIMESTAMP(gmt_create) AS gmt_create_ts",
+            FriendSqlFlavor::Sqlite => {
+                "CAST(strftime('%s', gmt_create) AS INTEGER) AS gmt_create_ts"
+            }
+        }
     }
 }
 
@@ -186,6 +200,116 @@ impl FriendRepoPort for DbFriendStore {
         }
 
         Ok(affected as usize)
+    }
+
+    async fn list_friendships_paginated(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<Friendship>, u64)> {
+        let env = resolve_env();
+        let ts = self.select_created_at_column();
+        // The friend is the "other" column; ORDER BY the projected friend uuid
+        // ascending as the tie-breaker after `gmt_create` DESC. Both flavors
+        // support CASE expressions in ORDER BY.
+        let sql = format!(
+            "SELECT left_bot, right_bot, {ts} \
+             FROM bcs_friendships \
+             WHERE (left_bot = ? OR right_bot = ?) AND env = ? \
+             ORDER BY gmt_create DESC, \
+                      CASE WHEN left_bot = ? THEN right_bot ELSE left_bot END ASC \
+             LIMIT ? OFFSET ?"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(bot_id),
+                    DbValue::from(bot_id),
+                    DbValue::from(env.as_str()),
+                    DbValue::from(bot_id),
+                    DbValue::from(limit),
+                    DbValue::from(offset),
+                ],
+            ))
+            .await
+            .map_err(|err| {
+                warn!(bot_id = %bot_id, error = %err, "Failed to list friendships paginated from DB");
+                service_db_error("list_friendships_paginated", err)
+            })?;
+
+        let mut friendships = Vec::with_capacity(rows.len());
+        for row in &rows {
+            let left = optional_string(row, "left_bot");
+            let right = optional_string(row, "right_bot");
+            match (left, right) {
+                (Some(left), Some(right)) => {
+                    let friend_bot_uuid = if left == bot_id { right } else { left };
+                    friendships.push(Friendship {
+                        bot_uuid: bot_id.to_string(),
+                        friend_bot_uuid,
+                        created_at: row_seconds_to_millis(row, "gmt_create_ts"),
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        let count_rows = self
+            .db
+            .query(DbStatement::with_params(
+                "SELECT COUNT(*) AS cnt FROM bcs_friendships \
+                 WHERE (left_bot = ? OR right_bot = ?) AND env = ?",
+                vec![
+                    DbValue::from(bot_id),
+                    DbValue::from(bot_id),
+                    DbValue::from(env.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|err| {
+                warn!(bot_id = %bot_id, error = %err, "Failed to count friendships from DB");
+                service_db_error("list_friendships_paginated_count", err)
+            })?;
+        let total = count_rows
+            .first()
+            .and_then(|row| match row.get("cnt") {
+                Some(DbValue::I64(value)) if *value >= 0 => Some(*value as u64),
+                Some(DbValue::U64(value)) => Some(*value),
+                _ => None,
+            })
+            .unwrap_or(0);
+
+        Ok((friendships, total))
+    }
+
+    async fn remove_friendship(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        // Pairs are stored normalized (left_bot < right_bot), one row per pair,
+        // so a single equality condition removes the friendship. No env-less
+        // bidirectional duplicate rows exist in this store.
+        let (left, right) = normalize_pair(bot_a, bot_b);
+        let env = resolve_env();
+        let affected = self
+            .execute(
+                "remove_friendship",
+                DbStatement::with_params(
+                    "DELETE FROM bcs_friendships \
+                     WHERE left_bot = ? AND right_bot = ? AND env = ?",
+                    vec![
+                        DbValue::from(left.as_str()),
+                        DbValue::from(right.as_str()),
+                        DbValue::from(env.as_str()),
+                    ],
+                ),
+            )
+            .await?;
+
+        if affected > 0 {
+            info!(left_bot = %left, right_bot = %right, "Friendship removed (DB)");
+        }
+        Ok(affected > 0)
     }
 }
 
@@ -466,6 +590,27 @@ impl FriendRequestRepoPort for DbFriendRequestStore {
         direction: FriendRequestDirection,
         status_filter: Option<FriendRequestStatus>,
     ) -> Vec<FriendRequest> {
+        // Legacy contract: swallow persistence failures and return an empty
+        // page. V1 callers use `try_list_requests` instead so DB failures
+        // surface as 500 rather than a silent 200 empty page.
+        match self
+            .try_list_requests(bot_id, direction, status_filter)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                warn!(bot_id = %bot_id, error = %err, "Failed to list friend requests from DB");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_requests(
+        &self,
+        bot_id: &str,
+        direction: FriendRequestDirection,
+        status_filter: Option<FriendRequestStatus>,
+    ) -> ServiceResult<Vec<FriendRequest>> {
         let env = resolve_env();
         let ts = self.select_timestamp_columns();
         let (sql, params) = match (&direction, &status_filter) {
@@ -538,19 +683,13 @@ impl FriendRequestRepoPort for DbFriendRequestStore {
             ),
         };
 
-        match self
+        let rows = self
             .query(
                 "list_friend_requests",
                 DbStatement::with_params(sql, params),
             )
-            .await
-        {
-            Ok(rows) => rows.iter().filter_map(Self::parse_request).collect(),
-            Err(err) => {
-                warn!(bot_id = %bot_id, error = %err, "Failed to list friend requests from DB");
-                Vec::new()
-            }
-        }
+            .await?;
+        Ok(rows.iter().filter_map(Self::parse_request).collect())
     }
 
     async fn delete_pending_requests_for_bot(&self, bot_id: &str) -> ServiceResult<usize> {
@@ -825,5 +964,61 @@ mod tests {
             must_service(request_store.get_request(&accepted.id).await).status,
             FriendRequestStatus::Accepted
         );
+    }
+
+    #[tokio::test]
+    async fn sqlite_list_friendships_paginated_and_remove_friendship() {
+        let (friend_store, _, _) = sqlite_services().await;
+
+        must_service(friend_store.add_friendship("alice", "bob").await);
+        must_service(friend_store.add_friendship("alice", "carol").await);
+
+        // list_friendships_paginated: alice has 2 friends, projected symmetric.
+        let (page, total) =
+            must_service(friend_store.list_friendships_paginated("alice", 0, 10).await);
+        assert_eq!(total, 2);
+        assert_eq!(page.len(), 2);
+        assert!(page.iter().all(|f| f.bot_uuid == "alice"));
+        let mut friends: Vec<String> =
+            page.iter().map(|f| f.friend_bot_uuid.clone()).collect();
+        friends.sort();
+        assert_eq!(friends, vec!["bob".to_string(), "carol".to_string()]);
+        // created_at round-trips non-zero (DEFAULT CURRENT_TIMESTAMP → secs*1000).
+        assert!(page.iter().all(|f| f.created_at > 0));
+
+        // pagination: limit 1 → one row, total still 2.
+        let (first, total) =
+            must_service(friend_store.list_friendships_paginated("alice", 0, 1).await);
+        assert_eq!(total, 2);
+        assert_eq!(first.len(), 1);
+
+        // offset beyond range → empty page, total still 2.
+        let (empty, total) =
+            must_service(friend_store.list_friendships_paginated("alice", 99, 10).await);
+        assert!(empty.is_empty());
+        assert_eq!(total, 2);
+
+        // symmetric: bob sees alice as its friend.
+        let (bob_page, bob_total) =
+            must_service(friend_store.list_friendships_paginated("bob", 0, 10).await);
+        assert_eq!(bob_total, 1);
+        assert_eq!(bob_page[0].bot_uuid, "bob");
+        assert_eq!(bob_page[0].friend_bot_uuid, "alice");
+
+        // remove_friendship: first true, second false (idempotent), either
+        // argument order hits the same normalized pair.
+        assert!(must_service(friend_store.remove_friendship("alice", "bob").await));
+        assert!(!must_service(friend_store.remove_friendship("bob", "alice").await));
+
+        let (after, total) =
+            must_service(friend_store.list_friendships_paginated("alice", 0, 10).await);
+        assert_eq!(total, 1);
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].friend_bot_uuid, "carol");
+
+        // legacy list_friends still works (compat guard) — returns uuids only.
+        let mut lf = must_service(friend_store.list_friends("alice").await);
+        lf.sort();
+        assert_eq!(lf, vec!["carol".to_string()]);
     }
 }

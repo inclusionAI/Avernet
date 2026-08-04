@@ -15,6 +15,7 @@ BCS WebSocket protocol.
   and contract tests.
 - `bcs-secret-local`: local secret-store stub for development.
 - `bcs-auth-*`: OAuth provider plugins (github, google, alipay, wechat, local).
+- `bcs-llm-anthropic`: Anthropic Messages API LLM judge client.
 - `bcs-llm-openai-compatible`: optional OpenAI-compatible LLM judge client.
 - `openclaw-channel-bcn`: OpenClaw channel plugin package for connecting
   OpenClaw bot runtimes to BCS.

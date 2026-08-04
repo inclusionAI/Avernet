@@ -46,6 +46,7 @@ class SessionFileSharingDispatcher(Protocol):
         file_size: int = 0,
         part_size: int | None = None,
         operator: str | None = None,
+        content_type: str | None = None,
     ) -> SessionGetUploadUrlResponse:
         """Generate a pre-signed upload URL for a Session file.
 
@@ -111,7 +112,7 @@ class SessionFileSharingDispatcher(Protocol):
         tenant: str,
         session_id: str,
         expire_seconds: int = 3600,
-        show: bool = False,
+        show: bool | None = False,
         operator: str | None = None,
     ) -> SessionShareLinkResponse:
         """Generate a shareable download link for a completed Session upload.

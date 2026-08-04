@@ -328,6 +328,47 @@ def test_service_draft_form_is_derived_from_current_publish_record() -> None:
     assert gate.calls[0]["runtime_form"] is BotRuntimeForm.SERVICE_DRAFT
 
 
+def test_desktop_form_enters_the_existing_rollout_gate() -> None:
+    bot = {**personal_bot(), "bot_type": "desktop"}
+    gate = RecordingGate(eligible_decision())
+    service = SkillsPoolMigrationClaimService(
+        FakeBotRepository(bot),
+        FakeBotPublishRepository(),
+        FakeLayoutRepository(),
+        gate,
+    )
+
+    result = claim(service)
+
+    assert result.outcome is MigrationClaimOutcome.CLAIMED
+    assert gate.calls[0]["runtime_form"] is BotRuntimeForm.DESKTOP
+
+
+def test_ineligible_desktop_keeps_the_unpersisted_legacy_state() -> None:
+    layouts = FakeLayoutRepository()
+    gate = RecordingGate(
+        RolloutDecision(
+            eligible=False,
+            reason=RolloutDecisionReason.CONFIG_DISABLED,
+        )
+    )
+    service = SkillsPoolMigrationClaimService(
+        FakeBotRepository({**personal_bot(), "bot_type": "desktop"}),
+        FakeBotPublishRepository(),
+        layouts,
+        gate,
+    )
+
+    result = claim(service)
+
+    assert result.outcome is MigrationClaimOutcome.INELIGIBLE
+    assert result.state is not None
+    assert result.state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+    assert result.state.persisted is False
+    assert layouts.claim_calls == 0
+    assert gate.calls[0]["runtime_form"] is BotRuntimeForm.DESKTOP
+
+
 def test_scope_environment_must_match_current_bot_record() -> None:
     service = SkillsPoolMigrationClaimService(
         FakeBotRepository({**personal_bot(), "env": "prod"}),

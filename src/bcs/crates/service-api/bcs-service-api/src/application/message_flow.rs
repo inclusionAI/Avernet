@@ -147,6 +147,7 @@ pub struct GroupCallbackOutcome {
 pub struct ChatAbortCommand {
     pub caller: CallerContext,
     pub group_id: String,
+    pub session_id: Option<String>,
     pub run_id: Option<String>,
 }
 

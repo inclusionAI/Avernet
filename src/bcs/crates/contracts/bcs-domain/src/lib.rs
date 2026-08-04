@@ -52,7 +52,7 @@ pub use collaboration::{
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
     StateMachineTransition,
 };
-pub use friend::{FriendRequest, FriendRequestDirection, FriendRequestStatus};
+pub use friend::{FriendRequest, FriendRequestDirection, FriendRequestStatus, Friendship};
 pub use fusion::{
     ContextBotSummary, ContextConflict, ContextConflictPosition, ContextFusionRequest,
     ContextFusionResponse, ContextParticipantPerspective,
@@ -96,7 +96,7 @@ pub use system_message::{
     SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind
 };
 pub use task_ledger::LedgerSummary;
-pub use invite::{InviteTokenPayload, InviteTokenError, encode as invite_token_encode, decode_and_verify as invite_token_decode_and_verify, decode_and_verify_no_expiry as invite_token_decode_no_expiry};
+pub use invite::{InviteTargetType, InviteTokenPayload, InviteTokenError, encode as invite_token_encode, decode_and_verify as invite_token_decode_and_verify, decode_and_verify_no_expiry as invite_token_decode_no_expiry};
 pub use register::{RegisterTokenPayload, RegisterTokenError, encode as register_token_encode, decode_and_verify as register_token_decode_and_verify};
 pub use session_file::{FileStatus, SessionFile, new_file_id};
 pub use share::{ShareTokenError, ShareTokenPayload, share_token_decode_and_verify, share_token_encode};

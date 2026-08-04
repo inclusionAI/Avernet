@@ -25,7 +25,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
-from ._bot_websocket_client import BotWebSocketClient
+from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import _SessionState
 
@@ -361,14 +361,24 @@ class AsyncChatClient:
                     timeout,
                 )
                 assert self._client is not None
-                send_result = await self._client.chat_send(
-                    session_key=session_key,
-                    message=message,
-                    auth_token=auth_token,
-                    app_id=app_id,
-                    timeout_ms=int(timeout * 1000) if timeout else None,
-                    chat_metadata=chat_metadata,
-                )
+                try:
+                    send_result = await self._client.chat_send(
+                        session_key=session_key,
+                        message=message,
+                        auth_token=auth_token,
+                        app_id=app_id,
+                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        chat_metadata=chat_metadata,
+                    )
+                except ChatRequestError as e:
+                    logger.error(
+                        "[send] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
+                        session_key,
+                        e.error_code,
+                        e.error_message,
+                    )
+                    state.chat_complete.set()
+                    raise
 
                 logger.info(
                     "[send] Sent successfully: session_key=%s, result=%s",
@@ -470,14 +480,28 @@ class AsyncChatClient:
                     timeout,
                 )
                 assert self._client is not None
-                await self._client.chat_send(
-                    session_key=session_key,
-                    message=message,
-                    auth_token=auth_token,
-                    app_id=app_id,
-                    timeout_ms=int(timeout * 1000) if timeout else None,
-                    chat_metadata=chat_metadata,
-                )
+                try:
+                    await self._client.chat_send(
+                        session_key=session_key,
+                        message=message,
+                        auth_token=auth_token,
+                        app_id=app_id,
+                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        chat_metadata=chat_metadata,
+                    )
+                except ChatRequestError as e:
+                    logger.error(
+                        "[send_stream] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
+                        session_key,
+                        e.error_code,
+                        e.error_message,
+                    )
+                    state.chat_complete.set()
+                    yield StreamChunk(
+                        type="error",
+                        content=f"chat.send failed: {e.error_code} - {e.error_message}",
+                    )
+                    return
 
                 # 消费 stream_queue，逐 chunk 产出
                 async for chunk in self._drain_stream_queue(queue, timeout):
@@ -752,9 +776,7 @@ class AsyncChatClient:
             content = payload.get("message", {}).get("content", [])
             text = content[0].get("text", "") if content else ""
             state.content = text
-            self._emit_stream_chunk(
-                state, StreamChunk(type="final", content=text)
-            )
+            self._emit_stream_chunk(state, StreamChunk(type="final", content=text))
             if self.verbose:
                 logger.info(
                     "[agent] final: sessionKey=%s, stream=%s", session_key, stream

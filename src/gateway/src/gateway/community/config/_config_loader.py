@@ -11,7 +11,6 @@ from ._models import (
     Config,
     LogConfig,
     ModuleConfig,
-    PluginConfig,
     UserConfig,
     WebConfig,
 )
@@ -30,7 +29,8 @@ class ConfigLoader:
             overlay = _load_yaml(overlay_path)
             base = _merge(base, overlay)
 
-        return _parse_config(base)
+        config_dir = base_path.parent if base_path is not None else None
+        return _parse_config(base, config_dir=config_dir)
 
     @staticmethod
     def load_raw() -> dict:
@@ -48,8 +48,20 @@ def _load_yaml(path: Path | None) -> dict:
     return data
 
 
+def _explicit_config_path() -> str:
+    """Return the explicit config path, preferring the gateway env var.
+
+    ``GATEWAY_CONFIG_PATH`` is the public gateway contract. ``SOFAPY_CONFIG_PATH``
+    is accepted as a compatibility alias for deployments that still set it.
+    """
+    return (
+        os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+        or os.getenv("SOFAPY_CONFIG_PATH", "").strip()
+    )
+
+
 def _resolve_base_path() -> Path | None:
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+    explicit = _explicit_config_path()
     if explicit:
         p = Path(explicit)
         if p.is_dir():
@@ -63,7 +75,7 @@ def _resolve_base_path() -> Path | None:
 
 
 def _resolve_overlay_path(env: str) -> Path | None:
-    explicit = os.getenv("GATEWAY_CONFIG_PATH", "").strip()
+    explicit = _explicit_config_path()
     if explicit:
         d = Path(explicit)
         if d.is_dir():
@@ -85,7 +97,7 @@ def _merge(base: dict, overlay: dict) -> dict:
     return out
 
 
-def _parse_config(raw: dict) -> Config:
+def _parse_config(raw: dict, *, config_dir: Path | None = None) -> Config:
     module_raw = raw.get("module_config") or {}
     web_raw = module_raw.get("web") or {}
     web = WebConfig(
@@ -100,10 +112,9 @@ def _parse_config(raw: dict) -> Config:
         log_dir=log_raw.get("log_dir", ""),
     )
     user_raw = raw.get("user_config") or {}
-    plugins_raw = user_raw.pop("plugins", {}) if isinstance(user_raw, dict) else {}
-    user_raw = user_raw if isinstance(user_raw, dict) else {}
-    plugin_config = PluginConfig.model_validate(plugins_raw)
-    user_config = UserConfig(plugins=plugin_config, **user_raw)
+    user_config = UserConfig.model_validate(
+        user_raw if isinstance(user_raw, dict) else {}
+    )
     return Config(
         app_name=raw.get("app_name", "gateway"),
         enable_sidecar=bool(raw.get("enable_sidecar", False)),
@@ -112,4 +123,5 @@ def _parse_config(raw: dict) -> Config:
         module_config=ModuleConfig(web=web if web_raw else None),
         user_config=user_config,
         raw=raw,
+        config_dir=config_dir,
     )

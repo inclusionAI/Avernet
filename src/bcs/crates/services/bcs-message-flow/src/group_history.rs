@@ -181,23 +181,24 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                 Some(human.actor_id.as_str())
             }
             CallerContext::Bot(bot_actor) => {
-                if !group.participants.iter().any(|p| p.bot_uuid == bot_actor.bot_uuid)
-                    && !cmd
-                        .session_participants
-                        .iter()
-                        .any(|p| p.bot_uuid == bot_actor.bot_uuid)
+                if !cmd
+                    .session_participants
+                    .iter()
+                    .any(|p| p.bot_uuid == bot_actor.bot_uuid)
                 {
                     return Err(GroupUseCaseError::Forbidden(format!(
-                        "bot '{}' is not a participant in group '{}'",
-                        bot_actor.bot_uuid, cmd.group_id
+                        "bot '{}' is not a participant in session '{}'",
+                        bot_actor.bot_uuid, cmd.session_id
                     )));
                 }
                 None
             }
-            CallerContext::Public | CallerContext::Integration(_) | CallerContext::Admin(_) => {
-                // Public/integration/admin callers: allow access without ownership verification
-                None
+            CallerContext::Public => {
+                return Err(GroupUseCaseError::Unauthorized(
+                    "valid Human identity or Bot token is required for session history".to_string(),
+                ));
             }
+            CallerContext::Integration(_) | CallerContext::Admin(_) => None,
         };
 
         backfill_bot_names(self.registry.as_ref(), &mut group).await;
@@ -340,7 +341,10 @@ impl BcsGroupMessageHistory {
             }
         }
 
-        self.verify_human_group_access(group, caller).await
+        Err(GroupUseCaseError::Forbidden(format!(
+            "current Human '{}' is not a session participant and owns no Bot in session '{}'",
+            caller.actor_id, group.id
+        )))
     }
 
     async fn verify_view_actor_ownership(

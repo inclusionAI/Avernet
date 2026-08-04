@@ -302,6 +302,21 @@ class TestUploadSkillValidation:
             assert body["success"] is True
             assert mock_svc.upload_skill.await_count == 1
 
+    def test_upload_passes_authenticated_user_as_author(self, mock_ctx):
+        with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    ("files", ("SKILL.md", b"---\nname: a\ndescription: a\n---", "text/markdown"))
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            assert response.json()["success"] is True
+            mock_svc.upload_skill.assert_awaited_once()
+            assert mock_svc.upload_skill.await_args.kwargs["user_id"] == mock_ctx.user_id
+            assert mock_svc.upload_skill.await_args.kwargs["author_id"] == mock_ctx.user_id
+
     def test_upload_passes_bot_scope_to_layout_aware_factory(self, mock_ctx):
         with _upload_skill_di_app(
             mock_ctx,

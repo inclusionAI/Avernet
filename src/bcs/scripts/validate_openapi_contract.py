@@ -161,14 +161,22 @@ def validate_contract(contract: dict[str, Any]) -> list[str]:
         if not responses:
             errors.append(f"{location}: missing responses")
         for status, response in responses.items():
+            websocket_upgrade = (
+                operation.get("x-avernet-protocol") == "websocket"
+                and str(status) == "101"
+            )
             schema = _response_schema(response)
-            if schema is None:
+            if schema is None and not websocket_upgrade:
                 errors.append(f"{location} {status}: missing JSON response schema")
-            else:
+            elif schema is not None:
                 required = set(schema.get("required", []))
                 if not ENVELOPE_FIELDS.issubset(required):
                     errors.append(f"{location} {status}: response is not an envelope")
-            if not str(status).startswith("2") and not response.get("x-error-codes"):
+            if (
+                not str(status).startswith("2")
+                and not websocket_upgrade
+                and not response.get("x-error-codes")
+            ):
                 errors.append(f"{location} {status}: missing x-error-codes")
 
     return errors

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from pathlib import Path
 
@@ -30,7 +29,8 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 log = logging.getLogger("session_resource.service")
-_SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._ -]+$")
+_WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
+_MAX_FILENAME_UTF8_BYTES = 255
 
 
 class SessionResourceService:
@@ -43,6 +43,7 @@ class SessionResourceService:
         device_context_resolver: DeviceContextResolver,
         token_vault: TokenVault,
         adapter_transport: DeviceAdapterTransport,
+        default_tenant: str,
     ) -> None:
         self._repository = repository
         self._baas = baas_client
@@ -50,6 +51,7 @@ class SessionResourceService:
         self._resolver = device_context_resolver
         self._vault = token_vault
         self._adapter_transport = adapter_transport
+        self._default_tenant = default_tenant.strip()
 
     def create_upload_intent(
         self,
@@ -65,10 +67,47 @@ class SessionResourceService:
     ) -> SessionUploadIntent:
         safe_filename = self._safe_filename(filename)
         context = self._resolver.resolve_for_bot(bot_id, owner_id)
-        tenant = context.conn_info.get("tenant")
-        bot_uuid = context.conn_info.get("bot_uuid")
-        if not isinstance(tenant, str) or not isinstance(bot_uuid, str):
+        raw_tenant = context.conn_info.get("tenant")
+        raw_bot_uuid = context.conn_info.get("bot_uuid")
+        provider = (
+            context.provider
+            if isinstance(context.provider, str)
+            else type(context.provider).__name__
+        )
+        bot_uuid_present = isinstance(raw_bot_uuid, str) and bool(raw_bot_uuid)
+        if raw_tenant is None or raw_tenant == "":
+            if not self._default_tenant:
+                log.warning(
+                    "session_resource.upload_intent.identity.reject provider=%s tenant_source=unconfigured_default bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+                    provider,
+                    bot_uuid_present,
+                    type(raw_tenant).__name__,
+                    type(raw_bot_uuid).__name__,
+                )
+                raise ValueError("BaaS device identity is unavailable")
+            tenant = self._default_tenant
+            tenant_source = "configured_default"
+        elif isinstance(raw_tenant, str):
+            tenant = raw_tenant
+            tenant_source = "context"
+        else:
+            log.warning(
+                "session_resource.upload_intent.identity.reject provider=%s tenant_source=invalid bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+                provider,
+                bot_uuid_present,
+                type(raw_tenant).__name__,
+                type(raw_bot_uuid).__name__,
+            )
             raise ValueError("BaaS device identity is unavailable")
+        bot_uuid = raw_bot_uuid if bot_uuid_present else ""
+        log.info(
+            "session_resource.upload_intent.identity.resolved provider=%s tenant_source=%s bot_uuid_present=%s tenant_type=%s bot_uuid_type=%s",
+            provider,
+            tenant_source,
+            bot_uuid_present,
+            type(raw_tenant).__name__,
+            type(raw_bot_uuid).__name__,
+        )
         grant = self._baas.create_session_upload_grant(
             tenant=tenant,
             session_id=session_key,
@@ -93,6 +132,8 @@ class SessionResourceService:
                 session_key_hash=session_hash,
                 engine_type=engine_type,
                 tenant=tenant,
+                # Session v2 uses tenant + session ID. Empty bot_uuid marks the
+                # shared legacy column as inapplicable; BOT_DEVICE_V1 needs a real value.
                 bot_uuid=bot_uuid,
                 display_name=filename,
                 filename=safe_filename,
@@ -105,14 +146,6 @@ class SessionResourceService:
                 size_bytes=size_bytes,
                 client_content_hash=content_hash,
             )
-        )
-        log.info(
-            "session_resource.upload_intent.create resource_id=%s session_key_hash=%s file_ext=%s size_bytes=%s upload_type=%s",
-            resource_id,
-            session_hash[:16],
-            Path(safe_filename).suffix.lower(),
-            size_bytes,
-            grant.upload_type,
         )
         return SessionUploadIntent(resource=record, grant=grant)
 
@@ -183,6 +216,26 @@ class SessionResourceService:
             and (not ready_only or record.status is SessionResourceStatus.READY)
         ]
 
+    def list_pending(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        session_key: str,
+    ) -> list[SessionResourceRecord]:
+        """Return only resources still controlled by the upload state machine."""
+        records = self._repository.list_owned(
+            owner_id,
+            bot_id,
+            hash_identifier(session_key),
+        )
+        return [
+            record
+            for record in records
+            if record.status
+            not in {SessionResourceStatus.READY, SessionResourceStatus.DELETED}
+        ]
+
     async def open_content(
         self,
         *,
@@ -220,8 +273,12 @@ class SessionResourceService:
             return record, response
         await response.close()
         if response.status_code == 409:
-            self._queue_rematerialization(record)
-            raise ValueError("resource_materializing")
+            log.info(
+                "session_resource.content.legacy_missing resource_id=%s provider=%s",
+                record.resource_id,
+                context.provider,
+            )
+            raise ValueError("resource_missing")
         log.warning(
             "session_resource.content.stream.fail resource_id=%s status=%s provider=%s",
             record.resource_id,
@@ -335,17 +392,6 @@ class SessionResourceService:
             transfer_id=record.transfer_id,
         )
 
-    def _queue_rematerialization(self, record: SessionResourceRecord) -> None:
-        try:
-            self._schedule_materialization(record, allow_ready=True)
-        except ValueError as exc:
-            if str(exc) != "materialize_state_conflict":
-                raise
-            log.info(
-                "session_resource.content.rematerialize.inflight resource_id=%s",
-                record.resource_id,
-            )
-
     def _schedule_materialization(
         self,
         record: SessionResourceRecord,
@@ -425,7 +471,19 @@ class SessionResourceService:
     def _safe_filename(value: str) -> str:
         if Path(value).name != value or value in {".", ".."}:
             raise ValueError("invalid_filename")
-        if not _SAFE_FILENAME.fullmatch(value):
+        try:
+            filename_bytes = value.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("invalid_filename") from exc
+        if (
+            not value
+            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or any(
+                not character.isprintable()
+                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+                for character in value
+            )
+        ):
             raise ValueError("invalid_filename")
         return value
 

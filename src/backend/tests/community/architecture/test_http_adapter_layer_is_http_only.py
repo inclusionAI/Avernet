@@ -70,6 +70,8 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "errors",        # adapter-owned error types (kept import-light on purpose)
     "clusters",      # public-API domain rule (engine ↔ cluster bijection)
     "principal",     # caller-identity extraction from the principal seam
+    "enums",         # adapter-owned public enums (import-light by design:
+                     # a public vocabulary must not depend on the HTTP stack)
 )
 
 
@@ -175,6 +177,7 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "BotServiceError", "BotInvalidLifecycleStateError", "BotNotFoundError", "BotPermissionError",
     "BotLimitExceededError", "BotNameExistsError", "BotNameInvalidError",
     "BotOperationNotAllowedError",
+    "DefaultBotTeclawNotAllowedError",
     "DeviceAllocationError", "DeviceLimitError",
     # Multi-instance entry-resolution errors raised by DeviceServiceRouter and
     # translated to HTTP by the devices router (§1/§2/§3):

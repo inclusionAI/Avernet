@@ -33,6 +33,11 @@ dependencies = [
   "aiofiles>=25.1.0",
   "fastapi>=0.115.0",
   "pycryptodome>=3.23.0",
+  # PyJWT verifies the gateway's signed X-Avernet-Principal token (auth design
+  # §7.1). Same library the gateway signs with, so both halves of the contract
+  # agree on claim handling; pinning `algorithms=` at the call site is what makes
+  # the verification safe, not the library choice.
+  "pyjwt>=2.8.0",
   "redis==7.4.0",
   "sqlalchemy>=2.0.48",
   "tomlkit>=0.14.0",

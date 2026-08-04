@@ -337,10 +337,13 @@ class DeviceService:
         device: AllocatedDevice,
         agent_pass_token: str = "",
         agent_code: str = "",
+        active_only: bool = False,
     ) -> bool:
         """Update outbound header rules on a running device (hot-update hook)。
 
         Subclasses override this to provider-specific implementations.
+        ``active_only`` limits a provider's batch target set to ACTIVE physical
+        devices; providers without physical-device fan-out may ignore it.
         Default: no-op.
         """
         return False
@@ -952,6 +955,7 @@ class DeviceService:
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
@@ -961,6 +965,12 @@ class DeviceService:
         ``device_uuid`` (optional) targets a specific instance in the multi-instance
         BaaS provider (see ``BaasDeviceService.get_device_connection``); local /
         non-BaaS providers have a single device and ignore it.
+
+        ``path`` (optional) is the in-device path the returned URL should address.
+        It matters only where the provider builds a *complete* URL server-side —
+        BaaS relay mode — because that URL then embeds the path and cannot be
+        appended to. Providers that return a bare routing target ignore it, and
+        the caller appends the path itself. ``None`` keeps the provider default.
         """
         logger.info(f"[get_device_connection] called with binding_id={binding_id}, port={port}, ttl={ttl}")
 

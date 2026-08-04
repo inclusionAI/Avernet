@@ -20,6 +20,7 @@ import pytest
 
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
     BotWebSocketClient,
+    ChatRequestError,
 )
 
 # ==================== Fixtures ====================
@@ -744,6 +745,139 @@ class TestConvenienceMethods:
         sent = sent_frames[0]
         assert sent["method"] == "sessions.reset"
         assert sent["params"] == {"sessionKey": "sk-reset"}
+
+
+# ==================== Tests: ChatRequestError ====================
+
+
+class TestChatRequestError:
+    """Tests for ChatRequestError ok=False handling in chat_send/chat_inject."""
+
+    async def _setup_mock_ws_ok_false(self, client, error_payload):
+        """Helper: set up a mock ws that responds with ok=False."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": False,
+                            "error": error_payload,
+                        }
+                    )
+
+        mock_ws.send = mock_send
+
+    # [单测用例]测试场景：chat_send ok=False 抛出 ChatRequestError
+    async def test_chat_send_ok_false_raises_error(self, client):
+        """chat_send raises ChatRequestError when response ok=False."""
+        error_payload = {
+            "code": "UNAVAILABLE",
+            "message": "Session validation failed",
+            "retryable": True,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError, match="chat.send failed"):
+            await client.chat_send(session_key="sk-err", message="hello")
+
+    # [单测用例]测试场景：chat_send ChatRequestError 包含 error 详情
+    async def test_chat_send_error_details(self, client):
+        """ChatRequestError from chat_send includes error_code, error_message, retryable."""
+        error_payload = {
+            "code": "UNAVAILABLE",
+            "message": "Session validation failed",
+            "retryable": True,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_send(session_key="sk-err", message="hello")
+
+        err = exc_info.value
+        assert err.error_code == "UNAVAILABLE"
+        assert err.error_message == "Session validation failed"
+        assert err.retryable is True
+
+    # [单测用例]测试场景：chat_send ok=False 缺少 error 字段时安全处理
+    async def test_chat_send_ok_false_missing_error_fields(self, client):
+        """ChatRequestError handles missing error fields gracefully."""
+        await self._setup_mock_ws_ok_false(client, {})
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_send(session_key="sk-err", message="hello")
+
+        err = exc_info.value
+        assert err.error_code is None
+        assert err.error_message is None
+        assert err.retryable is None
+
+    # [单测用例]测试场景：chat_inject ok=False 抛出 ChatRequestError
+    async def test_chat_inject_ok_false_raises_error(self, client):
+        """chat_inject raises ChatRequestError when response ok=False."""
+        error_payload = {
+            "code": "FORBIDDEN",
+            "message": "Permission denied",
+            "retryable": False,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError, match="chat.inject failed"):
+            await client.chat_inject(session_key="sk-err", message="inject")
+
+    # [单测用例]测试场景：chat_inject ChatRequestError 包含 error 详情
+    async def test_chat_inject_error_details(self, client):
+        """ChatRequestError from chat_inject includes error_code, error_message, retryable."""
+        error_payload = {
+            "code": "FORBIDDEN",
+            "message": "Permission denied",
+            "retryable": False,
+        }
+        await self._setup_mock_ws_ok_false(client, error_payload)
+
+        with pytest.raises(ChatRequestError) as exc_info:
+            await client.chat_inject(session_key="sk-err", message="inject")
+
+        err = exc_info.value
+        assert err.error_code == "FORBIDDEN"
+        assert err.error_message == "Permission denied"
+        assert err.retryable is False
+
+    # [单测用例]测试场景：chat_send ok=True 正常返回
+    async def test_chat_send_ok_true_returns_result(self, client):
+        """chat_send returns result when ok=True."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {"accepted": True},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+
+        result = await client.chat_send(session_key="sk-ok", message="hello")
+        assert result["ok"] is True
+        assert result["payload"]["accepted"] is True
 
 
 # ==================== Tests: on_event ====================

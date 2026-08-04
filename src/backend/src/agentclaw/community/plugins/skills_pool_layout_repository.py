@@ -6,15 +6,13 @@ import json
 from dataclasses import asdict
 
 from injector import inject
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.core.skills_pool.models import local_locator_prefixes
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -26,33 +24,38 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.skills_pool_cutover_diagnostics import (
     log_missing_quarantine_path,
 )
-from agentclaw.community.plugins.skills_pool_capability_repository import SkillsPoolCapabilityRepositoryMixin
-from agentclaw.community.plugins.skills_pool_operational_repository import SkillsPoolOperationalRepositoryMixin
+from agentclaw.community.plugins.skills_pool_capability_repository import (
+    SkillsPoolCapabilityRepositoryMixin,
+)
+from agentclaw.community.plugins.skills_pool_layout_persistence import (
+    encode_stage_evidence,
+    is_runtime_local_locator,
+    lease_expiry,
+    scope_filter,
+)
+from agentclaw.community.plugins.skills_pool_operational_repository import (
+    SkillsPoolOperationalRepositoryMixin,
+)
+from agentclaw.community.plugins.skills_pool_post_cutover_repository import (
+    SkillsPoolPostCutoverRepositoryMixin,
+)
 from agentclaw.community.plugins.skills_pool_quarantine_repository import (
     SkillsPoolQuarantineRepositoryMixin,
 )
 
 
-class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPoolOperationalRepositoryMixin, SkillsPoolQuarantineRepositoryMixin):
+class SkillsPoolLayoutRepository(
+    SkillsPoolCapabilityRepositoryMixin,
+    SkillsPoolOperationalRepositoryMixin,
+    SkillsPoolPostCutoverRepositoryMixin,
+    SkillsPoolQuarantineRepositoryMixin,
+):
+    _scope_filter = staticmethod(scope_filter)
+    _now_plus = staticmethod(lease_expiry)
+
     @inject
     def __init__(self, database: DatabasePlugin) -> None:
         self._database = database
-
-    @staticmethod
-    def _scope_filter(scope: BotSkillLayoutScope):
-        return (
-            BotSkillLayoutStateModel.env == scope.env,
-            BotSkillLayoutStateModel.entity_id == scope.entity_id,
-            BotSkillLayoutStateModel.bot_id == scope.bot_id,
-        )
-
-    @staticmethod
-    def _now_plus(session, seconds: int) -> ColumnElement:
-        if seconds <= 0:
-            raise ValueError("lease_seconds must be positive")
-        if session.bind.dialect.name == "sqlite":
-            return func.datetime(func.now(), text(f"'+{seconds} seconds'"))
-        return func.date_add(func.now(), text(f"INTERVAL {seconds} SECOND"))
 
     def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
         with self._database.transactional_orm_session() as session:
@@ -188,8 +191,7 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                     *self._scope_filter(scope),
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     or_(
                         BotSkillLayoutStateModel.lease_expires_at.is_(None),
                         BotSkillLayoutStateModel.lease_expires_at <= func.now(),
@@ -248,10 +250,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.POOL_PREPARING.value,
@@ -299,10 +299,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
@@ -324,9 +322,6 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
             engine = json.loads(row.rollout_evidence).get("engine_type")
             if not isinstance(engine, str) or not engine:
                 return False
-            if not isinstance(quarantine_path, str) or not quarantine_path:
-                log_missing_quarantine_path(scope, migration_generation)
-                return False
             if not self._upsert_quarantine(
                 session,
                 scope=scope,
@@ -335,10 +330,16 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 path=quarantine_path,
                 evidence_json=evidence_json,
             ):
+                if not isinstance(quarantine_path, str) or not quarantine_path:
+                    log_missing_quarantine_path(scope, migration_generation)
                 return False
             row.phase = SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value
             row.data_plane_cutover_committed = 1
-            row.last_probe_evidence = evidence_json
+            row.last_probe_evidence = encode_stage_evidence(
+                row.last_probe_evidence,
+                stage="cutover",
+                evidence=evidence,
+            )
         return True
 
     def record_cutover_finalizing(
@@ -351,15 +352,19 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
         evidence: dict[str, object],
     ) -> bool:
         evidence_json = json.dumps(evidence, ensure_ascii=False)
+        runtime_evidence = evidence.get("evidence")
+        quarantine_path = (
+            runtime_evidence.get("quarantine")
+            if isinstance(runtime_evidence, dict)
+            else None
+        )
         with self._database.transactional_orm_session() as session:
-            affected = (
+            row = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
@@ -372,28 +377,35 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                     BotSkillLayoutStateModel.lease_owner == lease_owner,
                     BotSkillLayoutStateModel.lease_expires_at > func.now(),
                 )
-                .update(
-                    {
-                        BotSkillLayoutStateModel.phase: (
-                            SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
-                        ),
-                        BotSkillLayoutStateModel.data_plane_cutover_committed: 1,
-                        BotSkillLayoutStateModel.last_failure_code: (
-                            "POST_CUTOVER_SYNC_PENDING"
-                        ),
-                        BotSkillLayoutStateModel.last_failure_stage: (
-                            "post_cutover_sync"
-                        ),
-                        BotSkillLayoutStateModel.last_failure_retryable: 1,
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
-                        BotSkillLayoutStateModel.last_failure_at: func.now(),
-                    },
-                    synchronize_session=False,
-                )
+                .with_for_update()
+                .one_or_none()
             )
-        return affected == 1
+            if row is None or row.rollout_evidence is None:
+                return False
+            engine = json.loads(row.rollout_evidence).get("engine_type")
+            if not isinstance(engine, str) or not engine:
+                return False
+            # Some post-boundary Engine failures cannot yet report the
+            # quarantine path. Persist the irreversible boundary first and
+            # keep FINALIZING until a later successful refresh supplies it.
+            if isinstance(quarantine_path, str) and quarantine_path:
+                if not self._upsert_quarantine(
+                    session,
+                    scope=scope,
+                    migration_generation=migration_generation,
+                    engine=engine,
+                    path=quarantine_path,
+                    evidence_json=evidence_json,
+                ):
+                    return False
+            row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
+            row.data_plane_cutover_committed = 1
+            row.last_failure_code = "POST_CUTOVER_SYNC_PENDING"
+            row.last_failure_stage = "post_cutover_sync"
+            row.last_failure_retryable = 1
+            row.last_failure_evidence = evidence_json
+            row.last_failure_at = func.now()
+        return True
 
     def begin_cutover(
         self,
@@ -410,12 +422,9 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.phase
-                    == SkillLayoutPhase.POOL_READY.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase == SkillLayoutPhase.POOL_READY.value,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
                     BotSkillLayoutStateModel.preparation_id == preparation_id,
@@ -452,10 +461,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.POOL_PREPARING.value,
@@ -472,15 +479,9 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 .update(
                     {
                         BotSkillLayoutStateModel.last_failure_code: failure_code,
-                        BotSkillLayoutStateModel.last_failure_stage: (
-                            failure_stage
-                        ),
-                        BotSkillLayoutStateModel.last_failure_retryable: int(
-                            retryable
-                        ),
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
+                        BotSkillLayoutStateModel.last_failure_stage: (failure_stage),
+                        BotSkillLayoutStateModel.last_failure_retryable: int(retryable),
+                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
                         BotSkillLayoutStateModel.last_failure_at: func.now(),
                     },
                     synchronize_session=False,
@@ -503,38 +504,55 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
 
         evidence_json = json.dumps(evidence, ensure_ascii=False)
         with self._database.transactional_orm_session() as session:
-            affected = (
+            row = (
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.phase
-                    == SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.phase.in_(
+                        (
+                            SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value,
+                            SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value,
+                        )
+                    ),
                     BotSkillLayoutStateModel.data_plane_cutover_committed == 1,
                     BotSkillLayoutStateModel.migration_generation
                     == migration_generation,
                     BotSkillLayoutStateModel.lease_owner == lease_owner,
                     BotSkillLayoutStateModel.lease_expires_at > func.now(),
                 )
-                .update(
-                    {
-                        BotSkillLayoutStateModel.last_failure_code: failure_code,
-                        BotSkillLayoutStateModel.last_failure_stage: failure_stage,
-                        BotSkillLayoutStateModel.last_failure_retryable: int(
-                            retryable
-                        ),
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
-                        BotSkillLayoutStateModel.last_failure_at: func.now(),
-                    },
-                    synchronize_session=False,
-                )
+                .with_for_update()
+                .one_or_none()
             )
-        return affected == 1
+            if row is None:
+                return False
+            try:
+                last_probe_evidence = (
+                    json.loads(row.last_probe_evidence)
+                    if row.last_probe_evidence
+                    else {}
+                )
+            except (TypeError, ValueError):
+                last_probe_evidence = {}
+            # Once runtime evidence is refreshed,
+            # last_probe_evidence carries an explicit durable success marker,
+            # so downstream failures must not reopen runtime finalization.
+            cutover_evidence = last_probe_evidence.get("cutover")
+            evidence_refreshed = isinstance(
+                cutover_evidence, dict
+            ) and cutover_evidence.get("post_cutover_evidence_recorded") is True
+            if (
+                row.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+                and not evidence_refreshed
+            ):
+                row.phase = SkillLayoutPhase.POOL_CUTOVER_FINALIZING.value
+            row.last_failure_code = failure_code
+            row.last_failure_stage = failure_stage
+            row.last_failure_retryable = int(retryable)
+            row.last_failure_evidence = evidence_json
+            row.last_failure_at = func.now()
+        return True
 
     def mark_repair_required(
         self,
@@ -554,10 +572,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER.value,
                     BotSkillLayoutStateModel.data_plane_cutover_committed == 0,
@@ -574,9 +590,7 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                         BotSkillLayoutStateModel.last_failure_code: failure_code,
                         BotSkillLayoutStateModel.last_failure_stage: failure_stage,
                         BotSkillLayoutStateModel.last_failure_retryable: 0,
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
+                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
                         BotSkillLayoutStateModel.last_failure_at: func.now(),
                         BotSkillLayoutStateModel.lease_owner: None,
                         BotSkillLayoutStateModel.lease_expires_at: None,
@@ -607,10 +621,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.NEEDS_MANUAL_REPAIR.value,
                     BotSkillLayoutStateModel.migration_generation
@@ -656,10 +668,9 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
     ) -> bool:
         """原子提交精确 Bot 范围内的全部 local locator 和布局状态。"""
 
-        pool_prefixes = local_locator_prefixes(pool=True)
         if any(
             not isinstance(skill_id, int)
-            or not locator.startswith(pool_prefixes)
+            or not is_runtime_local_locator(locator)
             for skill_id, locator in local_locators.items()
         ):
             return False
@@ -682,10 +693,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.LEGACY.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_CUTOVER_COMMITTED.value,
                     BotSkillLayoutStateModel.data_plane_cutover_committed == 1,
@@ -745,8 +754,7 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
                     BotSkillLayoutStateModel.target_layout.is_(None),
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.POOL_ACTIVE.value,
@@ -772,9 +780,7 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                             "rollback_requested"
                         ),
                         BotSkillLayoutStateModel.last_failure_retryable: None,
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
+                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
                         BotSkillLayoutStateModel.last_failure_at: func.now(),
                     },
                     synchronize_session=False,
@@ -798,10 +804,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.LEGACY.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
@@ -825,6 +829,13 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                         BotSkillLayoutStateModel.last_failure_evidence: (
                             evidence_json
                         ),
+                        BotSkillLayoutStateModel.last_probe_evidence: (
+                            encode_stage_evidence(
+                                None,
+                                stage="rollback",
+                                evidence=evidence,
+                            )
+                        ),
                         BotSkillLayoutStateModel.last_failure_at: None,
                     },
                     synchronize_session=False,
@@ -847,10 +858,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.LEGACY.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
@@ -896,10 +905,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.LEGACY.value,
                     BotSkillLayoutStateModel.phase.in_(
                         (
                             SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING.value,
@@ -915,12 +922,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                     {
                         BotSkillLayoutStateModel.last_failure_code: failure_code,
                         BotSkillLayoutStateModel.last_failure_stage: failure_stage,
-                        BotSkillLayoutStateModel.last_failure_retryable: int(
-                            retryable
-                        ),
-                        BotSkillLayoutStateModel.last_failure_evidence: (
-                            evidence_json
-                        ),
+                        BotSkillLayoutStateModel.last_failure_retryable: int(retryable),
+                        BotSkillLayoutStateModel.last_failure_evidence: (evidence_json),
                         BotSkillLayoutStateModel.last_failure_at: func.now(),
                     },
                     synchronize_session=False,
@@ -938,10 +941,9 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
     ) -> bool:
         """同事务恢复全部 local locator 与 ``LEGACY_ACTIVE``。"""
 
-        legacy_prefixes = local_locator_prefixes(pool=False)
         if any(
             not isinstance(skill_id, int)
-            or not locator.startswith(legacy_prefixes)
+            or not is_runtime_local_locator(locator)
             for skill_id, locator in local_locators.items()
         ):
             return False
@@ -964,10 +966,8 @@ class SkillsPoolLayoutRepository(SkillsPoolCapabilityRepositoryMixin, SkillsPool
                 session.query(BotSkillLayoutStateModel)
                 .filter(
                     *self._scope_filter(scope),
-                    BotSkillLayoutStateModel.active_layout
-                    == SkillLayout.POOL.value,
-                    BotSkillLayoutStateModel.target_layout
-                    == SkillLayout.LEGACY.value,
+                    BotSkillLayoutStateModel.active_layout == SkillLayout.POOL.value,
+                    BotSkillLayoutStateModel.target_layout == SkillLayout.LEGACY.value,
                     BotSkillLayoutStateModel.phase
                     == SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED.value,
                     BotSkillLayoutStateModel.migration_generation

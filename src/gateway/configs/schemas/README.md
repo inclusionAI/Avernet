@@ -5,6 +5,7 @@ Schemas are checked in as code. No build-time generation pipeline exists yet.
 ## Current schemas
 
 - `baas.openapi.json` — BaaS service OpenAPI spec
+- `bcn.openapi.json` — BCN collaboration service OpenAPI spec
 - `bots.openapi.json` — Bots service OpenAPI spec
 
 ## Future: build-time generation

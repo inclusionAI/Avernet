@@ -4,8 +4,10 @@
 //! and `port` contracts without creating reverse dependencies between those
 //! layers.
 
+pub mod bot_control_plane;
 pub mod error;
 
+pub use bot_control_plane::*;
 pub use bcs_domain::*;
 pub use error::{ServiceError, ServiceResult};
 

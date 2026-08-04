@@ -609,6 +609,151 @@ async fn session_history_denies_human_with_no_session_or_group_stake() {
 }
 
 #[tokio::test]
+async fn session_history_rejects_public_caller() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Public,
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("public session history reads must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Unauthorized(_)),
+        "expected Unauthorized, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_owner_when_not_in_session_and_owns_no_session_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .save_created_by("bot-observer", "1", true)
+        .await
+        .unwrap();
+
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group ownership alone must not grant session history access");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_group_participant_bot_not_in_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-observer".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("group participant bot must be rejected when absent from the session");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn session_history_denies_non_participant_bot() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let bot_request = Arc::new(ControllableHistoryBotRequest::with_delays(
+        HashMap::new(),
+        HashMap::new(),
+    ));
+    let history = BcsGroupMessageHistory::new(
+        support.group.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        bot_request,
+    );
+
+    let err = history
+        .get_session_history(SessionHistoryCommand {
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "intruder-bot".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "group-1:abcdef12".to_string(),
+            session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
+            view_bot_id: None,
+            limit: 500,
+            before: None,
+        })
+        .await
+        .expect_err("non-participant bot must be rejected");
+
+    assert!(
+        matches!(err, bcs_service_api::GroupUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn session_history_resolves_from_prefix_using_session_participants() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -752,7 +897,9 @@ async fn session_history_v3_falls_back_to_session_key_when_explicit_session_requ
 
     let result = history
         .get_session_history(SessionHistoryCommand {
-            caller: CallerContext::Public,
+            caller: CallerContext::Bot(BotActor {
+                bot_uuid: "bot-driver".to_string(),
+            }),
             group_id: "group-1".to_string(),
             session_id: "group-1:abcdef12".to_string(),
             session_participants: vec![Participant::bot("bot-driver", ParticipantRole::Driver)],
@@ -3043,6 +3190,7 @@ async fn chat_abort_delivers_abort_frame_to_bot_participants() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
+            session_id: None,
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -3086,6 +3234,7 @@ async fn chat_abort_publishes_frontend_event_through_port() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
+            session_id: None,
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -3096,6 +3245,128 @@ async fn chat_abort_publishes_frontend_event_through_port() {
     assert_eq!(events.len(), 1);
     assert!(events[0].contains(r#""event":"chat.abort""#));
     assert!(events[0].contains(r#""run_id":"run-1""#));
+}
+
+#[tokio::test]
+async fn chat_abort_with_session_rejects_a_run_from_another_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-other-session".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("session-other".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: Some("session-bound".to_string()),
+            run_id: Some("run-other-session".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(!outcome.aborted);
+    assert!(outcome.aborted_run_ids.is_empty());
+    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(support.frontend_delivery.events().await.is_empty());
+}
+
+#[tokio::test]
+async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(bcs_service_api::BotRunContext {
+            run_id: "run-bound".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("session-bound".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: Some("session-bound".to_string()),
+            run_id: Some("run-bound".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(outcome.aborted);
+    assert_eq!(outcome.aborted_run_ids, vec!["run-bound".to_string()]);
+    assert!(!support.bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_chat_abort(ChatAbortCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some("session-bound".to_string()),
+        run_id: None,
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        support
+            .bot_delivery
+            .frames()
+            .await
+            .into_iter()
+            .all(|frame| matches!(
+                frame,
+                BcsFrame::Request(req)
+                    if req.params.as_ref().and_then(|params| params["session_key"].as_str())
+                        == Some("session-bound")
+                    && req.params.as_ref().and_then(|params| params.get("run_id")).is_none()
+            ))
+    );
 }
 
 #[tokio::test]

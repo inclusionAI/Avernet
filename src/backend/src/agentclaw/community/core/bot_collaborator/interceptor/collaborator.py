@@ -26,6 +26,9 @@ from agentclaw.community.core.bot_collaborator.services.collaborator_lock_servic
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -87,6 +90,7 @@ class CollaboratorPermissionInterceptor:
         extractor_params: dict[str, str] | None = None,
         # 审计入库控制
         persist_audit_log: bool = True,
+        audit_excluded_params: set[str] | frozenset[str] | None = None,
         # 锁检查控制
         skip_lock_check: bool = False,
     ):
@@ -101,6 +105,7 @@ class CollaboratorPermissionInterceptor:
                 配合 params_extractor 使用，表达式解析后的值会作为参数传给回调函数
             persist_audit_log: 是否将操作审计记录到数据库，默认 True。
                 设置为 False 时，同时跳过锁检查（用于不需要审计的高频操作）。
+            audit_excluded_params: 审计日志中排除的请求参数名，用于敏感字段脱敏。
             skip_lock_check: 是否跳过锁检查，默认 False。
                 设置为 True 时，只检查协作者权限，不检查锁状态（用于抢锁等特殊操作）。
         """
@@ -110,6 +115,7 @@ class CollaboratorPermissionInterceptor:
         self.params_extractor = params_extractor
         self.extractor_params = extractor_params
         self.persist_audit_log = persist_audit_log
+        self.audit_excluded_params = frozenset(audit_excluded_params or ())
         self.skip_lock_check = skip_lock_check
         self.resolver = ExpressionResolver()
 
@@ -353,7 +359,7 @@ class CollaboratorPermissionInterceptor:
                 params = {}
                 for key, value in ctx.route_kwargs.items():
                     try:
-                        if key == "user":
+                        if key == "user" or key in self.audit_excluded_params:
                             continue
                         if hasattr(value, 'model_dump'):
                             params[key] = value.model_dump()
@@ -425,15 +431,21 @@ class CollaboratorPermissionInterceptor:
         """当请求未提供 owner_id 时，主动解析 Bot 归属。
 
         解析策略：
-        1. bot_id 缺失或为 "default" → 返回当前 user_id（语义=我的 bot）
-        2. bot_id 有值 → 通过 BotRepository.get_by_id 查询 bot 记录，
-           返回 bot.owner_id
+        1. bot_id 缺失 → 返回当前 user_id（语义=我的 bot）
+        2. bot_id 有值（含历史的 "default"）→ 通过 BotRepository.get_by_id
+           查询 bot 记录，返回 bot.owner_id
         3. BotRepository 不可用 或 bot 不存在 → 返回 None（回退到 skip）
 
         返回 None 表示无法解析，调用方应回退到跳过权限检查
         （让业务层返回更具体的错误如 404，而非拦截器一刀切 403）。
         """
-        if not bot_id or bot_id == "default":
+        if not bot_id:
+            return user_id
+        # 存量 default bot 兜底:单租户内每 owner 都有一条 bot_id="default",
+        # repo.get_by_id("default") 会歧义命中任意 owner 的 default bot,导致串户。
+        # 旧语义 default=我自己的 bot,保留此短路避免协作者鉴权用错 owner_id。
+        # 新 bot 永不为 default (generate_bot_id 全局唯一),此分支仅命中存量。
+        if bot_id == "default":
             return user_id
 
         if ctx.injector is None:
@@ -484,10 +496,11 @@ class CollaboratorPermissionInterceptor:
     def _is_coding_app(
         self, ctx: InterceptorContext, bot_id: str | None, owner_id: str | None
     ) -> bool:
-        """判断目标 Bot 是否为 coding 应用。
+        """判断目标 Bot 是否使用应用/成员管理语义。
 
-        coding 应用：``active_engine == "claude_code"`` 且
-        ``template_type == "applicationCoding"``。失败时保守返回 False
+        具体规则通过 ``MemberManagementCapabilityService`` 协调：通用层只
+        依赖 engine capability interface，不解释任何引擎私有 schema；各引擎
+        的定制判断放在各自目录的 capability 实现中。失败时保守返回 False
         （即按 Service Bot 原逻辑走 bot 级锁）。
         """
         if not bot_id or not owner_id or ctx.injector is None:
@@ -499,10 +512,8 @@ class CollaboratorPermissionInterceptor:
 
             bot_service = ctx.injector.get(BotServiceProtocol)
             bot = bot_service.get_bot(bot_id, owner_id)
-            return bool(bot) and (
-                bot.get("active_engine") == "claude_code"
-                and bot.get("template_type") == "applicationCoding"
-            )
+            capability_service = ctx.injector.get(MemberManagementCapabilityService)
+            return capability_service.uses_member_management_semantics(bot, bot_id)
         except Exception as e:
             logger.warning("[_is_coding_app] check failed: %s", e)
             return False

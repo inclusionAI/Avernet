@@ -81,6 +81,23 @@ ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     502: {"model": ErrorEnvelope, "description": "Upstream service error"},
 }
 
+# Extra failures only the engine-runtime groups can produce. Attached to those
+# routers, NOT merged into ``ERROR_RESPONSES``: that dict is applied surface-wide
+# in ``build_public_router``, and ``test_openapi_error_schema`` asserts every
+# operation documents every status in it — so adding these there would make the
+# six already-shipped categories advertise a 501 they cannot return, pointing at
+# an endpoint unrelated to them, and generate dead branches in clients.
+ENGINE_RUNTIME_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
+    **ERROR_RESPONSES,
+    501: {
+        "model": ErrorEnvelope,
+        "description": "Not supported for this bot — either its engine does not "
+        "declare the capability (see the engine-capabilities endpoint) or the "
+        "operation is not offered for this bot type",
+    },
+    504: {"model": ErrorEnvelope, "description": "Upstream service timed out"},
+}
+
 
 class Page[T](BaseModel):
     """A page of items returned by list endpoints."""

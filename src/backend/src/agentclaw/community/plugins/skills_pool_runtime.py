@@ -11,6 +11,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CurrentRuntimeLayoutProbeService,
+    MAPPING_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
@@ -78,6 +79,7 @@ class SkillsPoolRuntime:
                     "migration_generation": migration_generation,
                     "preparation_id": preparation_id,
                     "registered_local_names": registered_local_names,
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                 },
             )
@@ -137,6 +139,7 @@ class SkillsPoolRuntime:
                 user_id=user_id,
                 path="/api/skills/layout/mappings/publish",
                 body={
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                     "source_layout": source_layout.value,
                 },
@@ -276,6 +279,7 @@ class SkillsPoolRuntime:
                 user_id=user_id,
                 path="/api/skills/layout/mappings/verify",
                 body={
+                    "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                     "mappings": [mapping.to_dict() for mapping in mappings],
                     "source_layout": source_layout.value,
                 },

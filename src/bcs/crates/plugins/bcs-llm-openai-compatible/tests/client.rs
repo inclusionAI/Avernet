@@ -132,6 +132,26 @@ async fn openai_compatible_success_response_parses_choice_content() {
 }
 
 #[tokio::test]
+async fn openai_compatible_passes_llm_chat_completion_contract() {
+    let body = r#"{"choices":[{"message":{"content":"{\"outcome\":\"complete\"}"}}]}"#;
+    let response = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    let base_url = spawn_openai_compatible_response(response).await;
+    let client = OpenAiCompatibleLlmClient::new(test_config(
+        &base_url,
+        StructuredOutputMode::JsonSchema,
+        10_000,
+    ))
+    .expect("openai-compatible client");
+
+    bcs_test_support::contract::plugin::llm_chat_completion_contract_tests(&client, "gpt-4.1-mini")
+        .await;
+}
+
+#[tokio::test]
 async fn openai_compatible_success_response_parses_tool_call_arguments() {
     let body = r#"{"choices":[{"message":{"content":null,"tool_calls":[{"function":{"arguments":"{\"outcome\":\"complete\"}"}}]}}],"usage":{"total_tokens":12}}"#;
     let response = format!(

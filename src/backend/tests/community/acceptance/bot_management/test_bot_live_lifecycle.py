@@ -680,12 +680,14 @@ def test_bot_management_boundary_paths(live_backend):
             bot_name="BotMgmt default guard",
             status="ACTIVE",
         )
+        # T4: delete protection is now count-based (keep >=1 bot), not bot_id=="default".
+        # This owner has exactly one bot, so deleting it must be rejected.
         delete_default = client.delete(f"/api/bots/{default_bot_id}")
         assert delete_default.status_code == 200, delete_default.text
         delete_default_body = delete_default.json()
         assert delete_default_body["success"] is False, delete_default_body
         assert delete_default_body["error_code"] == 500, delete_default_body
-        assert "default bot" in delete_default_body["message"], delete_default_body
+        assert "至少保留一个 Bot" in delete_default_body["message"], delete_default_body
 
         desktop_device_id = f"BOT-{fresh_id('desktop_guard')}"
         binding_id = _seed_desktop_binding(

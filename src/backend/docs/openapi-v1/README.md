@@ -23,6 +23,11 @@ Read this alongside the deeper engineering handoff and the SDD docs in
 Stage 1, merged as PR #456) and `2026-07-27-openapi-v1-bots-track-b/` (Track B
 bots, merged as PR #494). Each carries `spec.md`, `plan.md`, `tasks.md`.
 
+For **Track C** (wrapping the bot's *engine* runtime), the endpoint-by-endpoint
+ruling lives in a companion reference: **[`engine-surface.md`](engine-surface.md)**
+([简体中文](engine-surface.zh-CN.md)). This README stays the single status board;
+that file holds the inventory.
+
 ---
 
 ## The big picture (read this first)
@@ -33,19 +38,26 @@ registered tenants**. It lives under
 category is implemented (PR #494); the other six are still **route definitions
 with stub handlers**.
 
-> 🔒 **The surface is not callable yet, by design.** `require_principal` is
-> still a stub returning `None`, so every real request to `/openapi/v1/...`
-> answers `401` — including the implemented bots endpoints. The real caller
-> authenticator is a separate workstream, and the DoD gates the public surface
-> on it. "bots is done" means the handlers, contracts and tests are done, not
-> that an external tenant can call them.
+> 🔒 **The surface is still not callable end-to-end, but no longer because of a
+> stub.** `require_principal` now really verifies the gateway's signed
+> `X-Avernet-Principal` token and `resolve_avernet_tenant` really reads the
+> tenant out of it (see **The auth seam** below). The gateway's signing PR
+> ([#599](https://github.com/inclusionAI/Avernet/pull/599)) **has merged**, so
+> `dev` does forward the header — a `user` caller now round-trips end to end
+> (verified against the real signer, 2026-08-02). What still stands between an
+> **external tenant** and a `200` is who may call: `route_security` requires a
+> `user` identity resolved by the Google chain, which a tenant presenting an
+> access key cannot satisfy, and since 2026-08-02 the backend independently
+> refuses any identity set that names no end user. Widening that is the
+> delegation workstream, not a config line. "bots is done" still means handlers,
+> contracts and tests are done.
 
 The catch: the internal `/api/...` surface and the public `/openapi/v1` surface
 share the **same tables, repositories, and services**. So a public endpoint
 that returned real data would — without isolation — read the *internal*
 tenant's data. That's the problem this effort exists to prevent.
 
-The work therefore splits into **two tracks**:
+The work therefore splits into **three tracks**:
 
 - **Track A — Tenant-isolation foundation.** Make every data category
   tenant-scoped *underneath both API surfaces*, before any public endpoint is
@@ -53,12 +65,24 @@ The work therefore splits into **two tracks**:
 - **Track B — Public API implementation.** Wire the seven `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **1 of 7 done: bots (PR #494).**
+  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
+- **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
+  adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
+  the `get_device_connection` hand-off with one sanitised socket-info endpoint.
+  **16 endpoints — implemented, PR #630.**
 
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
 > reusable mechanism + that category's records). The API endpoints land in
 > Track B — done for bots, still stubs for the other six.
+>
+> ⚠️ **Track C has no Track A stage, and that is correct.** Tracks A and B pair
+> up (isolate a category, then wire its endpoints); Track C does not. Its data
+> lives on the bot's device, not in a backend table, so there is nothing to add
+> `avernet_tenant` to and **no DDL**. Isolation comes entirely from resolving
+> `bot_id` through the bots guard (Stage 1 ✅) before touching the device — the
+> same argument that gives `identity` no stage of its own. Don't go looking for
+> a Track A stage that doesn't exist.
 
 ---
 
@@ -120,22 +144,58 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 1 of 7 done)
+### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
 | bots | totalfrank | P1 | `openapi_v1/bots/router.py` | ✅ **DONE — PR #494 merged 2026-07-29** (13/13 endpoints) | ~~Track A stage 1~~ ✅ |
-| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` *(stub)* | ⬜ TODO — **unblocked** | ~~Track A stage 5~~ ✅ (PR #564) |
+| mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE — PR #610** (6/6 endpoints) | ~~Track A stage 5~~ ✅ (PR #564) |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS (PARTIAL) — 9 handlers all wired but DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0); Track B all 9 endpoints wired stub→service; gated on auth workstream (gateway principal seam) + DDL deploy before public exposure |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | totalfrank | 🅳 **DEPRIORITIZED** | `openapi_v1/channels/router.py` *(stub)* | ⏸️ PARKED — scope intact, not cancelled | Track A stage 3 (also parked) |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
 | skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
 
+### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
+_All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
+DDL. Full ruling and per-endpoint mapping in
+**[`engine-surface.md`](engine-surface.md)**._
+
+| Group | Endpoints | Owner | Pri | Router | State |
+|---|---|---|---|---|---|
+| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630** (personal bots only; `service` → 501) |
+| engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
+| connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
+| approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
+| models | 2 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/models/` | ✅ **IMPLEMENTED — PR #630** |
+
+> **Scope rule (why only these).** Wrap engine HTTP the frontend reaches
+> **directly** through proxypass (`src/frontend/src/requestConfig.ts:189-205`).
+> Engine routes the frontend reaches **via the backend** — `/api/cron` (already
+> the `routines` category), `/api/file`, `/api/skills`, `/api/mcp`,
+> `/api/resource-materializations`, `/api/bash`, `/api/bot/config`,
+> `/api/work-items` — are already fronted by a backend contract and stay out.
+> AICoding-only routes stay out. **WebSockets are not wrapped**: the new
+> `…/connection` endpoint returns one complete socket URL, credential included,
+> and the caller builds the connection itself.
+>
+> `engine/switch` and `engine/restart` are deliberately excluded — wrapping
+> `switch` would be a back door around #494's `engine`-immutability ruling on
+> `PUT /openapi/v1/bots/{bot_id}`, and `restart` would give one bot two restart
+> verbs. `session-favorites` and the `/api/openclaw` HTTP trio are **deferred,
+> not cancelled** (both additive later). Reasons in `engine-surface.md`.
+>
+> **Routines is Track C's worked precedent, not a Track B one.** Backend
+> `/api/cron` → `CronRelayService` → `DeviceAdapterTransport` → engine has been
+> the shape in production all along, and `openapi_v1/routines/router.py:29`
+> already imports `CronRelayServiceProtocol`. Read it before writing a handler.
+
 ### Cross-cutting (not per-stage)
 | Item | State | Note |
 |---|---|---|
-| Real caller-identity verifier (auth workstream) | ⬜ TODO (other team) | swap `require_principal` + `resolve_avernet_tenant` bodies to read the gateway principal; **the whole public surface answers 401 until this lands** |
+| Real caller-identity verifier (auth workstream) | ✅ **DONE both halves** — backend PR [#634](https://github.com/inclusionAI/Avernet/pull/634), gateway PR [#599](https://github.com/inclusionAI/Avernet/pull/599) **merged** | `require_principal` + `resolve_avernet_tenant` verify the gateway's signed `X-Avernet-Principal` (HS256, `aud=backend`) and read tenant + owner from it. The wire contract was checked by round-tripping the **real** gateway signer into the **real** backend verifier (2026-08-02): user/bot/app/access_key shapes, secret non-projection, `aud`/`iss` refusal. **A `user` caller works end to end.** What remains is *which* callers are admitted — see the identity-admission row below |
+| **Identity admission: `user` only** | ✅ **DONE 2026-08-02** | `verify_principal_token` refuses an identity set naming no end user, so `bot` / `app` / `access_key` callers get `401` by design rather than by whether a handler asks for the owner. Widening it is delegation (auth design §15), not config. SDD: `specs/2026-08-02-public-api-user-only-principal/` |
+| **No cross-repo test pins the principal wire shape** | ⬜ TODO | Both sides are tested against their own hand-written idea of the payload (`test_verifier.py` builds dicts; the gateway tests its own models). Renaming a field on one side leaves both suites green and 401s production |
 | Tenant-leading indexes (F2, **MANDATORY** policy) | ⬜ TODO | before multi-tenant go-live |
 | Background/scheduled work revisit | ⬜ TODO | before a 2nd tenant holds real data |
 | **Bot identity keys collide across tenants** ([#556](https://github.com/inclusionAI/Avernet/issues/556)) | ⬜ TODO (totalfrank) | Passport, auth relationships, BCN, policy row are keyed on `bot_id`/`owner_id` with no tenant axis, and every owner's first bot is literally `"default"`. **Should gate enabling multi-tenancy.** Stopgapped in #494 by `sync_to_bcn=False` on the public update path |
@@ -253,13 +313,95 @@ Category-agnostic; reuse as-is. These files are **on `dev`** (PR #456):
   request's tenant. **Covers every request already; Track A stage 2+ does not
   touch it.**
 - `adapters/http/openapi_v1/dependencies.py` — `resolve_avernet_tenant(request)`:
-  the single seam. Returns the default tenant today; the auth workstream swaps
-  the body in place. Category-agnostic. _(This file holds both stubs today —
-  `require_principal` and `resolve_avernet_tenant`; the owner-side seam on top
-  of the former is `openapi_v1/principal.py::caller_owner_id`.)_
+  the single seam. Category-agnostic. **No longer a stub** — it and
+  `require_principal` both read the verified gateway principal; see **The auth
+  seam** below. The owner-side seam on top of the latter is
+  `openapi_v1/principal.py::caller_owner_id`.
 
 All paths are under
 `src/backend/src/agentclaw/community/`.
+
+---
+
+## The auth seam — how a caller becomes a tenant + an owner
+
+Both public seams read **one** header and verification happens **once** per
+request. SDD: `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+
+```
+gateway            verifies credentials → resolves identity set → signs it
+  │                (HS256, aud = the upstream's name, TTL 60s, principals[])
+  ▼  X-Avernet-Principal
+AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
+                                                            ├─ verify once,
+route dependency        → require_principal(request)       ─┘  cache on scope
+                             │
+                             └→ caller_owner_id(principal) → owner-scoped calls
+```
+
+- `core/gateway_principal/` — the verifier and **our** DTOs for the wire shape.
+  The backend never imports gateway types (Rule 7 / §9); it projects.
+- `utils/gateway_principal_config.py` — resolves the shared key through
+  `SecretResolver` under `SecretNamesConfig.gateway_principal_signing_key`.
+  That name **defaults**, so a deployment configures only the *value*: the corp
+  secret store (corp overlays also override the name),
+  or `AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE` (community).
+  **Singlebox resolves nothing** — no secret store, no local stand-in — so
+  `/openapi/v1` denies there and no config knob changes that; giving singlebox a
+  key is a deliberate change, not a config line. There is no dev fallback key on
+  this side on purpose: a committed shared secret is a committed credential. The
+  key is resolved once at boot, so rotating it needs a restart on both sides.
+
+  **An unresolvable key behaves differently by environment**, and the
+  difference is the whole point:
+
+  | Environment | No usable key ⇒ |
+  | --- | --- |
+  | `pre` / `prod` | **the process refuses to boot** — `init_principal_verifier_config` raises, so a rollout fails loudly instead of serving a surface that 401s while looking healthy |
+  | local / dev / singlebox | **every `/openapi/v1` request answers 401** — these legitimately have no key, so they stay bootable and deny instead |
+
+  Either way the trigger is the same: no such secret, an empty value, or a
+  resolver that raises.
+
+- `aud` and `iss` are fixed in code here, not configurable — one wire contract,
+  one spelling. They are **not** symmetric on the signing side, though:
+  - `aud` is not configurable there either (the gateway signs it from the
+    upstream server's own name), so a knob here could only break the contract.
+  - `iss` **is** configurable there — `user_config.principal_signer.issuer`,
+    since gateway #673. Its default is `gateway`, which this constant matches,
+    so the contract holds as shipped. **Changing the gateway's `issuer`
+    requires changing the backend constant in the same release**, or every
+    request 401s. Same unenforced coupling as the `aud` ↔ `servers:` name.
+- What gets rejected, all as an identical `401`: bad signature, `alg: none`, an
+  `aud` for another upstream, wrong `iss`, expired, a missing required claim, an
+  unknown `type` tag, a renamed contract field, an identity set that disagrees
+  about its tenant, **a tenant claiming to be `teamclaw`** (that one would
+  hand an external caller every internal row), and **an identity set naming no
+  end user** (see below).
+- The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
+  So a real external tenant reads an empty dataset until it has data; that is
+  isolation working, not a bug.
+
+**Two things you inherit if you own a Track B category:**
+
+1. **Only a `user` caller is admitted — `bot`, `app` and `access_key` are refused
+   at verification.** _Decided 2026-08-02._ Owner id is derived only from a
+   `user` principal. `app.owners` is free-text org attribution and the
+   access-key registry has no owner column, so neither names a person to scope
+   by; `bot` does carry `owner_id`, but letting a bot act as its owner across
+   the whole public contract is a grant nobody made. **The refusal happens in
+   `verify_principal_token`, not in `caller_owner_id`** — that is the load-bearing
+   part. A per-handler refusal only covers handlers that ask for the owner, and
+   four in `resources/router.py` don't; refusing the identity set means an
+   unscopeable caller cannot reach *any* route, present or future. What an `app`
+   / `access_key` caller should own is still unsettled (auth design §14 Q4);
+   delegation (§15) is the designed way to widen this. SDD:
+   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+2. **A mapped error raised in a dependency is now enveloped too.** `@envelope_errors`
+   only wraps the handler, so the seam's 401 (raised in a dependency) escaped it;
+   the lookup now lives in `responses.py::mapped_error_response` and the app's
+   catch-all consults the same table. If you add a dependency that raises a
+   domain error, it already answers in the envelope.
 
 ---
 
@@ -364,8 +506,12 @@ rebuild it. Everything below is category-agnostic and lives in
    guard** (a foreign `{id}` must be a masked 404). Keep the internal suite
    unmodified and green.
 8. Own SDD (`spec.md`/`plan.md`/`tasks.md`) and own PR per category. Use
-   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` and
-   `openapi_v1/bots/router.py` as the worked reference.
+   `src/backend/specs/2026-07-27-openapi-v1-bots-track-b/` +
+   `openapi_v1/bots/router.py` as the worked reference, and
+   `src/backend/specs/2026-07-30-openapi-v1-mcp-track-b/` +
+   `openapi_v1/mcp/router.py` for the second — the pattern for a category that
+   **extracts shared logic** out of a live internal router (recipe step 6) into
+   `core/mcp/` and proves the extraction by leaving the internal suite unmodified.
 
 > **Architecture gate:** `tests/community/architecture/` now also runs
 > `test_service_api_conformance.py` — the Service API gate that `api/README.md`
@@ -385,14 +531,17 @@ contract overview in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese
 endpoint reference by totalfrank — still open/draft as of 2026-07-29; kept here
 as reference).
 
-> ⚠️ **Path divergence — still open for the six stub groups.** The routers nest
-> every non-`bots` group under `/openapi/v1/bots/...` (e.g.
-> `/openapi/v1/bots/resources`, `/openapi/v1/bots/mcp`). PR #363's overview used
-> **top-level** paths (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). The
-> **router is authoritative** for implementation — the paths below match it.
-> Owners: if the top-level shape is the intended public surface, change the
-> router `prefix` and update this section in the same PR. _(bots is unaffected:
-> it is `/openapi/v1/bots` under either reading, and shipped that way in #494.)_
+> ⚠️ **Path divergence — RESOLVED for `mcp` (PR #610), open for the remaining
+> stub groups.** The routers nest every non-`bots` group under
+> `/openapi/v1/bots/...` (e.g. `/openapi/v1/bots/resources`,
+> `/openapi/v1/bots/mcp`). PR #363's overview used **top-level** paths
+> (`/openapi/v1/resources`, `/openapi/v1/mcp`, …). **Ruling (mcp owner, PR #610):
+> the nested router shape stays** — the router is authoritative and the churn of
+> a re-prefix buys nothing while the surface is pre-auth. The remaining five
+> groups inherit this precedent unless their owner decides otherwise; if you do
+> want the top-level shape, change the router `prefix` and update this section in
+> the same PR. _(bots is unaffected: it is `/openapi/v1/bots` under either
+> reading, and shipped that way in #494.)_
 >
 > **Mount order is load-bearing.** `build_public_router()` includes the six
 > literal sub-groups **before** the bots group, so `/openapi/v1/bots/channels`
@@ -448,8 +597,11 @@ DingTalk (`dingding`) config CRUD + status toggle.
 _Note: the stub returns `Envelope[list[Channel]]` for list (not `Page`); PR #363
 showed `Page[Channel]`. Confirm which you want when you wire it._
 
-### 🟦 totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py`
-Marketplace + tenants + the caller's unified per-server config.
+### ✅ totalfrank · P1 — mcp (6 endpoints) · `openapi_v1/mcp/router.py` — **IMPLEMENTED (PR #610)**
+Marketplace + tenants + the caller's unified per-server config. All 6 wired to
+the internal MCP services through the shared `core/mcp/` flow (extracted from the
+internal router so both surfaces answer identically); owner-scoped via
+`caller_owner_id`, tenant-scoped by the Stage 5 guard.
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/openapi/v1/bots/mcp/servers` | List marketplace servers (`keyword`, paged) | `Envelope[Page[McpServer]]` |
@@ -458,6 +610,14 @@ Marketplace + tenants + the caller's unified per-server config.
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/permissions` | Caller's permission for a server | `Envelope[McpPermission]` |
 | GET | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Read caller's unified server config | `Envelope[McpConfig]` |
 | PUT | `/openapi/v1/bots/mcp/servers/{server_code}/config` | Write config (pushed to devices) | `Envelope[McpConfig]` |
+
+_Delivered decisions (PR #610): paths stay nested (`/openapi/v1/bots/mcp/...`);
+`sync_mode` dropped from the write body (no single-device push path — `extra=
+"forbid"` makes it a 422); a failed device push rolls the write back and answers
+502 (mirrors the internal surface); `endpoint_env`/`transport_protocol` are
+strict enums (`PROD`/`PRE`, `SSE`/`STREAMABLE_HTTP`). **Preserved fail-open:** a
+marketplace outage still reports the caller as permitted (advisory endpoint; the
+MCP server enforces) — pinned by a test so it reads as a decision, not a bug._
 
 ### 🟩 lucas-xzp · P1 — resources (9 endpoints) · `openapi_v1/resources/router.py`
 Unified file/link/folder abstraction; storage location never exposed.
@@ -524,26 +684,49 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
 
+### ⬜ unassigned · Track C — engine runtime (16 endpoints)
+Not a Track B category — these wrap the **engine adapter** on the bot's device
+rather than a backend service. The per-endpoint checklist, the engine route each
+one maps to, and the ruling on the ~72 engine routes that are *not* wrapped live
+in **[`engine-surface.md`](engine-surface.md)**. Summary:
+
+| Group | Endpoints | Public paths |
+|---|---|---|
+| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` — personal bots only |
+| engine | 3 | `…/engine/{status,capabilities,available}` |
+| models | 2 | `…/models`, `…/models/{model_id}` |
+| approvals | 3 | `…/approvals/mode` (GET/PUT), `…/approvals/modes` |
+| connection | 1 | `…/connection` — complete WS URL, replaces `get_device_connection` |
+
 ---
 
 ## Definition of done (whole `/openapi/v1` effort)
 
 1. **Track A:** every data category (bots, resources, channels, skills, mcp,
    routines) carries `avernet_tenant` and is guarded, Stage-1 test shape green.
-   — _1 of 6 (bots ✅)._
+   — _2 of 6 (bots ✅, mcp ✅ PR #564)._
 2. Internal API unchanged throughout (no `to_dict()` leaks; internal suites
    unmodified). — _holding: full `tests/community` green at #494 (9171 passed,
    3 skipped)._
 3. **Track B:** the seven `/openapi/v1` categories' handlers implemented and
-   tenant-safe, each with its own tests + PR. — _1 of 7 (bots ✅)._
+   tenant-safe, each with its own tests + PR. — _2 of 7 (bots ✅, mcp ✅)._
 4. F2 tenant-leading indexes in place (mandatory policy). — _⬜_
 5. Background/scheduled work revisited for per-tenant correctness. — _⬜_
 6. `require_principal` / `resolve_avernet_tenant` wired to the real verifier
    (auth workstream) — the point at which a second tenant can safely hold real
-   data, and the point at which the public surface stops answering 401. — _⬜_
+   data, and the point at which the public surface stops answering 401.
+   — _✅ both halves merged ([#634](https://github.com/inclusionAI/Avernet/pull/634), [#599](https://github.com/inclusionAI/Avernet/pull/599)); a `user` caller round-trips.
+   Admitting an **external tenant** is now a separate, deliberate step:
+   `route_security` must accept its credential **and** delegation must give that
+   credential an end user to scope by (auth design §15)._
 7. **Cross-tenant external identity settled ([#556](https://github.com/inclusionAI/Avernet/issues/556))** — Passport, auth
    relationships and BCN carry a tenant axis, so the BCN sync can be re-enabled
    on the public path. — _⬜ (added 2026-07-29; gates enabling multi-tenancy)._
+8. **Track C:** the five engine-runtime groups (16 endpoints) implemented,
+   owner-scoped and capability-aware, and `…/connection` returning socket URLs
+   so no external caller ever sees a proxypass target or a raw device token.
+   — _✅ 5 of 5 (PR #630). Like every other category it answers 401 until item 6
+   lands; the singlebox E2E flow is blocked on the same event._
 
 ---
 
@@ -558,11 +741,16 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
   index's name to its columns; create before drop so there's no index-less
   window). Leave low-cardinality (`idx_status`, `idx_is_delete`) and
   unique-lookup (`idx_binding_id`) indexes alone.
-- **Real caller-identity verifier.** Swap `require_principal`'s body to return
-  the gateway-forwarded principal, and `resolve_avernet_tenant`'s to return its
-  tenant. Both seams are ready, and `caller_owner_id` already accepts either a
-  bare id string or an object/dict with `user_id`, so handlers don't change.
-  **Until this lands the public surface answers 401 to everything.**
+- ~~**Real caller-identity verifier.**~~ **DONE, both halves** — see **The auth
+  seam** above. `caller_owner_id`'s tolerance of an object exposing `user_id` is
+  what let this land with zero handler changes, exactly as intended. Gateway
+  [#599](https://github.com/inclusionAI/Avernet/pull/599) has merged and the wire
+  shapes were verified by round-trip, so a `user` caller works end to end.
+- **Owner semantics for `app` / `access_key` callers.** Still open, and now
+  explicit: those callers are **refused at verification** (2026-08-02), not
+  silently unscoped. Settling what they own is the delegation workstream (auth
+  design §15); a `route_security` rule alone would not be enough, because a
+  credential that names no person still cannot be owner-scoped.
 - **Background/scheduled work.** Resolves to the default tenant now (correct
   while all data is `teamclaw`); revisit before a 2nd tenant holds real data
   (scheduled scans, pollers, sync loops in skill_center / governance / dormant /
@@ -689,3 +877,143 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
      `with_loader_criteria` applies to join clauses. Verified, not assumed.
 - **2026-07-29** — **Channels deprioritized (not cancelled)**, Track A stage 3
   and Track B endpoints both parked with scope intact.
+- **2026-07-30** — **Track B mcp merged (PR #610) — second public category
+  implemented (2 of 7).** All 6 `/openapi/v1/bots/mcp` endpoints wired to the
+  internal MCP services through a **shared `core/mcp/` flow** extracted from the
+  internal `/api/mcp` router (masking / `extInfo` stripping / network-type
+  allowlist in `presentation.py`; the write→push→rollback + read in
+  `config_flow.py`; typed domain errors in `errors.py`), so both surfaces answer
+  identically. The internal router now calls that flow — proven behavior-
+  preserving by `test_mcp_config_internal_unchanged.py` + `test_mcp.py` passing
+  **unmodified**. Public handlers owner-scoped via `caller_owner_id`,
+  tenant-scoped by the Stage 5 guard (cross-tenant config invisible + un-
+  overwritable, proven against the real guard through the flow). Decisions:
+  nested paths (**resolves the path divergence for mcp**), `sync_mode` dropped
+  (`extra="forbid"` → 422), push-failure rolls back → 502, strict
+  `endpoint_env`/`transport_protocol` enums (no `DEV`). **Preserved fail-open**
+  permission on a marketplace outage (advisory endpoint), pinned by a test. Board
+  moved: Track B mcp → done; the "worked reference" list now points here as the
+  second example, specifically for the *extract-shared-logic* pattern.
+- **2026-07-30** — **Gateway principal verification landed (backend half).** The
+  two seams PR #456 placed are real: `require_principal` verifies the gateway's
+  signed `X-Avernet-Principal` (HS256, `aud=backend`, `principals[]`) and
+  `resolve_avernet_tenant` reads the tenant out of it — **no handler, router or
+  middleware changes**, which is what those seams were for. New
+  `core/gateway_principal/` (our DTOs + verifier, no gateway imports) and
+  `utils/gateway_principal_config.py` (env, **no dev fallback key** — unset means
+  401). Built against gateway PR
+  [#599](https://github.com/inclusionAI/Avernet/pull/599)'s contract without
+  waiting for it to merge, since #599 explicitly leaves the component verifier to
+  us. Deliberate guards: a wire tenant of `teamclaw` is refused, a disagreeing
+  identity set is refused, forwarded secrets are not projected, and 401 is
+  byte-identical for "no credential" and "bad credential". One necessary
+  side-fix: the mapped-error lookup moved into
+  `responses.py::mapped_error_response` and the app catch-all consults it, because
+  the seam raises in a *dependency* — without it an unauthenticated public request
+  would have answered 500 instead of 401. Board moved: the cross-cutting verifier
+  row and DoD item 6 → backend half done. **Still gated upstream** on #599 merging
+  and on `route_security.yaml` admitting this surface's real callers; and `app` /
+  `access_key` callers 401 until somebody rules on what they own. SDD:
+  `src/backend/specs/2026-07-30-gateway-principal-verifier/`.
+- **2026-07-30** — **Track C implemented (PR #630)** — all 16 engine-runtime
+  endpoints across five groups, plus `core/engine_runtime/` (the relay and the
+  connection service) and its Service API Protocols. Seven things worth knowing
+  before you touch this track or copy from it:
+  1. **Track C changes nothing outside its own prefix.** An `Envelope.warning`
+     field was added and then removed: across both OSS engines the only
+     *limited* capability this surface can reach is `SESSION_CREATE` on
+     `claude_code`, whose caveat describes how the session key is established
+     rather than a degraded result — so the field would have been permanently
+     empty on 15 of 16 endpoints and on all six other categories. `501`/`504`
+     live in a per-group dict for the same reason.
+  2. **The engine's own text never reaches a caller.** Capability caveats and
+     the `limited`/`fallback` explanations are internal engineering prose and
+     not always English; only capability *names* are published. Field
+     descriptions and docstrings are published verbatim into the OpenAPI
+     document, so rationale belongs in `#` comments — a gate now fails the build
+     on internal markers in published text.
+  3. **The sessions group serves `personal` bots only.** The engine accepts
+     `user_id` on session list, logs it, and **drops it**, so a device returns
+     every session it holds. On a `service` bot that is every caller's. Gated
+     before the forward, not filtered after.
+  4. **`GET /api/engine/status` is the one engine route with no envelope** — it
+     returns `EngineManager.status()` raw. Treating it as enveloped fails every
+     call against a healthy device.
+  5. **Any engine 404 is a resource, not a missing capability.** The transport
+     raises its not-found error for unknown session ids and model ids too;
+     mapping it to 501 would tell a caller its bot lost the sessions capability.
+  6. **Isolation is "don't undo it", not "build it".** No table, no DDL, no
+     Track A stage — but the guard cannot see a device call, so the isolation
+     sweep asserts the transport was *never invoked* across all 16 routes rather
+     than just checking for a 404.
+  7. **The singlebox E2E flow is blocked on the auth workstream**, not on this
+     module — every `/openapi/v1` route answers 401, so a flow could only assert
+     401s. `engine_runtime` stays on `SINGLEBOX_E2E_EXEMPT` until the gateway
+     verifier lands.
+- **2026-07-30** — **Track C added — the public API now wraps the engine too.**
+  Previously the frontend got a connection from `get_device_connection` and
+  called the bot's engine adapter itself through `/proxypass/{target}`; that
+  hand-off publishes proxypass topology and a raw device token, and makes the
+  engine — never designed as a public contract — the surface an integrator codes
+  against. Track C wraps the engine's client-facing HTTP behind
+  `/openapi/v1/bots/{bot_id}/…` instead. Five things worth knowing:
+  1. **16 endpoints, not 89.** The engine serves 89 HTTP routes + 6 WS across 25
+     routers. The scope rule wraps only what the frontend reaches *directly*
+     (sessions 7, engine 3, models 2, approvals 3) plus one new `…/connection`.
+     Backend-mediated engine routes stay with the backend contract that already
+     fronts them, and **nodes was dropped** — the frontend proxypasses it, so
+     the rule would wrap it, but the product does not need node inventory
+     publicly.
+  2. **`/api/cron` was already this.** Backend `/api/cron` →
+     `CronRelayService` → `DeviceAdapterTransport` → engine has been in
+     production all along, and the `routines` stub already imports
+     `CronRelayServiceProtocol`. Track C generalises an existing shape rather
+     than inventing one.
+  3. **No Track A stage, no DDL** — the first track for which that's true by
+     construction, not by luck. Added the caveat up top so nobody hunts for a
+     stage that doesn't exist.
+  4. **WebSockets are not wrapped.** `…/connection` hands back one ready-to-use
+     `wss://` URL with the credential in it; the caller owns the socket. No
+     `POST /chat`, no SSE relay of the engine's frame format.
+  5. **Two exclusions are contract decisions, not laziness.** `engine/switch`
+     would be a back door around #494's `engine`-immutability ruling, and
+     `engine/restart` would give one bot two restart verbs.
+
+  Full inventory, per-endpoint mapping and the ruling on every non-wrapped
+  engine route: **[`engine-surface.md`](engine-surface.md)**. Board moved: Track
+  C section added (0 of 6 groups), DoD item 8 added. **Owners still unassigned.**
+- **2026-08-02** — **Identity admission decided: `user` only.** `verify_principal_token`
+  now refuses an identity set that names no end user, so `bot` / `app` /
+  `access_key` callers answer `401` **by design** rather than as a side effect of
+  `caller_owner_id` raising on an empty owner. Four things worth knowing:
+  1. **The refusal moved because the old placement was skippable.** A 401 that
+     comes from `caller_owner_id` only covers handlers that call it — and four in
+     `resources/router.py` (`list_resources`, `create_resource`, `get_resource`,
+     `update_resource`) never do; they scope on a caller-supplied `bot_id`. An
+     unscopeable caller reached them and got data. Refusing the identity set
+     during verification makes the rule hold for every route, including ones not
+     written yet. An invariant every handler must remember is not an invariant.
+  2. **`bot` lost its owner fallback.** `VerifiedCaller.user_id` no longer falls
+     back to `bot.owner_id`. It was unreachable (no `route_security` rule
+     requires or accepts `bot`), but it was a standing grant — a bot acting as
+     its owner across the whole public contract — that nobody had decided to
+     make. A bot-facing surface should re-add it deliberately.
+  3. **A user *plus* other identities is still accepted.** The gateway forwards
+     the whole set it resolved, so a route declaring `user: required, app:
+     optional` yields two principals. The rule is "must contain a user", not
+     "must contain nothing else" — the strict form would refuse a request the
+     gateway considers valid.
+  4. **Auth is now attached at `build_public_router()`**, alongside
+     `ERROR_RESPONSES`, so a future route cannot omit it by construction rather
+     than by `test_public_routes_require_principal` catching it afterwards.
+     Zero behaviour change — every route already declared `PrincipalDep`, and
+     FastAPI caches the dependency, so it resolves once per request.
+
+  Also corrected on this board: gateway [#599](https://github.com/inclusionAI/Avernet/pull/599)
+  **has merged** (it was still recorded as open in three places), and the
+  principal wire contract was verified by round-tripping the real gateway signer
+  into the real backend verifier — the shapes match, forwarded secrets are not
+  projected, and `aud`/`iss` mismatches are refused. **Filed as still-open:** no
+  cross-repo test pins that contract, so a rename on either side leaves both
+  suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
+  `src/backend/specs/2026-08-02-public-api-user-only-principal/`.

@@ -62,6 +62,7 @@ def _write_trace(
     biz_task_id: str | None = None,
     output: str = "synthetic output",
     user_id: str = "user_fixture",
+    bot_id: str = "bot_fixture",
 ) -> None:
     repo.upsert_ocb_trace(
         {
@@ -71,7 +72,7 @@ def _write_trace(
             "biz_scene": biz_scene,
             "biz_task_id": biz_task_id,
             "user_id": user_id,
-            "bot_id": "bot_fixture",
+            "bot_id": bot_id,
             "name": "Synthetic trace",
             "input": "synthetic input",
             "output": output,
@@ -268,6 +269,145 @@ def test_owner_scope_remains_the_default_for_session_queries():
     assert [row.id for row in owned] == ["trace_owned"]
     assert open_total == 2
     assert {row.id for row in opened} == {"trace_owned", "trace_other"}
+
+
+def test_session_group_and_detail_names_use_each_trace_owner():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    first_key = "agent:main:group_fixture:first"
+    second_key = "agent:main:group_fixture:second"
+    _write_trace(
+        repo,
+        trace_id="trace_first_owner",
+        session_id="shared_session",
+        session_key=first_key,
+        user_id="first_owner",
+        bot_id="default",
+    )
+    _write_trace(
+        repo,
+        trace_id="trace_second_owner",
+        session_id="shared_session",
+        session_key=second_key,
+        user_id="second_owner",
+        bot_id="default",
+    )
+    with db.orm_session() as session:
+        session.add_all(
+            [
+                BotModel(
+                    bot_id="default",
+                    bot_name="First Owner Bot",
+                    entity_id="first_owner",
+                    entity_type="staff",
+                    creator_id="first_owner",
+                    owner_id="first_owner",
+                    env=get_current_env(),
+                ),
+                BotModel(
+                    bot_id="default",
+                    bot_name="Second Owner Bot",
+                    entity_id="second_owner",
+                    entity_type="staff",
+                    creator_id="second_owner",
+                    owner_id="second_owner",
+                    env=get_current_env(),
+                ),
+                BcsGroupSession(
+                    session_id=first_key,
+                    group_id="group_fixture",
+                    env=get_current_env(),
+                ),
+                BcsGroupSession(
+                    session_id=second_key,
+                    group_id="group_fixture",
+                    env=get_current_env(),
+                ),
+            ]
+        )
+
+    by_session_id, session_total = repo.list_ocb_traces(
+        owner_id="first_owner",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        session_id="shared_session",
+    )
+    by_group, group_total = repo.list_ocb_traces(
+        owner_id=None,
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        group_id="group_fixture",
+        query_scope=QueryScope.OPEN,
+    )
+    by_session_key, session_key_total = repo.list_ocb_traces(
+        owner_id="second_owner",
+        from_ms=0,
+        to_ms=2_000,
+        page=1,
+        limit=20,
+        session_key=second_key,
+    )
+    detail = repo.get_ocb_trace("trace_second_owner")
+
+    assert session_total == 1
+    assert by_session_id[0].bot_name == "First Owner Bot"
+    assert session_key_total == 1
+    assert by_session_key[0].bot_name == "Second Owner Bot"
+    assert group_total == 2
+    assert {
+        (row.user_id, row.bot_name)
+        for row in by_group
+    } == {
+        ("first_owner", "First Owner Bot"),
+        ("second_owner", "Second Owner Bot"),
+    }
+    assert detail.user_id == "second_owner"
+    assert detail.bot_name == "Second Owner Bot"
+
+
+def test_bot_name_owner_falls_back_to_trace_metadata():
+    db = _LocalDb()
+    repo = BotChatDbRepository(db)
+    repo.upsert_ocb_trace(
+        {
+            "trace_id": "trace_metadata_owner",
+            "session_id": "session_metadata_owner",
+            "session_key": "agent:main:session_metadata_owner",
+            "user_id": None,
+            "bot_id": "default",
+            "name": "Synthetic trace",
+            "input": "synthetic input",
+            "output": "synthetic output",
+            "metadata": {
+                "attributes": {
+                    "identity.owner_id": "metadata_owner",
+                }
+            },
+            "start_time_ms": 1_000,
+            "usage": {},
+        }
+    )
+    with db.orm_session() as session:
+        session.add(
+            BotModel(
+                bot_id="default",
+                bot_name="Metadata Owner Bot",
+                entity_id="metadata_owner",
+                entity_type="staff",
+                creator_id="metadata_owner",
+                owner_id="metadata_owner",
+                env=get_current_env(),
+            )
+        )
+
+    detail = repo.get_ocb_trace("trace_metadata_owner")
+
+    assert detail.user_id == "metadata_owner"
+    assert detail.bot_name == "Metadata Owner Bot"
 
 
 def test_group_query_normalizes_session_key_and_returns_optional_labels():

@@ -1,0 +1,27 @@
+[package]
+name = "bcs-app-invitation"
+description = "Versioned Invitation + Friendship application facade for the BCN V1 API"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-domain = { workspace = true }
+bcs-service-api = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+bcs-bot = { workspace = true }
+bcs-friend = { workspace = true }
+bcs-group = { workspace = true }
+bcs-relation = { workspace = true }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
+bcs-test-support = { workspace = true }
+tokio = { workspace = true }

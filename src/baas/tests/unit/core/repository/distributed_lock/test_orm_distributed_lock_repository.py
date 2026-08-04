@@ -434,12 +434,16 @@ class TestTryAcquireLock:
         added_model = mock_session.add.call_args[0][0]
         assert added_model.env == "dev"
 
-    def test_acquire_handles_oceanbase_lock_wait_timeout(self, repository, mock_session):
+    def test_acquire_handles_oceanbase_lock_wait_timeout(
+        self, repository, mock_session
+    ):
         from sqlalchemy.exc import DatabaseError as SADatabaseError
 
         orig = MagicMock()
         orig.errno = 1205
-        orig.__str__.return_value = "Lock wait timeout exceeded; try restarting transaction"
+        orig.__str__.return_value = (
+            "Lock wait timeout exceeded; try restarting transaction"
+        )
         mock_session.query.return_value.filter.return_value.update.side_effect = (
             SADatabaseError("UPDATE ...", {}, orig)
         )

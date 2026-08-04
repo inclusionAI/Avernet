@@ -45,7 +45,7 @@ class GoogleUserStrategy:
         self,
         *,
         token_header: str,
-        default_tenant: str,
+        default_tenant: str | None = None,
         userinfo_url: str = GOOGLE_USERINFO_URL,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:

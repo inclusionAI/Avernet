@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_OK,
     Deleted,
     Envelope,
+    ErrorEnvelope,
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
@@ -56,6 +57,23 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineBotTypeNotSupportedError,
+    EngineHistoryDepthExceededError,
+    EngineCapabilityUnsupportedError,
+    EngineDeviceNotReadyError,
+    EngineResourceNotFoundError,
+    EngineRuntimeError,
+    EngineUpstreamError,
+)
+from agentclaw.community.core.gateway_principal import PrincipalVerificationError
+from agentclaw.community.core.mcp.errors import (
+    McpConfigValueError,
+    McpHeadersInvalidError,
+    McpMarketUnavailableError,
+    McpServerNotFoundError,
+    McpSyncFailedError,
+)
 from agentclaw.community.core.resources.service import (
     DuplicateResourceError,
     FileTooLargeError,
@@ -64,6 +82,11 @@ from agentclaw.community.core.resources.service import (
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
 )
 from agentclaw.community.plugin_api.passport import PassportError
 
@@ -116,6 +139,13 @@ def deleted(request: Request) -> Envelope[Deleted]:
 # tell "exists but not yours/other tenant" from "does not exist".
 ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     MissingPrincipalError: (401, "Unauthorized"),
+    # Byte-identical to the line above, deliberately. "You sent no principal" and
+    # "your principal did not verify" must be indistinguishable, or the response
+    # tells a forger whether their signature was the part that failed. The seam
+    # in ``dependencies.py`` already funnels both into MissingPrincipalError; this
+    # entry covers a handler that calls ``verify_principal_token`` directly, so
+    # the error cannot escape the envelope as a 500.
+    PrincipalVerificationError: (401, "Unauthorized"),
     BotNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
@@ -158,7 +188,74 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
     InvalidIdentityFileTypeError: (400, "Invalid file type"),
-    # Base class LAST: every mapping above is a subclass of BotServiceError, and
+    # ── Engine-runtime (Track C) ──────────────────────────────────────────
+    # Ordering inside this block is load-bearing: ``EngineRuntimeError`` is the
+    # base of the four ``Engine*`` errors below it and is listed AFTER them.
+    # Lookup returns on the first isinstance match in insertion order, so a base
+    # placed first would swallow every leaf under it — the trap recorded in the
+    # Track B gotchas.
+    #
+    # The three ``DeviceAdapter*`` errors are *siblings*, not a hierarchy
+    # (``TimeoutError`` and two independent ``ValueError`` subclasses —
+    # ``plugin_api/device_adapter_transport.py``), so each needs its own entry
+    # and their relative order does not matter. Do not assume otherwise: a
+    # comment here previously claimed EndpointNotFound subclassed HTTPStatus,
+    # which is false and would have justified a wrong "fix" to the ordering.
+    #
+    # The two 501s are distinct answers to distinct questions and must not be
+    # merged: one is "your bot's engine does not offer this", answerable from
+    # the capabilities endpoint; the other is "this operation is not offered for
+    # your bot's type", which capabilities cannot tell you.
+    EngineBotTypeNotSupportedError: (
+        501,
+        "Not supported for this bot type",
+    ),
+    EngineCapabilityUnsupportedError: (
+        501,
+        "Not supported by this bot's engine; see the engine capabilities endpoint",
+    ),
+    # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
+    # caller's) and from 500 (nothing is broken).
+    EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # An out-of-range page argument, so it joins the 422 FastAPI already returns
+    # for page_size > 100 rather than inventing a status. Needs a mapped entry
+    # rather than a bare HTTPException: app-level handlers replace an unmapped
+    # message with the bare HTTP reason phrase, and "Unprocessable Entity" would
+    # not tell the caller a depth limit is what they hit.
+    EngineHistoryDepthExceededError: (
+        422,
+        "Requested page is deeper than the message history this endpoint serves",
+    ),
+    # Byte-identical to the other 404s above, so an engine-side missing resource
+    # cannot be distinguished from a bot that is not the caller's.
+    EngineResourceNotFoundError: (404, "Not found"),
+    EngineUpstreamError: (502, "Engine service error"),
+    # Base of the four above — LAST of its group.
+    EngineRuntimeError: (502, "Engine service error"),
+    # Transport errors that reach a handler without the relay translating them
+    # (e.g. a future caller using the transport directly). The relay already
+    # converts the first two; these are the backstop.
+    DeviceAdapterTimeoutError: (504, "Engine request timed out"),
+    DeviceAdapterEndpointNotFoundError: (404, "Not found"),
+    # A sibling of the entry above, not its base — see the block comment. Order
+    # between these two is therefore free.
+    DeviceAdapterHTTPStatusError: (502, "Engine service error"),
+    # MCP category (Track B). These share no base with BotServiceError, so their
+    # order among themselves is free — but they must sit above the BotServiceError
+    # fallback like everything else. Fixed public messages: the header-validation
+    # and value errors carry internal-language text (the validator answers in
+    # Chinese), which is exactly what the fixed-message rule keeps from leaking.
+    # 404 message is byte-identical to the bots not-found so existence can't be
+    # probed. The two upstream failures are 502 (downstream problem), matching how
+    # PassportError / ConnInfoBuildError are mapped above.
+    McpServerNotFoundError: (404, "Not found"),
+    McpHeadersInvalidError: (400, "Invalid MCP headers"),
+    McpConfigValueError: (400, "Invalid MCP configuration"),
+    McpSyncFailedError: (502, "Device sync failed"),
+    McpMarketUnavailableError: (502, "MCP service error"),
+    # Base class LAST: the bot mappings above subclass BotServiceError (the
+    # resources, identity, MCP, and engine-runtime entries are separate
+    # hierarchies that never match a bot error), and
     # the lookup returns on the first isinstance match in insertion order, so the
     # specific mappings still win. Services raise the bare base for device,
     # persistence, and downstream failures — without this the decorator would
@@ -250,7 +347,13 @@ def _error_response(
     *,
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
-    body = Envelope(
+    # ``ErrorEnvelope``, not ``Envelope``: it is the model every route documents
+    # for failures (``ERROR_RESPONSES``), and since ``Envelope`` gained the
+    # optional ``warning`` field the two shapes are no longer identical. Building
+    # the documented model keeps the wire and the published schema in step — an
+    # error body has no partial payload to caveat, so ``warning`` has no meaning
+    # here.
+    body = ErrorEnvelope(
         code=http_status * 1000,
         message=message,
         data=None,
@@ -288,12 +391,31 @@ def envelope_errors(
         try:
             return await fn(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 — re-raised unless mapped
-            for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
-                if isinstance(exc, error_type):
-                    request = _find_request(args, kwargs)
-                    if request is None:
-                        raise
-                    return _error_response(http_status, message, request)
-            raise
+            request = _find_request(args, kwargs)
+            if request is None:
+                raise
+            response = mapped_error_response(exc, request)
+            if response is None:
+                raise
+            return response
 
     return wrapper
+
+
+def mapped_error_response(exc: Exception, request: Request) -> JSONResponse | None:
+    """The enveloped response for ``exc``, or ``None`` if it is not mapped.
+
+    Shared by :func:`envelope_errors` and the app-level backstop in ``app.py``,
+    so one table decides an error's public status and message no matter *where*
+    it was raised. That matters because a handler decorator only sees failures
+    inside the handler: a mapped error raised in a **dependency** — the auth seam
+    being the one every public route has — is raised before the handler runs and
+    would otherwise be answered as a 500.
+
+    Returns on the first ``isinstance`` match in insertion order, so a specific
+    leaf listed before its base class still wins.
+    """
+    for error_type, (http_status, message) in ENVELOPE_ERRORS.items():
+        if isinstance(exc, error_type):
+            return _error_response(http_status, message, request)
+    return None

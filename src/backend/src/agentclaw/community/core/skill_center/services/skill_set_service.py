@@ -237,7 +237,7 @@ class SkillSetService:
             lambda _owner_id, _bot_id, _engine: None
         )
         effective_owner = entity_id or user_id
-        if not self.is_desktop and effective_owner is not None:
+        if effective_owner is not None:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
                 str(self.bot_id),
@@ -618,7 +618,13 @@ class SkillSetService:
                 continue
 
             # Create association using repository
-            self.skill_set_repo.add_skill_to_set(skill_set_id, skill.get('id'))
+            if not self.skill_set_repo.add_skill_to_set(
+                skill_set_id, skill.get('id')
+            ):
+                results["failed"].append(
+                    {"skill_id": skill_id, "error": "Failed to add skill to skill set"}
+                )
+                continue
             results["success"].append({"skill_id": skill.get('id'), "name": skill.get('name')})
 
         # Update metadata file
@@ -1212,7 +1218,7 @@ class SkillSetService:
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
         pool_layout_paths = None
-        if not self.is_desktop and self.entity_id is not None:
+        if self.entity_id is not None:
             pool_layout_paths = self._pool_layout_paths(
                 str(self.entity_id),
                 str(self.bot_id),
@@ -1353,7 +1359,20 @@ class SkillSetService:
         # Create association (store server_code, name, description and icon)
         from agentclaw.community.utils.env_utils import get_current_env
         current_env = get_current_env()
-        self.skill_set_repo.add_mcp_to_set(skill_set_id, server_code, mcp_name, mcp_description, mcp_icon, user_id, env=current_env)
+        if not self.skill_set_repo.add_mcp_to_set(
+            skill_set_id,
+            server_code,
+            mcp_name,
+            mcp_description,
+            mcp_icon,
+            user_id,
+            env=current_env,
+        ):
+            return {
+                "success": False,
+                "error": "Failed to add MCP server to skill set",
+                "server_code": server_code,
+            }
 
         # Sync to device (blocking - must succeed for operation to be considered successful)
         # Note: API key is NOT passed during initial add, user should configure it separately

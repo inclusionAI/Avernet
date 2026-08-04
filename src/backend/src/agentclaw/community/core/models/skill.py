@@ -3,6 +3,7 @@ Skill 相关 ORM 模型（迁移自 services/openclawserver/server/models/skill.
 """
 from agentclaw.community.core.base import Base
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 from sqlalchemy import Column, String, Text, Boolean, DateTime, ForeignKey, UniqueConstraint, Integer, func
 from sqlalchemy.orm import relationship
 
@@ -23,15 +24,18 @@ class SkillSet(Base):
     env = Column(String(20), default=get_current_env, nullable=False)
     engine_type = Column(String(32), nullable=True, index=True, comment="引擎类型，如 openclaw/moltis/hermes/aicoding/claude_code；is_default 行由应用层保证非空")
     is_active = Column(Boolean, default=False, nullable=False, comment="当前激活的技能集")
+    # Persistence-only isolation metadata. The shared guard stamps ORM inserts
+    # from the current request tenant; the server default preserves existing
+    # internal rows and raw writers during the one-tenant cutover.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     # Relationships
     skills = relationship("SkillSetSkill", back_populates="skill_set", cascade="all, delete-orphan")
     mcp_servers = relationship("SkillSetMCPServer", back_populates="skill_set", cascade="all, delete-orphan")
 
-    __table_args__ = (
-        UniqueConstraint("name", "user_id", "env", "bolt_id", name="uix_skill_set_name_user_env_bot"),
-        {"extend_existing": True},
-    )
+    # Production has no business unique key on ac_skill_set. Keep the local
+    # schema aligned so two tenants can hold the same legacy identity.
+    __table_args__ = {"extend_existing": True}
 
     def to_dict(self) -> dict:
         """Convert to dictionary."""
@@ -49,6 +53,9 @@ class SkillSet(Base):
             "engine_type": self.engine_type,
             "is_active": self.is_active if self.is_active is not None else False,
         }
+
+
+register_avernet_tenant_guard(SkillSet)
 
 
 class Skill(Base):
@@ -87,13 +94,14 @@ class Skill(Base):
     category_path = Column(String(256), nullable=True, comment="类目完整路径(ac_skill_category.code)")
     package_url = Column(String(1028), nullable=True, comment="上传到oss上的可访问的url")
     zip_url = Column(String(1028), nullable=True, comment="用户上传的url")
+    # Deliberately absent from to_dict(): tenant is persistence metadata, not
+    # part of the established internal Skills response contract.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
-    __table_args__ = (
-        # uix_skill_link_name_env_version dropped along with the
-        # link_name column (2026-05-20) — prod DDL has neither.
-        UniqueConstraint("skill_uuid", "name", "env", "version", name="uix_skill_uuid_name_env_ver"),
-        {"extend_existing": True},
-    )
+    # uix_skill_link_name_env_version was dropped with link_name, and prod has
+    # no replacement unique key on these fields. Keep SQLite create_all aligned
+    # with that production DDL rather than inventing a source-only constraint.
+    __table_args__ = {"extend_existing": True}
 
     skill_sets = relationship("SkillSetSkill", back_populates="skill", cascade="all, delete-orphan")
 
@@ -142,6 +150,9 @@ class Skill(Base):
         }
 
 
+register_avernet_tenant_guard(Skill)
+
+
 class SkillSetSkill(Base):
     """Association table between SkillSet and Skill."""
     __tablename__ = "ac_skill_set_skill"
@@ -155,6 +166,7 @@ class SkillSetSkill(Base):
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     env = Column(String(20), default=get_current_env, nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
     skill_set = relationship("SkillSet", back_populates="skills")
     skill = relationship("Skill", back_populates="skill_sets")
@@ -171,6 +183,9 @@ class SkillSetSkill(Base):
             "gmt_modified": self.gmt_modified.isoformat() if self.gmt_modified else None,
             "env": self.env,
         }
+
+
+register_avernet_tenant_guard(SkillSetSkill)
 
 
 class UserDefaultSkillSet(Base):

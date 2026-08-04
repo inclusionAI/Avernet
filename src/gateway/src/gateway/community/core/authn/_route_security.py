@@ -41,7 +41,13 @@ class RouteSecurity:
     @classmethod
     def from_yaml(cls, path: str | Path) -> RouteSecurity:
         raw = yaml.safe_load(Path(path).read_text()) or {}
-        return cls.from_table(raw.get("route_security", {}))
+        user_config = raw.get("user_config", {}) if isinstance(raw, dict) else {}
+        table = (
+            user_config.get("route_security", {})
+            if isinstance(user_config, dict)
+            else {}
+        )
+        return cls.from_table(table)
 
     def resolve(self, method: str, path: str) -> Requirement | None:
         """Most-specific matching rule's requirement, or ``None`` if none match."""

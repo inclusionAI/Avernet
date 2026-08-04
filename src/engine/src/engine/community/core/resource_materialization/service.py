@@ -8,9 +8,11 @@ import logging
 import mimetypes
 import os
 import re
+import threading
 import uuid
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import Any, ClassVar
 from urllib.parse import quote
 
 from engine.community.core.resource_materialization.models import (
@@ -26,7 +28,9 @@ from engine.community.plugin_api.resource_materialization import (
 from engine.community.plugin_api.workspace_root import workspace_root_strict
 
 log = logging.getLogger("engine.resource_materialization")
-_SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+_SAFE_IDENTIFIER_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+_WINDOWS_FORBIDDEN_FILENAME_CHARACTERS = frozenset('<>:"/\\|?*')
+_MAX_FILENAME_UTF8_BYTES = 255
 
 
 class MaterializationSecurityError(ValueError):
@@ -40,11 +44,23 @@ class ResourceNotMaterializedError(ValueError):
 class ManifestStore:
     """Atomic JSON manifest stored inside the Bot workspace."""
 
+    _locks: ClassVar[dict[Path, Any]] = {}
+    _locks_guard: ClassVar[Any] = threading.Lock()
+
     def __init__(self, root: Path) -> None:
         self.root = root
         self.path = root / ".teamclaw/session-files/.manifest.json"
 
-    def _read(self) -> dict:
+    @classmethod
+    def _lock_for(cls, path: Path):
+        with cls._locks_guard:
+            lock = cls._locks.get(path)
+            if lock is None:
+                lock = threading.RLock()
+                cls._locks[path] = lock
+            return lock
+
+    def _read_locked(self) -> dict:
         if not self.path.exists():
             return {"version": 1, "resources": {}}
         try:
@@ -56,13 +72,33 @@ class ManifestStore:
         return raw
 
     def get(self, resource_id: str) -> ManifestEntry | None:
-        value = self._read()["resources"].get(resource_id)
-        return ManifestEntry.model_validate(value) if value is not None else None
+        with self._lock_for(self.path):
+            value = self._read_locked()["resources"].get(resource_id)
+            return ManifestEntry.model_validate(value) if value is not None else None
+
+    def list_entries(self) -> list[ManifestEntry]:
+        with self._lock_for(self.path):
+            values = self._read_locked()["resources"].values()
+            return [ManifestEntry.model_validate(value) for value in values]
 
     def upsert(self, entry: ManifestEntry) -> None:
-        payload = self._read()
-        payload["version"] = 1
-        payload["resources"][entry.resource_id] = entry.model_dump(mode="json")
+        with self._lock_for(self.path):
+            payload = self._read_locked()
+            payload["version"] = 1
+            payload["resources"][entry.resource_id] = entry.model_dump(mode="json")
+            self._write_locked(payload)
+
+    def remove(self, resource_id: str) -> ManifestEntry | None:
+        with self._lock_for(self.path):
+            payload = self._read_locked()
+            value = payload["resources"].pop(resource_id, None)
+            if value is None:
+                return None
+            payload["version"] = 1
+            self._write_locked(payload)
+            return ManifestEntry.model_validate(value)
+
+    def _write_locked(self, payload: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_name(f".manifest-{uuid.uuid4().hex}.tmp")
         try:
@@ -116,7 +152,13 @@ class ResourceMaterializationService:
             # can never disclose a sibling or host path through the content API.
             self._assert_contained(root, target)
             canonical = target.resolve(strict=True)
-            if not canonical.is_file() or canonical.stat().st_size != entry.size_bytes:
+            if (
+                not canonical.is_file()
+                or canonical.stat().st_size != entry.size_bytes
+                or self._sha256(canonical) != entry.content_hash
+            ):
+                raise ResourceNotMaterializedError("resource_not_materialized")
+            if self._sha256(canonical) != entry.content_hash:
                 raise ResourceNotMaterializedError("resource_not_materialized")
         except (OSError, MaterializationSecurityError) as exc:
             raise ResourceNotMaterializedError("resource_not_materialized") from exc
@@ -148,10 +190,11 @@ class ResourceMaterializationService:
                 result = await self._materialize_locked(request)
             except MaterializationSecurityError as exc:
                 log.warning(
-                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s",
+                    "engine.resource_materialize.path.reject resource_id=%s task_version=%s error_type=%s reason=%s",
                     request.resource_id,
                     request.task_version,
                     type(exc).__name__,
+                    str(exc),
                 )
                 result = self._failure_result(request, "invalid_device_path")
             except Exception as exc:
@@ -194,7 +237,9 @@ class ResourceMaterializationService:
         # COSEC: resolve the final parent after mkdir and enforce containment;
         # this rejects pre-existing symlinks that redirect writes outside Bot root.
         self._assert_contained(root, target)
-        temporary = target.with_name(f".{target.name}.part-{uuid.uuid4().hex}")
+        # Keep the temporary segment independent of the user filename: the final
+        # filename may already be close to the filesystem's per-segment limit.
+        temporary = target.with_name(f".part-{uuid.uuid4().hex}")
         log.info(
             "engine.resource_materialize.pull.start resource_id=%s task_version=%s path_hash=%s",
             request.resource_id,
@@ -216,6 +261,7 @@ class ResourceMaterializationService:
             self._assert_contained(root, target)
             os.replace(temporary, target)
             canonical = target.resolve(strict=True)
+            observed = canonical.stat()
             entry = ManifestEntry(
                 resource_id=request.resource_id,
                 transfer_id=request.transfer_id,
@@ -229,6 +275,9 @@ class ResourceMaterializationService:
                 size_bytes=actual_size,
                 content_hash=actual_hash,
                 status="ready",
+                observed_size=observed.st_size,
+                observed_mtime_ns=observed.st_mtime_ns,
+                observed_inode=getattr(observed, "st_ino", None),
             )
             store.upsert(entry)
             log.info(
@@ -257,13 +306,31 @@ class ResourceMaterializationService:
         root: Path,
         request: MaterializationRequest,
     ) -> tuple[Path, Path]:
-        segments = (
+        identifier_segments = (
             request.scope_key_hash,
             request.session_key_hash,
             request.resource_id,
-            request.filename,
         )
-        if any(not _SAFE_SEGMENT.fullmatch(segment) for segment in segments):
+        if any(
+            not _SAFE_IDENTIFIER_SEGMENT.fullmatch(segment)
+            for segment in identifier_segments
+        ):
+            raise MaterializationSecurityError("invalid controlled path segment")
+        try:
+            filename_bytes = request.filename.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise MaterializationSecurityError("invalid controlled path segment") from exc
+        if (
+            not request.filename
+            or Path(request.filename).name != request.filename
+            or request.filename in {".", ".."}
+            or len(filename_bytes) > _MAX_FILENAME_UTF8_BYTES
+            or any(
+                not character.isprintable()
+                or character in _WINDOWS_FORBIDDEN_FILENAME_CHARACTERS
+                for character in request.filename
+            )
+        ):
             raise MaterializationSecurityError("invalid controlled path segment")
         supplied_path = request.workspace_relative_path or request.device_path
         if supplied_path is None:

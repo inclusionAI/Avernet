@@ -16,6 +16,11 @@ for a persistent override or `AVERNET_PRE_PUSH_MERGE_TARGET` for one `git push`.
 The hook must fetch that target and use its merge base rather than a direct
 target-to-head diff.
 
+When opening a pull request, follow the `Pull Request Conventions` section in
+`AGENTS.md`: title the PR `<type>(<scope>): <concise outcome>` and write the
+description with the `Problem` / `Solution` / `Validation` sections from
+`.github/pull_request_template.md`.
+
 Before changing Git hooks, module CI entrypoints, Singlebox orchestration,
 acceptance E2E tests, coverage manifests, or coverage reporting, read the
 `Pre-push Module Selection` section in `AGENTS.md` and treat it together with

@@ -135,18 +135,21 @@ class SqliteDatabasePlugin(DataSourcePlugin):
             await session.close()
 
     def seed(self, session: Session) -> None:
-        """No-op seed for the bare plugin.
+        """No-op — seed data is inserted by the bootstrap composition root.
 
-        Override in subclasses or add seed data when ORM models are
-        introduced.
+        The SPI contract keeps ``seed`` for plugins that own self-contained
+        seed data; the community SQLite plugin's seed rows reference core ORM
+        models, so the actual seeding lives in ``bootstrap._database`` (the
+        composition root, which may import core) to respect layer rules.
         """
 
     def init_database(self, config: DatabasePluginConfig) -> None:
-        """Configure schema and seed data.
+        """Configure schema and create tables.
 
         Resolves the database URL from ``DATABASE_URL`` env var,
         ``config.db_url``, or falls back to ``sqlite:///:memory:``.
-        Calls ``create_all()`` and ``seed()``.
+        Calls ``create_all()`` only — seeding is handled by the bootstrap
+        composition root (``bootstrap._database.initialize_database``).
         """
         import os
 
@@ -156,10 +159,8 @@ class SqliteDatabasePlugin(DataSourcePlugin):
         logger.info("init_database: database_url=%s", resolved_url)
 
         self.create_all()
-        with self.orm_session() as session:
-            self.seed(session)
 
-        logger.info("init_database: schema created and seeded")
+        logger.info("init_database: schema created")
 
     async def close(self) -> None:
         if self._sync_engine:

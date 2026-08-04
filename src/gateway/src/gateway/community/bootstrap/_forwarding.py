@@ -10,9 +10,11 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from gateway.community.config import Config
 from gateway.community.core.forwarding import DomainMap, Forwarding
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
+from gateway.community.spi.ws_forwarder import WebSocketForwarder
 
 _logger = logging.getLogger("bootstrap")
 
@@ -22,6 +24,7 @@ _DEFAULT_REFRESH_SECONDS = 300.0
 def build_forwarding(
     forwarder: Forwarder,
     catalog: SchemaCatalog,
+    ws_forwarder: WebSocketForwarder,
 ) -> Forwarding:
     """Build the forwarding subsystem (called once from ``create_app``).
 
@@ -29,14 +32,16 @@ def build_forwarding(
     through the DI container. Schema sources are loaded from configs and
     injected into the catalog if it supports ``set_sources``.
     """
-    configs_dir = _resolve_configs_dir()
-    domain_map = _load_domain_map(configs_dir)
+    from gateway.community.config import ConfigLoader
+
+    config = ConfigLoader.load()
+    domain_map = _load_domain_map(config)
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
     sources: dict[str, str | Path] = {}
-    if configs_dir is not None:
+    if config.config_dir is not None:
         for name, domain in domain_map.domains.items():
             if domain.schema.source == "file" and domain.schema.location:
-                sources[name] = configs_dir / domain.schema.location
+                sources[name] = config.config_dir / domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
     if sources and hasattr(catalog, "set_sources"):
         catalog.set_sources(sources)
@@ -46,27 +51,26 @@ def build_forwarding(
         domain_map=domain_map,
         forwarder=forwarder,
         catalog=catalog,
+        ws_forwarder=ws_forwarder,
         refresh_seconds=refresh_seconds,
     )
 
 
-def _load_domain_map(configs_dir: Path | None) -> DomainMap:
-    if configs_dir is None:
-        raise FileNotFoundError("configs directory not found — set GATEWAY_CONFIG_PATH")
-    path = configs_dir / "upstreams.yaml"
-    if not path.exists():
-        raise FileNotFoundError(f"required config file not found: {path}")
-    from gateway.community.config import ConfigLoader
+def _load_domain_map(config: Config | None = None) -> DomainMap:
+    if config is None:
+        from gateway.community.config import ConfigLoader
 
-    config = ConfigLoader.load()
-    upstream_vars = config.user_config.model_dump().get("upstreams", {})
-    if not isinstance(upstream_vars, dict):
-        upstream_vars = {}
-    _logger.info("loading upstream config from %s", path)
-    domain_map = DomainMap.from_yaml(path, variables=upstream_vars)
+        config = ConfigLoader.load()
+    upstream_vars = config.user_config.upstream_vars
+    upstreams_raw = config.user_config.upstreams
+    if not isinstance(upstreams_raw, dict) or not upstreams_raw:
+        raise ValueError(
+            "required config section not found: application.yaml user_config.upstreams"
+        )
+    _logger.info("loading upstream config from application.yaml user_config.upstreams")
+    domain_map = DomainMap.from_config(upstreams_raw, variables=upstream_vars)
     _logger.info(
-        "upstream config (%s): %d domains\n%s",
-        path,
+        "upstream config (application.yaml user_config.upstreams): %d domains\n%s",
         len(domain_map.domains),
         "\n".join(
             f"  {name} → {domain.server}, schema={domain.schema.location}"
@@ -74,9 +78,3 @@ def _load_domain_map(configs_dir: Path | None) -> DomainMap:
         ),
     )
     return domain_map
-
-
-def _resolve_configs_dir() -> Path | None:
-    from ._configs import resolve_configs_dir as _rcd
-
-    return _rcd()

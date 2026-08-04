@@ -108,6 +108,10 @@ def _extract_user_input(trace_input: Any) -> str | None:
     return str(trace_input)
 
 
+def _trace_owner_id(trace: dict[str, Any], attributes: dict[str, Any]) -> Any:
+    return trace.get("userId") or attributes.get("identity.owner_id") or attributes.get("user.id")
+
+
 def _map_trace_to_session(trace: dict[str, Any]) -> ConversationSession:
     """Map a Langfuse trace dict to a ConversationSession."""
     metadata_raw = trace.get("metadata") or {}
@@ -146,7 +150,7 @@ def _map_trace_to_session(trace: dict[str, Any]) -> ConversationSession:
         ),
         status="FAILED" if trace.get("success") is False else "SUCCESS",
         timestamp=trace.get("timestamp", ""),
-        user_id=trace.get("userId"),
+        user_id=_trace_owner_id(trace, attributes),
         metadata=SessionMetadata(attributes=attributes),
         total_cost=float(trace.get("totalCost") or 0),
         latency_ms=float(trace.get("latency") or 0),
@@ -344,25 +348,26 @@ class BotChatService(OpenBotChatServiceMixin):
         return "db"
 
     def _check_bot_access(self, user_id: str, bot_id: str) -> bool:
-        """Check if user has access to the specified non-default bot.
-
-        Access is granted if the user is the bot owner (via ac_bots) or
-        a collaborator (via ac_bot_collaborator).
-
-        Args:
-            user_id: The user ID (staffId).
-            bot_id: The bot ID (non-default).
-
-        Returns:
-            True if access verified, False otherwise.
-        """
-        if (
-            bot_id == "default"
-            or bot_id == f"{user_id}_default"
-        ):
-            return True
-
+        """Check access: owner (ac_bots) or collaborator (ac_bot_collaborator)."""
         return self._db_repo.has_bot_access(user_id, bot_id)
+
+    @staticmethod
+    def _is_legacy_default_bot_id(bot_id: str | None, owner_id: str) -> bool:
+        """True iff ``bot_id`` is a legacy per-owner default alias (pre-retirement).
+
+        These ids (`"default"` and ``f"{owner_id}_default"``) were unique only per
+        owner, so :func:`has_bot_access` cannot disambiguate them across owners
+        via ``get_by_id`` — multiple owners each have a `"default"` bot. Routes
+        over historical traces keep the legacy short-circuit (owner match by
+        user_id / scoped list) instead of routing through ``has_bot_access``.
+        New bots are globally unique and never hit this branch.
+
+        Kept as a service-layer helper so the alias set + rationale live in one
+        place rather than scattered across list/get-session paths.
+        """
+        if not bot_id:
+            return False
+        return bot_id == "default" or bot_id == f"{owner_id}_default"
 
     async def list_sessions(
         self,
@@ -449,11 +454,10 @@ class BotChatService(OpenBotChatServiceMixin):
                 include_output_match=include_output_match,
             )
 
-        # Default DB mode: for non-default bot, check access (owner or collaborator).
-        if (
-            bot_id
-            and bot_id != "default"
-        ):
+        # Default DB mode: for non-(legacy-default) bot, check access (owner or collaborator).
+        # Legacy default aliases short-circuit (see _is_legacy_default_bot_id): the
+        # subsequent DB list is already scoped by owner_id, so access is implicit.
+        if bot_id and not self._is_legacy_default_bot_id(bot_id, owner_id):
             has_access = self._check_bot_access(owner_id, bot_id)
             if not has_access:
                 return SessionListResponse(
@@ -807,13 +811,14 @@ class BotChatService(OpenBotChatServiceMixin):
             raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
 
         # Bot access check based on row's bot_id.
-        # - default bot (or null bot_id): require trace's user_id to match caller.
-        # - non-default bot: require caller to be owner or collaborator.
+        # - legacy default alias (or null bot_id): require trace's user_id to match
+        #   caller — see _is_legacy_default_bot_id; has_bot_access can't disambiguate
+        #   a literal "default" across owners.
+        # - non-legacy bot: require caller to be owner or collaborator.
         if owner_id:
             if (
                 row.bot_id is None
-                or row.bot_id == "default"
-                or row.bot_id == f"{owner_id}_default"
+                or self._is_legacy_default_bot_id(row.bot_id, owner_id)
             ):
                 if row.user_id != owner_id:
                     raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
@@ -859,12 +864,13 @@ class BotChatService(OpenBotChatServiceMixin):
                 metadata_raw = trace_data.get("metadata") or {}
                 attributes = (metadata_raw.get("attributes") or {}) if isinstance(metadata_raw, dict) else {}
                 trace_bot_id = attributes.get("identity.bot_id")
+                trace_owner_id = _trace_owner_id(trace_data, attributes)
 
                 if (
                     trace_bot_id is None
-                    or trace_bot_id == "default"
+                    or self._is_legacy_default_bot_id(trace_bot_id, owner_id)
                 ):
-                    if trace_data.get("userId") != owner_id:
+                    if trace_owner_id != owner_id:
                         raise SessionNotFoundError(f"Trace {trace_id} not found or not accessible")
                 else:
                     if not self._db_repo.has_bot_access(owner_id, trace_bot_id):
@@ -904,7 +910,7 @@ class BotChatService(OpenBotChatServiceMixin):
             output=trace_data.get("output"),
             status="FAILED" if trace_data.get("success") is False else "SUCCESS",
             timestamp=trace_data.get("timestamp", ""),
-            user_id=trace_data.get("userId"),
+            user_id=_trace_owner_id(trace_data, attributes),
             metadata=SessionMetadata(attributes=attributes),
             total_cost=float(trace_data.get("totalCost") or 0),
             latency_ms=float(trace_data.get("latency") or 0),

@@ -144,10 +144,14 @@ class BotRepository:
         return result
 
     def get_by_id_and_owner(
-        self, bot_id: str, owner_id: str
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        execution_options: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
-            bot = (
+            q = (
                 db.query(self.Model)
                 .filter(
                     self.Model.bot_id == bot_id,
@@ -155,8 +159,10 @@ class BotRepository:
                     self.Model.is_delete == 0,
                     self._env(),
                 )
-                .first()
             )
+            if execution_options:
+                q = q.execution_options(**execution_options)
+            bot = q.first()
             return bot.to_dict() if bot else None
 
     def get_live_by_id_owner_and_env(

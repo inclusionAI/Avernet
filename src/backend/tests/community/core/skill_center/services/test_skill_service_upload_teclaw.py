@@ -62,6 +62,24 @@ async def test_teclaw_upload_adapts_path_and_stores_logical_git_path():
 
 
 @pytest.mark.asyncio
+async def test_upload_uses_author_id_for_skill_metadata():
+    fake_fs = MagicMock()
+    fake_fs.delete_tree = AsyncMock(return_value=True)
+    fake_fs.write_file = AsyncMock()
+    svc = _service(Path("skills-local"), to_local_skill_engine_path, fake_fs)
+
+    uploaded = [{"filename": "SKILL.md", "relative_path": "SKILL.md", "content": SKILL_MD}]
+    await svc.upload_skill(
+        uploaded,
+        user_id="bot-owner",
+        author_id="collaborator",
+        bolt_id="b1",
+    )
+
+    assert svc.create_skill.call_args.kwargs["user_id"] == "collaborator"
+
+
+@pytest.mark.asyncio
 async def test_non_teclaw_upload_passes_host_path_through_unchanged():
     fake_fs = MagicMock()
     fake_fs.delete_tree = AsyncMock(return_value=True)

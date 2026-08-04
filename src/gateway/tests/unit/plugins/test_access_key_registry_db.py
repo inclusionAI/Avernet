@@ -1,4 +1,4 @@
-"""DB-backed tests for ``AccessKeyRepository`` (seeded ``access_keys`` table)."""
+"""DB-backed tests for ``AccessKeyRepository`` (seeded ``avernet_access_key_token`` table)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from datetime import datetime
 
 import pytest
 
-from gateway.community.bootstrap._authn import build_database
+from gateway.community.bootstrap import initialize_database
+from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.core.access_key import AccessKeyRepository
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.spi.access_key import RegisteredAccessKey
@@ -14,7 +15,7 @@ from gateway.community.spi.access_key import RegisteredAccessKey
 
 def _make_db():
     db = SqliteDatabasePlugin()
-    return build_database(db)
+    return initialize_database(db, DatabaseConfig(plugin_type="SQLITE_ORM", db_url=""))
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +28,7 @@ async def test_known_token_resolves_seeded_access_key(
 ) -> None:
     ak = await registry.find_access_key_by_token("ak-token")
     assert ak == RegisteredAccessKey(
-        access_key_id="ak-1",
+        access_key="ak-1",
         tenant="t",
         expire_at=datetime(2027, 1, 1, 0, 0, 0),
     )

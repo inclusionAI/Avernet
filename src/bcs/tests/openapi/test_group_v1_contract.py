@@ -14,32 +14,11 @@ from scripts.validate_openapi_contract import (  # noqa: E402
     validate_contract,
 )
 
-EXPECTED_OPERATIONS = {
-    ("get", "/openapi/v1/bots/collaboration/{bot_uuid}/groups"),
-    ("post", "/openapi/v1/groups"),
-    ("get", "/openapi/v1/groups/{group_id}"),
-    ("patch", "/openapi/v1/groups/{group_id}"),
-    ("delete", "/openapi/v1/groups/{group_id}"),
-}
+GROUPS_PATH = "/openapi/v1/collaboration/groups"
+GROUP_PATH = "/openapi/v1/collaboration/groups/{group_id}"
 
 
-def test_first_batch_contains_exactly_the_five_group_operations() -> None:
-    contract = load_contract(CONTRACT_ROOT)
-
-    actual = {
-        (method, path)
-        for path, path_item in contract["paths"].items()
-        for method in path_item
-        if method.lower()
-        in {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
-    }
-
-    assert actual == EXPECTED_OPERATIONS
-    assert not any(path.startswith("/openapi/v1/bcn/") for _, path in actual)
-    assert not any(path.startswith("/openapi/v1/actors/") for _, path in actual)
-
-
-def test_first_batch_contract_obeys_bcn_openapi_rules() -> None:
+def test_contract_obeys_bcn_openapi_rules() -> None:
     contract = load_contract(CONTRACT_ROOT)
 
     assert validate_contract(contract) == []
@@ -55,9 +34,8 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert "sender_routes" not in serialized
     assert "routing_policy" not in serialized
 
-    list_operation = contract["paths"][
-        "/openapi/v1/bots/collaboration/{bot_uuid}/groups"
-    ]["get"]
+    list_operation = contract["paths"][GROUPS_PATH]["get"]
+    assert list_operation["operationId"] == "list_groups"
     query_names = {
         parameter["name"]
         for parameter in list_operation["parameters"]
@@ -70,32 +48,40 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "membership",
         "kind",
         "strategy",
+        "view_bot_id",
     }
+    view_actor = next(
+        parameter
+        for parameter in list_operation["parameters"]
+        if parameter["name"] == "view_bot_id"
+    )
+    assert view_actor["schema"] == {"type": "string", "minLength": 1}
+    assert view_actor.get("required", False) is False
 
     assert (
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["201"]["content"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
             "application/json"
         ]["schema"]["properties"]["code"]["const"]
         == 20_100
     )
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["200"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["200"][
             "content"
         ]["application/json"]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["404"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["404"][
             "x-error-codes"
         ]
     ) == {"bot_not_found", "collaboration_definition_not_found"}
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["409"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
         ]
     ) == {"conflict", "non_public_participant"}
     assert set(
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["400"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["400"][
             "x-error-codes"
         ]
     ) == {
@@ -104,23 +90,23 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "invalid_participant_binding",
     }
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["409"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["409"][
             "x-error-codes"
         ]
     ) == {"state_machine_definition_missing"}
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["get"]["responses"]["400"][
+        contract["paths"][GROUP_PATH]["get"]["responses"]["400"][
             "x-error-codes"
         ]
         == ["invalid_request"]
     )
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+        contract["paths"][GROUP_PATH]["patch"]["responses"][
             "404"
         ]["x-error-codes"]
     ) == {"group_not_found", "bot_not_found"}
     assert set(
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["patch"]["responses"][
+        contract["paths"][GROUP_PATH]["patch"]["responses"][
             "409"
         ]["x-error-codes"]
     ) == {
@@ -129,17 +115,34 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         "state_machine_definition_missing",
     }
     assert (
-        contract["paths"]["/openapi/v1/groups/{group_id}"]["delete"]["responses"][
+        contract["paths"][GROUP_PATH]["delete"]["responses"][
             "400"
         ]["x-error-codes"]
         == ["invalid_request"]
     )
     assert (
-        contract["paths"]["/openapi/v1/groups"]["post"]["responses"]["200"]["content"][
+        contract["paths"][GROUPS_PATH]["post"]["responses"]["200"]["content"][
             "application/json"
         ]["schema"]["properties"]["code"]["const"]
         == 20_000
     )
+
+
+def test_group_detail_uses_implicit_human_or_owned_bot_participant_access() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["get"]
+
+    assert "view_bot_id" not in {
+        parameter["name"]
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+    forbidden = operation["responses"]["403"]
+    assert forbidden["x-error-codes"] == ["forbidden"]
+    description = forbidden["description"]
+    assert "Human Actor" in description
+    assert "created by that Human" in description
+    assert "Group Participant" in description
 
 
 def test_contract_bundles_to_a_deterministic_document(
@@ -151,7 +154,7 @@ def test_contract_bundles_to_a_deterministic_document(
 
     assert first == second
     assert "$ref:" not in first
-    assert "operationId: list_bot_groups" in first
+    assert "operationId: list_groups" in first
 
 
 def test_bundled_discriminator_mappings_resolve_inside_the_document(

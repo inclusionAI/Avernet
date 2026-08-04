@@ -8,4 +8,4 @@ pub use envelope::{Envelope, ErrorData};
 pub use error::{ErrorResponse, application_error_response, invalid_request};
 pub use principal::{PrincipalVerificationError, PrincipalVerifier, verify_principal};
 pub use request_id::RequestId;
-pub use state::ApiState;
+pub use state::{ApiState, PrincipalVerificationState};
