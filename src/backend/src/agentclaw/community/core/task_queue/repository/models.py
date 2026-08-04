@@ -81,6 +81,25 @@ class TaskQueueModel(Base):
         comment="give-up time from first enqueue (DB clock); a task always has one",
     )
 
+    # ── enqueue idempotency (opt-in, active-only) ───────────────────────
+    # Two columns on purpose. ``idempotency_key`` is the durable audit value:
+    # written once at enqueue, never cleared, so "which task handled key X?"
+    # stays answerable after the task finishes. ``active_idempotency_key`` is
+    # the enforcement value: equal to it while the task is live, NULLed on every
+    # terminal transition to release the key. MySQL/OceanBase have no partial
+    # indexes, so nulling a plain column is the portable way to express
+    # "unique among live rows only".
+    idempotency_key = Column(
+        String(190),
+        nullable=True,
+        comment="caller-supplied enqueue dedup key; NULL = opted out. Audit only",
+    )
+    active_idempotency_key = Column(
+        String(190),
+        nullable=True,
+        comment="enforcement copy of idempotency_key; NULLed on terminal transitions",
+    )
+
     # ── env scoping / audit ─────────────────────────────────────────────
     env = Column(
         String(20),
@@ -102,6 +121,18 @@ class TaskQueueModel(Base):
         Index("idx_env_status_run_at", "env", "status", "run_at"),
         # Reclaim scan: env-scoped lookup of expired RUNNING leases.
         Index("idx_env_lease_expires_at", "env", "lease_expires_at"),
+        # Active-only enqueue dedup: at most one *live* task per key within an
+        # (env, task_type). Terminal rows null their active key and drop out.
+        # A NULL active key is the opt-out — both MySQL/OceanBase and SQLite
+        # treat NULLs as distinct in a unique index, so un-keyed enqueues never
+        # collide with each other. That property is relied upon, not incidental.
+        Index(
+            "uk_env_task_type_active_idem",
+            "env",
+            "task_type",
+            "active_idempotency_key",
+            unique=True,
+        ),
     )
 
     def to_record(self) -> TaskRecord:
