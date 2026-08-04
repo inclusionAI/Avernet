@@ -306,3 +306,12 @@ def test_create_state_machine_group_accepts_definition_content_yaml() -> None:
     }
     assert "definition_id" not in repr(state_machine_config)
     assert "version" not in definition["properties"]
+
+
+def test_update_group_does_not_accept_context() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["patch"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "context" not in schema["properties"]
+    assert set(schema["properties"]) == {"name", "visibility", "delivery_policy"}

@@ -488,8 +488,6 @@ UpdateGroup:
   properties:
     name:
       type: string
-    context:
-      type: string
     visibility:
       type: string
       enum:
