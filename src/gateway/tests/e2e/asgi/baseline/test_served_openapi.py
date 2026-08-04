@@ -35,7 +35,7 @@ class TestServedOpenAPI:
             "/openapi/v1/bots/logs/traces/{trace_id}",
         }
         assert expected <= set(paths), (
-            "bots.openapi.json must publish both Bot Logs operations"
+            "bots.openapi.json must publish all Bot Logs operations"
         )
         for path in expected:
             assert paths[path]["get"]["x-avernet-security"] == {
