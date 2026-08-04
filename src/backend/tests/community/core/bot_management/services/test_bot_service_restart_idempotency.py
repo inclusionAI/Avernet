@@ -143,6 +143,7 @@ def _make_service(
     bot_publish_repo: MagicMock | None = None,
     baas_template_resolver: MagicMock | None = None,
     task_queue_service: MagicMock | None = None,
+    common_config_service: MagicMock | None = None,
 ) -> BotService:
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
@@ -159,6 +160,10 @@ def _make_service(
     svc._bot_publish_repo = bot_publish_repo if bot_publish_repo is not None else MagicMock()
     svc._baas_template_resolver = baas_template_resolver
     svc._task_queue_service = task_queue_service
+    svc._common_config_service = common_config_service
+    svc._teclaw_provision_provider = lambda: SimpleNamespace(
+        is_teclaw=lambda active_engine: active_engine == "teclaw"
+    )
     svc._drm_reader = MagicMock()
     svc._drm_reader.read.return_value = None
     svc._bcn_service = MagicMock()
@@ -768,6 +773,47 @@ class TestRestartGuardOrchestration:
         stop.assert_not_called()
         start.assert_not_called()
         assert result == bot
+
+    def test_restart_baas_service_refreshes_pin_before_upgrade(self):
+        """草稿态重启读取当前开关，并仅刷新 Pin 字段后透传镜像。"""
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {"service_bot_config": {"device_count": 3}},
+        }
+        bot_repository, state = _stateful_bot_repository(bot)
+        svc = _make_service(
+            repo,
+            bot_repository=bot_repository,
+            common_config_service=common_config,
+        )
+        svc._template_service.get_template_config.return_value = {
+            "image": "registry/arka:v1",
+            "envs": {"A": "1"},
+        }
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        baas.upgrade_bot.return_value = {"publish_id": 101}
+        svc._baas_service_provider = lambda: baas
+
+        with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        common_config.get_value.assert_called_once()
+        assert state["ext"]["service_bot_config"] == {"device_count": 3}
+        assert state["ext"]["sbot_pin_image"] is True
+        assert state["ext"]["sbot_docker_image"] == "registry/arka:v2"
+        upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
+        assert upgrade_kwargs["template_config"] == {
+            "image": "registry/arka:v2",
+            "envs": {"A": "1"},
+        }
 
     def test_restart_baas_service_ignores_existing_publish_migration_path(self):
         """普通 restart 只重启当前 bot；历史发布记录里的 migration_path 不参与。"""

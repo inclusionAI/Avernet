@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     )
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
+    from agentclaw.community.core.common_config.service import CommonConfigService
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->
     # bot_service). ``BotService`` is provider-constructed, so this
@@ -66,6 +67,12 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    apply_image_pin_to_ext,
+    copy_image_pin_to_ext,
+    overlay_image_pin_on_template_config,
+    resolve_current_arka_image,
+)
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
 )
@@ -308,6 +315,7 @@ class BotService:
         baas_template_resolver: "BaasTemplateResolverProtocol | None" = None,
         baas_service_provider: "Callable[[], BaasService] | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        common_config_service: "CommonConfigService | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -355,6 +363,61 @@ class BotService:
         self._policy_service = policy_service
         self._baas_template_resolver = baas_template_resolver
         self._task_queue_service = task_queue_service
+        self._common_config_service = common_config_service
+
+    def _resolve_service_bot_arka_image_pin(
+        self,
+        bot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Resolve draft ARKA Pin in memory without changing persistent state."""
+        if bot.get("bot_type") != "service" or self.is_teclaw_bot(
+            bot.get("active_engine")
+        ):
+            return bot
+        image = resolve_current_arka_image(
+            getattr(self, "_common_config_service", None),
+            env=get_current_env(),
+        )
+        updated_ext = apply_image_pin_to_ext(bot.get("ext"), image)
+        if updated_ext == (bot.get("ext") or {}):
+            return bot
+        updated_bot = dict(bot)
+        updated_bot["ext"] = updated_ext
+        return updated_bot
+
+    def _persist_service_bot_arka_image_pin(
+        self,
+        bot: Dict[str, Any],
+        *,
+        user_id: str,
+    ) -> None:
+        """Persist an accepted draft restart's Pin snapshot to Bot and Draft."""
+        if bot.get("bot_type") != "service" or self.is_teclaw_bot(
+            bot.get("active_engine")
+        ):
+            return
+
+        bot_id = str(bot["bot_id"])
+        updated_ext = dict(bot.get("ext") or {})
+        self._repository.update_by_owner(bot_id, user_id, {"ext": updated_ext})
+
+        draft = self._bot_publish_repo.get_draft_by_publish_bot_id(
+            publish_bot_id=bot_id,
+            env=get_current_env(),
+        )
+        if draft is None:
+            return
+        draft_ext = copy_image_pin_to_ext(updated_ext, draft.ext) or {}
+        updated_draft = self._bot_publish_repo.update_status_with_ext(
+            publish_id=draft.id,
+            target_status=draft.status,
+            ext=draft_ext,
+            source_status=draft.status,
+        )
+        if updated_draft is None:
+            raise BotServiceError(
+                f"Draft publish {draft.id} image Pin persistence conflicted"
+            )
 
     def _build_engine_extra_envs(
         self,
@@ -1169,6 +1232,17 @@ class BotService:
             resolved_engine_types = [*resolved_engine_types, resolved_active_engine]
         resolved_bot_type = bot_type or "personal"
 
+        if resolved_bot_type == "service" and not self.is_teclaw_bot(
+            resolved_active_engine
+        ):
+            ext = apply_image_pin_to_ext(
+                ext,
+                resolve_current_arka_image(
+                    getattr(self, "_common_config_service", None),
+                    env=get_current_env(),
+                ),
+            ) or None
+
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
 
@@ -1316,6 +1390,10 @@ class BotService:
                         engine_type=resolved_active_engine,
                         template_type=template_type,
                         template_config=template_config,
+                    )
+                    device_template_config = overlay_image_pin_on_template_config(
+                        device_template_config,
+                        bot_record.get("ext"),
                     )
                     extra_envs = self._build_engine_extra_envs(
                         bot_id=str(bot_id),
@@ -1514,6 +1592,7 @@ class BotService:
         force_nas: bool = False,
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
+        bot_ext_override: Optional[Dict[str, Any]] = None,
     ):
         """
         Allocate device asynchronously in background thread.
@@ -1634,6 +1713,15 @@ class BotService:
                     template_type=bot_template_type,
                     template_config=resolved_template_config,
                 )
+                effective_bot_ext = (
+                    bot_ext_override
+                    if bot_ext_override is not None
+                    else (bot_record.get("ext") if bot_record else None)
+                )
+                device_template_config = overlay_image_pin_on_template_config(
+                    device_template_config,
+                    effective_bot_ext,
+                )
                 logger.info(
                     f"[bot_service._allocate_device_async] allocation requested: "
                     f"bot_id={bot_id}, user_id={user_id}, entity_id={entity_id}, "
@@ -1690,14 +1778,22 @@ class BotService:
 
                 # Update bot with binding_id, device_id and final status
                 # Use update_by_owner to ensure we only update the owner's bot
-                updated = self._repository.update_by_owner(bot_id, user_id, {
+                bot_update = {
                     "binding_id": binding_id,
                     "device_id": device_id,
-                    "status": final_status
-                })
+                    "status": final_status,
+                }
+                if bot_ext_override is not None:
+                    bot_update["ext"] = bot_ext_override
+                updated = self._repository.update_by_owner(bot_id, user_id, bot_update)
                 if not updated:
                     logger.error(f"[bot_service._allocate_device_async] Failed to update bot {bot_id} for user {user_id}: bot not found or not owner")
                     return
+                if bot_ext_override is not None:
+                    self._persist_service_bot_arka_image_pin(
+                        {**(bot_record or {}), "bot_id": bot_id, "ext": bot_ext_override},
+                        user_id=user_id,
+                    )
 
                 logger.info(f"[bot_service._allocate_device_async] Bot {bot_id} updated with binding_id={binding_id}, status={final_status}")
 
@@ -3536,6 +3632,7 @@ class BotService:
         force_nas: bool = False,
         device_provider: Optional[str] = None,
         restart_lock_key: Optional[Tuple[str, str, str, str]] = None,
+        bot_ext_override: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Start a bot by triggering async device allocation.
 
@@ -3637,6 +3734,7 @@ class BotService:
             force_nas=force_nas,
             device_provider=device_provider,
             restart_lock_key=restart_lock_key,
+            bot_ext_override=bot_ext_override,
         )
 
         # The allocation thread is now spawned and (for the restart flow) owns
@@ -3853,6 +3951,10 @@ class BotService:
         lock_key = (env, entity_id, bot_id, lock.lock_token)
         handed_off = False
         try:
+            if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
+                bot.get("active_engine")
+            ):
+                bot = self._resolve_service_bot_arka_image_pin(bot)
             if (
                 binding_id
                 and current_device_provider == "baas"
@@ -3894,6 +3996,12 @@ class BotService:
                 nick_name=nick_name,
                 device_provider=current_device_provider,
                 restart_lock_key=lock_key,
+                bot_ext_override=(
+                    bot.get("ext")
+                    if bot.get("bot_type") == "service"
+                    and not self.is_teclaw_bot(bot.get("active_engine"))
+                    else None
+                ),
             )
             handed_off = True
 
@@ -4015,6 +4123,10 @@ class BotService:
                 bot_id, e,
             )
             device_template_config = resolved_template_config
+        device_template_config = overlay_image_pin_on_template_config(
+            device_template_config,
+            bot.get("ext"),
+        )
 
         import uuid as _uuid
         request_id = _uuid.uuid4().hex
@@ -4042,6 +4154,7 @@ class BotService:
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
         result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
+        self._persist_service_bot_arka_image_pin(bot, user_id=user_id)
 
         # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
         # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然

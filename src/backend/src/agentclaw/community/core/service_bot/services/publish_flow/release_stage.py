@@ -26,6 +26,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
@@ -164,6 +167,7 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -187,6 +191,7 @@ class ReleaseStageRunner:
                 # provider seam in a follow-up; tracked separately.
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
             )
             if spec.first_release_passes_version:
                 release_kwargs["version"] = f"{publish_record.version}"
@@ -262,6 +267,7 @@ class ReleaseStageRunner:
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -284,6 +290,7 @@ class ReleaseStageRunner:
                 version=version,
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
             )
 
         try:

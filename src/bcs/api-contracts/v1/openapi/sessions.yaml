@@ -48,6 +48,7 @@ UpdateSessionParticipantRequest:
 GroupSessionsPath:
   post:
     operationId: create_session
+    tags: ["Collaboration / Sessions"]
     summary: Create a Session under a Group.
     x-avernet-security:
       user: required
@@ -114,6 +115,7 @@ GroupSessionsPath:
 
   get:
     operationId: list_sessions
+    tags: ["Collaboration / Sessions"]
     summary: List Sessions under a Group for the selected View Actor.
     x-avernet-security:
       user: required
@@ -189,6 +191,7 @@ GroupSessionsPath:
 SessionPath:
   get:
     operationId: get_session
+    tags: ["Collaboration / Sessions"]
     summary: Get session detail.
     x-avernet-security:
       user: required
@@ -239,6 +242,7 @@ SessionPath:
         $ref: ../shared.yaml#/InternalErrorResponse
   patch:
     operationId: update_session
+    tags: ["Collaboration / Sessions"]
     summary: Update the explicitly mutable session properties.
     x-avernet-security:
       user: required
@@ -301,6 +305,7 @@ SessionPath:
         $ref: ../shared.yaml#/InternalErrorResponse
   delete:
     operationId: delete_session
+    tags: ["Collaboration / Sessions"]
     summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
       user: required
@@ -343,6 +348,7 @@ SessionPath:
 SessionCompletionPath:
   post:
     operationId: complete_session
+    tags: ["Collaboration / Sessions"]
     summary: Complete a running chat session; idempotent after completion.
     x-avernet-security:
       user: required
@@ -393,6 +399,7 @@ SessionCompletionPath:
 SessionMessagesPath:
   get:
     operationId: list_session_messages
+    tags: ["Collaboration / Sessions"]
     summary: List session message history (cursor-based).
     x-avernet-security:
       user: required
@@ -469,6 +476,7 @@ SessionMessagesPath:
 AddSessionParticipantPath:
   post:
     operationId: add_session_participant
+    tags: ["Collaboration / Sessions"]
     summary: Add a Bot as a Session participant.
     x-avernet-security:
       user: required
@@ -536,6 +544,7 @@ AddSessionParticipantPath:
 SessionParticipantPath:
   patch:
     operationId: update_session_participant
+    tags: ["Collaboration / Sessions"]
     summary: Update a Session participant mode.
     x-avernet-security:
       user: required
@@ -600,6 +609,7 @@ SessionParticipantPath:
         $ref: ../shared.yaml#/InternalErrorResponse
   delete:
     operationId: remove_session_participant
+    tags: ["Collaboration / Sessions"]
     summary: Remove a Session participant or let a Bot leave.
     x-avernet-security:
       user: required

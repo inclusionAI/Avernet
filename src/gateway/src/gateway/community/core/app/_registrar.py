@@ -57,6 +57,7 @@ class AppRegistrar:
         app_type: str,
         tenant: str,
         *,
+        creator: str,
         status: str = "ACTIVE",
         env: str = "",
         config: dict[str, Any] | None = None,
@@ -70,6 +71,7 @@ class AppRegistrar:
             "jti": uuid.uuid4().hex,
         }
         token = await self._signer.sign_token(claims)
+        # The registering caller is both creator and modifier on register.
         app_id = await self._repository.store(
             token=token,
             app_name=app_name,
@@ -79,6 +81,8 @@ class AppRegistrar:
             status=status,
             env=env,
             config=config,
+            creator=creator,
+            modifier=creator,
         )
         return IssuedApp(
             id=app_id,

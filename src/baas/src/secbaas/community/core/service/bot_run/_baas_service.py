@@ -665,6 +665,63 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot binding (read-only).
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表，不创建新会话。
+
+        Args:
+            binding_info: Binding info for HTTP connection.
+            context: Optional request context for tenant extraction.
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip.
+
+        Returns:
+            List of SessionInfo objects.
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(s, binding_info.bot_id)
+                    for s in adapter_sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
+            ) from e
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

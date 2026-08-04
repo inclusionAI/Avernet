@@ -56,6 +56,9 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -137,6 +140,7 @@ class ExpertChatInstanceService:
             bot_id, owner_id
         )
         version = publish_record.version or 1
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # --- Step 1: look up / create instance row ---
         instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
@@ -196,6 +200,7 @@ class ExpertChatInstanceService:
                     user_id=user_id,
                     migration_path=migration_path,
                     version=version,
+                    docker_image=image_pin.docker_image,
                 )
                 bot_uuid = order["bot_uuid"]
                 baas_publish_id = order.get("publish_id")
@@ -217,6 +222,7 @@ class ExpertChatInstanceService:
                     owner_id=owner_id,
                     migration_path=migration_path,
                     version=version,
+                    docker_image=image_pin.docker_image,
                 )
                 bot_uuid = upgraded["bot_uuid"]
                 baas_publish_id = upgraded.get("publish_id")
@@ -394,6 +400,7 @@ class ExpertChatInstanceService:
         user_id: str,
         migration_path: Optional[str],
         version: int = 1,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """Call ``release_async`` and return the publish order.
 
@@ -421,6 +428,7 @@ class ExpertChatInstanceService:
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                docker_image=docker_image,
             )
         except Exception as e:
             logger.error(
@@ -474,6 +482,7 @@ class ExpertChatInstanceService:
         owner_id: str,
         migration_path: Optional[str],
         version: int = 1,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
@@ -501,6 +510,7 @@ class ExpertChatInstanceService:
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                docker_image=docker_image,
             )
             logger.info(
                 "[ExpertChatInstance] upgrade_async succeeded: bot_uuid=%s",

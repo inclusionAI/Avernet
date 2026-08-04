@@ -39,6 +39,9 @@ bcs_port="${BCS_PORT:-21000}"
 compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
 line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
 method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
+# The coverage runner is a local test launcher, so explicitly provide the same
+# non-production Principal key to both the BCS child and the E2E client.
+export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
 source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 
 skip_start=0

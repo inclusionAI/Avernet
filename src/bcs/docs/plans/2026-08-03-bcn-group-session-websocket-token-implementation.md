@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Expose a five-minute, single-session JWT flow through the `/openapi/v1/collaboration` Gateway domain so a browser can open `/openapi/v1/collaboration/group/ws?token=...` with behavior equivalent to the existing Workbench `/ws` endpoint.
+**Goal:** Expose a five-minute, single-session JWT flow through the `/openapi/v1/collaboration` Gateway domain so a browser can open `/openapi/v1/collaboration/messages/ws?token=...` with behavior equivalent to the existing Workbench `/ws` endpoint.
 
 **Architecture:** `bcs-service-api` defines transport-neutral issuance and verification contracts plus an outbound token port. `bcs-app-session` authorizes the Human and derives `gid` from `sid`; `bcs-jwt` signs and verifies the dedicated JWT. Bootstrap obtains the signing key through the existing environment-backed `SecretAccessPort`. `bcs-api-http` exposes token issuance, while `bcs-ws` authenticates before Upgrade and feeds an immutable session-bound identity into the existing Workbench handler and dispatcher. The Python Gateway transparently relays both planes to identical BCN paths under `/openapi/v1/collaboration`.
 
@@ -13,7 +13,7 @@
 ## Preconditions and invariants
 
 - Read `docs/arch/arch.rules.md`, `docs/arch/ci.enforce.md`, `docs/arch/context-boundary-format.md`, `docs/arch/protocol-contract-tests.md`, `src/bcs/AGENTS.md`, and `src/bcs/CLAUDE.md` before editing production code.
-- Expose `POST /openapi/v1/collaboration/sessions/{sid}/token` and `GET /openapi/v1/collaboration/group/ws?token=...` at both Gateway and BCN. Gateway forwards both paths unchanged.
+- Expose `POST /openapi/v1/collaboration/sessions/{sid}/token` and `GET /openapi/v1/collaboration/messages/ws?token=...` at both Gateway and BCN. Gateway forwards both paths unchanged.
 - Never accept `uid`, `gid`, tenant, lifetime, or JWT purpose from the request body or query string.
 - The token lifetime is exactly 300 seconds. It scopes one tenant, one Human, one group, and one session. It is stateless and may open more than one socket to that same session before expiration.
 - Token expiration only gates a new Upgrade. It does not terminate an established WebSocket.
@@ -528,7 +528,7 @@ Expected: FAIL because the route builder is missing.
 
 **Step 3: Implement pre-Upgrade verification and shared handling**
 
-Add a handler for `GET /openapi/v1/collaboration/group/ws?token=...`. Extract and validate the query credential before calling `on_upgrade`. Map only the approved status classes and use sanitized messages. Convert the application binding to `WorkbenchConnectionAuth::SessionBound`, with `actor_id = format!("human_{}", binding.user_id)`, then call the existing shared Workbench connection handler.
+Add a handler for `GET /openapi/v1/collaboration/messages/ws?token=...`. Extract and validate the query credential before calling `on_upgrade`. Map only the approved status classes and use sanitized messages. Convert the application binding to `WorkbenchConnectionAuth::SessionBound`, with `actor_id = format!("human_{}", binding.user_id)`, then call the existing shared Workbench connection handler.
 
 Do not add a second dispatcher, registry, idle timer, or frontend delivery path.
 
@@ -636,7 +636,7 @@ Require:
 - a `bcs_server_url` upstream variable and `bcs` server;
 - `collaboration` domain with `protocols: [http, websocket]`;
 - `POST /openapi/v1/collaboration/sessions/{sid}/token` to require a Gateway Human, forward a signed Principal with audience `bcs`, and arrive at the identical BCN path;
-- `GET /openapi/v1/collaboration/group/ws` to have an explicit empty Gateway requirement, work without browser-supplied headers, and arrive at the identical BCN path;
+- `GET /openapi/v1/collaboration/messages/ws` to have an explicit empty Gateway requirement, work without browser-supplied headers, and arrive at the identical BCN path;
 - the more-specific WS rule to beat the general authenticated collaboration rule;
 - `token=...` to be redacted in request/relay/error logs, including percent-encoded query cases;
 - no path or query rewriting beyond changing the upstream origin.
@@ -663,7 +663,7 @@ route_security:
     user: required
   "POST /openapi/v1/collaboration/sessions/{sid}/token":
     user: required
-  "GET /openapi/v1/collaboration/group/ws": {}
+  "GET /openapi/v1/collaboration/messages/ws": {}
 
 upstreams:
   domains:
@@ -771,6 +771,86 @@ Expected: PASS. Record any suite that cannot run and the exact reason.
 ```bash
 git add src/bcs/crates/bootstrap/bcs/tests src/bcs/crates/adapters/ws/bcs-ws/tests src/bcs/docs src/bcs/crates/bootstrap/bcs/CONTEXT.md src/bcs/crates/adapters/ws/bcs-ws/CONTEXT.md src/bcs/crates/adapters/http/bcs-api-http/CONTEXT.md src/bcs/crates/application/v1/bcs-app-session/CONTEXT.md src/bcs/crates/service-api/bcs-service-api/CONTEXT.md src/bcs/crates/services/bcs-jwt/CONTEXT.md
 git commit -m "test(bcs): verify group session websocket parity"
+```
+
+### Task 11: Rename the public collaboration message WebSocket path
+
+**Files:**
+
+- Modify: `src/bcs/tests/openapi/test_group_session_connection_contract.py`
+- Modify: `src/bcs/tests/openapi/test_contract.py`
+- Modify: `src/bcs/api-contracts/v1/openapi.yaml`
+- Modify: `src/bcs/api-contracts/README.md`
+- Modify: `src/bcs/crates/adapters/ws/bcs-ws/src/web/group_session.rs`
+- Modify: `src/bcs/crates/adapters/ws/bcs-ws/tests/group_session_ws.rs`
+- Modify: `src/bcs/crates/bootstrap/bcs/tests/openapi_v1_mount.rs`
+- Modify: `src/gateway/configs/application.yaml`
+- Regenerate: `src/gateway/configs/schemas/bcn.openapi.json`
+- Modify: relevant BCS and Gateway tests, `CONTEXT.md` files, and current P0 plans containing the old path
+
+**Step 1: Point tests at the approved path**
+
+Change contract, runtime, Gateway security, log-redaction, relay, live-forwarding,
+and served-OpenAPI expectations to
+`/openapi/v1/collaboration/messages/ws`. Assert that the old
+`/openapi/v1/collaboration/group/ws` path is absent from the public contract and
+does not mount in BCN.
+
+**Step 2: Run focused tests to verify they fail**
+
+```bash
+uv run --with pytest --with pyyaml pytest \
+  src/bcs/tests/openapi/test_group_session_connection_contract.py \
+  src/bcs/tests/openapi/test_contract.py -q
+CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
+  -p bcs-ws --test group_session_ws
+CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
+  -p bcs --test openapi_v1_mount
+cd src/gateway && uv run pytest \
+  tests/test_domain_map.py tests/test_route_security.py \
+  tests/test_log_redaction.py tests/integration/test_relay_ws_route.py -q
+```
+
+Expected: FAIL because the authoritative YAML, Axum route, Gateway exception,
+and published schema still use the old path.
+
+**Step 3: Rename the contract and runtime path without an alias**
+
+Update the authoritative OpenAPI path, the single Axum route constant, and the
+Gateway anonymous WebSocket exception. Keep token issuance at
+`/openapi/v1/collaboration/sessions/{session_id}/token`, keep the session-bound
+claims and message protocol unchanged, and do not add a rewrite or compatibility
+alias. Regenerate the deterministic schema with:
+
+```bash
+uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
+  src/gateway/configs/schemas/bcn.openapi.json
+```
+
+Update current documentation to explain that `/messages/ws` is the WebSocket
+message channel and reserves `/messages/sse` for a future SSE sibling.
+
+**Step 4: Run focused and cross-module verification**
+
+```bash
+uv run --with pytest --with pyyaml pytest src/bcs/tests/openapi -q
+CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
+  -p bcs-ws --test group_session_ws
+CARGO_SHIM_SKIP_CLEAN=1 cargo test --manifest-path src/bcs/Cargo.toml \
+  -p bcs --test openapi_v1_mount
+cd src/gateway && uv run pytest -q
+bash src/gateway/scripts/test_live_bcs_forwarding.sh
+git diff --check
+```
+
+Expected: PASS. A repository search across current BCS/Gateway source, tests,
+configuration, generated schema, and active plans finds no old public path.
+
+**Step 5: Commit**
+
+```bash
+git add src/bcs src/gateway
+git commit -m "fix(gateway): rename the BCN message websocket path"
 ```
 
 ## Frontend adoption follow-up

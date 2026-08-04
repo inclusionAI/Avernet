@@ -37,17 +37,29 @@ def build_served_openapi(
     """
     paths: dict[str, Any] = {}
     components: dict[str, Any] = {}
+    tags: list[dict[str, Any]] = []
+    tag_names: set[str] = set()
     for domain in domains:
         doc = generate_openapi(describe(domain), rules, base_path)
         paths.update(doc.get("paths", {}))
         for section, items in doc.get("components", {}).items():
             components.setdefault(section, {}).update(items)
+        for tag in doc.get("tags", []):
+            if not isinstance(tag, dict):
+                continue
+            name = tag.get("name")
+            if not isinstance(name, str) or name in tag_names:
+                continue
+            tag_names.add(name)
+            tags.append(copy.deepcopy(tag))
     info: dict[str, Any] = {"title": title, "version": version}
     if description:
         info["description"] = description
     served: dict[str, Any] = {"openapi": "3.1.0", "info": info, "paths": paths}
     if components:
         served["components"] = components
+    if tags:
+        served["tags"] = tags
     return served
 
 

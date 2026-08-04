@@ -75,6 +75,7 @@ user_config:
   upstream_vars:
     backend_server_url: https://backend.sample.com
     baas_server_url: https://baas.sample.com
+    bcs_server_url: https://bcs.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
 
   # Per-identity strategy chain (system-level config).
@@ -102,6 +103,14 @@ user_config:
     # Sample group — the bots endpoints (explicit, more-specific rule).
     "/openapi/v1/bots/**":
       user: required
+
+    "/openapi/v1/collaboration/**":
+      user: required
+
+    # BCN verifies the short-lived session credential carried by this exact
+    # WebSocket handshake. Keep every other collaboration operation, including
+    # session-token issuance, on the required User Principal boundary above.
+    "GET /openapi/v1/collaboration/messages/ws": {}
 
     # The tenant engine socket, and the FIRST rule under /openapi/v1 that
     # requires no identity at all. Deliberate: the credential is already in the
@@ -163,6 +172,13 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      collaboration:
+        server: bcs
+        protocols: [http, websocket]
+        schema:
+          source: file
+          path: schemas/bcn.openapi.json
+          refresh_seconds: 300
       sessions:
         server: baas
         schema:
@@ -213,5 +229,7 @@ user_config:
         base_url: "${backend_server_url}"
       baas:
         base_url: "${baas_server_url}"
+      bcs:
+        base_url: "${bcs_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"

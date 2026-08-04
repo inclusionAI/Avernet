@@ -681,6 +681,20 @@ mod tests {
     }
 
     #[test]
+    fn test_real_local_config_selects_env_secret_backend() {
+        let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../configs/bcs-config-local.toml");
+        let content = std::fs::read_to_string(config_path).unwrap();
+        let config: crate::config::BcsConfig = toml::from_str(&content).unwrap();
+
+        assert_eq!(config.secret.provider, "env");
+        assert_eq!(
+            config.secret.providers["env"]["prefix"].as_str(),
+            Some("BCS_SECRET_")
+        );
+    }
+
+    #[test]
     fn test_real_local_config_routes_all_errors_to_common_error_file() {
         let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../configs/bcs-config-local.toml");

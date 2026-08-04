@@ -96,7 +96,7 @@ async fn start_test_server(
     bots_dir: &PathBuf,
 ) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     let config = create_test_config(bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server
         .run_on_random_port()
         .await

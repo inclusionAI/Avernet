@@ -1,6 +1,7 @@
 BotCandidatesPath:
   get:
     operationId: list_bot_candidates
+    tags: ["Collaboration / Bots"]
     summary: List candidate physical Bots from a managed Bot's perspective.
     description: >-
       Human control-plane operation. The path bot_id must identify a physical
@@ -107,6 +108,7 @@ BotCandidatesPath:
 QueryBotsPath:
   post:
     operationId: query_bots
+    tags: ["Collaboration / Bots"]
     summary: Query Bot domain objects by explicit identifiers.
     description: >-
       Human control-plane operation for deterministic explicit-ID hydration.
@@ -170,6 +172,7 @@ QueryBotsPath:
 BotPath:
   get:
     operationId: get_bot
+    tags: ["Collaboration / Bots"]
     summary: Get one Bot domain object by exact identifier.
     description: >-
       Human control-plane exact-ID lookup for either a physical Bot or a Human
@@ -227,6 +230,7 @@ BotPath:
         $ref: ../shared.yaml#/InternalErrorResponse
   patch:
     operationId: update_bot
+    tags: ["Collaboration / Bots"]
     summary: Update the explicitly mutable Bot properties.
     description: >-
       Human control-plane owner update. The current Human staff_no must equal
@@ -297,6 +301,7 @@ BotPath:
 MyBotsPath:
   get:
     operationId: list_my_bots
+    tags: ["Collaboration / Bots"]
     summary: List Bot rows created by the current Human.
     description: >-
       Human control-plane operation. Ownership is selected by comparing the
