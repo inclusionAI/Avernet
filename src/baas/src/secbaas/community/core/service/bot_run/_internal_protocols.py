@@ -183,6 +183,39 @@ class BotService(Protocol):
         """
         ...
 
+    def supports_lazy_session(self, *, binding_info: BotBindingInfo) -> bool:
+        """Return True if the engine supports local session-id construction.
+
+        When True, BotRunner will construct a session_id locally (via
+        ``construct_session_id``) instead of making a synchronous HTTP call
+        to ``create_session``. The adapter session is then created lazily
+        in the async execution phase (dispatcher).
+
+        Engines with deterministic session-id rules (openclaw, claude_code)
+        should return True. Engines without such rules (teclaw, aicoding,
+        hermes) should return False to preserve the synchronous path.
+        """
+        ...
+
+    def construct_session_id(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        run_id: str,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+    ) -> str:
+        """Construct a session_id locally for lazy creation.
+
+        The returned id MUST match what the adapter would produce, so that
+        the deferred ``create_session`` call (with ``session_id=constructed_id``)
+        reuses the same id idempotently.
+
+        Called only when ``supports_lazy_session`` returns True.
+        """
+        ...
+
 
 @runtime_checkable
 class MessageDispatcher(Protocol):
@@ -229,6 +262,7 @@ class MessageDispatcher(Protocol):
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        needs_session_creation: bool = False,
     ) -> None:
         """分发消息发送以进行异步执行
 
@@ -248,6 +282,9 @@ class MessageDispatcher(Protocol):
             callback: 可选的完成回调，签名与
                       asyncio.Task.add_done_callback 一致
             chat_metadata: 可选的 chat 请求元数据，透传给 BotService.send_message
+            needs_session_creation: 若为 True，表示 session_id 是本地构造的、
+                      adapter 侧尚未创建会话，dispatcher 执行时需先调用
+                      bot_service.create_session(session_id=session_id, ...) 再发消息
         """
         ...
 
@@ -262,6 +299,7 @@ class MessageDispatcher(Protocol):
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式消息发送分发，返回 StreamChunk 迭代器。
 
@@ -270,6 +308,10 @@ class MessageDispatcher(Protocol):
         - Queue 模式：入队后轮询 chunk 表，封装为迭代器返回
 
         调用方统一 async for 消费，不感知模式差异。
+
+        Args:
+            needs_session_creation: 若为 True，dispatcher 在开始流式发送前
+                      需先调用 bot_service.create_session(session_id=session_id, ...)
         """
         ...
 
@@ -283,6 +325,7 @@ class MessageDispatcher(Protocol):
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> None:
         """分发消息注入以进行异步执行
 
@@ -297,6 +340,8 @@ class MessageDispatcher(Protocol):
             binding_info: 已解析的绑定信息
             context: 可选的请求上下文
             bot_id: 用于队列模式下的每键限制
+            needs_session_creation: 若为 True，dispatcher 执行注入前需先调用
+                      bot_service.create_session(session_id=session_id, ...)
         """
         ...
 

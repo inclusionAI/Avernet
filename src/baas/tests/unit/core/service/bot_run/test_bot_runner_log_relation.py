@@ -59,6 +59,7 @@ def mock_bot_service():
         return_value=MagicMock(session_id="agent:main:sess-001")
     )
     svc.send_message = AsyncMock(return_value=MagicMock(content="reply", usage={}))
+    svc.supports_lazy_session = MagicMock(return_value=False)
     return svc
 
 

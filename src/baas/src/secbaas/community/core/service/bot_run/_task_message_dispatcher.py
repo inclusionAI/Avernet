@@ -66,6 +66,7 @@ class TaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        needs_session_creation: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_send_message(
@@ -79,6 +80,7 @@ class TaskMessageDispatcher:
                 timeout=timeout,
                 bot_id=bot_id,
                 chat_metadata=chat_metadata,
+                needs_session_creation=needs_session_creation,
             )
         )
         task.add_done_callback(
@@ -98,6 +100,7 @@ class TaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: float,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
 
@@ -115,6 +118,14 @@ class TaskMessageDispatcher:
             self._run_repository.update_status(run_id, "RUNNING")
             final_content: str = ""
             try:
+                if needs_session_creation:
+                    await bot_service.create_session(
+                        bot_id=bot_id,
+                        session_id=session_id,
+                        binding_info=binding_info,
+                        context=context,
+                        run_id=run_id,
+                    )
                 async for chunk in bot_service.send_message_stream(
                     session_id=session_id,
                     message=message,
@@ -160,6 +171,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> None:
         task = asyncio.create_task(
             self._execute_inject_message(
@@ -170,6 +182,7 @@ class TaskMessageDispatcher:
                 binding_info=binding_info,
                 context=context,
                 bot_id=bot_id,
+                needs_session_creation=needs_session_creation,
             )
         )
         task.add_done_callback(self._handle_task_exception)
@@ -198,10 +211,13 @@ class TaskMessageDispatcher:
         timeout: float,
         bot_id: str = "",
         chat_metadata: dict[str, str] | None = None,
+        needs_session_creation: bool = False,
     ) -> None:
         """执行消息发送
 
-        会话已创建，此方法只负责发送消息。
+        当 ``needs_session_creation=True`` 时（session_id 由 runner 本地构造、
+        adapter 侧尚未创建会话），先调用 ``bot_service.create_session`` 完成
+        WS 解析、baas_bot_session 持久化等副作用，再发送消息。
         """
         slot = await self._acquire_slot(bot_id)
         try:
@@ -210,7 +226,17 @@ class TaskMessageDispatcher:
                 # 1. 更新状态为 RUNNING
                 self._run_repository.update_status(run_id, "RUNNING")
 
-                # 2. 发送消息
+                # 2. 懒创建会话（若 session_id 是本地构造的）
+                if needs_session_creation:
+                    await bot_service.create_session(
+                        bot_id=bot_id,
+                        session_id=session_id,
+                        binding_info=binding_info,
+                        context=context,
+                        run_id=run_id,
+                    )
+
+                # 3. 发送消息
                 response = await bot_service.send_message(
                     session_id=session_id,
                     message=message,
@@ -221,7 +247,7 @@ class TaskMessageDispatcher:
                     chat_metadata=chat_metadata,
                 )
 
-                # 3. 更新成功结果
+                # 4. 更新成功结果
                 extra: dict[str, Any] = {"session_id": session_id}
                 if not wait_result:
                     extra["ignore_result"] = "true"
@@ -265,10 +291,12 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> None:
         """执行消息注入
 
-        会话已创建，此方法只负责注入消息。
+        当 ``needs_session_creation=True`` 时先调用 ``bot_service.create_session``
+        再注入消息。
         """
         slot = await self._acquire_slot(bot_id)
         try:
@@ -277,7 +305,17 @@ class TaskMessageDispatcher:
                 # 1. 更新状态为 RUNNING
                 self._run_repository.update_status(run_id, "RUNNING")
 
-                # 2. 注入消息（不触发推理，无返回值）
+                # 2. 懒创建会话（若 session_id 是本地构造的）
+                if needs_session_creation:
+                    await bot_service.create_session(
+                        bot_id=bot_id,
+                        session_id=session_id,
+                        binding_info=binding_info,
+                        context=context,
+                        run_id=run_id,
+                    )
+
+                # 3. 注入消息（不触发推理，无返回值）
                 await bot_service.inject_message(
                     session_id=session_id,
                     message=message,
@@ -285,7 +323,7 @@ class TaskMessageDispatcher:
                     context=context,
                 )
 
-                # 3. 更新成功结果（inject 无响应内容）
+                # 4. 更新成功结果（inject 无响应内容）
                 self._run_repository.update_result(
                     run_id=run_id,
                     content_long="",

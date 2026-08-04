@@ -578,3 +578,115 @@ class TestCreateSessionFullFlow:
         )
         assert session.session_id == SESSION_ID
         assert session.status == "active"
+
+
+# ==================== Tests: lazy session support ====================
+
+
+class TestClawBotServiceLazySession:
+    """Tests for supports_lazy_session and construct_session_id."""
+
+    def _make_service(self):
+        pool = MagicMock(spec=AsyncChatClientPool)
+        config = _make_config()
+        secret = _make_secret_store()
+        return ClawBotService(config=config, client_pool=pool, secret_store=secret)
+
+    def test_supports_lazy_session_openclaw(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="openclaw",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is True
+
+    def test_supports_lazy_session_claude_code(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="claude_code",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is True
+
+    def test_supports_lazy_session_non_supported_engine_false(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="hermes",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is False
+
+    def test_construct_session_id_openclaw(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="openclaw",
+        )
+        session_id = service.construct_session_id(
+            bot_id=BOT_ID,
+            user_id=ENTITY_ID,
+            run_id="run-001",
+            metadata={},
+            binding_info=binding,
+        )
+        assert session_id == f"agent:main:session:run-001:user:{ENTITY_ID}"
+
+    def test_construct_session_id_claude_code(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="claude_code",
+        )
+        session_id = service.construct_session_id(
+            bot_id=BOT_ID,
+            user_id=ENTITY_ID,
+            run_id="run-001",
+            metadata={},
+            binding_info=binding,
+        )
+        assert session_id == f"agent:{BOT_ID}:session:run-001:user:{ENTITY_ID}"
+
+    def test_construct_session_id_unsupported_raises(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id=ENTITY_ID,
+            sandbox_id=SANDBOX_ID,
+            device_id=SANDOX_DEVICE_ID,
+            device_provider="arca",
+            binding_id=100101,
+            engine_type="hermes",
+        )
+        with pytest.raises(BotServiceError, match="Cannot construct session_id"):
+            service.construct_session_id(
+                bot_id=BOT_ID,
+                user_id=ENTITY_ID,
+                run_id="run-001",
+                metadata={},
+                binding_info=binding,
+            )

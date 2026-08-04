@@ -88,6 +88,7 @@ class QueueTaskMessageDispatcher:
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
+        needs_session_creation: bool = False,
     ) -> None:
         """队列化消息发送：只入库（PENDING），Worker 异步执行。
 
@@ -103,6 +104,8 @@ class QueueTaskMessageDispatcher:
             meta["callback_function"] = callback
         if timeout is not None:
             meta["timeout"] = timeout
+        if needs_session_creation:
+            meta["needs_session_creation"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_send] run_id=%s bot_id=%s session_id=%s",
@@ -121,6 +124,7 @@ class QueueTaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> None:
         """队列化消息注入：只入库（PENDING），Worker 异步执行。
 
@@ -129,6 +133,8 @@ class QueueTaskMessageDispatcher:
         """
         self._check_backpressure(bot_id)
         meta: dict[str, Any] = {"request_type": "inject"}
+        if needs_session_creation:
+            meta["needs_session_creation"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
         logger.info(
             "[queue_dispatcher.dispatch_inject] run_id=%s bot_id=%s session_id=%s",
@@ -150,6 +156,7 @@ class QueueTaskMessageDispatcher:
         context: BotChatContext | None = None,
         timeout: int | None = None,
         bot_id: str = "",
+        needs_session_creation: bool = False,
     ) -> AsyncIterator[StreamChunk]:
         """队列化流式发送：入队 + 轮询 chunk 表。
 
@@ -165,6 +172,8 @@ class QueueTaskMessageDispatcher:
         meta: dict[str, Any] = {"request_type": "chat", "stream": "true"}
         if timeout is not None:
             meta["timeout"] = timeout
+        if needs_session_creation:
+            meta["needs_session_creation"] = "true"
         self._enqueue_work(run_id, bot_id, session_id, meta=meta)
 
         logger.info(

@@ -659,6 +659,50 @@ class BaasBotService(BotService):
                 f"Failed to get session: {_safe_client_msg(e)}"
             ) from e
 
+    def supports_lazy_session(self, *, binding_info: BotBindingInfo) -> bool:
+        """Return True for engines with deterministic session-id rules."""
+        return binding_info.engine_type in ("openclaw", "claude_code")
+
+    def construct_session_id(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        run_id: str,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+    ) -> str:
+        """Construct a session_id locally for lazy creation.
+
+        Delegates to the existing ``_create_session_consistency_key`` pattern
+        (or the engine adapter's ``session_consistency_key``) so the id matches
+        what device-affinity routing would produce.  The deferred
+        ``create_session(session_id=constructed_id)`` call hits the reuse path
+        (``_get_or_create_adapter_session`` returns the id without HTTP), and
+        the engine auto-creates the session on first ``send_message``.
+        """
+        engine_type = binding_info.engine_type
+        _adapter = self._adapter_for(engine_type)
+        if _adapter is not None:
+            key = _adapter.session_consistency_key(
+                tc_bot_id=binding_info.bot_id,
+                user_id=user_id,
+                run_id=run_id,
+            )
+            if key is not None:
+                return key
+        key = self._create_session_consistency_key(
+            engine_type=engine_type,
+            tc_bot_id=binding_info.bot_id,
+            user_id=user_id,
+            run_id=run_id,
+        )
+        if key is None:
+            raise BotServiceError(
+                f"Cannot construct session_id for engine type: {engine_type}"
+            )
+        return key
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

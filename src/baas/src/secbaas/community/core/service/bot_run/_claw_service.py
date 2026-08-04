@@ -433,6 +433,39 @@ class ClawBotService(BotService):
         except Exception as e:
             raise BotServiceError(f"Failed to get session: {e}") from e
 
+    def supports_lazy_session(self, *, binding_info: BotBindingInfo) -> bool:
+        """Return True for engines with deterministic session-id rules."""
+        return binding_info.engine_type in ("openclaw", "claude_code")
+
+    def construct_session_id(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        run_id: str,
+        metadata: dict[str, Any],
+        binding_info: BotBindingInfo,
+    ) -> str:
+        """Construct a session_id locally for lazy creation.
+
+        Mirrors the patterns already used by the adapter-side session creation:
+        - openclaw:    ``agent:main:session:{run_id}:user:{user_id}``
+        - claude_code: ``agent:{binding_info.bot_id}:session:{run_id}:user:{user_id}``
+
+        The deferred ``create_session(session_id=constructed_id)`` call hits
+        the reuse path (``_get_or_create_adapter_session`` returns the id
+        without HTTP), and the engine auto-creates the session on first
+        ``send_message``.
+        """
+        engine_type = binding_info.engine_type
+        if engine_type == "openclaw":
+            return f"agent:main:session:{run_id}:user:{user_id}"
+        if engine_type == "claude_code":
+            return f"agent:{binding_info.bot_id}:session:{run_id}:user:{user_id}"
+        raise BotServiceError(
+            f"Cannot construct session_id for engine type: {engine_type}"
+        )
+
     # ── 私有方法 ─────────────────────────────────────────────────────────────
 
     def _adapter_for(self, engine_type: str | None) -> BotEngineAdapter | None:

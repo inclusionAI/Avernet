@@ -71,6 +71,7 @@ def mock_bot_service():
     svc.send_message = AsyncMock(return_value=MagicMock(content="reply", usage={}))
     svc.inject_message = AsyncMock()
     svc.get_messages = AsyncMock(return_value=[])
+    svc.supports_lazy_session = MagicMock(return_value=False)
     return svc
 
 
@@ -2048,3 +2049,170 @@ class _DummyConverter:
         result = self._results[self._idx]
         self._idx += 1
         return result
+
+
+# ==================== Tests: lazy session creation ====================
+
+
+class TestLazySession:
+    """Tests for lazy session creation in BotRunner.
+
+    When the bot service supports_lazy_session (openclaw/claude_code),
+    BotRunner should:
+    - Construct the session_id locally via construct_session_id
+    - NOT call create_session synchronously
+    - Persist the constructed session_id to DB
+    - Pass needs_session_creation=True to the dispatcher
+    """
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_lazy_skips_sync_create_session(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message with lazy engine must not call create_session."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.supports_lazy_session = MagicMock(return_value=True)
+        mock_bot_service.construct_session_id = MagicMock(
+            return_value="agent:main:session:run-001:user:test-entity-001"
+        )
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={},
+            message_id="msg-001",
+        )
+
+        mock_bot_service.create_session.assert_not_called()
+        mock_bot_service.construct_session_id.assert_called_once()
+        mock_run_repo.update_session_id.assert_called_once_with(
+            "msg-001",
+            "agent:main:session:run-001:user:test-entity-001",
+        )
+        dispatcher.dispatch_send.assert_called_once()
+        kw = dispatcher.dispatch_send.call_args.kwargs
+        assert kw["needs_session_creation"] is True
+        assert kw["session_id"] == "agent:main:session:run-001:user:test-entity-001"
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_non_lazy_calls_sync_create_session(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """deliver_message with non-lazy engine must call create_session."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.supports_lazy_session = MagicMock(return_value=False)
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={},
+            message_id="msg-001",
+        )
+
+        mock_bot_service.create_session.assert_called_once()
+        dispatcher.dispatch_send.assert_called_once()
+        kw = dispatcher.dispatch_send.call_args.kwargs
+        assert kw["needs_session_creation"] is False
+
+    @pytest.mark.asyncio
+    async def test_inject_message_lazy_skips_sync_create_session(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """inject_message with lazy engine must not call create_session."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.supports_lazy_session = MagicMock(return_value=True)
+        mock_bot_service.construct_session_id = MagicMock(
+            return_value="agent:main:session:msg-001:user:test-entity-001"
+        )
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_inject = AsyncMock()
+
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+        await runner.inject_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={},
+            message_id="msg-001",
+        )
+
+        mock_bot_service.create_session.assert_not_called()
+        mock_run_repo.update_session_id.assert_called_once_with(
+            "msg-001",
+            "agent:main:session:msg-001:user:test-entity-001",
+        )
+        kw = dispatcher.dispatch_inject.call_args.kwargs
+        assert kw["needs_session_creation"] is True
+
+    @pytest.mark.asyncio
+    async def test_deliver_message_lazy_with_provided_session_id(
+        self,
+        mock_selector,
+        mock_bot_service,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        arca_binding_data,
+        context,
+    ):
+        """When session_id provided AND lazy, use the provided id directly."""
+        mock_bot_service_plugin.get_binding.return_value = arca_binding_data
+        mock_bot_service.supports_lazy_session = MagicMock(return_value=True)
+
+        dispatcher = MagicMock(spec=MessageDispatcher)
+        dispatcher.dispatch_send = AsyncMock()
+
+        runner = _make_runner(
+            mock_selector, mock_run_repo, mock_bot_service_plugin, dispatcher
+        )
+        await runner.deliver_message(
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            context=context,
+            message="hello",
+            metadata={"session_id": "existing-session-001"},
+            message_id="msg-001",
+        )
+
+        mock_bot_service.create_session.assert_not_called()
+        mock_bot_service.construct_session_id.assert_not_called()
+        mock_run_repo.update_session_id.assert_called_once_with(
+            "msg-001",
+            "existing-session-001",
+        )
+        kw = dispatcher.dispatch_send.call_args.kwargs
+        assert kw["session_id"] == "existing-session-001"
+        assert kw["needs_session_creation"] is True

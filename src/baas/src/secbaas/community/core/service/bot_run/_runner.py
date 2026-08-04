@@ -50,6 +50,7 @@ from ._bot_run_utils import (
     parse_bot_id,
     parse_wait_result,
     resolve_bot_id,
+    resolve_user_id,
 )
 from ._bot_service_selector import BotServiceSelector
 from ._internal_protocols import BotService, MessageDispatcher
@@ -170,13 +171,16 @@ class BotRunner:
         route = await self._resolve_bot_route(bot_id, metadata)
         raw_session_id = metadata.get("session_id")
 
-        # 3. 创建会话
-        actual_session_id = await self._create_session(
-            run_id=message_id,
-            session_id=raw_session_id,
-            metadata=metadata,
-            route=route,
-            context=context,
+        # 3. 创建会话（lazy 或 sync）
+        actual_session_id, needs_session_creation = (
+            await self._resolve_session(
+                run_id=message_id,
+                raw_session_id=raw_session_id,
+                metadata=metadata,
+                route=route,
+                context=context,
+                bot_id=bot_id,
+            )
         )
 
         # 4. 委托 dispatcher 异步注入
@@ -188,6 +192,7 @@ class BotRunner:
             binding_info=route.binding_info,
             context=context,
             bot_id=bot_id,
+            needs_session_creation=needs_session_creation,
         )
 
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
@@ -263,13 +268,16 @@ class BotRunner:
 
         route = await self._resolve_bot_route(bot_id, metadata)
 
-        # 3. 创建会话
-        actual_session_id = await self._create_session(
-            run_id=message_id,
-            session_id=raw_session_id,
-            metadata=metadata,
-            route=route,
-            context=context,
+        # 3. 创建会话（lazy 或 sync）
+        actual_session_id, needs_session_creation = (
+            await self._resolve_session(
+                run_id=message_id,
+                raw_session_id=raw_session_id,
+                metadata=metadata,
+                route=route,
+                context=context,
+                bot_id=bot_id,
+            )
         )
 
         # 4. 委托 dispatcher 异步发送
@@ -287,6 +295,7 @@ class BotRunner:
             bot_id=bot_id,
             callback=callback,
             chat_metadata=chat_metadata,
+            needs_session_creation=needs_session_creation,
         )
 
         # 5. 上报日志关联(后台执行,不阻塞主链路)
@@ -355,13 +364,16 @@ class BotRunner:
             metadata=metadata,
         )
 
-        # 创建会话
-        actual_session_id = await self._create_session(
-            run_id=message_id,
-            session_id=raw_session_id,
-            metadata=metadata,
-            route=route,
-            context=context,
+        # 创建会话（lazy 或 sync）
+        actual_session_id, needs_session_creation = (
+            await self._resolve_session(
+                run_id=message_id,
+                raw_session_id=raw_session_id,
+                metadata=metadata,
+                route=route,
+                context=context,
+                bot_id=bot_id,
+            )
         )
 
         # 委托 dispatcher 流式发送
@@ -376,6 +388,7 @@ class BotRunner:
             context=context,
             timeout=timeout,
             bot_id=bot_id,
+            needs_session_creation=needs_session_creation,
         )
 
         return message_id, actual_session_id, stream_iter
@@ -713,6 +726,72 @@ class BotRunner:
                 run_id=run_id, error="Session creation failed"
             )
             raise
+
+    async def _resolve_session(
+        self,
+        *,
+        run_id: str,
+        raw_session_id: str | None,
+        metadata: dict[str, Any],
+        route: _BotRoute,
+        context: BotChatContext,
+        bot_id: str,
+    ) -> tuple[str, bool]:
+        """Resolve the session id, choosing lazy or synchronous creation.
+
+        For engines that support lazy session (openclaw, claude_code):
+        - Construct the session_id locally using existing construction rules.
+        - Persist it to the DB immediately.
+        - Return ``needs_session_creation=True`` so the dispatcher's background
+          task calls ``bot_service.create_session(session_id=constructed_id)``
+          before sending the message.
+
+        For engines that do NOT support lazy session (teclaw, aicoding, hermes):
+        - Fall back to the synchronous ``_create_session`` path (HTTP to adapter).
+        - Return ``needs_session_creation=False``.
+
+        If a ``session_id`` is already provided by the caller (reuse), use it
+        directly — the dispatcher's ``create_session(session_id=raw)`` will hit
+        the reuse path without HTTP.
+
+        Returns:
+            Tuple of ``(actual_session_id, needs_session_creation)``.
+        """
+        supports_lazy = getattr(route.bot_service, "supports_lazy_session", None)
+        if (
+            callable(supports_lazy)
+            and supports_lazy(binding_info=route.binding_info)
+        ):
+            if raw_session_id is not None:
+                actual_session_id = raw_session_id
+            else:
+                user_id = resolve_user_id(
+                    metadata, route.binding_info, context, route.route_bot_id
+                )
+                actual_session_id = route.bot_service.construct_session_id(
+                    bot_id=route.route_bot_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    metadata=metadata,
+                    binding_info=route.binding_info,
+                )
+            self._run_repository.update_session_id(run_id, actual_session_id)
+            logger.info(
+                "[runner] Lazy session: run_id=%s, session_id=%s, engine=%s",
+                run_id,
+                actual_session_id,
+                route.binding_info.engine_type,
+            )
+            return actual_session_id, True
+
+        actual_session_id = await self._create_session(
+            run_id=run_id,
+            session_id=raw_session_id,
+            metadata=metadata,
+            route=route,
+            context=context,
+        )
+        return actual_session_id, False
 
     async def _resolve_binding(
         self,

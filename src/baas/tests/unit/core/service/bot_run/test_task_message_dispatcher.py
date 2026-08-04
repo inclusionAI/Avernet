@@ -26,6 +26,7 @@ def mock_bot_service():
     )
     svc.send_message = AsyncMock(return_value=MagicMock(content="reply", usage={}))
     svc.inject_message = AsyncMock()
+    svc.supports_lazy_session = MagicMock(return_value=False)
     return svc
 
 
@@ -462,3 +463,76 @@ class TestTaskMessageDispatcherTimeout:
         call_kw = mock_bot_service.send_message.call_args.kwargs
         assert call_kw["timeout"] == pytest.approx(14.8)
         assert pool.active_count == 0
+
+
+# ==================== Tests: lazy session creation ====================
+
+
+class TestTaskMessageDispatcherLazySession:
+    """Tests for deferred create_session in background task."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_send_lazy_creates_session_before_send(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        """When needs_session_creation=True, create_session is called before send_message."""
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="agent:main:session:run-001:user:u1",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+            needs_session_creation=True,
+        )
+        await asyncio.sleep(0)
+
+        mock_bot_service.create_session.assert_called_once()
+        create_kw = mock_bot_service.create_session.call_args.kwargs
+        assert create_kw["session_id"] == "agent:main:session:run-001:user:u1"
+        mock_bot_service.send_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_send_no_lazy_skips_create_session(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        """When needs_session_creation=False, create_session is NOT called."""
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+            needs_session_creation=False,
+        )
+        await asyncio.sleep(0)
+
+        mock_bot_service.create_session.assert_not_called()
+        mock_bot_service.send_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_inject_lazy_creates_session_before_inject(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        """When needs_session_creation=True, create_session is called before inject_message."""
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_inject(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="agent:main:session:run-001:user:u1",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            needs_session_creation=True,
+        )
+        await asyncio.sleep(0)
+
+        mock_bot_service.create_session.assert_called_once()
+        create_kw = mock_bot_service.create_session.call_args.kwargs
+        assert create_kw["session_id"] == "agent:main:session:run-001:user:u1"
+        mock_bot_service.inject_message.assert_called_once()

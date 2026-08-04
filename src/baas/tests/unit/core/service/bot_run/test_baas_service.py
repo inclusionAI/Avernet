@@ -2168,3 +2168,115 @@ class _ANY:
 
 
 ANY: _ANY = _ANY()
+
+
+# ==================== Tests: lazy session support ====================
+
+
+class TestBaasBotServiceLazySession:
+    """Tests for supports_lazy_session and construct_session_id."""
+
+    def _make_service(self):
+        pool = MagicMock(spec=AsyncChatClientPool)
+        config = BaasBotServiceConfig()
+        wss_resolver = MagicMock()
+        session_service = MagicMock()
+        return BaasBotService(
+            config=config,
+            client_pool=pool,
+            wss_resolver=wss_resolver,
+            session_service=session_service,
+        )
+
+    def test_supports_lazy_session_openclaw(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="openclaw",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is True
+
+    def test_supports_lazy_session_claude_code(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="claude_code",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is True
+
+    def test_supports_lazy_session_teclaw_false(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="teclaw",
+        )
+        assert service.supports_lazy_session(binding_info=binding) is False
+
+    def test_construct_session_id_openclaw(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="openclaw",
+        )
+        session_id = service.construct_session_id(
+            bot_id=BOT_UUID,
+            user_id="user-001",
+            run_id="run-001",
+            metadata={},
+            binding_info=binding,
+        )
+        assert session_id == "agent:main:session:run-001:user:user-001"
+
+    def test_construct_session_id_claude_code(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="claude_code",
+        )
+        session_id = service.construct_session_id(
+            bot_id=BOT_UUID,
+            user_id="user-001",
+            run_id="run-001",
+            metadata={},
+            binding_info=binding,
+        )
+        assert session_id == f"agent:{BOT_UUID}:session:run-001:user:user-001"
+
+    def test_construct_session_id_unsupported_raises(self):
+        service = self._make_service()
+        binding = BotBindingInfo(
+            bot_id=BOT_UUID,
+            entity_id=BOT_UUID,
+            device_id=BOT_UUID,
+            device_provider="baas",
+            binding_id=100002,
+            engine_type="hermes",
+        )
+        with pytest.raises(BotServiceError, match="Cannot construct session_id"):
+            service.construct_session_id(
+                bot_id=BOT_UUID,
+                user_id="user-001",
+                run_id="run-001",
+                metadata={},
+                binding_info=binding,
+            )
