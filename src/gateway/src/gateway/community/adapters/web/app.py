@@ -112,18 +112,11 @@ def create_app() -> FastAPI:
     _default_openapi = app.openapi
 
     def _served_openapi() -> dict[str, Any]:
-        served = bs.served_openapi(
+        return bs.served_openapi(
             title=config.app_name,
             version=__version__,
             description=_API_DESCRIPTION,
         )
-        local = _default_openapi()
-        local_paths = local.get("paths", {})
-        served_paths = served.setdefault("paths", {})
-        for path, item in local_paths.items():
-            if path not in served_paths:
-                served_paths[path] = item
-        return served
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
 

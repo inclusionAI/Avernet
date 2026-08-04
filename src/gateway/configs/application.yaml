@@ -220,19 +220,7 @@ user_config:
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
 
-      sessions:
-        server: baas
-        schema:
-          source: file
-          path: schemas/baas.openapi.json
-          refresh_seconds: 300
-      messages:
-        server: baas
-        schema:
-          source: file
-          path: schemas/baas.openapi.json
-          refresh_seconds: 300
-      runs:
+      chat:
         server: baas
         schema:
           source: file
