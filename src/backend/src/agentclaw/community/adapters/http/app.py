@@ -315,6 +315,9 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError,
     CallerMcpSyncError,
 )
+from agentclaw.community.core.task.domain.repository import (  # noqa: E402
+    TaskNotFoundError,
+)
 from agentclaw.community.core.task.domain.state_machine import (  # noqa: E402
     IllegalTransitionError,
 )
@@ -402,6 +405,24 @@ async def _illegal_transition_handler(
     ValueError 子类(非 DomainError),默认落 catch-all 500,故单独注册。"""
     status = 409
     logger.info("[IllegalTransition 409] %s %s: %s", request.method, request.url.path, exc)
+    if _is_public_api(request):
+        return _public_error_envelope(status, request)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": str(exc)},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(TaskNotFoundError)
+async def _task_not_found_handler(
+    request: Request, exc: TaskNotFoundError,
+) -> JSONResponse:
+    """Task/node 找不到 → 404(claim/release 命中缺失 id)。TaskNotFoundError 是
+    ValueError 子类(非 DomainError),默认落 catch-all 500,故单独注册——与
+    IllegalTransitionError 同一范式(BBS skill 契约:404 不 500)。"""
+    status = 404
+    logger.info("[TaskNotFound 404] %s %s: %s", request.method, request.url.path, exc)
     if _is_public_api(request):
         return _public_error_envelope(status, request)
     return JSONResponse(

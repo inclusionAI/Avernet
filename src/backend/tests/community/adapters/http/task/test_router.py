@@ -333,6 +333,7 @@ def _client_with_real(svc) -> TestClient:
     from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
     from agentclaw.community.adapters.http.task.router import router
     from agentclaw.community.core.errors import DomainError, Forbidden
+    from agentclaw.community.core.task.domain.repository import TaskNotFoundError
     from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
     from fastapi.responses import JSONResponse
 
@@ -343,6 +344,10 @@ def _client_with_real(svc) -> TestClient:
     # propagate uncaught (TestClient re-raises) instead of returning 409/403.
     # Forbidden (non-assignee release) → 403; IllegalTransitionError (concurrent
     # claim / illegal source state) → 409 — same status mapping as app.py.
+    # TaskNotFoundError (claim/release on a missing node) → 404 — same as app.py.
+    # The catch-all Exception→500 mirrors app.py's _unhandled_exception_handler
+    # so an unmapped error surfaces as a 500 response (not a re-raised traceback)
+    # — required to observe TaskNotFoundError→500 RED before the 404 handler fix.
     @app.exception_handler(DomainError)
     async def _domain_error_handler(request, exc):  # noqa: ANN001
         status = 403 if isinstance(exc, Forbidden) else 500
@@ -352,11 +357,22 @@ def _client_with_real(svc) -> TestClient:
     async def _illegal_transition_handler(request, exc):  # noqa: ANN001
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
+    @app.exception_handler(TaskNotFoundError)
+    async def _task_not_found_handler(request, exc):  # noqa: ANN001
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+    @app.exception_handler(Exception)
+    async def _unhandled_handler(request, exc):  # noqa: ANN001
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
     inj = Injector([])
     inj.binder.bind(TaskServiceProtocol, to=svc, scope=singleton)
     inj.binder.bind(TaskSchedulerProtocol, to=_StubTaskScheduler(), scope=singleton)
     attach_injector(app, inj)
-    return TestClient(app)
+    # raise_server_exceptions=False mirrors production (uvicorn does not re-raise
+    # after the catch-all 500 handler); it lets an unmapped TaskNotFoundError
+    # surface as a 500 response so the 404-handler fix is observable as RED.
+    return TestClient(app, raise_server_exceptions=False)
 
 
 @pytest.fixture
@@ -434,3 +450,69 @@ def test_app_registers_illegal_transition_409_handler():
     from agentclaw.community.adapters.http.app import app
     from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
     assert IllegalTransitionError in app.exception_handlers
+
+
+# --- BBS skill contract gap fixes (Task 8 follow-up) ------------------------
+# FR-PICK-02:GET /nodes/{node_id} 必须透传 targets_acceptance,供 bot 据
+# (targets_acceptance vs acceptance_result) 算剩余验收项。TaskService 已算出该字段,
+# 但 response_model 未声明 → FastAPI strip。FR-404:claim 一个 task 内不存在的 node
+# → TaskNotFoundError(ValueError 子类,非 DomainError)→ 应 404 不 500。
+
+
+def test_node_detail_returns_targets_acceptance():
+    """targets_acceptance 必须到达 wire(response_model 声明该字段,否则被 strip)。"""
+    from agentclaw.community.core.task.domain.models import (
+        AcceptanceCriteria,
+        AcceptanceCriteriaKind,
+    )
+
+    svc = _real_service()
+    task_id, node_id = _task_with_pending_node(svc)
+    # InMemoryTaskRepo deep-copies on get/save,所以改一个 fetched copy 然后 save
+    # 同一对象(再 svc.get 会丢失改动)——镜像 Task 6 SubtaskState 的 hold+save 范式。
+    task = svc.get(task_id)
+    node = next(n for n in task.execution_graph.nodes if n.node_id == node_id)
+    node.targets_acceptance = [
+        AcceptanceCriteria(
+            kind=AcceptanceCriteriaKind.INVARIANT,
+            properties={"assert": "覆盖率 ≥ 80%"},
+        ),
+        AcceptanceCriteria(
+            kind=AcceptanceCriteriaKind.OUTPUT,
+            properties={"location": "s3://bucket/report.html"},
+        ),
+    ]
+    svc._task_repo.save(task)  # noqa: SLF001 — hold-reference+save,InMemory deep-copies
+    client = _client_with_real(svc)
+    r = client.get(f"/api/tasks/{task_id}/nodes/{node_id}")
+    assert r.status_code == 200
+    body = r.json()
+    # 字段必须出现在 wire 上(未声明则被 response_model strip)。
+    assert body.get("targets_acceptance"), "targets_acceptance was stripped from the wire"
+    assert len(body["targets_acceptance"]) == 2
+    assert body["targets_acceptance"][0]["kind"] == "invariant"
+    assert body["targets_acceptance"][0]["properties"] == {"assert": "覆盖率 ≥ 80%"}
+    assert body["targets_acceptance"][1]["kind"] == "output"
+
+
+def test_claim_missing_node_returns_404(real_client_with_running_node):
+    """claim 一个 task 内不存在的 node → service raise TaskNotFoundError
+    (ValueError 子类,非 DomainError)→ 404,不落 catch-all 500。
+
+    注:missing *task* 走 router 的 None→HTTPException(404) 守卫(已绿);此测试
+    覆盖 missing *node* 路径——才是 TaskNotFoundError 实际抛出、需要 handler 兜的分支。
+    """
+    client, task_id, _node_id = real_client_with_running_node
+    r = client.post(
+        f"/api/tasks/{task_id}/nodes/nope/claim",
+        json={"executor_id": "bot-A", "run_mode": "bbs"},
+    )
+    assert r.status_code == 404
+
+
+def test_app_registers_task_not_found_404_handler():
+    """Production app.py must register TaskNotFoundError→404 (the route tests use a
+    mirror app; this guards the real registration — mirrors the 409 guard above)."""
+    from agentclaw.community.adapters.http.app import app
+    from agentclaw.community.core.task.domain.repository import TaskNotFoundError
+    assert TaskNotFoundError in app.exception_handlers

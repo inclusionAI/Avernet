@@ -125,6 +125,7 @@ class TaskNodeView(BaseModel):
     attempted_executors: list[Any] = Field(default_factory=list)
     artifacts: list[Any] = Field(default_factory=list)
     acceptance_result: Optional[Any] = None
+    targets_acceptance: list[dict] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
     sub_dag_ref: Optional[SubDagRefView] = None
 
@@ -168,6 +169,7 @@ class TaskNodeDetailView(BaseModel):
     intermediate_results: list[dict] = Field(default_factory=list)
     gap_records: list[dict] = Field(default_factory=list)
     acceptance_result: Optional[Any] = None
+    targets_acceptance: list[dict] = Field(default_factory=list)
     properties: dict[str, Any] = Field(default_factory=dict)
     note: str = ""
 
