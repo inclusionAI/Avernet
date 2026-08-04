@@ -2069,11 +2069,10 @@ class TestListSessions:
         mock_bot_service.list_sessions = AsyncMock(return_value=expected_sessions)
 
         runner = BotRunner(
-            service_selector=mock_selector,
-            run_repo=mock_run_repo,
+            bot_service_selector=mock_selector,
+            run_repository=mock_run_repo,
             bot_service_plugin=None,
-            task_pool=None,
-            message_dispatcher=None,
+            dispatchers=[],
         )
 
         # Patch _resolve_bot_route to return our binding and service
