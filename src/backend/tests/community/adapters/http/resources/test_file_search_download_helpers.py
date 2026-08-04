@@ -123,6 +123,24 @@ class TestResolveWalkDeviceFs:
             )
         assert fs is None
 
+    def test_teclaw_draft_requires_endpoint_opt_in(self):
+        resolver = MagicMock()
+        dispatcher = MagicMock()
+        dispatcher.dispatch_addressed.return_value = "teclaw-fs"
+        with patch(
+            "agentclaw.community.core.devices.services.device_info.get_device_info",
+            return_value=("teclaw", "teclaw-device"),
+        ):
+            common_args = dict(
+                publish_id=None, bot_id="b1", owner_id="o1", operator_id="u1",
+                engine_type="teclaw", publish_repo=MagicMock(), bot_repo=MagicMock(),
+                resolver=resolver, dispatcher=dispatcher,
+            )
+            assert _resolve_walk_device_fs(**common_args) is None
+            assert _resolve_walk_device_fs(**common_args, include_teclaw=True) == "teclaw-fs"
+
+        resolver.resolve_for_bot.assert_called_once_with("b1", "o1", device_uuid=None)
+
 
 # ── _abs_path ─────────────────────────────────────────────────────────────────
 
