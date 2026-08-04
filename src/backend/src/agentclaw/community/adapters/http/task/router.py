@@ -31,10 +31,14 @@ from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconn
 from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.task.schemas import (
+    ClaimRequest,
+    ClaimResponse,
     ClarifyTaskRequest,
     CreateTaskRequest,
     EventReportRequest,
     EventReportResponse,
+    ReleaseRequest,
+    ReleaseResponse,
     TaskCreatedResponse,
     TaskDetailResponse,
     TaskEventItem,
@@ -290,6 +294,53 @@ def get_task_graph(task_id: str, service: TaskServiceProtocol = Injected(TaskSer
 def get_node_detail(task_id: str, node_id: str, service: TaskServiceProtocol = Injected(TaskServiceProtocol)) -> Any:
     """Node execution detail (aligns SM canvas node-detail panel)."""
     return _node_detail_view_of(service.get_node_detail(task_id, node_id))
+
+
+# --- BBS self-drive claim/release (plan §10.1/§10.4) -------------------------
+
+
+@router.post("/{task_id}/nodes/{node_id}/claim", response_model=ClaimResponse)
+def claim_node_route(
+    task_id: str,
+    node_id: str,
+    req: ClaimRequest,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+) -> Any:
+    """BBS 自主接单抢占(§10.1):CAS 源态→RUNNING,系统按 T_fallback 设兜底 lease。
+    并发冲突/源态非法 → 409(IllegalTransitionError,app handler);task/node 不存在
+    → 404。``run_mode`` 以字符串透传给 service,service 侧强转为 ``RunMode`` 枚举
+    (避免 adapter 反向依赖 core,守 layering 不变)。"""
+    result = service.claim_node(task_id, node_id, req.executor_id, run_mode=req.run_mode)
+    if result is None:
+        raise HTTPException(status_code=404, detail="task/node not found")
+    return ClaimResponse(
+        node_id=result.node_id,
+        executor_id=result.executor_id,
+        run_mode=result.run_mode.value,
+        accept_token=result.accept_token,
+        lease_until=result.lease_until,
+    )
+
+
+@router.post("/{task_id}/nodes/{node_id}/release", response_model=ReleaseResponse)
+def release_node_route(
+    task_id: str,
+    node_id: str,
+    req: ReleaseRequest,
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),
+) -> Any:
+    """BBS 接单主动让出(§10.4):仅 assignee 可调;RUNNING→FAILED(handoff)立即接力。
+    非 assignee → 403(Forbidden,DomainError map);源态非法 → 409。"""
+    task = service.release_node(task_id, node_id, req.executor_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    graph = _attr(task, "execution_graph", None)
+    nodes = getattr(graph, "nodes", None) or []
+    node = next((n for n in nodes if _attr(n, "node_id", None) == node_id), None)
+    status = _status_of(node) if node is not None else "unknown"
+    props = _attr(node, "properties", {}) or {}
+    outcome = props.get("release_outcome") or "handoff"
+    return ReleaseResponse(node_id=node_id, status=status, outcome=outcome)
 
 
 @router.get("/{task_id}/nodes/{node_id}/sub-dag", response_model=TaskGraphView)

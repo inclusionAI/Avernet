@@ -288,3 +288,141 @@ def test_get_task_history_after_seq_filter():
     body = r.json()
     assert body["total"] == 2
     assert [e["seq"] for e in body["items"]] == [2, 3]
+
+
+# --- BBS claim/release routes (Task 5) + IllegalTransitionError→409 (Task 4) --
+# Real-service harness: the stub service can't exercise CAS conflicts / 403 /
+# 409, so we wire a real in-memory TaskService. The bare FastAPI app here mirrors
+# app.py's IllegalTransitionError→409 translation (production handler lives in
+# adapters/http/app.py; without it the second claim's IllegalTransitionError
+# would propagate uncaught instead of returning 409).
+
+def _real_service():
+    from agentclaw.community.core.task.services import TaskService
+    from agentclaw.community.plugins.community.task.in_memory_repos import (
+        InMemoryTaskEventRepo,
+        InMemoryTaskRepo,
+    )
+    from agentclaw.community.plugins.community.task.panel_publisher import (
+        RecordingPanelPublisher,
+    )
+    return TaskService(InMemoryTaskRepo(), InMemoryTaskEventRepo(), RecordingPanelPublisher())
+
+
+def _task_with_pending_node(svc) -> tuple[str, str]:
+    """create → clarify(confirmed=True → DEFINED) → init_execution_graph → add_node.
+    Returns (task_id, node_id) with the node in PENDING (claimable) state."""
+    from agentclaw.community.core.task.domain.models import NodeType, RunMode, SubTaskSpec
+    t = svc.create(title="t")
+    svc.clarify(t.id, {"summary": "s"})
+    svc.clarify(t.id, {}, confirmed=True)
+    task = svc.get(t.id)
+    svc.init_execution_graph(task)
+    # add_node signature: (task_id, node|SubTaskSpec, parent_node, node_type, executor="")
+    # — node_type is required (Correction 1: the brief omitted it → TypeError).
+    svc.add_node(
+        task.id,
+        SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.BBS),
+        "n_execute_start",
+        NodeType.DISPATCH,
+    )
+    return t.id, "n1"
+
+
+def _client_with_real(svc) -> TestClient:
+    from agentclaw.community.api.task import TaskSchedulerProtocol, TaskServiceProtocol
+    from agentclaw.community.adapters.http.task.router import router
+    from agentclaw.community.core.errors import DomainError, Forbidden
+    from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
+    from fastapi.responses import JSONResponse
+
+    app = FastAPI()
+    app.include_router(router)
+    # Mirror app.py's error translation for the paths under test: the bare app
+    # has no app-level handlers, so without these the routes' raised errors
+    # propagate uncaught (TestClient re-raises) instead of returning 409/403.
+    # Forbidden (non-assignee release) → 403; IllegalTransitionError (concurrent
+    # claim / illegal source state) → 409 — same status mapping as app.py.
+    @app.exception_handler(DomainError)
+    async def _domain_error_handler(request, exc):  # noqa: ANN001
+        status = 403 if isinstance(exc, Forbidden) else 500
+        return JSONResponse(status_code=status, content={"detail": exc.detail})
+
+    @app.exception_handler(IllegalTransitionError)
+    async def _illegal_transition_handler(request, exc):  # noqa: ANN001
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    inj = Injector([])
+    inj.binder.bind(TaskServiceProtocol, to=svc, scope=singleton)
+    inj.binder.bind(TaskSchedulerProtocol, to=_StubTaskScheduler(), scope=singleton)
+    attach_injector(app, inj)
+    return TestClient(app)
+
+
+@pytest.fixture
+def real_client_with_running_node():
+    svc = _real_service()
+    task_id, node_id = _task_with_pending_node(svc)
+    return _client_with_real(svc), task_id, node_id
+
+
+def test_claim_returns_200_with_lease(real_client_with_running_node):
+    client, task_id, node_id = real_client_with_running_node
+    r = client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/claim",
+        json={"executor_id": "bot-A", "run_mode": "bbs"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["node_id"] == node_id
+    assert body["run_mode"] == "bbs"
+    assert body["lease_until"]  # 非空 ISO
+
+
+def test_release_by_assignee_returns_200(real_client_with_running_node):
+    client, task_id, node_id = real_client_with_running_node
+    client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/claim",
+        json={"executor_id": "bot-A", "run_mode": "bbs"},
+    )
+    r = client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/release",
+        json={"executor_id": "bot-A"},
+    )
+    assert r.status_code == 200
+    assert r.json()["outcome"] == "handoff"
+
+
+def test_release_non_assignee_returns_403(real_client_with_running_node):
+    client, task_id, node_id = real_client_with_running_node
+    client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/claim",
+        json={"executor_id": "bot-A", "run_mode": "bbs"},
+    )
+    r = client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/release",
+        json={"executor_id": "bot-B"},
+    )
+    assert r.status_code == 403
+
+
+def test_illegal_transition_maps_to_409(real_client_with_running_node):
+    client, task_id, node_id = real_client_with_running_node
+    # 第一个 claim 200;第二个并发 claim 同节点 → IllegalTransitionError → 409
+    r1 = client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/claim",
+        json={"executor_id": "bot-A", "run_mode": "bbs"},
+    )
+    assert r1.status_code == 200
+    r2 = client.post(
+        f"/api/tasks/{task_id}/nodes/{node_id}/claim",
+        json={"executor_id": "bot-B", "run_mode": "bbs"},
+    )
+    assert r2.status_code == 409
+
+
+def test_router_registers_claim_release_routes():
+    from agentclaw.community.adapters.http.task.router import router
+    paths = {getattr(r, "path", None) for r in router.routes}
+    assert "/api/tasks/{task_id}/nodes/{node_id}/claim" in paths
+    assert "/api/tasks/{task_id}/nodes/{node_id}/release" in paths

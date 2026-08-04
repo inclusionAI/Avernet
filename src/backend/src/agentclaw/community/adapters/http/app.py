@@ -315,6 +315,9 @@ from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
     CallerMcpNotFoundError,
     CallerMcpSyncError,
 )
+from agentclaw.community.core.task.domain.state_machine import (  # noqa: E402
+    IllegalTransitionError,
+)
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
@@ -386,6 +389,24 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(IllegalTransitionError)
+async def _illegal_transition_handler(
+    request: Request, exc: IllegalTransitionError,
+) -> JSONResponse:
+    """状态机非法转移(claim/release 并发冲突、源态非法)→ 409 Conflict,
+    使 skill 可据 409 换下一候选(spec FR-EXT-03)。IllegalTransitionError 是
+    ValueError 子类(非 DomainError),默认落 catch-all 500,故单独注册。"""
+    status = 409
+    logger.info("[IllegalTransition 409] %s %s: %s", request.method, request.url.path, exc)
+    if _is_public_api(request):
+        return _public_error_envelope(status, request)
+    return JSONResponse(
+        status_code=status,
+        content={"detail": str(exc)},
         headers=_trace_headers(request),
     )
 

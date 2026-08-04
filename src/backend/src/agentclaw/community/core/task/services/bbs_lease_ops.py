@@ -68,6 +68,15 @@ class BbsLeaseOpsMixin:
         节点已有 mode,再退 ``SINGLE_BOT``。系统按全局 ``BBS_LEASE_FALLBACK_SECONDS``
         算兜底 ``lease_until``(非 bot 预测,仅为 sweeper 崩溃检出兜底),存
         ``node.properties["lease_until"]`` 并随 :class:`DispatchResult` 返回。"""
+        # Adapter side may pass run_mode as a plain string (router keeps no core
+        # import to honor layering). Coerce here so the rest of the method — and
+        # the ``run_mode or node.run_mode or RunMode.SINGLE_BOT`` fallback below —
+        # always sees a RunMode or None. None / RunMode inputs are unchanged.
+        if isinstance(run_mode, str):
+            try:
+                run_mode = RunMode(run_mode)
+            except ValueError:
+                run_mode = None
         task = self._load(task_id)
         if task is None:
             return None

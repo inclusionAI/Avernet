@@ -192,3 +192,34 @@ class TaskHistoryResponse(BaseModel):
     task_id: str
     items: list[TaskEventItem] = Field(default_factory=list)
     total: int = 0
+
+
+# --- BBS self-drive claim/release (plan §10.1/§10.4) ------------------------
+# Wire contract for POST /nodes/{node_id}/claim + /release. ``run_mode`` is a
+# plain string on the wire (SINGLE_BOT | COOP_GROUP | BBS) — the router passes
+# it straight through to the service, which coerces it to the domain enum. This
+# keeps the adapter layer free of core imports (layering invariant).
+
+
+class ClaimRequest(BaseModel):
+    executor_id: str
+    run_mode: str = "bbs"  # SINGLE_BOT | COOP_GROUP | BBS;BBS 自主接单默认 bbs
+
+
+class ClaimResponse(BaseModel):
+    node_id: str
+    executor_id: str
+    run_mode: str
+    accept_token: str = ""
+    lease_until: Optional[str] = None
+
+
+class ReleaseRequest(BaseModel):
+    executor_id: str
+    idempotency_key: Optional[str] = None
+
+
+class ReleaseResponse(BaseModel):
+    node_id: str
+    status: str
+    outcome: str  # handoff
