@@ -13,8 +13,11 @@ from agentclaw.community.adapters.http.bot_dormant.schemas import (
     WhitelistBatchResponse,
 )
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    BotNotFoundError,
+    InvalidBotStateError,
+)
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
