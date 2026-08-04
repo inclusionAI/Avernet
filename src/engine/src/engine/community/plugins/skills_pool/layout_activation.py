@@ -396,18 +396,15 @@ def _publish_structural_bridge(path: Path, target: Path) -> None:
 
 def _restore_legacy_repo_bridge(
     *,
-    engine: str,
     layout: _Layout,
 ) -> None:
     """Restore the descriptor's Legacy repo view after rollback."""
 
     repo_delivery = current_repo_delivery()
-    if repo_delivery is RepoDelivery.MOUNT or engine == "openclaw":
+    if repo_delivery is RepoDelivery.MOUNT or layout.repo_bridge == layout.legacy_repo:
         target = layout.pool_repo
-    elif layout.repo_bridge != layout.legacy_repo:
-        target = layout.legacy_repo
     else:
-        target = _lexical_target(layout.pool_repo)
+        target = layout.legacy_repo
     _publish_structural_bridge(layout.repo_bridge, target)
 
 
@@ -2007,7 +2004,7 @@ def _rollback_pool(
     copy_staging = layout.pool_root / (f".rollback-copy-{rollback_generation}")
 
     def finish_legacy_structure() -> PoolActivationResult | None:
-        _restore_legacy_repo_bridge(engine=engine, layout=layout)
+        _restore_legacy_repo_bridge(layout=layout)
         active_repo = layout.active_root / "skills-repo"
         if (
             engine == "aicoding"
