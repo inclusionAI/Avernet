@@ -931,7 +931,7 @@ async def exec_shell(
 @router.post("/batch/env", response_model=ApiResponse[BatchSetDeviceEnvResult])
 async def batch_set_device_env(
     req: BatchSetDeviceEnvRequest,
-    user: AuthenticatedUser = Depends(require_operator),
+    user: AuthenticatedUser = Depends(get_current_user),
     service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
 ) -> ApiResponse[BatchSetDeviceEnvResult]:
     """Batch update device environment (admin only)."""
