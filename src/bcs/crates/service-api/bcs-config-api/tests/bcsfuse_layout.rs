@@ -44,14 +44,16 @@ fn bcsfuse_config_ignores_unknown_fields() {
 
 #[test]
 fn bcsfuse_config_rejects_invalid_retry_settings() {
-    let cfg = BcsFuseConfig {
-        sync_max_attempts: 0,
-        ..BcsFuseConfig::default()
-    };
-    assert_eq!(
-        cfg.validate().unwrap_err(),
-        "bcsfuse.sync_max_attempts must be at least 1"
-    );
+    for max_attempts in [0, 6] {
+        let cfg = BcsFuseConfig {
+            sync_max_attempts: max_attempts,
+            ..BcsFuseConfig::default()
+        };
+        assert_eq!(
+            cfg.validate().unwrap_err(),
+            "bcsfuse.sync_max_attempts must be between 1 and 5"
+        );
+    }
 
     for delay_ms in [9, 10_001] {
         let cfg = BcsFuseConfig {
@@ -64,12 +66,14 @@ fn bcsfuse_config_rejects_invalid_retry_settings() {
         );
     }
 
-    for delay_ms in [10, 10_000] {
-        let cfg = BcsFuseConfig {
-            sync_max_attempts: 11,
-            sync_retry_base_delay_ms: delay_ms,
-            ..BcsFuseConfig::default()
-        };
-        assert!(cfg.validate().is_ok());
+    for max_attempts in [1, 5] {
+        for delay_ms in [10, 10_000] {
+            let cfg = BcsFuseConfig {
+                sync_max_attempts: max_attempts,
+                sync_retry_base_delay_ms: delay_ms,
+                ..BcsFuseConfig::default()
+            };
+            assert!(cfg.validate().is_ok());
+        }
     }
 }

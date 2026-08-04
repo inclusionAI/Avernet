@@ -1390,14 +1390,16 @@ mod tests {
     #[test]
     fn test_loaded_config_rejects_invalid_bcsfuse_retry_settings() {
         let mut config = BcsConfig::default();
-        config.bcsfuse.sync_max_attempts = 0;
-
-        let error = validate_loaded_config(&config).expect_err("invalid retry config must fail");
-        assert!(
-            error
-                .to_string()
-                .contains("bcsfuse.sync_max_attempts must be at least 1")
-        );
+        for max_attempts in [0, 6] {
+            config.bcsfuse.sync_max_attempts = max_attempts;
+            let error =
+                validate_loaded_config(&config).expect_err("invalid retry config must fail");
+            assert!(
+                error
+                    .to_string()
+                    .contains("bcsfuse.sync_max_attempts must be between 1 and 5")
+            );
+        }
 
         config.bcsfuse.sync_max_attempts = 1;
         config.bcsfuse.sync_retry_base_delay_ms = 9;

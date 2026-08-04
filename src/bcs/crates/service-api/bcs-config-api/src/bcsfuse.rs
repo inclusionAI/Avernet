@@ -21,7 +21,7 @@ pub struct BcsFuseConfig {
     #[serde(default = "default_sync_timeout")]
     pub sync_timeout_ms: u64,
 
-    /// Maximum attempts for best-effort worker synchronization (at least 1).
+    /// Maximum attempts for best-effort worker synchronization (1..=5).
     #[serde(default = "default_sync_max_attempts")]
     pub sync_max_attempts: u32,
 
@@ -93,8 +93,8 @@ impl Default for BcsFuseConfig {
 
 impl BcsFuseConfig {
     pub fn validate(&self) -> Result<(), String> {
-        if self.sync_max_attempts == 0 {
-            return Err("bcsfuse.sync_max_attempts must be at least 1".to_string());
+        if !(1..=5).contains(&self.sync_max_attempts) {
+            return Err("bcsfuse.sync_max_attempts must be between 1 and 5".to_string());
         }
         if !(10..=10_000).contains(&self.sync_retry_base_delay_ms) {
             return Err(

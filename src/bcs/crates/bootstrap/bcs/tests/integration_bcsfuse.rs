@@ -100,7 +100,7 @@ sync_max_attempts = 0
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     let expected = "ERROR Failed to load BCS configuration: \
-                    bcsfuse.sync_max_attempts must be at least 1";
+                    bcsfuse.sync_max_attempts must be between 1 and 5";
     assert!(
         stderr.lines().any(|line| line == expected),
         "unexpected stderr: {stderr}"
