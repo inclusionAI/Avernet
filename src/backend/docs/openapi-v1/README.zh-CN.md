@@ -616,34 +616,33 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
-一个组件下的两类资源：全局目录在 `/openapi/v1/bots/skills/catalog`，某个 Agent 已安装的
-技能在 `/openapi/v1/bots/skills/{bot_id}`。
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（6 个端点：Track B 已定案）· `openapi_v1/skills/router.py`
+Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上传和生命周期属于指定 Bot。
 
-> **目录为什么需要一个字面的 `catalog` 段。** 按寻址规则，带 Agent 作用域的那一类占用
-> `/openapi/v1/bots/skills/{bot_id}`；而目录详情若写成 `/openapi/v1/bots/skills/{skill_id}`，
-> 就会以不同含义占据同一个位置 —— 同一深度上的两个通配，任何顺序规则都无法区分。`catalog`
-> 用的正是本界面已经在 `check-name`、`ceiling` 上使用过的手法。让字面量排在 `{bot_id}`
-> 之前靠的是路由内的声明顺序，文件里已写明这一点。
+> **已与 totalfrank 定案。** 现有 Local Skill 由 Bot 的设备文件系统存储，不是可在租户内复用的
+> 全局资产。因此 Track B 采用 per-bot **上传** → **激活/停用** → **删除**
+> 的生命周期，不暴露独立的“安装”概念。租户级可复用 Skill 延后到 Skill Center 具备独立存储和分发能力后再设计。
+> 公开 API 不提供跨 Bot 的 Skill 目录；列表和上传必须通过查询参数携带 `bot_id`，
+> 列表通过可选的 `active` 过滤条件区分状态，不再设独立的 Active Skill 列表路由。
+> `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；针对具体 Skill 的请求无需重复携带 `bot_id`。
 
-> **共担 —— 最棘手的类别。** skills 有三层生命周期（全局**上传** → per-bot **安装** →
-> per-bot **启用/停用**）、两个尚未纳入桩的 ★ 端点，以及一个悬而未决的问题：后端更丰富的
-> skill-set 模型是否要升为一等公民。因此**两人共担**。动手前先商定一份共同的子计划 ——
-> 例如把 目录/上传 与 per-bot 安装/生命周期 分开 —— 并为它单独走一遍 SDD。在各自的 P1/P2
-> 切片之后再做。
+上传接受一个原始 `application/zip` 请求体，创建时默认为 Inactive。同名上传会在该 Bot
+范围内更新原 Skill，保持 Skill ID 和期望的 Active/Inactive 状态。针对服务 Bot，
+列表和上传可选携带 `owner_entity_id`，但它只能在权限校验后用于定位 owner 范围：
+Local Skill 仍归 Bot owner 所有，有权限的协作者只记录为操作人。读取使用数据库期望状态，
+Bot 离线时仍可用；变更操作要求 Bot ready，运行时同步失败时必须补偿。
 
-**状态**列标明每个端点是已经在路由桩里（`桩内`），还是来自 PR #363 的提议新增
-（`★ 提议` —— 尚未在桩里；实现前请与 totalfrank 确认）。
+router stub 现已精确暴露这份定案契约。它们只定义 transport shape；Track B 的实现切片
+负责在其后接入持久化、包存储、权限与 runtime 同步。
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills/catalog` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
-| GET | `/openapi/v1/bots/skills/catalog/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` | ★ 提议 |
-| GET | `/openapi/v1/bots/skills/{bot_id}` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{bot_id}` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` | 桩内 |
-| PATCH ★ | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` | ★ 提议 |
-| DELETE | `/openapi/v1/bots/skills/{bot_id}/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` | 桩内 |
+| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[Skill]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[SkillUpload]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[SkillState]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[SkillState]` | 桩内 |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 桩内 |
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
@@ -931,7 +930,6 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
-
 - **2026-08-03** —— **`/openapi/v1/bots` 路径规范化 + 删除 channels。**
   每个组件的路由现在都位于 `/openapi/v1/bots/<component>/…` 之下，`{bot_id}` 作为组件
   **之内**的第一段 —— 见新增的**寻址规则**一节，新增组件前应先读它。此前并存三种形态，而
@@ -947,3 +945,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   `tests/…/openapi_v1/test_path_convention.py` 针对生成的文档断言该规则以及本文的保留名
   清单，使两者都在测试而非评审中失败。SDD：
   `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`。
+- **2026-08-04** —— **Track B Skills 契约最终定为 6 个端点。** 删除独立的
+  `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
+  原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，
+  以及运行时同步失败时的补偿。Skill Center 发布和租户级可复用 Skill 仍属于后续契约。
