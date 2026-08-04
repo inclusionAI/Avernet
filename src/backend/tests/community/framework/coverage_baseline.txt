@@ -7,6 +7,15 @@
 # token, and the harness has no minter — so a case could assert nothing but a
 # 401. #651 covers the minter and the backfill for the whole surface.
 #
+# `GET /openapi/v1/bots/hello` is on that list too, and deliberately so despite
+# taking no input and calling no service: it is a route on the public surface,
+# so it needs the same gateway-signed token as its neighbours. Covering it here
+# would mean the harness forging one — which is exactly what the auth workstream
+# declined to do (see _GATEWAY_PRINCIPAL_EXEMPT_REASON in flow_coverage.py). Its
+# happy path is covered by unit tests in
+# tests/community/adapters/http/openapi_v1/hello/ meanwhile, and it drains with
+# the rest of the surface on #651.
+#
 # Comments survive hand edits; `python -m tests.community.framework.coverage_gate
 # --regen` rewrites the file and drops them.
 DELETE /api/bot-render-screens/{record_id}: missing [happy, error]
@@ -154,6 +163,7 @@ GET /openapi/v1/bots/ceiling: missing [happy, error]
 GET /openapi/v1/bots/channels/{channel_id}: missing [happy, error]
 GET /openapi/v1/bots/channels: missing [happy, error]
 GET /openapi/v1/bots/check-name: missing [happy, error]
+GET /openapi/v1/bots/hello: missing [happy, error]
 GET /openapi/v1/bots/identity/bot/{bot_id}/{file_type}: missing [happy, error]
 GET /openapi/v1/bots/identity/bot/{bot_id}: missing [happy, error]
 GET /openapi/v1/bots/mcp/servers/{server_code}/config: missing [happy, error]
