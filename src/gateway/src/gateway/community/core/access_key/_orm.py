@@ -29,8 +29,8 @@ class AccessKeyRow(Base):  # type: ignore[misc]
     access_key: Mapped[str] = mapped_column()
     tenant: Mapped[str] = mapped_column()
     expire_at: Mapped[datetime] = mapped_column()
-    creator: Mapped[str | None] = mapped_column(default=None)
-    modifier: Mapped[str | None] = mapped_column(default=None)
+    creator: Mapped[str] = mapped_column(default="")
+    modifier: Mapped[str] = mapped_column(default="")
     gmt_create: Mapped[datetime] = mapped_column(
         server_default=text("CURRENT_TIMESTAMP")
     )
