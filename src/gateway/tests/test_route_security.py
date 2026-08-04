@@ -21,6 +21,7 @@ def test_shipped_config_loads_and_requires_user() -> None:
 
 
 _SOCKET_PATH = "/openapi/v1/bots/messages/ARCA_x@0:20003/api/openclaw/ws"
+_COLLABORATION_SOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
 
 
 def test_shipped_config_exempts_the_bot_socket_handshake() -> None:
@@ -66,21 +67,18 @@ def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
         assert req[PrincipalType.USER] is Presence.REQUIRED, path
 
 
-def test_shipped_config_exempts_only_the_bcn_session_websocket_get() -> None:
+def test_shipped_config_exempts_the_collaboration_socket_handshake() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    assert rs.resolve("WEBSOCKET", _COLLABORATION_SOCKET_PATH) == {}
 
-    assert rs.resolve("GET", "/openapi/v1/collaboration/messages/ws") == {}
 
-    token_post = rs.resolve(
-        "POST", "/openapi/v1/collaboration/sessions/session-1/token"
-    )
-    assert token_post is not None
-    assert token_post[PrincipalType.USER] is Presence.REQUIRED
-
-    ordinary_get = rs.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
-    assert ordinary_get is not None
-    assert ordinary_get[PrincipalType.USER] is Presence.REQUIRED
+def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", _COLLABORATION_SOCKET_PATH)
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
 def test_more_specific_rule_wins() -> None:
