@@ -14,11 +14,13 @@ class SessionFileView:
     display_name: str
     size_bytes: int
     availability: str
+    uploaded_at: str | None
 
-    def as_dict(self) -> dict[str, str | int]:
+    def as_dict(self) -> dict[str, str | int | None]:
         return {
             "resource_id": self.resource_id,
             "display_name": self.display_name,
             "size_bytes": self.size_bytes,
             "availability": self.availability,
+            "uploaded_at": self.uploaded_at,
         }

@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from fastapi import HTTPException
 import pytest
+from pydantic import ValidationError
 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.session_resources.router import (
@@ -15,6 +16,7 @@ from agentclaw.community.adapters.http.session_resources.router import (
 )
 from agentclaw.community.adapters.http.session_resources.schemas import (
     MaterializedCallbackRequest,
+    UploadIntentRequest,
 )
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
@@ -87,6 +89,30 @@ class _Service:
                 close=close,
             ),
         )
+
+
+def test_upload_intent_request_accepts_positive_binding_id_only():
+    body = UploadIntentRequest(
+        bot_id="bot-1",
+        session_key="session-raw",
+        scope_type="friend_bot_chat",
+        engine_type="openclaw",
+        binding_id=91,
+        files=[{"filename": "report.txt"}],
+    )
+
+    assert body.binding_id == 91
+
+    with pytest.raises(ValidationError, match="binding_id"):
+        UploadIntentRequest(
+            bot_id="bot-1",
+            session_key="session-raw",
+            scope_type="friend_bot_chat",
+            engine_type="openclaw",
+            binding_id=True,
+            files=[{"filename": "report.txt"}],
+        )
+
 
 
 @pytest.mark.asyncio

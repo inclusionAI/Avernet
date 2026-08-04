@@ -278,6 +278,7 @@ class ResourceMaterializationService:
                 observed_size=observed.st_size,
                 observed_mtime_ns=observed.st_mtime_ns,
                 observed_inode=getattr(observed, "st_ino", None),
+                uploaded_at=request.uploaded_at,
             )
             store.upsert(entry)
             log.info(

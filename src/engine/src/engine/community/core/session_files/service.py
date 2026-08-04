@@ -5,6 +5,7 @@ import hashlib
 import logging
 import mimetypes
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -43,16 +44,26 @@ class SessionFileService:
                 display_name=entry.filename,
                 size_bytes=entry.size_bytes,
                 availability=self._inspect(root, entry, force_hash=False)[0],
+                uploaded_at=self._format_uploaded_at(entry.uploaded_at),
             )
             for entry in entries
             if entry.status == "ready" and entry.session_key_hash == session_hash
         ]
         log.info(
-            "engine.session_files.list session_key_hash=%s file_count=%s",
+            "engine.session_files.list session_key_hash=%s file_count=%s upload_time_count=%s",
             session_hash[:16],
             len(files),
+            sum(file.uploaded_at is not None for file in files),
         )
         return files
+
+    @staticmethod
+    def _format_uploaded_at(uploaded_at: datetime | None) -> str | None:
+        if uploaded_at is None:
+            return None
+        if uploaded_at.tzinfo is None:
+            uploaded_at = uploaded_at.replace(tzinfo=UTC)
+        return uploaded_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
     def open_content(
         self,

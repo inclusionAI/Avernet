@@ -16,6 +16,10 @@ from urllib.parse import urlparse
 
 from injector import singleton
 
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
+    BotFriendRepositoryProtocol,
+)
 from agentclaw.community.core.session_resources.repository.protocol import (
     SessionResourceRepositoryProtocol,
 )
@@ -48,8 +52,10 @@ from tests.community.framework import (
 
 
 _OWNER = "session-resource-user"
+_TARGET_OWNER = "session-resource-target-owner"
 _BOT_ID = "bot-session-resource"
 _DEVICE_ID = "device-session-resource"
+_TARGET_DEVICE_ID = "device-session-resource-target"
 _SESSION_KEY = "session-resource-key"
 _UPSTREAM_ERROR_SESSION_KEY = "session-resource-upstream-error"
 _AUTH_HEADERS = {"x-user-id": _OWNER}
@@ -167,6 +173,39 @@ def _seed_bot(world) -> None:
     )
 
 
+def _seed_friend_target_bot(world) -> None:
+    _use_real_session_file_api(world)
+    make_staff_user(world, user_id=_OWNER)
+    make_staff_user(world, user_id=_TARGET_OWNER)
+    binding_id = make_active_local_device(
+        world,
+        owner_id=_TARGET_OWNER,
+        device_id=_TARGET_DEVICE_ID,
+    )
+    make_bot(
+        world,
+        bot_id=_BOT_ID,
+        owner_id=_TARGET_OWNER,
+        owner_name="Session Resource Target Owner",
+        bot_type="service",
+        status="ACTIVE",
+        binding_id=binding_id,
+    )
+    world.get(BotRepository).update_by_owner(
+        _BOT_ID,
+        _TARGET_OWNER,
+        {"public": "1"},
+    )
+    world.get(BotFriendRepositoryProtocol).insert(
+        {
+            "requester_entity_id": _OWNER,
+            "target_entity_id": _TARGET_OWNER,
+            "target_bot_id": _BOT_ID,
+            "status": "ACCEPTED",
+        }
+    )
+
+
 def _record(
     *,
     resource_id: str = _RESOURCE_ID,
@@ -256,6 +295,11 @@ _UPLOAD_INTENT_BODY = {
         }
     ],
 }
+_FRIEND_UPLOAD_INTENT_BODY = {
+    **_UPLOAD_INTENT_BODY,
+    "scope_type": "friend_bot_chat",
+    "target_entity_id": _TARGET_OWNER,
+}
 _INVALID_UPLOAD_INTENT_BODY = {
     **_UPLOAD_INTENT_BODY,
     "files": [{"filename": "../notes.txt"}],
@@ -303,6 +347,21 @@ _CALLBACK_BODY = {
 )
 def upload_intents_ok():
     """Create an intent through the real service and local HTTP API."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/session-resources/upload-intents",
+    scenario="friend_target_entity_routes_to_target_binding",
+    input=CaseInput(headers=_AUTH_HEADERS, json_body=_FRIEND_UPLOAD_INTENT_BODY),
+    seed=_seed_friend_target_bot,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"files": [{"status": "upload_url_issued"}]},
+    ),
+)
+def upload_intents_friend_target_entity():
+    """Route an interaction user's upload to the approved target Bot binding."""
 
 
 @endpoint_test(
