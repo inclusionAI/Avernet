@@ -190,13 +190,27 @@ class SerializingExecutor:
 def _rebuild_context(
     api_key_prefix: str,
     api_key_repository: APIKeyRepository,
+    metadata: dict[str, Any] | None = None,
 ) -> BotChatContext:
-    """通过 api_key_prefix 查 api_key 记录重建 BotChatContext。
+    """重建 BotChatContext。
 
-    进入 Worker 后已离开 HTTP 请求生命周期，无法访问 cookie / header。
-    参照 BCN 的 _build_chat_context 方式，从 api_key 记录获取
-    app_id / app_type / tenant，用 BotChatContext.from_api_key 构造。
+    优先从 metadata 中的 app_id / app_type / tenant 重建（Runner 入库时写入），
+    避免 gateway 路径的 api_key_prefix（resource_key[:8]）无法反查 baas_api_key 表。
+    若 metadata 缺失，则 fallback 到 api_key_repository.get_by_prefix 反查。
     """
+    metadata = metadata or {}
+    app_id = metadata.get("app_id")
+    app_type = metadata.get("app_type")
+    tenant = metadata.get("tenant")
+
+    if app_id is not None:
+        return BotChatContext.from_api_key(
+            api_key_prefix=api_key_prefix,
+            app_id=app_id,
+            app_type=app_type or "UNKNOWN",
+            tenant=tenant or "",
+        )
+
     api_key_record = api_key_repository.get_by_prefix(api_key_prefix)
     if not api_key_record:
         raise ValueError(f"api key not found: {api_key_prefix}")
@@ -257,7 +271,9 @@ class BotRunRequestExecutor:
         timeout_sec = metadata.get("timeout")
         chat_metadata = build_chat_metadata(metadata, run.run_id)
 
-        context = _rebuild_context(run.api_key_prefix, self._api_key_repository)
+        context = _rebuild_context(
+            run.api_key_prefix, self._api_key_repository, metadata
+        )
         lifecycle_stage = extract_lifecycle_stage(metadata)
         binding_info = await self._resolve_binding(run.bot_id, lifecycle_stage)
 
