@@ -29,9 +29,10 @@ Local to the bot-chat flow. Changes here affect the single-user chat path; group
 The external read contract is exposed by the thin Public API adapter under
 `/openapi/v1/bots/logs`: separate Session, Task, Group and user-Bot Trace-list
 operations plus a Trace-detail operation. The adapter only translates HTTP;
-query semantics remain in this package. The internal `/api/v1/open/bot-chats`
-routes remain registered for compatibility and Singlebox coverage, but are not
-published by Gateway.
+query semantics remain in this package. Public Bot Logs use a separate service
+and repository, so they do not depend on product Bot Chat authorization or
+query behavior. The former `/api/v1/open/bot-chats/**` compatibility routes are
+not registered.
 
 `GET /api/v1/bot-chats` keeps exact matching and the existing 72-hour default
 window for backward compatibility. Optional product-query capabilities are:
@@ -55,9 +56,9 @@ index declarations create indexes for new local databases only. Existing
 deployments must apply equivalent DDL through their normal database migration
 process.
 
-The OpenAPI user-and-Bot trace query is stricter than the product query: task
-label enrichment requires an exact relation `user_id` and requested `bot_id`
-(including the established `default` Bot alias). Identity-free legacy task
-relations are not used by this endpoint. Group labels are enriched through the
-environment-scoped BCS session relation; `(env, session_id)` is unique and is
-used only for display enrichment, not as user or Bot authorization evidence.
+OpenAPI task-label enrichment is stricter than the product query: every Trace
+uses only relations matching its own `user_id` and `bot_id` (including the
+established `default` Bot alias). Identity-free legacy task relations are not
+used by this surface. Group labels are enriched through the environment-scoped
+BCS session relation; `(env, session_id)` is unique and is used only for display
+enrichment, not as user or Bot authorization evidence.

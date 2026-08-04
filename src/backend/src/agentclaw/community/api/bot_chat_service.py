@@ -44,6 +44,13 @@ class BotChatServiceProtocol(Protocol):
         log_source: str | None = None,
     ) -> ConversationDetail: ...
 
+    async def health_check(self) -> HealthCheckData: ...
+
+
+@runtime_checkable
+class OpenBotChatServiceProtocol(Protocol):
+    """Service API for the independently secured Bot Logs OpenAPI."""
+
     async def list_open_sessions(
         self,
         session_key: str | None = None,
@@ -63,5 +70,3 @@ class BotChatServiceProtocol(Protocol):
         page: int = 1,
         limit: int = 100,
     ) -> SessionListResponse: ...
-
-    async def health_check(self) -> HealthCheckData: ...

@@ -1,14 +1,67 @@
 """Live bot-chat OTLP ingest, query, and business-relation lifecycle."""
 from __future__ import annotations
 
+import os
 import time
 import uuid
 
 import httpx
+import jwt
 import pytest
 
 
 HEADERS = {"x-user-id": "e2e_user"}
+_PRINCIPAL_KEY = os.environ.get(
+    "SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY",
+    "singlebox-gateway-principal-key-not-for-production",
+)
+_PUBLIC_TENANT = "singlebox-bot-logs"
+
+
+@pytest.fixture
+def bot_logs_backend(monkeypatch, request):
+    """Start this test's backend with the Bot Logs Principal key configured."""
+    monkeypatch.setenv(
+        "AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE",
+        _PRINCIPAL_KEY,
+    )
+    return request.getfixturevalue("live_backend")
+
+
+def _bot_logs_headers() -> dict[str, str]:
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "iss": "gateway",
+            "aud": "backend",
+            "iat": now,
+            "exp": now + 60,
+            "principals": [
+                {
+                    "type": "user",
+                    "tenant": _PUBLIC_TENANT,
+                    "subject": {
+                        "id": "e2e_user",
+                        "username": "e2e@example.com",
+                    },
+                },
+                {
+                    "type": "app",
+                    "tenant": _PUBLIC_TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "singlebox-bot-logs",
+                        "owners": "e2e_user",
+                        "tenant": _PUBLIC_TENANT,
+                        "app_type": "integration",
+                    },
+                },
+            ],
+        },
+        _PRINCIPAL_KEY,
+        algorithm="HS256",
+    )
+    return {"X-Avernet-Principal": token}
 
 
 def _attr(key: str, value: str | int) -> dict:
@@ -77,11 +130,13 @@ def _otlp_payload(trace_id: str, start_ns: int) -> dict:
 
 
 @pytest.mark.acceptance
-def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
+def test_bot_chat_otel_ingest_query_and_relation_roundtrip(bot_logs_backend):
     trace_id = uuid.uuid4().hex
     payload = _otlp_payload(trace_id, time.time_ns())
 
-    with httpx.Client(base_url=live_backend, headers=HEADERS, timeout=30.0) as client:
+    with httpx.Client(
+        base_url=bot_logs_backend, headers=HEADERS, timeout=30.0
+    ) as client:
         ingest = client.post("/api/bot-chat/otel/traces", json=payload)
         assert ingest.status_code == 200, ingest.text
         ingest_body = ingest.json()
@@ -172,26 +227,40 @@ def test_bot_chat_otel_ingest_query_and_relation_roundtrip(live_backend):
         assert colliding_relation.status_code == 200, colliding_relation.text
         assert colliding_relation.json()["data"]["inserted"] == 1
 
-        open_user_bot = client.get(
-            "/api/v1/open/bot-chats/users/e2e_user/bots/default/traces",
-            params={"page": 1, "limit": 20},
-        )
-        assert open_user_bot.status_code == 200, open_user_bot.text
-        open_user_bot_body = open_user_bot.json()
-        assert open_user_bot_body["success"] is True
-        assert open_user_bot_body["data"]["total"] == 1
-        open_trace = open_user_bot_body["data"]["sessions"][0]
-        assert open_trace["id"] == trace_id
-        assert open_trace["user_id"] == "e2e_user"
-        assert open_trace["bot_id"] == "default"
-        assert open_trace["biz_scene"] == "singlebox-coverage"
-        assert open_trace["biz_task_id"] == trace_id
+        with httpx.Client(
+            base_url=bot_logs_backend,
+            headers=_bot_logs_headers(),
+            timeout=30.0,
+        ) as open_client:
+            session_traces = open_client.get(
+                "/openapi/v1/bots/logs/sessions/session-key-live/traces"
+            )
+            assert session_traces.status_code == 200, session_traces.text
+            assert session_traces.json()["data"]["sessions"][0]["id"] == trace_id
 
-        other_user_open = client.get(
-            "/api/v1/open/bot-chats/users/other-user/bots/default/traces"
-        )
-        assert other_user_open.status_code == 200, other_user_open.text
-        assert other_user_open.json()["data"]["total"] == 0
+            task_traces = open_client.get(
+                f"/openapi/v1/bots/logs/tasks/singlebox-coverage/{trace_id}/traces"
+            )
+            assert task_traces.status_code == 200, task_traces.text
+            assert task_traces.json()["data"]["sessions"][0]["id"] == trace_id
+
+            group_traces = open_client.get(
+                "/openapi/v1/bots/logs/groups/missing-group/traces"
+            )
+            assert group_traces.status_code == 200, group_traces.text
+            assert group_traces.json()["data"]["total"] == 0
+
+            user_bot_traces = open_client.get(
+                "/openapi/v1/bots/logs/traces",
+                params={"user_id": "e2e_user", "bot_id": "default"},
+            )
+            assert user_bot_traces.status_code == 200, user_bot_traces.text
+            assert user_bot_traces.json()["data"]["sessions"][0]["id"] == trace_id
+
+            detail = open_client.get(f"/openapi/v1/bots/logs/traces/{trace_id}")
+            assert detail.status_code == 200, detail.text
+            assert detail.json()["data"]["id"] == trace_id
+            assert detail.json()["data"]["observations"]
 
         task_queries = [
             {

@@ -1,10 +1,10 @@
-"""Open exact-query service entry points for bot-chat embeds."""
+"""Independent service entry points for the Bot Logs OpenAPI."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+
+from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import InvalidBotLogQueryError
-from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.repository import OpenBotChatRepository
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
@@ -15,12 +15,12 @@ _OPEN_PAGE_SIZE = 100
 _USER_BOT_TIME_RANGE_HOURS = 72
 
 
-class OpenBotChatServiceMixin:
-    """Expose narrow OpenAPI reads without product-route authorization."""
+class OpenBotChatService:
+    """Serve only the independently secured Bot Logs OpenAPI contract."""
 
-    _list_sessions_db: Any
-    _get_session_db: Any
-    _open_repo: OpenBotChatRepository
+    @inject
+    def __init__(self, repository: OpenBotChatRepository) -> None:
+        self._repository = repository
 
     async def list_open_sessions(
         self,
@@ -49,23 +49,15 @@ class OpenBotChatServiceMixin:
                 "biz_scene and biz_task_id must be provided together"
             )
 
-        return await self._list_sessions_db(
-            owner_id=None,
-            from_date=datetime(1970, 1, 1, tzinfo=timezone.utc),
-            to_date=datetime.now(timezone.utc),
+        return self._repository.list_scope_traces(
+            from_ms=0,
+            to_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
             page=max(1, page),
             limit=min(max(1, limit), _OPEN_PAGE_SIZE),
-            bot_id=None,
-            trace_id=None,
-            session_id=None,
             session_key=session_key,
-            query=None,
             biz_scene=biz_scene,
             biz_task_id=biz_task_id,
             group_id=group_id,
-            match_mode="exact",
-            include_output_match=False,
-            query_scope=QueryScope.OPEN,
         )
 
     async def get_open_session(self, trace_id: str) -> ConversationDetail:
@@ -73,7 +65,7 @@ class OpenBotChatServiceMixin:
         trace_id = trace_id.strip()
         if not trace_id:
             raise InvalidBotLogQueryError("trace_id must not be empty")
-        return await self._get_session_db(trace_id, owner_id=None)
+        return self._repository.get_trace_detail(trace_id)
 
     async def list_open_user_bot_traces(
         self,
@@ -85,7 +77,7 @@ class OpenBotChatServiceMixin:
         """List the recent traces for one explicit user-and-Bot pair.
 
         This is a query boundary, not caller authorization: the open Gateway
-        surface currently permits an authenticated caller to name the pair.
+        surface permits an authenticated User+App caller to name the pair.
         """
         user_id = user_id.strip()
         bot_id = bot_id.strip()
@@ -96,7 +88,7 @@ class OpenBotChatServiceMixin:
 
         now = datetime.now(timezone.utc)
         from_date = now - timedelta(hours=_USER_BOT_TIME_RANGE_HOURS)
-        return self._open_repo.list_user_bot_traces(
+        return self._repository.list_user_bot_traces(
             user_id=user_id,
             bot_id=bot_id,
             from_ms=int(from_date.timestamp() * 1000),

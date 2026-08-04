@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     Principal,
     require_principal,
+    require_user_and_app_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -82,20 +83,41 @@ def signing_key():
     reset_principal_verifier_config_cache()
 
 
-def mint(*, tenant: str = TENANT, user_id: str = "u-1", **overrides) -> str:
+def mint(
+    *,
+    tenant: str = TENANT,
+    user_id: str = "u-1",
+    include_app: bool = False,
+    **overrides,
+) -> str:
     now = int(time.time())
+    principals = [
+        {
+            "type": "user",
+            "tenant": tenant,
+            "subject": {"id": user_id, "username": "alice@example.com"},
+        }
+    ]
+    if include_app:
+        principals.append(
+            {
+                "type": "app",
+                "tenant": tenant,
+                "app": {
+                    "app_id": 1,
+                    "app_name": "bot-logs-test-app",
+                    "owners": user_id,
+                    "tenant": tenant,
+                    "app_type": "integration",
+                },
+            }
+        )
     claims = {
         "iss": overrides.get("issuer", "gateway"),
         "aud": overrides.get("audience", "backend"),
         "iat": now,
         "exp": now + 60,
-        "principals": [
-            {
-                "type": "user",
-                "tenant": tenant,
-                "subject": {"id": user_id, "username": "alice@example.com"},
-            }
-        ],
+        "principals": principals,
     }
     return jwt.encode(claims, overrides.get("key", KEY), algorithm="HS256")
 
@@ -130,6 +152,14 @@ def probe_app():
             },
             request,
         )
+
+    @app.get("/openapi/v1/bots/logs/_probe")
+    @envelope_errors
+    async def bot_logs_probe(
+        request: Request,
+        principal: Principal = Depends(require_user_and_app_principal),
+    ):
+        return envelope({"owner_id": caller_owner_id(principal)}, request)
 
     return app
 
@@ -180,6 +210,21 @@ def test_verification_runs_once_per_request(client):
 
     assert response.status_code == 200
     assert spy.call_count == 1
+
+
+def test_bot_logs_requires_user_and_app(client):
+    user_only = client.get(
+        "/openapi/v1/bots/logs/_probe",
+        headers={PRINCIPAL_HEADER: mint()},
+    )
+    user_and_app = client.get(
+        "/openapi/v1/bots/logs/_probe",
+        headers={PRINCIPAL_HEADER: mint(include_app=True)},
+    )
+
+    assert user_only.status_code == 401
+    assert user_and_app.status_code == 200
+    assert user_and_app.json()["data"]["owner_id"] == "u-1"
 
 
 # ── denial, and its uniformity ───────────────────────────────────────────────
@@ -274,6 +319,23 @@ def test_public_routes_require_principal():
     assert not missing, f"public routes not gated by require_principal: {missing}"
 
 
+def test_bot_logs_routes_require_user_and_app_principal():
+    bot_logs_routes = [
+        route
+        for route in _api_routes(build_public_router())
+        if route.path.startswith("/openapi/v1/bots/logs")
+    ]
+    assert bot_logs_routes, "no Bot Logs routes found"
+
+    missing = [
+        f"{sorted(route.methods)} {route.path}"
+        for route in bot_logs_routes
+        if not _depends_on(route.dependant, require_user_and_app_principal)
+    ]
+
+    assert not missing, f"Bot Logs routes not gated by User+App: {missing}"
+
+
 def _api_routes(router) -> list:
     """Every real route under ``router``, flattening included sub-routers.
 
@@ -297,6 +359,12 @@ def _depends_on_require_principal(dependant) -> bool:
     if dependant.call is require_principal:
         return True
     return any(_depends_on_require_principal(sub) for sub in dependant.dependencies)
+
+
+def _depends_on(dependant, dependency) -> bool:
+    if dependant.call is dependency:
+        return True
+    return any(_depends_on(sub, dependency) for sub in dependant.dependencies)
 
 
 def _body_without_request_id(response) -> dict:

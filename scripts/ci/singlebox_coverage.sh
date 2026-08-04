@@ -9,6 +9,7 @@ export PATH="${HOME}/.cargo/bin:${PATH}"
 # CPython 3.12. Keep local pre-push aligned with the GitHub workflow instead of
 # accidentally selecting a newer host Python during `uv sync`.
 export UV_PYTHON="${UV_PYTHON:-3.12}"
+export SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY="${SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY:-singlebox-gateway-principal-key-not-for-production}"
 
 coverage_root="${SINGLEBOX_COVERAGE_ROOT:-$repo_root/scripts/.dependencies/coverage/singlebox}"
 report_dir="$coverage_root/reports"
@@ -212,6 +213,7 @@ run_real_singlebox() {
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
     bash "$repo_root/scripts/singlebox.sh" --standalone setup all
   env SINGLEBOX_COVERAGE=1 SINGLEBOX_COVERAGE_DIR="$coverage_root/raw" OCB_SKIP_GIT_HOOKS=1 SINGLEBOX_MODEL_CONFIG_MODE="$model_config_mode" \
+    AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE="$SINGLEBOX_GATEWAY_PRINCIPAL_SIGNING_KEY" \
     BCS_DEBUG=true BCS_COVERAGE_FORCE_REBUILD="${BCS_COVERAGE_FORCE_REBUILD:-1}" \
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \

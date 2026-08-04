@@ -26,11 +26,6 @@ _TASK_PATH = "/openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces"
 _GROUP_PATH = "/openapi/v1/bots/logs/groups/{group_id}/traces"
 _TRACES_PATH = "/openapi/v1/bots/logs/traces"
 _DETAIL_PATH = "/openapi/v1/bots/logs/traces/{trace_id}"
-_INTERNAL_LIST_PATH = "/api/v1/open/bot-chats"
-_INTERNAL_DETAIL_PATH = "/api/v1/open/bot-chats/{trace_id}"
-_INTERNAL_USER_BOT_PATH = (
-    "/api/v1/open/bot-chats/users/{user_id}/bots/{bot_id}/traces"
-)
 _TRACE_ID = "trace_open_endpoint_fixture"
 _SESSION_ID = "session_open_endpoint_fixture"
 _BCS_SESSION_ID = "group_open_endpoint_fixture:abcdef12"
@@ -56,7 +51,18 @@ def _principal_headers() -> dict[str, str]:
                         "id": "endpoint-user",
                         "username": "endpoint-user@example.com",
                     },
-                }
+                },
+                {
+                    "type": "app",
+                    "tenant": "bot-logs-endpoint-test",
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "bot-logs-test-app",
+                        "owners": "endpoint-user",
+                        "tenant": "bot-logs-endpoint-test",
+                        "app_type": "integration",
+                    },
+                },
             ],
         },
         _SIGNING_KEY,
@@ -348,113 +354,4 @@ def open_bot_chat_detail_happy():
     ),
 )
 def open_bot_chat_detail_not_found():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_LIST_PATH,
-    scenario="happy",
-    seed=_seed_trace,
-    input=CaseInput(query_params={"session_key": _SESSION_KEY}),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "success": True,
-            "data": {"total": 1, "sessions": [{"id": _TRACE_ID}]},
-        },
-    ),
-)
-def internal_open_bot_chat_list_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_LIST_PATH,
-    scenario="missing_query_mode",
-    expect=ExpectError(
-        status=200,
-        json_contains={"success": False, "error_code": 4000},
-    ),
-)
-def internal_open_bot_chat_list_missing_query_mode():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_DETAIL_PATH,
-    scenario="happy",
-    seed=_seed_trace,
-    input=CaseInput(path_params={"trace_id": _TRACE_ID}),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={"success": True, "data": {"id": _TRACE_ID}},
-    ),
-)
-def internal_open_bot_chat_detail_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_DETAIL_PATH,
-    scenario="not_found",
-    input=CaseInput(path_params={"trace_id": "missing_trace_fixture"}),
-    expect=ExpectError(
-        status=200,
-        json_contains={"success": False, "error_code": 4004},
-    ),
-)
-def internal_open_bot_chat_detail_not_found():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_USER_BOT_PATH,
-    scenario="happy",
-    seed=_seed_user_bot_traces,
-    input=CaseInput(
-        path_params={
-            "user_id": "user_pair_fixture",
-            "bot_id": "bot_pair_fixture",
-        }
-    ),
-    expect=ExpectSuccess(
-        status=200,
-        json_contains={
-            "success": True,
-            "data": {
-                "total": 1,
-                "sessions": [
-                    {
-                        "id": "trace_user_bot_match",
-                        "group_id": "group_user_bot_fixture",
-                        "session_kind": "chat",
-                    }
-                ],
-            },
-        },
-    ),
-)
-def internal_open_bot_chat_user_bot_list_happy():
-    """The framework owns invocation."""
-
-
-@endpoint_test(
-    method="GET",
-    path=_INTERNAL_USER_BOT_PATH,
-    scenario="invalid_limit",
-    input=CaseInput(
-        path_params={
-            "user_id": "user_pair_fixture",
-            "bot_id": "bot_pair_fixture",
-        },
-        query_params={"limit": 101},
-    ),
-    expect=ExpectError(status=422),
-)
-def internal_open_bot_chat_user_bot_list_invalid_limit():
     """The framework owns invocation."""
