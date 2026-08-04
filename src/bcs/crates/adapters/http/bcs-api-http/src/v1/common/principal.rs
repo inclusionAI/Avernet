@@ -4,6 +4,7 @@ use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use bcs_service_api::application::v1::AuthenticatedCaller;
+use tracing::warn;
 
 use super::{ErrorResponse, PrincipalVerificationState, RequestId};
 
@@ -42,7 +43,12 @@ where
             request.extensions_mut().insert(request_id);
             next.run(request).await
         }
-        Err(PrincipalVerificationError::Missing | PrincipalVerificationError::Invalid(_)) => {
+        Err(PrincipalVerificationError::Missing) => {
+            warn!(request_id = %request_id.0, "Gateway Principal header is missing");
+            ErrorResponse::unauthenticated(request_id.0).into_response()
+        }
+        Err(PrincipalVerificationError::Invalid(reason)) => {
+            warn!(request_id = %request_id.0, %reason, "Gateway Principal verification failed");
             ErrorResponse::unauthenticated(request_id.0).into_response()
         }
     }
