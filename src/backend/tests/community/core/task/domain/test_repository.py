@@ -52,6 +52,11 @@ class _InMemoryTaskRepo:
     def list_by_user(self, user_id: str) -> list[object]:
         return [t for t in self._store.values() if t.user_id == user_id]
 
+    def find_expired_lease_nodes(self, now_iso: str) -> list[tuple[str, str]]:
+        # Protocol conformance only; the real impl lives in InMemoryTaskRepo /
+        # OrmTaskRepository (Task 7 defers the ORM scan — spec §7.2).
+        return []
+
 
 class _InMemoryEventRepo:
     def __init__(self) -> None:

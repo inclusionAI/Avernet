@@ -53,6 +53,11 @@ class TaskRepo(Protocol):
         """Return all tasks owned by ``user_id`` (snapshot order is unspecified)."""
         ...
 
+    def find_expired_lease_nodes(self, now_iso: str) -> list[tuple[str, str]]:
+        """RUNNING nodes whose ``lease_until`` < ``now_iso`` → ``[(task_id, node_id)]``
+        pairs for the兜底租期清扫器 (§10.3/FR-EXT-04). Empty list when none expired."""
+        ...
+
 
 @runtime_checkable
 class TaskEventRepo(Protocol):

@@ -191,6 +191,10 @@ class TaskService(Protocol):
         """兜底租期到期收回(清扫器):RUNNING→FAILED(lease_expired)。"""
         ...
 
+    def sweep_expired_leases(self) -> int:
+        """兜底租期清扫(§10.3/FR-EXT-04):扫所有过期 RUNNING 节点 → expire_lease。返回收回数。"""
+        ...
+
     # --- history / trace face (plan §6.6) ---------------------------------
     def history(self, task_id: str, after_seq: int = 0) -> list[TaskEvent]:
         """Return the append-only event log for ``task_id`` in seq order

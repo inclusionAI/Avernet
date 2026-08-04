@@ -40,6 +40,7 @@ from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugins.community.task.panel_carrier import TaskPanelCarrier
 from agentclaw.community.core.task.services.bot_catalog import BotCatalogPort
 from agentclaw.community.core.task.services.graph_checkpoint import GraphCheckpoint
+from agentclaw.community.core.task.services.lease_sweeper import LeaseSweeper
 
 
 class CommunityTaskModule(Module):
@@ -138,6 +139,13 @@ class CommunityTaskModule(Module):
         # query face, writes via on_event (no Scheduler tick).
         from agentclaw.community.core.task.services import BbsExecutorService
         return BbsExecutorService(task_service)
+
+    @singleton
+    @provider
+    def lease_sweeper(self, task_service: TaskService) -> LeaseSweeper:
+        # 兜底租期清扫器(§10.3/FR-EXT-04):过期 RUNNING 节点 → expire_lease 自愈接力。
+        # 周期触发(定时器/调度)属部署接入(spec §7.2);绑定后调度器注入即可调 sweep_once。
+        return LeaseSweeper(task_service)
 
     @singleton
     @provider

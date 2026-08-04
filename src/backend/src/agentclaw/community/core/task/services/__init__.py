@@ -16,12 +16,14 @@ from __future__ import annotations
 from .bbs_executor import BbsExecutorService
 from .graph_adapter import SmGraphAdapter
 from .graph_checkpoint import GraphCheckpoint
+from .lease_sweeper import LeaseSweeper
 from .task_scheduler import TaskScheduler
 from .task_service import TaskService
 
 __all__ = [
     "BbsExecutorService",
     "GraphCheckpoint",
+    "LeaseSweeper",
     "SmGraphAdapter",
     "TaskScheduler",
     "TaskService",

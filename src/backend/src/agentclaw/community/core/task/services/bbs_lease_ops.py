@@ -159,3 +159,16 @@ class BbsLeaseOpsMixin:
             "[Task] task=%s expire_lease node=%s → failed(lease_expired)", task_id, node_id
         )
         return self._task_repo.get_by_id(task_id)
+
+    def sweep_expired_leases(self) -> int:
+        """兜底租期清扫(§10.3/FR-EXT-04):扫所有过期 RUNNING 节点 → ``expire_lease``。
+        返回收回数(单节点失败不中断清扫——崩溃自愈接力不能因一行坏数据停摆)。"""
+        pairs = self._task_repo.find_expired_lease_nodes(_utcnow().isoformat())
+        for task_id, node_id in pairs:
+            try:
+                self.expire_lease(task_id, node_id)
+            except Exception:  # noqa: BLE001 — 清扫不因单节点失败中断
+                logger.exception(
+                    "[Task] sweep expire_lease failed task=%s node=%s", task_id, node_id
+                )
+        return len(pairs)
