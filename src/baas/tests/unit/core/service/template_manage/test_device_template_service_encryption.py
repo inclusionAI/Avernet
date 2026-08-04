@@ -1,7 +1,9 @@
 """Tests for device_template_service SM4 encryption logic."""
 
 from secbaas.community.api.template_manage import ArcaTemplateConfig
-from secbaas.community.core.service.template_manage._device_template_service import _ensure_api_key_encrypted
+from secbaas.community.core.service.template_manage._device_template_service import (
+    _ensure_api_key_encrypted,
+)
 from secbaas.community.core.utils.secret_utils import common_sm4_decrypt
 from secbaas.community.spi.secret import DEV_SM4_KEY
 
