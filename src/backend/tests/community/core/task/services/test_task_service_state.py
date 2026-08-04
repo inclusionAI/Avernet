@@ -18,6 +18,7 @@ from agentclaw.community.core.task.domain.models import (
     RunMode,
     SubDagRef,
     SubTaskSpec,
+    SubtaskState,
     Task,
 )
 from agentclaw.community.core.task.domain.state_machine import (
@@ -302,3 +303,25 @@ def test_release_then_reclaim_relays():
     res = svc.claim_node(task_id, node_id, "bot-B", run_mode=RunMode.BBS)
     assert res is not None
     assert res.executor_id == "bot-B"
+
+
+# --- get_node_detail 直出 SubtaskState (FR-EXT-05, Task 6) ------------------
+
+
+def test_get_node_detail_exposes_subtask_state():
+    """FR-EXT-05:get_node_detail 直出 SubtaskState.intermediate_results,
+    接力 bot 能看到前序已 commit 的中间结果而不重做。"""
+    svc = _service()
+    task = _graph_with_n1(svc)
+    # 直接往 State 分区写一条中间结果(模拟前序 bot checkpoint)。
+    # InMemoryTaskRepo deep-copies on get/save,so mutate one fetched copy
+    # and save THAT same object (a second svc.get would discard the mutation).
+    task = svc.get(task.id)
+    task.execution_graph.state.subtasks["n1"] = SubtaskState(
+        node_id="n1",
+        status=NodeStatus.RUNNING,
+        intermediate_results=[{"step": 1, "note": "done-30pct"}],
+    )
+    svc._task_repo.save(task)  # noqa: SLF001
+    detail = svc.get_node_detail(task.id, "n1")
+    assert detail["intermediate_results"] == [{"step": 1, "note": "done-30pct"}]

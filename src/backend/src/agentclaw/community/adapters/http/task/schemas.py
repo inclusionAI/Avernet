@@ -165,6 +165,8 @@ class TaskNodeDetailView(BaseModel):
     assignee: Optional[str] = None
     attempted_executors: list[Any] = Field(default_factory=list)
     artifacts: list[Any] = Field(default_factory=list)
+    intermediate_results: list[dict] = Field(default_factory=list)
+    gap_records: list[dict] = Field(default_factory=list)
     acceptance_result: Optional[Any] = None
     properties: dict[str, Any] = Field(default_factory=dict)
     note: str = ""

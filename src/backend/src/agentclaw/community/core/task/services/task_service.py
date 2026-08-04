@@ -325,7 +325,7 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
         if node is None:
             return None
         rec = node.attempted_executors[-1] if node.attempted_executors else None
-        return {
+        view = {
             "node_id": node.node_id,
             "display_name": node.spec,
             "status": node.status.value,
@@ -351,6 +351,29 @@ class TaskService(GraphStateOpsMixin, BbsLeaseOpsMixin):
             "sub_dag_ref": self._sub_dag_ref_view(node.sub_dag),
             "properties": dict(node.properties),
         }
+        # merge SubtaskState (FR-EXT-05): relay bot sees prior
+        # intermediate_results/gap_records/artifacts without redoing.
+        st = (
+            task.execution_graph.state.subtasks.get(node_id)
+            if task.execution_graph else None
+        )
+        if st is not None:
+            view["intermediate_results"] = list(st.intermediate_results)
+            view["gap_records"] = [
+                {"node_id": gr.node_id, "round": gr.round,
+                 "unmet_criteria": list(gr.unmet_criteria),
+                 "verdict": (gr.verdict.value if gr.verdict else None), "at": gr.at}
+                for gr in st.gap_records
+            ]
+            view["artifacts"] = [
+                {"name": a.name, "location": a.location, "type": a.type}
+                for a in st.artifacts
+            ]  # SubtaskState.artifacts is canonical (Node.artifacts is deprecated mirror, §15)
+        else:
+            view["intermediate_results"] = []
+            view["gap_records"] = []
+            # keep the existing view["artifacts"] from node.artifacts (already in the literal)
+        return view
 
     def get_sub_dag(self, task_id: str, node_id: str) -> Optional[dict]:
         """Cooperative-group drill-down (路 A, plan §1.3a). Returns None when
