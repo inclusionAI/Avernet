@@ -34,9 +34,9 @@ that file holds the inventory.
 
 **Goal:** implement the public `/openapi/v1` API, whose callers are **external
 registered tenants**. It lives under
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**
-category is implemented (PR #494); the other six are still **route definitions
-with stub handlers**.
+`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`. The **bots**,
+**mcp**, and **skills** categories have implemented handlers; the remaining
+categories retain their independently tracked readiness states below.
 
 > 🔒 **The surface is still not callable end-to-end, but no longer because of a
 > stub.** `require_principal` now really verifies the gateway's signed
@@ -65,7 +65,8 @@ The work therefore splits into **three tracks**:
 - **Track B — Public API implementation.** Wire the seven `/openapi/v1`
   category handlers to the existing services. **This is where the endpoint/API
   code actually lands.** Each category depends on its data being isolated
-  (Track A) first. **2 of 7 done: bots (PR #494), mcp (PR #610).**
+  (Track A) first. Skills implementation/CI is complete but its schema and
+  pre-production release gates remain pending; see its board row.
 - **Track C — Engine (runtime) surface.** _Added 2026-07-30._ Wrap the engine
   adapter's client-facing HTTP behind `/openapi/v1/bots/{bot_id}/…`, and replace
   the `get_device_connection` hand-off with one sanitised socket-info endpoint.
@@ -74,7 +75,8 @@ The work therefore splits into **three tracks**:
 > ⚠️ **The one confusion to avoid:** "isolation Stage N is done" does **not**
 > mean any API endpoint was implemented. A Track A stage is plumbing only (the
 > reusable mechanism + that category's records). The API endpoints land in
-> Track B — done for bots, still stubs for the other six.
+> Track B — each category has its own state on the board; implementation does
+> not by itself make a category release-complete.
 >
 > ⚠️ **Track C has no Track A stage, and that is correct.** Tracks A and B pair
 > up (isolate a category, then wire its endpoints); Track C does not. Its data
@@ -144,7 +146,7 @@ must implement._
 > Stage 1 also builds the **reusable mechanism** (see below) that every later
 > stage copies. It's the foundation, not just "bots."
 
-### Track B — Public API implementation (where the endpoints land — 2 of 7 done)
+### Track B — Public API implementation
 _Ordered by priority tier._
 | Category | Owner | Pri | Router | State | Depends on |
 |---|---|---|---|---|---|
@@ -154,7 +156,7 @@ _Ordered by priority tier._
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` *(stub)* | ⬜ TODO | Track A routines (lucas-xzp) |
 | channels | — | ❌ **REMOVED (2026-08-03)** | *(deleted)* | Router, schemas and both published paths deleted — see the channels section below | n/a |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` *(stub)* | ⬜ TODO | bots isolation (Stage 1 ✅) |
-| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(stub)* | ⬜ TODO | Track A skills (shared) |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **IMPLEMENTATION + CI COMPLETE; RELEASE PENDING** — six ratified Local Skill operations | #725 cleanup-work DDL must deploy before code; [pre-production acceptance runbook](skills-track-b-preprod-acceptance.md) remains **PRE-PROD PENDING** |
 
 ### Track C — Engine (runtime) surface (5 of 5 groups implemented — PR #630)
 _All groups depend only on **bots isolation (Stage 1 ✅)** — no Track A stage, no
@@ -753,42 +755,32 @@ _Note: upload is finalized as a raw `application/octet-stream` body (not
 multipart). This diverges from PR #363's multipart summary — implementation
 follows the route; switching to multipart would be a contract change._
 
-### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (6 endpoints: Track B contract ratified) · `openapi_v1/skills/router.py`
-The Skills public API uses the `/openapi/v1/bots/skills` route group. Local
-Skill upload and lifecycle operations belong to a specific bot.
+### 🟪 totalfrank + lucas-xzp · P3 — skills, co-owned (six ratified operations) · `openapi_v1/skills/router.py`
 
-> **Ratified with totalfrank.** Existing Local Skills are stored through a bot's
-> device file system; they are not reusable tenant-global assets. Track B
-> therefore uses a per-bot **upload** → **activate/deactivate** → **delete**
-> lifecycle and does not expose a separate installation concept. Reusable
-> tenant-level Skills are deferred until Skill Center provides independent
-> storage and distribution. The public API does not expose a cross-bot Skill
-> catalog: list and upload require `bot_id` as a query parameter, and list uses
-> the optional `active` filter instead of a separate active-list route.
-> `skill_id` maps to `ac_skill.id` and uniquely identifies a Skill, so operations
-> on a specific Skill do not repeat `bot_id`.
+The public surface is a Bot-owned `local://` Local Skill lifecycle. It is not a
+catalog, marketplace, Git/Center installation surface, or a general Skill Set
+API. The collection's optional `active` filter is the only Active-list
+mechanism. Every operation requires a verified principal, is owner/Bot scoped,
+and uses the standard `Envelope` / `Page` contract.
 
-Upload accepts one raw `application/zip` body and creates an Inactive Skill.
-A same-name upload updates the existing Skill in that Bot scope while preserving
-its ID and desired Active/Inactive state. For a service Bot, the optional
-`owner_entity_id` on list/upload locates the owner scope only after permission
-verification: the Bot owner remains the Local Skill owner, while an authorized
-collaborator is recorded only as the operation actor. Reads use database desired
-state and remain available while the Bot is offline; mutations require a ready
-Bot and must compensate on runtime synchronization failure.
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | List exact Bot-owned Local Skill metadata (`bot_id`, optional owner locator, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/skills/upload` | Create or safely replace one raw `application/zip` Local Skill package | `201 Envelope[SkillUpload]` / `200` replacement |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Read public metadata for one deployment-wide Skill ID | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Set desired Active state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Set desired Inactive state and synchronously reconcile runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Recoverably delete one Inactive Local Skill | `Envelope[Deleted]` |
 
-The router stubs now expose exactly this ratified contract. They define the
-transport shape only; the Track B implementation slices wire persistence,
-package storage, authorization, and runtime synchronization behind it.
+`413101` is documented only on raw ZIP upload. The stable Local Skill business
+subcodes are `400101`, `404000`, `409101`–`409104`, `413101`, `502101`, and
+`502102`; existing public categories retain their `xxx000` codes. Generated
+OpenAPI is contract-tested to expose exactly these six operations.
 
-| Method | Path | Purpose | Success | Status |
-|---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[Skill]` | in stub |
-| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[SkillUpload]` | in stub |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[SkillState]` | in stub |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[SkillState]` | in stub |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | in stub |
+**Release gate — do not mark Track B complete yet.** The cleanup-work table DDL
+from #725 must be applied and verified before application rollout, and the real
+owner/collaborator acceptance still needs approved pre-production credentials
+and Bot containers. See the [English runbook and rollback procedure](skills-track-b-preprod-acceptance.md).
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`
 Scheduled/triggered agent tasks (the former "cron"); trigger is a nested object.
@@ -942,6 +934,17 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-04** — **Skills Track B integration/release gate implementation and
+  CI are complete, but Track B is not release-complete.** The served OpenAPI is
+  now locked to exactly six Bot-owned Local Skill operations; obsolete
+  `{bot_id}/skills` install/uninstall stubs were removed. Assembled real-guard
+  tests prove another tenant cannot list, read, upload/replace, activate,
+  deactivate, or delete the target tenant's Local Skill. The #725
+  `ac_local_skill_cleanup_work` deploy-before-code DDL remains pending, and the
+  owner plus authorized collaborator pre-production lifecycle remains **PRE-PROD
+  PENDING**. The executable acceptance, verification, and rollback checklist is
+  `skills-track-b-preprod-acceptance.md`.
 
 - **2026-07-27** — Handoff README created. Track A Stage 1 (bots + reusable
   mechanism) complete and in **PR #456**, awaiting approval. Track B not
