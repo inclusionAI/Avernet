@@ -270,7 +270,9 @@ active root 的软链。Cloud 把 OSS 内容直接挂载到 Pool repo；Desktop 
 把 target、临时解压、单份 backup 与 ETag 状态放在同一 Pool root 下。Desktop
 preparation 原子迁移旧真实 repo 后，只在 cutover 前保留
 `legacy_repo -> pool_repo` 反向兼容桥；cutover 验证逐 Skill mapping 后移除 active
-root 可达的完整 corpus 入口。
+root 可达的完整 corpus 入口。同一 runtime 内，canonical repo move、历史 locator
+bridge 发布与结构校验在 Pool root 的本地 advisory directory lock 内完成，使并发启动
+收敛到同一布局；该锁不跨 Bot、不持久化业务状态，也不是分布式 rollout 锁。
 
 SC 接入后，`skills-center` 作为 `skills-pool` 下与 `skills-repo`、`skills-local` 并列的第三个内容目录；它同样不进入 active-skill-dir，只能通过逐 Skill 激活入口暴露给 Agent。
 

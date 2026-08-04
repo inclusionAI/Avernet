@@ -10,6 +10,7 @@ from threading import Barrier
 import pytest
 
 from engine.community.config import RepoDelivery
+from engine.community.core.skills import skills_repo_download
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     LayoutIdentity,
@@ -17,14 +18,9 @@ from engine.community.core.skills.layout_planner import (
     resolve_filesystem_skill_layout,
 )
 from engine.community.plugins.skills_pool import desktop_preparation
-from engine.community.core.skills import skills_repo_download
 from engine.community.plugins.skills_pool.desktop_preparation import (
     DesktopPreparationStatus,
     prepare_desktop_pool,
-)
-from engine.community.plugins.skills_pool.layout_probe import (
-    RuntimeLayoutInspectionStatus,
-    inspect_runtime_layout,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
     PoolActivationStatus,
@@ -32,6 +28,10 @@ from engine.community.plugins.skills_pool.layout_activation import (
     activate_claude_code_pool,
     activate_hermes_pool,
     activate_openclaw_pool,
+)
+from engine.community.plugins.skills_pool.layout_probe import (
+    RuntimeLayoutInspectionStatus,
+    inspect_runtime_layout,
 )
 
 FILESYSTEM_ENGINES = ("openclaw", "claude_code", "aicoding", "hermes")
@@ -354,14 +354,16 @@ def test_preparation_preserves_pool_only_local_content(tmp_path: Path) -> None:
     assert (pool_only / "SKILL.md").read_text() == "preserve"
 
 
+@pytest.mark.parametrize("engine", FILESYSTEM_ENGINES)
 def test_concurrent_startup_preparation_converges_without_shared_staging(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    engine: str,
 ) -> None:
     home = tmp_path / "home/admin"
     layout, repo_source, _managed, _external = _legacy_runtime(
         home,
-        "openclaw",
+        engine,
     )
     barrier = Barrier(2)
     original_mirror = desktop_preparation.mirror_local_tree
@@ -379,7 +381,7 @@ def test_concurrent_startup_preparation_converges_without_shared_staging(
         results = list(
             executor.map(
                 lambda _: prepare_desktop_pool(
-                    engine="openclaw",
+                    engine=engine,
                     repo_source=repo_source,
                     home=home,
                 ),
@@ -387,18 +389,65 @@ def test_concurrent_startup_preparation_converges_without_shared_staging(
             )
         )
 
-    assert {result.status for result in results} <= {
-        DesktopPreparationStatus.PREPARED,
-        DesktopPreparationStatus.ALREADY_PREPARED,
-    }
+    failures = [
+        result
+        for result in results
+        if result.status
+        not in {
+            DesktopPreparationStatus.PREPARED,
+            DesktopPreparationStatus.ALREADY_PREPARED,
+        }
+    ]
+    assert not failures, [result.reason for result in failures]
     assert layout.ready_marker.is_file()
     assert not list(layout.pool_root.glob(".preparation-staging-*"))
     probe = inspect_runtime_layout(
-        engine="openclaw",
+        engine=engine,
         home=home,
         repo_delivery=RepoDelivery.DOWNLOAD,
     )
     assert probe.status is RuntimeLayoutInspectionStatus.READY
+
+
+@pytest.mark.parametrize(
+    "replace_error",
+    (FileNotFoundError, IsADirectoryError),
+)
+def test_repo_move_loser_accepts_winner_published_reverse_bridge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    replace_error: type[OSError],
+) -> None:
+    """A loser accepts either POSIX error after the winner publishes the bridge."""
+
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, "openclaw")
+    (repo_source / "legacy.txt").write_text("legacy")
+    original_replace = desktop_preparation.os.replace
+
+    def winner_completed_replace(source: Path, target: Path) -> None:
+        if Path(source) == repo_source and Path(target) == layout.pool_repo:
+            original_replace(source, target)
+            repo_source.symlink_to(layout.pool_repo, target_is_directory=True)
+            raise replace_error("concurrent winner completed repo migration")
+        original_replace(source, target)
+
+    monkeypatch.setattr(
+        desktop_preparation.os,
+        "replace",
+        winner_completed_replace,
+    )
+
+    desktop_preparation._canonicalize_downloaded_repo(
+        pool_repo=layout.pool_repo,
+        repo_source=repo_source,
+    )
+
+    assert layout.pool_repo.is_dir()
+    assert not layout.pool_repo.is_symlink()
+    assert (layout.pool_repo / "legacy.txt").read_text() == "legacy"
+    assert repo_source.is_symlink()
+    assert _target(repo_source) == layout.pool_repo
 
 
 def test_invalid_existing_claude_repo_bridge_never_publishes_ready_marker(

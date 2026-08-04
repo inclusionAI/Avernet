@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -63,6 +66,21 @@ def _publish_repo_delivery_bridge(path: Path, source: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
+@contextmanager
+def _exclusive_directory_lock(path: Path) -> Iterator[None]:
+    """Serialize one local filesystem transition without persistent lock state."""
+
+    directory_fd = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(directory_fd, fcntl.LOCK_UN)
+    finally:
+        os.close(directory_fd)
+
+
 def _canonicalize_downloaded_repo(
     *,
     pool_repo: Path,
@@ -78,6 +96,18 @@ def _canonicalize_downloaded_repo(
     pool_repo = Path(os.path.abspath(pool_repo))
     repo_source = Path(os.path.abspath(repo_source))
     pool_repo.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive_directory_lock(pool_repo.parent):
+        _canonicalize_downloaded_repo_locked(
+            pool_repo=pool_repo,
+            repo_source=repo_source,
+        )
+
+
+def _canonicalize_downloaded_repo_locked(
+    *,
+    pool_repo: Path,
+    repo_source: Path,
+) -> None:
     if repo_source == pool_repo:
         if not pool_repo.is_dir() or pool_repo.is_symlink():
             raise OSError(f"Canonical Pool repo is not a directory: {pool_repo}")
@@ -101,14 +131,15 @@ def _canonicalize_downloaded_repo(
     try:
         os.replace(repo_source, pool_repo)
         moved_repo = True
-    except FileNotFoundError:
-        if (
-            pool_repo.is_dir()
-            and not pool_repo.is_symlink()
-            and (not repo_source.exists() and not repo_source.is_symlink())
-        ):
-            _publish_repo_delivery_bridge(repo_source, pool_repo)
-            return
+    except OSError as error:
+        if pool_repo.is_dir() and not pool_repo.is_symlink():
+            if repo_source.is_symlink() and _lexical_target(repo_source) == pool_repo:
+                return
+            if isinstance(error, FileNotFoundError) and (
+                not repo_source.exists() and not repo_source.is_symlink()
+            ):
+                _publish_repo_delivery_bridge(repo_source, pool_repo)
+                return
         raise
     try:
         _publish_repo_delivery_bridge(repo_source, pool_repo)
@@ -291,27 +322,28 @@ def prepare_desktop_pool(
             staging_root=staging,
             remove_missing=False,
         )
-        _canonicalize_downloaded_repo(
-            pool_repo=layout.pool_repo,
-            repo_source=repo_source,
-        )
-        if layout.legacy_repo != repo_source:
-            _publish_legacy_repo_bridge(
-                path=layout.legacy_repo,
-                pool_repo=layout.pool_repo,
-                previous_source=repo_source,
+        with _exclusive_directory_lock(layout.pool_repo.parent):
+            _canonicalize_downloaded_repo_locked(
+                pool_repo=Path(os.path.abspath(layout.pool_repo)),
+                repo_source=repo_source,
             )
-        with os.scandir(layout.pool_repo):
-            pass
+            if layout.legacy_repo != repo_source:
+                _publish_legacy_repo_bridge(
+                    path=layout.legacy_repo,
+                    pool_repo=layout.pool_repo,
+                    previous_source=repo_source,
+                )
+            with os.scandir(layout.pool_repo):
+                pass
 
-        structural_bridges = _pre_cutover_structural_bridges(
-            engine=engine,
-            pool_repo=layout.pool_repo,
-            local_bridge=layout.local_bridge,
-            legacy_local=layout.legacy_local,
-            repo_bridge=layout.repo_bridge,
-            legacy_repo=layout.legacy_repo,
-        )
+            structural_bridges = _pre_cutover_structural_bridges(
+                engine=engine,
+                pool_repo=layout.pool_repo,
+                local_bridge=layout.local_bridge,
+                legacy_local=layout.legacy_local,
+                repo_bridge=layout.repo_bridge,
+                legacy_repo=layout.legacy_repo,
+            )
         if any(bridge["valid"] is not True for bridge in structural_bridges):
             raise OSError("pre-cutover structural bridge is invalid")
 
