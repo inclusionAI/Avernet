@@ -254,30 +254,6 @@
         "title": "BotCreate",
         "type": "object"
       },
-      "BotSkill": {
-        "description": "A skill installed on a bot.",
-        "properties": {
-          "enabled": {
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "skill_id": {
-            "title": "Skill Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "skill_id",
-          "name",
-          "enabled"
-        ],
-        "title": "BotSkill",
-        "type": "object"
-      },
       "BotStatus": {
         "description": "Runtime / device readiness of a bot.",
         "properties": {
@@ -617,44 +593,6 @@
           "request_id"
         ],
         "title": "Envelope[BotAuthStatus]",
-        "type": "object"
-      },
-      "Envelope_BotSkill_": {
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BotSkill"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results."
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[BotSkill]",
         "type": "object"
       },
       "Envelope_BotStatus_": {
@@ -1797,7 +1735,7 @@
         "title": "Envelope[Session]",
         "type": "object"
       },
-      "Envelope_SkillDetail_": {
+      "Envelope_SkillState_": {
         "properties": {
           "code": {
             "description": "6-digit code: HTTP status (3) + business subcode (3).",
@@ -1807,7 +1745,7 @@
           "data": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SkillDetail"
+                "$ref": "#/components/schemas/SkillState"
               },
               {
                 "type": "null"
@@ -1832,7 +1770,83 @@
           "data",
           "request_id"
         ],
-        "title": "Envelope[SkillDetail]",
+        "title": "Envelope[SkillState]",
+        "type": "object"
+      },
+      "Envelope_SkillUpload_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SkillUpload"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SkillUpload]",
+        "type": "object"
+      },
+      "Envelope_Skill_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Skill"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[Skill]",
         "type": "object"
       },
       "Envelope_dict_str__Any__": {
@@ -1915,48 +1929,6 @@
           "request_id"
         ],
         "title": "Envelope[list[ApprovalModeInfo]]",
-        "type": "object"
-      },
-      "Envelope_list_BotSkill__": {
-        "properties": {
-          "code": {
-            "description": "6-digit code: HTTP status (3) + business subcode (3).",
-            "title": "Code",
-            "type": "integer"
-          },
-          "data": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/BotSkill"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Response payload; present but null on errors or empty results.",
-            "title": "Data"
-          },
-          "message": {
-            "description": "Human-readable status; always English (e.g. \"OK\").",
-            "title": "Message",
-            "type": "string"
-          },
-          "request_id": {
-            "description": "Trace id; mirrors the X-Trace-Id response header.",
-            "title": "Request Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message",
-          "data",
-          "request_id"
-        ],
-        "title": "Envelope[list[BotSkill]]",
         "type": "object"
       },
       "Envelope_list_EngineInfo__": {
@@ -3405,8 +3377,12 @@
         "type": "object"
       },
       "Skill": {
-        "description": "A skill in the catalog.",
+        "description": "Public metadata for one Bot-owned Skill.",
         "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
           "category": {
             "anyOf": [
               {
@@ -3417,6 +3393,21 @@
               }
             ],
             "title": "Category"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
           },
           "description": {
             "anyOf": [
@@ -3436,80 +3427,76 @@
           "skill_id": {
             "title": "Skill Id",
             "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
           }
         },
         "required": [
           "skill_id",
-          "name"
+          "name",
+          "active"
         ],
         "title": "Skill",
         "type": "object"
       },
-      "SkillDetail": {
-        "description": "A skill's full detail.",
+      "SkillState": {
+        "description": "Result of an idempotent Skill desired-state command.",
         "properties": {
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
+          "changed": {
+            "title": "Changed",
+            "type": "boolean"
           },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
-          },
-          "manifest": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Manifest"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "skill_id": {
-            "title": "Skill Id",
-            "type": "string"
+          "skill": {
+            "$ref": "#/components/schemas/Skill"
           }
         },
         "required": [
-          "skill_id",
-          "name"
+          "skill",
+          "changed"
         ],
-        "title": "SkillDetail",
+        "title": "SkillState",
         "type": "object"
       },
-      "SkillInstall": {
-        "description": "Install-a-skill request body.",
+      "SkillUpload": {
+        "description": "Response for a Skill create or same-name package replacement.",
         "properties": {
-          "skill_id": {
-            "title": "Skill Id",
+          "operation": {
+            "enum": [
+              "created",
+              "updated"
+            ],
+            "title": "Operation",
             "type": "string"
+          },
+          "skill": {
+            "$ref": "#/components/schemas/Skill"
           }
         },
         "required": [
-          "skill_id"
+          "operation",
+          "skill"
         ],
-        "title": "SkillInstall",
+        "title": "SkillUpload",
         "type": "object"
       },
       "Socket": {
@@ -9118,12 +9105,60 @@
         ]
       }
     },
-    "/openapi/v1/bots/skills/catalog": {
+    "/openapi/v1/bots/skills": {
       "get": {
-        "description": "List the skill catalog (filter + paginate).",
-        "operationId": "list_skills_openapi_v1_bots_skills_catalog_get",
+        "description": "List one Bot's Local Skills from persisted desired state.",
+        "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
+            "description": "Bot ID whose Local Skills are listed.",
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "Bot ID whose Local Skills are listed.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verified Bot owner locator.",
+            "in": "query",
+            "name": "owner_entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified Bot owner locator.",
+              "title": "Owner Entity Id"
+            }
+          },
+          {
+            "description": "Filter by desired Active state.",
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by desired Active state.",
+              "title": "Active"
+            }
+          },
+          {
+            "description": "Case-insensitive name or description filter.",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -9136,6 +9171,7 @@
                   "type": "null"
                 }
               ],
+              "description": "Case-insensitive name or description filter.",
               "title": "Keyword"
             }
           },
@@ -9255,241 +9291,69 @@
         ]
       }
     },
-    "/openapi/v1/bots/skills/catalog/{skill_id}": {
-      "get": {
-        "description": "Get a skill's detail.",
-        "operationId": "get_skill_openapi_v1_bots_skills_catalog__skill_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "skill_id",
-            "required": true,
-            "schema": {
-              "title": "Skill Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_SkillDetail_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "Get Skill",
-        "tags": [
-          "skills"
-        ]
-      }
-    },
-    "/openapi/v1/bots/skills/{bot_id}": {
-      "get": {
-        "description": "List the skills installed on a bot.",
-        "operationId": "list_bot_skills_openapi_v1_bots_skills__bot_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "title": "Bot Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_list_BotSkill__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "List Bot Skills",
-        "tags": [
-          "skills"
-        ]
-      },
+    "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Install a skill on a bot.",
-        "operationId": "install_bot_skill_openapi_v1_bots_skills__bot_id__post",
+        "description": "Create or safely replace one Local Skill from a raw ZIP body.",
+        "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
-            "in": "path",
+            "description": "Bot that owns and stores the Local Skill.",
+            "in": "query",
             "name": "bot_id",
             "required": true,
             "schema": {
+              "description": "Bot that owns and stores the Local Skill.",
               "title": "Bot Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Verified Bot owner locator.",
+            "in": "query",
+            "name": "owner_entity_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Verified Bot owner locator.",
+              "title": "Owner Entity Id"
             }
           }
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/zip": {
               "schema": {
-                "$ref": "#/components/schemas/SkillInstall"
+                "contentMediaType": "application/octet-stream",
+                "title": "Content",
+                "type": "string"
               }
             }
           },
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillUpload_"
+                }
+              }
+            },
+            "description": "Same-name Local Skill replaced successfully."
+          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Envelope_BotSkill_"
+                  "$ref": "#/components/schemas/Envelope_SkillUpload_"
                 }
               }
             },
@@ -9535,6 +9399,16 @@
             },
             "description": "Conflicts with current state"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "ZIP package exceeds an upload limit."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -9566,26 +9440,17 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Install Bot Skill",
+        "summary": "Upload Skill",
         "tags": [
           "skills"
         ]
       }
     },
-    "/openapi/v1/bots/skills/{bot_id}/{skill_id}": {
+    "/openapi/v1/bots/skills/{skill_id}": {
       "delete": {
-        "description": "Remove a skill from a bot.",
-        "operationId": "remove_bot_skill_openapi_v1_bots_skills__bot_id___skill_id__delete",
+        "description": "Delete one Inactive Local Skill selected by its Skill ID.",
+        "operationId": "delete_skill_openapi_v1_bots_skills__skill_id__delete",
         "parameters": [
-          {
-            "in": "path",
-            "name": "bot_id",
-            "required": true,
-            "schema": {
-              "title": "Bot Id",
-              "type": "string"
-            }
-          },
           {
             "in": "path",
             "name": "skill_id",
@@ -9678,7 +9543,314 @@
             "description": "Upstream service error"
           }
         },
-        "summary": "Remove Bot Skill",
+        "summary": "Delete Skill",
+        "tags": [
+          "skills"
+        ]
+      },
+      "get": {
+        "description": "Get public metadata for one Local Skill selected by its Skill ID.",
+        "operationId": "get_skill_openapi_v1_bots_skills__skill_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Skill_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/skills/{skill_id}/activate": {
+      "post": {
+        "description": "Set one Local Skill's desired state to Active.",
+        "operationId": "activate_skill_openapi_v1_bots_skills__skill_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillState_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Activate Skill",
+        "tags": [
+          "skills"
+        ]
+      }
+    },
+    "/openapi/v1/bots/skills/{skill_id}/deactivate": {
+      "post": {
+        "description": "Set one Local Skill's desired state to Inactive.",
+        "operationId": "deactivate_skill_openapi_v1_bots_skills__skill_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "title": "Skill Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SkillState_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Deactivate Skill",
         "tags": [
           "skills"
         ]
