@@ -10,7 +10,8 @@ use bcs_domain::{
     SystemMessageEvent, CoordinationMode, CoordinationSurface,
 };
 use bcs_service_api::{
-    AgentCredentials, BotRegistryCoreService, ServiceResult, SystemMessageProducerService,
+    AgentCredentials, BotDeliveryTarget, BotRegistryCoreService, RedactedToken, ServiceResult,
+    SystemMessageProducerService,
 };
 
 use super::session_context::SessionContextMessageProducer;
@@ -18,6 +19,7 @@ use super::session_context::SessionContextMessageProducer;
 struct NamedRegistry {
     bots: HashMap<String, RegisteredBot>,
     surfaces: HashMap<String, CoordinationSurface>,
+    http_providers: std::collections::HashSet<String>,
 }
 
 impl NamedRegistry {
@@ -47,11 +49,17 @@ impl NamedRegistry {
         Self {
             bots,
             surfaces: HashMap::new(),
+            http_providers: std::collections::HashSet::new(),
         }
     }
 
     fn with_surface(mut self, bot_id: &str, surface: CoordinationSurface) -> Self {
         self.surfaces.insert(bot_id.to_string(), surface);
+        self
+    }
+
+    fn with_http_provider(mut self, bot_id: &str) -> Self {
+        self.http_providers.insert(bot_id.to_string());
         self
     }
 }
@@ -87,6 +95,25 @@ impl BotRegistryCoreService for NamedRegistry {
             .get(bot_id)
             .cloned()
             .unwrap_or_else(CoordinationSurface::legacy_upstream))
+    }
+
+    async fn resolve_delivery_target(
+        &self,
+        bot_id: &str,
+    ) -> ServiceResult<BotDeliveryTarget> {
+        if self.http_providers.contains(bot_id) {
+            return Ok(BotDeliveryTarget::HttpProvider {
+                bot_id: bot_id.to_string(),
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "ref".to_string(),
+                webhook_url: "https://provider.example.com/bcs/webhook".to_string(),
+                bcs_to_provider_token: RedactedToken::new("secret"),
+                protocol_version: "2.0".to_string(),
+            });
+        }
+        Ok(BotDeliveryTarget::WebSocket {
+            bot_id: bot_id.to_string(),
+        })
     }
 
     async fn list_active(&self) -> Vec<RegisteredBot> {
@@ -236,7 +263,7 @@ async fn manager_worker_session_context_messages_with_ledger(
         task_ledger,
     };
 
-    let messages = SessionContextMessageProducer
+    let (messages, _) = SessionContextMessageProducer
         .produce(&event, &group, &registry, &participants)
         .await;
 
@@ -341,7 +368,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         task_ledger: None,
     };
 
-    let messages = SessionContextMessageProducer
+    let (messages, _) = SessionContextMessageProducer
         .produce(&event, &group, &registry, &participants)
         .await;
 
@@ -405,4 +432,223 @@ async fn manager_worker_manager_reminder_includes_task_ledger_status() {
         .find(|message| message.recipients == vec![worker_id.clone()])
         .expect("worker receives context");
     assert!(!worker_message.message.contains("[任务状态]"));
+}
+
+async fn chat_session_context_produce(
+    group: Group,
+    participants: Vec<Participant>,
+) -> (Vec<SystemGroupMessage>, Option<String>) {
+    let registry = NamedRegistry::new(&[]);
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+    };
+    SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await
+}
+
+#[tokio::test]
+async fn chat_session_context_user_message_is_depersonalized_group_context() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut peer = Participant::bot("bot-peer", ParticipantRole::Consultant);
+    peer.bot_name = Some("Peer".to_string());
+    let mut group = Group::new("group-chat", "bot-driver", vec![driver, peer]);
+    group.group_strategy = GroupStrategy::Chat;
+    let participants = group.participants.clone();
+
+    let (messages, user_message) = chat_session_context_produce(group, participants).await;
+
+    // bot_messages unchanged: one per bot.
+    assert_eq!(messages.len(), 2);
+    let ws = user_message.expect("chat SessionContext must emit user_message");
+
+    // Facts preserved.
+    assert!(ws.contains("[GROUP CONTEXT]"));
+    assert!(ws.contains("[/GROUP CONTEXT]"));
+    assert!(ws.contains("群组ID: group-chat"));
+    assert!(ws.contains("主题: 普通协作"));
+    assert!(ws.contains("参与者:"));
+    // Routing instruction preserved (no provider downlink → bcs_route variant).
+    assert!(ws.contains("路由工具 (bcs_route)"));
+    // Personalization stripped.
+    assert!(!ws.contains("你是:"));
+    assert!(!ws.contains("你的角色:"));
+    assert!(!ws.contains("你是本次协作的 Driver"));
+    assert!(!ws.contains("应静默观察"));
+    assert!(!ws.contains("等待 @mention"));
+}
+
+#[tokio::test]
+async fn chat_session_context_user_message_at_mention_when_provider_downlink_present() {
+    // NamedRegistry resolves bot-provider as HTTP provider via resolve_delivery_target.
+    // The producer uses contains_provider_downlink_bot which calls resolve_delivery_target.
+    // NamedRegistry below overrides resolve_delivery_target to mark bot-provider as HTTP provider.
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut provider = Participant::bot("bot-provider", ParticipantRole::Consultant);
+    provider.bot_name = Some("Provider".to_string());
+    let mut group = Group::new("group-chat", "bot-driver", vec![driver, provider]);
+    group.group_strategy = GroupStrategy::Chat;
+    let participants = group.participants.clone();
+
+    let registry = NamedRegistry::new(&[]).with_http_provider("bot-provider");
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+    };
+    let (_messages, user_message) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await;
+    let ws = user_message.expect("ws text");
+
+    assert!(ws.contains("路由工具 (@mention)"));
+    assert!(ws.contains("可@:"));
+    assert!(!ws.contains("路由工具 (bcs_route)"));
+    assert!(!ws.contains("你是:"));
+}
+
+#[tokio::test]
+async fn chat_session_context_user_message_renders_without_driver_role_bot() {
+    // No participant has the Driver role; driver_bot fallback still renders.
+    let mut peer_a = Participant::bot("bot-a", ParticipantRole::Consultant);
+    peer_a.bot_name = Some("A".to_string());
+    let mut peer_b = Participant::bot("bot-b", ParticipantRole::Consultant);
+    peer_b.bot_name = Some("B".to_string());
+    let mut group = Group::new("group-chat", "bot-a", vec![peer_a, peer_b]);
+    group.group_strategy = GroupStrategy::Chat;
+    let participants = group.participants.clone();
+
+    let (messages, user_message) = chat_session_context_produce(group, participants).await;
+    assert_eq!(messages.len(), 2);
+    let ws = user_message.expect("ws text");
+    assert!(ws.contains("[GROUP CONTEXT]"));
+    assert!(ws.contains("参与者:"));
+    assert!(!ws.contains("你是:"));
+}
+
+#[tokio::test]
+async fn manager_worker_session_context_user_message_is_depersonalized_service_group_context() {
+    let manager_id = "20260416_a5clr6ig:12345678";
+    let worker_id = "20260528_vobmrqo6:12345678";
+    let mut manager = Participant::bot(manager_id, ParticipantRole::Manager);
+    manager.bot_name = Some(manager_id.to_string());
+    let mut worker = Participant::bot(worker_id, ParticipantRole::Worker);
+    worker.bot_name = Some(worker_id.to_string());
+    let mut group = Group::new("851c7a6a-42bc-4be2-8785-1106ef4393a0", manager_id, vec![manager, worker]);
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let participants = vec![
+        Participant::bot(manager_id, ParticipantRole::Manager),
+        Participant::bot(worker_id, ParticipantRole::Worker),
+    ];
+    let registry = NamedRegistry::new(&[
+        (manager_id, "Demo Worker的分身", Some("Demo Worker的分身")),
+        (worker_id, "Demo Worker测试0528", None),
+    ]);
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "协作任务".to_string(),
+        session_input: Some(serde_json::json!("执行慢查询审计")),
+        task_ledger: Some(LedgerSummary {
+            pending: vec!["B".to_string()],
+            replied: vec!["A".to_string()],
+            failed: Vec::new(),
+            timed_out: Vec::new(),
+        }),
+    };
+
+    let (messages, user_message) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await;
+    assert_eq!(messages.len(), 2);
+    let ws = user_message.expect("MW SessionContext must emit user_message");
+
+    // Facts preserved.
+    assert!(ws.contains("[SERVICE GROUP CONTEXT]"));
+    assert!(ws.contains("[/SERVICE GROUP CONTEXT]"));
+    assert!(ws.contains("模式: manager_worker"));
+    assert!(ws.contains(&format!("群组ID: {}", group.id)));
+    assert!(ws.contains("参与者:"));
+    assert!(ws.contains("Demo Worker的分身"));
+    // [任务] and [任务状态] rendered unconditionally from facts.
+    assert!(ws.contains("[任务]"));
+    assert!(ws.contains("执行慢查询审计"));
+    assert!(ws.contains("[任务状态] 待回复: B | 已回复: A | 失败: - | 超时: -"));
+    // Personalization / coordination stripped.
+    assert!(!ws.contains("你是:"));
+    assert!(!ws.contains("你的角色:"));
+    assert!(!ws.contains("[协同提醒]"));
+    assert!(!ws.contains("bcs_assign_task"));
+    assert!(!ws.contains("bcs_send_task_message"));
+}
+
+#[tokio::test]
+async fn manager_worker_session_context_user_message_renders_without_manager_participant() {
+    // No Manager in roster; facts still render.
+    let worker = Participant::bot("worker-only", ParticipantRole::Worker);
+    let mut group = Group::new("g-mw", "worker-only", vec![worker]);
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let participants = vec![Participant::bot("worker-only", ParticipantRole::Worker)];
+    let registry = NamedRegistry::new(&[]);
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "协作任务".to_string(),
+        session_input: Some(serde_json::json!("任务X")),
+        task_ledger: None,
+    };
+
+    let (_messages, user_message) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await;
+    let ws = user_message.expect("ws text");
+    assert!(ws.contains("[SERVICE GROUP CONTEXT]"));
+    assert!(ws.contains("模式: manager_worker"));
+    assert!(ws.contains("[任务]"));
+    assert!(ws.contains("任务X"));
+    assert!(!ws.contains("你是:"));
+    assert!(!ws.contains("[协同提醒]"));
+}
+
+#[tokio::test]
+async fn chat_session_context_user_message_includes_background_and_task_when_present() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut peer = Participant::bot("bot-peer", ParticipantRole::Consultant);
+    peer.bot_name = Some("Peer".to_string());
+    let mut group = Group::new("group-chat-bg", "bot-driver", vec![driver, peer]);
+    group.group_strategy = GroupStrategy::Chat;
+    group.context = Some("背景X".to_string());
+    let participants = group.participants.clone();
+
+    // Inline produce (mirror helper but with session_input + group.context set)
+    // to cover the WS depersonalized path with non-empty input/context.
+    let registry = NamedRegistry::new(&[]);
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: Some(serde_json::json!("任务X")),
+        task_ledger: None,
+    };
+    let (messages, user_message) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await;
+
+    let ws = user_message.expect("chat SessionContext must emit user_message");
+    assert_eq!(messages.len(), 2, "bot_messages still present");
+    assert!(ws.contains("[GROUP CONTEXT]"));
+    assert!(ws.contains("背景: 背景X"), "ws must render group context as 背景:");
+    assert!(ws.contains("[任务]") && ws.contains("任务X") && ws.contains("[/任务]"),
+        "ws must render session_input as a [任务] block");
+    assert!(!ws.contains("你是:") && !ws.contains("你的角色:"),
+        "depersonalization still holds on the WS path");
 }

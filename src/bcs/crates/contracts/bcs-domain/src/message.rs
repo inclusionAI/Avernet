@@ -179,6 +179,10 @@ pub enum MessageOwnerFilter {
     Any,
     IsNull,
     Eq(String),
+    /// `owner_bot_id IS NULL OR owner_bot_id = <viewer>` — 公共消息 + 发给该
+    /// viewer 的系统消息副本。历史查询按 `view_bot_id` 回放"公共 + 自己的
+    /// 系统副本"，收窄的仅是他人新增的私有副本，是旧 `Any`/`IsNull` 的超集。
+    PublicOrOwner(String),
 }
 
 impl Default for MessageOwnerFilter {

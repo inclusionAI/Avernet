@@ -24,9 +24,9 @@ impl SystemMessageProducerService for BotLeftMessageProducer {
         _group: &Group,
         registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::BotLeft { actor, .. } = event else {
-            return vec![];
+            return (vec![], None);
         };
 
         let left_id = actor.bot_uuid.clone();
@@ -35,7 +35,8 @@ impl SystemMessageProducerService for BotLeftMessageProducer {
             .as_ref()
             .and_then(|b| b.capabilities.name.clone())
             .unwrap_or_else(|| left_id.clone());
-        let message = format!("{}({}) 已退出协作群", name, left_id);
+        let user_text = format!("{}({}) 已退出协作群", name, left_id);
+        let user_message = Some(user_text.clone());
 
         let recipients: Vec<String> = participants
             .iter()
@@ -43,15 +44,17 @@ impl SystemMessageProducerService for BotLeftMessageProducer {
             .filter(|p| p.is_bot())
             .map(|p| p.bot_uuid.clone())
             .collect();
-        if recipients.is_empty() {
-            return vec![];
-        }
-
-        vec![SystemGroupMessage {
-            recipients,
-            message,
-            delivery_type: DeliveryType::Inject,
-        }]
+        let bot_messages = if recipients.is_empty() {
+            vec![]
+        } else {
+            vec![SystemGroupMessage {
+                recipients,
+                message: user_text,
+                delivery_type: DeliveryType::Inject,
+            }]
+        };
+        // empty recipients does NOT block user_message (last bot leaving)
+        (bot_messages, user_message)
     }
 }
 
@@ -123,7 +126,7 @@ mod tests {
             },
         };
 
-        let messages = BotLeftMessageProducer
+        let (messages, user_message) = BotLeftMessageProducer
             .produce(&event, &group, &registry, &group.participants)
             .await;
 
@@ -133,5 +136,67 @@ mod tests {
         assert!(messages[0].message.contains("bot-1"));
         assert_eq!(messages[0].recipients, vec!["bot-2"]);
         assert_eq!(messages[0].delivery_type, DeliveryType::Inject);
+        assert_eq!(
+            user_message.as_deref(),
+            Some("bot-1(bot-1) 已退出协作群")
+        );
+    }
+
+    #[tokio::test]
+    async fn bot_left_with_no_other_recipients_returns_user_message_only() {
+        let registry = NoopBotRegistryCoreService;
+        let group = Group {
+            id: "g1".into(),
+            label: None,
+            status: bcs_domain::GroupStatus::Active,
+            driver_bot: "bot-1".into(),
+            originator: Some("bot-1".into()),
+            routing_policy: None,
+            context: None,
+            participants: vec![Participant {
+                bot_uuid: "bot-1".into(),
+                bot_name: Some("测试Bot".into()),
+                kind: None,
+                role: ParticipantRole::Driver,
+                actor_kind: ActorKind::Bot,
+                mode: Some(ParticipantMode::Auto),
+            }],
+            messages: vec![],
+            workspace: Default::default(),
+            service_group_uuid: None,
+            service_mode: None,
+            created_at: 0,
+            updated_at: 0,
+            group_kind: bcs_domain::GroupKind::Normal,
+            dm_pair_key: None,
+            group_strategy: bcs_domain::GroupStrategy::Chat,
+            service_spec: None,
+            version: 0,
+            record_status: "active".to_string(),
+            visibility: "private".to_string(),
+        };
+
+        let event = SystemMessageEvent::BotLeft {
+            group_id: "g1".into(),
+            actor: Participant {
+                bot_uuid: "bot-1".into(),
+                bot_name: None,
+                kind: None,
+                role: ParticipantRole::Driver,
+                actor_kind: ActorKind::Bot,
+                mode: None,
+            },
+        };
+
+        let (messages, user_message) = BotLeftMessageProducer
+            .produce(&event, &group, &registry, &group.participants)
+            .await;
+
+        assert!(messages.is_empty(), "no other recipients → empty bot_messages");
+        assert_eq!(
+            user_message.as_deref(),
+            Some("bot-1(bot-1) 已退出协作群"),
+            "user_message still produced when no bot recipients remain"
+        );
     }
 }

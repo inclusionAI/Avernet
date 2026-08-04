@@ -2001,8 +2001,8 @@ impl SystemMessageProducerService for NoopSystemMessageProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (vec![], None)
     }
 }
 
