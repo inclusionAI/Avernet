@@ -331,6 +331,38 @@ fn default_gateway_principal_signing_key_env() -> String {
     "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
 }
 
+/// Group-session WebSocket JWT signing-key lookup configuration.
+///
+/// The signing key material is resolved through the configured SecretAccessPort
+/// using `signing_key_secret` as the logical secret name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSessionWsConfig {
+    #[serde(default = "default_group_session_ws_signing_key_secret")]
+    pub signing_key_secret: String,
+}
+
+impl Default for GroupSessionWsConfig {
+    fn default() -> Self {
+        Self {
+            signing_key_secret: default_group_session_ws_signing_key_secret(),
+        }
+    }
+}
+
+impl GroupSessionWsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.signing_key_secret.trim().is_empty() {
+            return Err("group_session_ws.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_group_session_ws_signing_key_secret() -> String {
+    "bcn-group-session-ws-jwt".to_string()
+}
+
 /// BCS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -382,6 +414,10 @@ pub struct BcsConfig {
     /// Gateway-signed Principal verification trust configuration.
     #[serde(default)]
     pub gateway_principal: GatewayPrincipalConfig,
+
+    /// Group-session WebSocket JWT signing-key lookup configuration.
+    #[serde(default)]
+    pub group_session_ws: GroupSessionWsConfig,
 
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
@@ -820,6 +856,7 @@ impl Default for BcsConfig {
             dingtalk_accounts: Vec::new(),
             auth_token: None,
             gateway_principal: GatewayPrincipalConfig::default(),
+            group_session_ws: GroupSessionWsConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
@@ -1246,6 +1283,10 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.group_session_ws.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.telemetry.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1298,6 +1339,48 @@ mod tests {
         assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "bcn-group-session-ws-jwt"
+        );
+    }
+
+    #[test]
+    fn group_session_ws_signing_key_secret_can_be_configured() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = "other_manual_teamclawgw_principal_signing_key"
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml)
+            .expect("parse configurable group-session WebSocket secret name");
+
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "other_manual_teamclawgw_principal_signing_key"
+        );
+    }
+
+    #[test]
+    fn blank_group_session_ws_signing_key_secret_is_rejected() {
+        let tmp = tempfile::TempDir::new().expect("temp config dir");
+        std::fs::write(
+            tmp.path().join("bcs-config.toml"),
+            r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = " "
+            "#,
+        )
+        .expect("write config");
+
+        let err = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
+            .expect_err("blank group-session WebSocket secret name rejected");
+
+        assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
     }
 
     #[test]
