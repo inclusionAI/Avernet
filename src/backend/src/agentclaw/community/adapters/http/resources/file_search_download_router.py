@@ -197,7 +197,8 @@ def _resolve_walk_device_fs(
     """The device-fs to walk for search/zip, or ``None`` → local-FS fallback.
 
     ``publish_id`` → the published stage binding (``resolve_for_binding``); else the
-    bot's draft device when it's a container-backed provider (arca / baas service).
+    bot's draft device when it's a container-backed provider (arca / baas service /
+    teclaw).
     All providers address files uniformly via the ``workspace/<rel>`` namespace, so
     the caller just walks ``list_dir`` — no arca-specific path here.
 
@@ -216,7 +217,7 @@ def _resolve_walk_device_fs(
             entity_id=owner_id, bot_id=bot_id, engine_type=engine_type,
         )
     device_provider, _ = device_info_lookup.get_device_info(bot_id, owner_id, bot_repo)
-    if device_provider not in ("arca", "baas"):
+    if device_provider not in ("arca", "baas", "teclaw"):
         return None
     return _device_fs_for_bot(
         bot_id, owner_id, engine_type, resolver, dispatcher, device_uuid=device_uuid,
@@ -235,7 +236,7 @@ def _device_fs_for_bot(
     ``list_files`` takes (``resolve_for_bot`` → ``dispatch_addressed``).
 
     Used by search/zip for any container-backed draft device (arca + baas
-    service bot): both address files uniformly via the ``workspace/<rel>``
+    service + teclaw): all address files uniformly via the ``workspace/<rel>``
     namespace, so the caller just walks ``list_dir`` / reads ``read_file`` — no
     provider branching here. (Desktop baas bots keep files local and are handled
     by the caller before this.)
@@ -504,7 +505,7 @@ async def download_directory(
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
 ):
-    """Download a directory as a streamed zip. Supports local FS + Arca + BaaS only."""
+    """Download a directory as a streamed zip. Supports local FS, Arca, BaaS, and Teclaw."""
     _reject_traversal(path)
     eid, ebid, eeng = _resolve_params(ctx, bot_id, engine_type, owner_id, bot_repo=bot_repo)
     workspace_dir = get_bot_workspace_dir(path_factory, eid, ebid, eeng, "staff")
@@ -547,7 +548,7 @@ async def download_directory(
         if total > _ZIP_DOWNLOAD_TOTAL_LIMIT:
             raise HTTPException(status_code=413, detail=f"Folder too large to download ({total} bytes, max {_ZIP_DOWNLOAD_TOTAL_LIMIT} bytes)")
 
-    # arca + baas-service + published-stage devices all walk + read uniformly via
+    # arca + baas-service + teclaw + published-stage devices all walk + read uniformly via
     # the device-fs (workspace/<rel> namespace); local/unbound → local-FS below.
     if device_fs is not None:
         entries = await _walk_device_fs(

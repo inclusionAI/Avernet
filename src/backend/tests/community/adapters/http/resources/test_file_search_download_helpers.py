@@ -367,7 +367,8 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
     """
 
     @pytest.mark.asyncio
-    async def test_subdir_read_path_is_flat_join_no_double(self, tmp_path):
+    @pytest.mark.parametrize("provider", ["arca", "teclaw"])
+    async def test_subdir_read_path_is_flat_join_no_double(self, tmp_path, provider):
         list_tree = {
             "": [_entry("memory", is_dir=True)],
             "memory": [_entry("foo.txt", size=3), _entry("bar.txt", size=3)],
@@ -378,14 +379,14 @@ class TestDownloadDirectoryDeviceFsDoubleJoin:
         }
         fs = _RecordingDeviceFs(list_tree, read_payload)
         resolver = MagicMock()
-        resolver.resolve_for_bot.return_value = SimpleNamespace(provider="arca")
+        resolver.resolve_for_bot.return_value = SimpleNamespace(provider=provider)
 
         with patch(
             "agentclaw.community.adapters.http.resources.file_router.resolve_engine_for_bot",
             return_value="openclaw",
         ), patch(
             "agentclaw.community.core.devices.services.device_info.get_device_info",
-            return_value=("arca", "sbx"),
+            return_value=(provider, "sbx"),
         ), patch(
             "agentclaw.community.adapters.http.resources.file_search_download_router.get_bot_workspace_dir",
             return_value=tmp_path,
