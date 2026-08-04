@@ -63,6 +63,22 @@ class HermesAdapter(BaseEngineAdapter):
             return session_id
         return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
 
+    def build_session_id(
+        self,
+        *,
+        tc_bot_id: str,
+        user_id: str,
+        run_id: str,
+        session_id: str | None = None,
+    ) -> str | None:
+        """Hermes 不支持「同步构造、异步建会话」路径。
+
+        Hermes 的真正可用 session_id 是引擎侧异步持久化产生的
+        （形如 ``YYYYMMDD_HHMMSS_xxxxxx``），无法在同步链路确定性构造，
+        因此返回 ``None``，runner 维持原同步建会话路径。
+        """
+        return None
+
     async def create_adapter_session(
         self,
         *,
