@@ -32,11 +32,21 @@ from secbaas.community.core.service.bot_run import (
 )
 from secbaas.community.core.service.bot_run._executor import BotRunRequestExecutor
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
+from secbaas.community.plugins.bot.engine_adapter.aicoding.stub import (
+    MockAICodingAdapter,
+    NoopAICodingAdapter,
+)
 from secbaas.community.plugins.bot.engine_adapter.claude_code.real import (
     ClaudeCodeAdapter,
 )
 from secbaas.community.plugins.bot.engine_adapter.claude_code.stub import (
     MockClaudeCodeAdapter,
+    NoopClaudeCodeAdapter,
+)
+from secbaas.community.plugins.bot.engine_adapter.hermes.real import HermesAdapter
+from secbaas.community.plugins.bot.engine_adapter.hermes.stub import (
+    MockHermesAdapter,
+    NoopHermesAdapter,
 )
 from secbaas.community.spi.bot_service import BotBindingData
 
@@ -94,6 +104,81 @@ class TestAdapterBuildSessionId:
             )
             is None
         )
+
+
+class TestStubAdapterBuildSessionId:
+    """Cover every real stub/adapter ``build_session_id`` body so the
+    changed-line coverage gate sees each new branch exercised."""
+
+    def test_noop_aicoding_returns_none(self):
+        assert (
+            NoopAICodingAdapter().build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            is None
+        )
+
+    def test_mock_aicoding_returns_none_and_records_call(self):
+        adapter = MockAICodingAdapter()
+        assert (
+            adapter.build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            is None
+        )
+        assert adapter.calls[0][0] == "build_session_id"
+
+    def test_noop_claude_code_returns_caller_session_id(self):
+        assert (
+            NoopClaudeCodeAdapter().build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id="caller-sid"
+            )
+            == "caller-sid"
+        )
+
+    def test_noop_claude_code_constructs_deterministic_id(self):
+        assert (
+            NoopClaudeCodeAdapter().build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            == "agent:b1:session:r1:user:u1"
+        )
+
+    def test_mock_claude_code_returns_caller_session_id(self):
+        adapter = MockClaudeCodeAdapter()
+        assert (
+            adapter.build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id="caller-sid"
+            )
+            == "caller-sid"
+        )
+        assert adapter.calls[0][0] == "build_session_id"
+
+    def test_hermes_real_returns_none(self):
+        assert (
+            HermesAdapter().build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            is None
+        )
+
+    def test_noop_hermes_returns_none(self):
+        assert (
+            NoopHermesAdapter().build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            is None
+        )
+
+    def test_mock_hermes_returns_none_and_records_call(self):
+        adapter = MockHermesAdapter()
+        assert (
+            adapter.build_session_id(
+                tc_bot_id="b1", user_id="u1", run_id="r1", session_id=None
+            )
+            is None
+        )
+        assert adapter.calls[0][0] == "build_session_id"
 
 
 # ── BotService.build_session_id ─────────────────────────────────────────────
