@@ -100,6 +100,19 @@ def test_cleanup_uses_full_locator_hash_and_rejects_a_hash_collision(world, monk
         )
 
 
+def test_cleanup_repair_required_retains_the_quarantine_outside_purge_retries(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    assert repo.record_repair_required(
+        **scope, skill_id="9", package_locator="pool/local/delete-quarantine"
+    )
+    assert repo.list_pending(**scope) == []
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.status == "repair_required"
+        assert row.last_error == "authoritative package repair required"
+
+
 def test_cleanup_ddl_uses_a_bounded_full_locator_digest_as_its_unique_key() -> None:
     sql = (
         Path(__file__).parents[3]

@@ -17,6 +17,9 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
+from agentclaw.community.core.skill_center.local_skill_cleanup import (
+    LocalSkillCleanupWorkModel,
+)
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
 from agentclaw.community.plugin_api.models import BotModel
@@ -73,6 +76,7 @@ def db(tmp_path):
         DefaultSkillsetSkillExclusion,
         BotModel,
         AcSkillMember,
+        LocalSkillCleanupWorkModel,
     ):
         m.__table__.create(engine)
     return _FileSqliteDB(engine)
@@ -212,6 +216,63 @@ def test_delete_cannot_remove_a_skill_or_association_from_another_tenant(
         with db.orm_session() as session:
             assert session.query(SkillSetSkill).count() == 1
             assert session.query(Skill).count() == 1
+
+
+def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, sets, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {"name": "local", "git_path": "local:///skills/local", "user_id": "owner", "bolt_id": "bot"}
+        )
+        default_set = sets.create(
+            {"name": "default", "user_id": "owner", "bolt_id": "bot", "is_default": True}
+        )
+        sets.add_skill_to_set(default_set["id"], skill["id"], user_id="owner")
+        sets.add_default_skill_exclusion("owner", "bot", int(default_set["id"]), int(skill["id"]))
+        work_id = skills.delete_bot_local_skill(
+            skill_id=skill["id"], owner_id="owner", bot_id="bot",
+            quarantine_locator="/skills/.local.delete-verified",
+        )
+        assert work_id is not None
+        with db.orm_session() as session:
+            work = session.query(LocalSkillCleanupWorkModel).one()
+            assert work.id == work_id
+            assert work.status == "pending"
+            assert work.package_locator == "/skills/.local.delete-verified"
+            assert session.query(Skill).count() == 0
+            assert session.query(SkillSetSkill).count() == 0
+            assert session.query(DefaultSkillsetSkillExclusion).count() == 0
+
+
+def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skills, sets, db):
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {"name": "local", "git_path": "local:///skills/local", "user_id": "owner", "bolt_id": "bot"}
+        )
+        default_set = sets.create(
+            {"name": "default", "user_id": "owner", "bolt_id": "bot", "is_default": True}
+        )
+        sets.add_skill_to_set(default_set["id"], skill["id"], user_id="owner")
+        sets.add_default_skill_exclusion("owner", "bot", int(default_set["id"]), int(skill["id"]))
+
+        def fail_cleanup_insert(_conn, _cursor, statement, _parameters, _context, _executemany):
+            if statement.lstrip().lower().startswith("insert into ac_local_skill_cleanup_work"):
+                raise RuntimeError("injected cleanup work failure")
+
+        event.listen(db.engine, "before_cursor_execute", fail_cleanup_insert)
+        try:
+            with pytest.raises(RuntimeError, match="injected cleanup work failure"):
+                skills.delete_bot_local_skill(
+                    skill_id=skill["id"], owner_id="owner", bot_id="bot",
+                    quarantine_locator="/skills/.local.delete-rollback",
+                )
+        finally:
+            event.remove(db.engine, "before_cursor_execute", fail_cleanup_insert)
+
+        with db.orm_session() as session:
+            assert session.query(Skill).count() == 1
+            assert session.query(SkillSetSkill).count() == 1
+            assert session.query(DefaultSkillsetSkillExclusion).count() == 1
+            assert session.query(LocalSkillCleanupWorkModel).count() == 0
 
 
 def test_skill_create_is_plain_insert_not_upsert(skills):
