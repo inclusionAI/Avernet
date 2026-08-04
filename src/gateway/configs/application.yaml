@@ -52,8 +52,20 @@ user_config:
 
   # PrincipalSigner (JWT client) config. The signing key is a secret and is
   # resolved at runtime via the SecretResolver using ``secret_name``; the
-  # remaining fields are non-secret and live here. A missing/empty key falls
-  # back to a dev key (single-box/tests only — NOT for production).
+  # remaining fields are non-secret and live here. With the community resolver
+  # above that means AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE, and its value
+  # must equal the one the upstream verifies with — both sides log a
+  # fingerprint of it at boot so the two can be compared without printing it.
+  #
+  # There is NO fallback key. A missing or empty value refuses the boot in
+  # pre/prod, and elsewhere leaves the gateway unable to sign, so every
+  # forwarded request answers 500 rather than carrying an identity no upstream
+  # can verify. The dev key that used to fill this gap was a committed
+  # credential, and no upstream accepted tokens signed with it anyway.
+  #
+  # `issuer` is a two-sided contract: the backend pins the value it accepts in
+  # code, so changing this requires changing that constant in the same release
+  # or every request 401s.
   principal_signer:
     secret_name: "principal_signing_key"
     kid: "bare"

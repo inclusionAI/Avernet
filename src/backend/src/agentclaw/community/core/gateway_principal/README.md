@@ -33,6 +33,9 @@ provides:
   - PrincipalVerifierConfig
   - VerifiedCaller
   - verify_principal_token
+  - key_fingerprint
+  - is_weak_signing_key
+  - MIN_SIGNING_KEY_BYTES
   - PrincipalVerificationError
 consumes:
   - "Gateway PrincipalSigner (the signing half of the contract, in src/gateway)"

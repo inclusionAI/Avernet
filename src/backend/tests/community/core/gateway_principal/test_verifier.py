@@ -20,6 +20,7 @@ from agentclaw.community.core.gateway_principal import (
     PrincipalVerificationError,
     PrincipalVerifierConfig,
     UserPrincipal,
+    key_fingerprint,
     verify_principal_token,
 )
 from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
@@ -434,3 +435,201 @@ def test_internal_tenant_off_the_wire_is_rejected():
         verify_principal_token(token, CONFIG)
 
     assert "internal tenant" in str(exc.value)
+
+
+# ── operator diagnostics ─────────────────────────────────────────────────────
+#
+# A rejected token answers one fixed 401, so the *log* is the only place the
+# reason survives. These tests pin what that log line must carry, because the
+# failure they exist for — the gateway and this component holding different
+# shared secrets — is otherwise indistinguishable from a forgery.
+
+
+def test_key_fingerprint_matches_the_gateway_golden_values():
+    """The fingerprint is a cross-component contract, pinned by literal value.
+
+    The gateway computes the same digest over its own copy of the key and both
+    sides log it at boot; comparing the two lines is how an operator tells "we
+    hold different secrets" from "the secret is stale". The two implementations
+    live in separate distributions with no shared package, so nothing but this
+    test and its twin in ``src/gateway/tests/unit/plugins/test_principal_signer
+    .py`` stops one side from drifting and quietly making the comparison
+    meaningless. Change these expected values only when both change together.
+    """
+    assert key_fingerprint("k" * 32) == "5e318f8c"
+    assert key_fingerprint("a-shared-secret-of-at-least-32-bytes!!") == "eb128a7a"
+    assert key_fingerprint("rotated-shared-secret-32-bytes-min!!!!") == "21654248"
+
+
+def test_fingerprint_of_no_key_reads_as_unset():
+    """Never a hash of the empty string, which would look like a real key."""
+    assert key_fingerprint("") == "unset"
+
+
+def test_fingerprint_does_not_leak_the_key():
+    assert KEY not in key_fingerprint(KEY)
+    assert len(key_fingerprint(KEY)) == 8
+
+
+def test_config_exposes_its_own_fingerprint():
+    assert CONFIG.key_fingerprint == key_fingerprint(KEY)
+
+
+def test_a_key_mismatch_is_diagnosable_from_the_message_alone():
+    """The failure this whole section exists for.
+
+    ``Signature verification failed`` on its own cannot say which key the token
+    was judged against. The suffix must name it, alongside the contract this
+    component enforces — all of it read from our own configuration.
+    """
+    token = mint([user_principal()], key="not-the-shared-secret-but-also-32-bytes+")
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    message = str(exc.value)
+    assert "Signature verification failed" in message, "PyJWT's own reason survives"
+    assert f"verifier key fp={key_fingerprint(KEY)}" in message
+    assert f"aud={AUDIENCE!r}" in message and f"iss={ISSUER!r}" in message
+    assert "alg='HS256'" in message
+    assert "kid='bare'" in message
+
+
+def test_the_jose_header_is_labelled_as_caller_supplied():
+    """A failed signature authenticates nothing, including the header.
+
+    Any caller can stamp ``kid: bare`` on a token they minted, so presenting it
+    as provenance would hand a forger the power to point an operator at a
+    healthy shared secret. The line must mark it as untrusted, and must not
+    claim it identifies the signer.
+    """
+    token = mint([user_principal()], key="not-the-shared-secret-but-also-32-bytes+")
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    message = str(exc.value)
+    assert "unverified caller-supplied header" in message
+    # The trustworthy half is stated first, so the line reads as
+    # "here is what we hold" before "here is what they claimed".
+    assert message.index("verifier key fp=") < message.index("unverified")
+
+
+def test_a_forged_kid_cannot_impersonate_the_gateway_in_the_log():
+    """The concrete abuse the labelling exists to defuse.
+
+    A forger who never touched our gateway can still present ``kid='bare'``.
+    The message must read the same either way — no wording that would tell an
+    operator this came from their gateway.
+    """
+    claims = {
+        "iss": ISSUER,
+        "aud": AUDIENCE,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60,
+        "principals": [user_principal()],
+    }
+    forged = jwt.encode(
+        claims, "an-attacker-key-of-at-least-32-bytes!!", algorithm="HS256",
+        headers={"kid": "bare"},
+    )
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(forged, CONFIG)
+
+    message = str(exc.value)
+    assert "unverified caller-supplied header" in message
+    for claim in ("our gateway", "signed by", "produced by", "provenance"):
+        assert claim not in message.lower(), f"must not assert {claim!r}"
+
+
+def test_the_diagnostic_never_carries_the_key_or_the_token():
+    token = mint([user_principal()], key="not-the-shared-secret-but-also-32-bytes+")
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    assert KEY not in str(exc.value)
+    assert token not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "reason,token_kwargs",
+    [
+        ("Signature has expired", {"ttl": -3600}),
+        ("Audience doesn't match", {"audience": "baas"}),
+        ("Invalid issuer", {"issuer": "somebody-else"}),
+    ],
+)
+def test_each_failure_mode_keeps_its_own_reason(reason: str, token_kwargs: dict):
+    """The suffix is added to PyJWT's message, never in place of it.
+
+    Collapsing these into one string would cost the operator the first and
+    cheapest split: is this a key problem at all, or a clock/config one?
+    """
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(mint([user_principal()], **token_kwargs), CONFIG)
+
+    assert reason in str(exc.value)
+    assert f"verifier key fp={key_fingerprint(KEY)}" in str(exc.value)
+
+
+def test_a_token_with_no_readable_header_says_so():
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token("not-a-jwt-at-all", CONFIG)
+
+    message = str(exc.value)
+    assert "unparseable JOSE header" in message
+    assert f"verifier key fp={key_fingerprint(KEY)}" in message, (
+        "the trustworthy half is present even when the header is not"
+    )
+
+
+def test_a_hostile_kid_cannot_forge_log_lines():
+    """The JOSE header is attacker-controlled and reaches a log line.
+
+    A ``kid`` carrying a newline could otherwise append text that reads as a
+    separate log entry, so the field is escaped as well as bounded.
+    """
+    claims = {
+        "iss": ISSUER,
+        "aud": AUDIENCE,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60,
+        "principals": [user_principal()],
+    }
+    token = jwt.encode(
+        claims,
+        "a-different-key-that-is-also-32-bytes!!",
+        algorithm="HS256",
+        headers={"kid": "x\nWARNING - forged log line"},
+    )
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    message = str(exc.value)
+    assert "\n" not in message, "a newline in kid must not reach the log verbatim"
+    assert "\\n" in message, "it is escaped, not silently dropped"
+
+
+def test_a_long_kid_is_clipped():
+    claims = {
+        "iss": ISSUER,
+        "aud": AUDIENCE,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60,
+        "principals": [user_principal()],
+    }
+    token = jwt.encode(
+        claims,
+        "a-different-key-that-is-also-32-bytes!!",
+        algorithm="HS256",
+        headers={"kid": "K" * 500},
+    )
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    assert "…" in str(exc.value)
+    assert "K" * 100 not in str(exc.value)
