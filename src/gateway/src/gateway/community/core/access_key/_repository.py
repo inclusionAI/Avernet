@@ -48,8 +48,15 @@ class AccessKeyRepository(AccessKeyRegistry):
         access_key: str,
         tenant: str,
         expire_at: datetime,
+        creator: str = "",
+        modifier: str = "",
     ) -> None:
-        """Persist a freshly issued access key (``token`` = its JWT, the unique lookup key)."""
+        """Persist a freshly issued access key (``token`` = its JWT, the unique lookup key).
+
+        ``creator`` / ``modifier`` are the audit actor; the issuer fills both
+        with the registering caller (non-empty) so the NOT NULL columns carry a
+        real operator, never a fabricated default.
+        """
         with self._db.orm_session() as session:
             session.add(
                 AccessKeyRow(
@@ -57,5 +64,7 @@ class AccessKeyRepository(AccessKeyRegistry):
                     access_key=access_key,
                     tenant=tenant,
                     expire_at=expire_at,
+                    creator=creator,
+                    modifier=modifier,
                 )
             )

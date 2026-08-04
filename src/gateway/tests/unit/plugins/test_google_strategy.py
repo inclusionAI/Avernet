@@ -48,6 +48,18 @@ async def test_applicable_token_resolves_user_principal() -> None:
     assert result.subject.display_name == "Alice"
 
 
+async def test_no_default_tenant_leaves_tenant_none() -> None:
+    """With no default_tenant configured, a user principal carries tenant=None."""
+    transport = _userinfo_handler(_GOOGLE_BODY)
+    strat = GoogleUserStrategy(
+        token_header="x-avernet-google-token",
+        transport=transport,
+    )
+    result = await strat.build(_creds("google-access-token"))
+    assert isinstance(result, UserPrincipal)
+    assert result.tenant is None
+
+
 async def test_absent_token_returns_none() -> None:
     strat = GoogleUserStrategy(
         token_header="x-avernet-google-token",

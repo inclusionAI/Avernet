@@ -38,7 +38,9 @@ def registrar(db: DataSourcePlugin) -> AppRegistrar:
 async def test_register_persists_row_and_returns_record(
     registrar: AppRegistrar, db: DataSourcePlugin
 ) -> None:
-    issued = await registrar.register("X App", "org-1", "assistant", "t1")
+    issued = await registrar.register(
+        "X App", "org-1", "assistant", "t1", creator="alice"
+    )
     assert isinstance(issued, IssuedApp)
     assert isinstance(issued.id, int) and issued.id >= 1
     assert issued.app_name == "X App"
@@ -53,11 +55,22 @@ async def test_register_persists_row_and_returns_record(
     assert rec.app_name == "X App"
     assert rec.tenant == "t1"
 
+    # The registering caller is recorded as both creator and modifier (non-empty),
+    # never a fabricated default.
+    with db.orm_session() as session:
+        from gateway.community.core.app._orm import AppRow
+
+        row = session.get(AppRow, issued.id)
+        assert row.creator == "alice"
+        assert row.modifier == "alice"
+
 
 async def test_register_token_has_expected_claims_and_no_exp(
     registrar: AppRegistrar,
 ) -> None:
-    issued = await registrar.register("X App", "org-1", "assistant", "t1")
+    issued = await registrar.register(
+        "X App", "org-1", "assistant", "t1", creator="alice"
+    )
     decoded = jwt.decode(issued.token, "k", algorithms=["HS256"])
     assert decoded["typ"] == "app"
     assert decoded["sub"] == "X App"

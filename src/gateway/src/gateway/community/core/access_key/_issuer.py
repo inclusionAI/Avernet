@@ -48,7 +48,12 @@ class AccessKeyIssuer:
         self._clock = clock
 
     async def issue(
-        self, access_key: str, tenant: str, expire_at: datetime
+        self,
+        access_key: str,
+        tenant: str,
+        expire_at: datetime,
+        *,
+        creator: str,
     ) -> IssuedAccessKey:
         claims = {
             "iss": _ISSUER,
@@ -60,11 +65,14 @@ class AccessKeyIssuer:
             "jti": uuid.uuid4().hex,
         }
         token = await self._signer.sign_token(claims)
+        # The registering caller is both creator and modifier on issue.
         await self._repository.store(
             token=token,
             access_key=access_key,
             tenant=tenant,
             expire_at=expire_at,
+            creator=creator,
+            modifier=creator,
         )
         return IssuedAccessKey(
             access_key=access_key,

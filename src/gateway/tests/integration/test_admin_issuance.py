@@ -22,6 +22,7 @@ async def test_issue_access_key_via_http() -> None:
                 "access_key": "ak-http",
                 "tenant": "t",
                 "expire_at": "2027-01-01T00:00:00",
+                "creator": "admin",
             },
         )
     assert resp.status_code == 201
@@ -52,6 +53,7 @@ async def test_register_app_via_http() -> None:
                 "owners": "org-1",
                 "app_type": "assistant",
                 "tenant": "t",
+                "creator": "admin",
             },
         )
     assert resp.status_code == 201
@@ -117,6 +119,7 @@ async def test_issuance_failure_returns_500() -> None:
                 "access_key": "x",
                 "tenant": "t",
                 "expire_at": "2027-01-01T00:00:00",
+                "creator": "admin",
             },
         )
     assert resp.status_code == 500
