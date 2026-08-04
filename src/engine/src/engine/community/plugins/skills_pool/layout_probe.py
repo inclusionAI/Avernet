@@ -732,10 +732,7 @@ def inspect_runtime_layout(
             )
         if active_marker["activation_state"] == "active":
             retired_bridges = [("local", layout.local_bridge)]
-            if engine in {"openclaw", "claude_code"} and not (
-                engine == "openclaw"
-                and effective_repo_delivery is RepoDelivery.DOWNLOAD
-            ):
+            if layout.repo_bridge.is_relative_to(layout.active_root):
                 retired_bridges.append(("repo", layout.repo_bridge))
             for bridge_name, bridge_path in retired_bridges:
                 if bridge_path.exists() or bridge_path.is_symlink():
