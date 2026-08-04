@@ -44,7 +44,6 @@ router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
-
 def _tags(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(tag) for tag in value]
@@ -122,6 +121,10 @@ async def get_skill(
     status_code=201,
     response_model=Envelope[SkillUpload],
     responses={
+        200: {
+            "model": Envelope[SkillUpload],
+            "description": "Same-name Local Skill replaced successfully.",
+        },
         413: {
             "model": ErrorEnvelope,
             "description": "ZIP package exceeds an upload limit.",
