@@ -74,29 +74,31 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Depends on:** Task 4
 - **Note:** protocol.py and README.md change together in one commit, per spec (g).
 
-## Task 6: Test enqueue dedup, opt-out, and scoping
+## Task 6 `[x]`: Test enqueue dedup, opt-out, and scoping
 - **Goal:** Cover spec (g) cases 1–4 plus the opt-out regression guard.
 - **Files:** `tests/community/plugins/test_task_queue_repository.py`
 - **Done when:**
   - [x] The `_enqueue` helper unwraps `.record` so the **22 existing call sites stay untouched**; a separate `_enqueue_result` helper returns the full `EnqueueResult` for new tests. *(Landed in Task 4 — see its note.)*
-  - [ ] Duplicate keyed enqueue returns the existing record with `created=False` and inserts no second row (row count asserted).
-  - [ ] Multiple `NULL` keys coexist — the relied-upon engine property, asserted explicitly.
-  - [ ] The same key under a different `task_type` does not collide.
-  - [ ] The same key under a different `env` does not collide.
-  - [ ] An un-keyed enqueue returns `created=True` with both key columns `NULL`.
-  - [ ] A keyed enqueue writes the same value to both columns.
+  - [x] Duplicate keyed enqueue returns the existing record with `created=False` and inserts no second row (row count asserted).
+  - [x] Multiple `NULL` keys coexist — the relied-upon engine property, asserted explicitly.
+  - [x] The same key under a different `task_type` does not collide.
+  - [x] The same key under a different `env` does not collide.
+  - [x] An un-keyed enqueue returns `created=True` with both key columns `NULL`.
+  - [x] A keyed enqueue writes the same value to both columns.
 - **Depends on:** Task 4
 
-## Task 7: Test key release, retention, and error handling
+## Task 7 `[x]`: Test key release, retention, and error handling
 - **Goal:** Cover spec (g) cases 5–8 — the invariant that makes active-only correct.
 - **Files:** `tests/community/plugins/test_task_queue_repository.py`
 - **Done when:**
-  - [ ] Parametrized over all four terminal paths (`complete`, `fail`, `reschedule`-overshoot, claim-path `TIMED_OUT`): the key is released **and** re-enqueue on the same key then succeeds with `created=True`.
-  - [ ] `reschedule` back to `PENDING` **retains** the key, and a re-enqueue on it still returns `created=False`.
-  - [ ] An unrelated `IntegrityError` propagates rather than being read as a duplicate.
-  - [ ] The session is usable after a caught `IntegrityError` (a subsequent enqueue on the same repo succeeds).
-  - [ ] `_is_active_idem_conflict` is unit-tested against both the MySQL/OceanBase and SQLite message forms, without needing a MySQL instance.
+  - [x] Parametrized over all four terminal paths (`complete`, `fail`, `reschedule`-overshoot, claim-path `TIMED_OUT`): the key is released **and** re-enqueue on the same key then succeeds with `created=True`.
+  - [x] `reschedule` back to `PENDING` **retains** the key, and a re-enqueue on it still returns `created=False`. Also asserted for a `RUNNING` task.
+  - [x] An unrelated `IntegrityError` propagates rather than being read as a duplicate.
+  - [x] The session is usable after a caught `IntegrityError` (a subsequent enqueue on the same repo succeeds).
+  - [x] `_is_active_idem_conflict` is unit-tested against both the MySQL/OceanBase and SQLite message forms, without needing a MySQL instance.
+  - [x] Added beyond the plan, to close the changed-line coverage gate: the insert/re-`SELECT` race where the holder goes terminal in the window (the retry path), the two-attempt ceiling raising, and the past-deadline-but-unscanned edge documented as current behavior.
 - **Depends on:** Tasks 3, 4
+- **Note:** These tests were the fix for the CI changed-line coverage gate — the keyed insert path and `_is_active_idem_conflict` were entirely uncovered, putting changed-line coverage at 56.25% against an 80% minimum. Module coverage went 81% → 98%; the two lines still uncovered (`_now_plus`'s mysql branch, `claim_batch`'s `limit <= 0` guard) are pre-existing and outside this PR's diff.
 
 ## Task 8: Verify spec acceptance
 - **Goal:** Confirm every acceptance criterion in `spec.md` holds.
