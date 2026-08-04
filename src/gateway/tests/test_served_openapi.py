@@ -130,10 +130,9 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     # REL qualified the collaboration messages/ws exemption by plane: only the
     # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
     # HTTP GET operation on the same path keeps the user requirement.
-    assert (
-        paths["/openapi/v1/collaboration/messages/ws"]["get"]["x-avernet-security"]
-        == {"user": "required"}
-    )
+    assert paths["/openapi/v1/collaboration/messages/ws"]["get"][
+        "x-avernet-security"
+    ] == {"user": "required"}
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "tags"
     ] == ["Collaboration / Sessions"]

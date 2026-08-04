@@ -100,7 +100,7 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert requirement[PrincipalType.USER] is Presence.REQUIRED
 
     websocket_requirement = security.resolve(
-        "GET", "/openapi/v1/collaboration/messages/ws"
+        "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"
     )
     assert websocket_requirement == {}
 

@@ -259,7 +259,7 @@ def test_bcn_session_websocket_relays_verbatim_without_forged_identity() -> None
     assert "x-avernet-principal" not in {
         name.lower(): value for name, value in request.headers.items()
     }
-    assert auth.calls == [("GET", "/openapi/v1/collaboration/messages/ws")]
+    assert auth.calls == [("WEBSOCKET", "/openapi/v1/collaboration/messages/ws")]
 
 
 def test_an_encoded_target_is_not_decoded_on_the_way_through() -> None:
