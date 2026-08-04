@@ -645,6 +645,7 @@ class DefaultPublishService(PublishService):
             bot_record=bot,
             batch_records=batch_records,
             operator=operator,
+            publish_config=config,
         )
 
         # Step 6: Return publish response
@@ -887,6 +888,7 @@ class DefaultPublishService(PublishService):
         bot_record: BotRecord,
         batch_records: list[PublishBatchRecord],
         operator: str,
+        publish_config: PublishConfig | None = None,
     ) -> None:
         """Pre-create device-level PublishRecordRecord entries at create_publish time.
 
@@ -1007,6 +1009,16 @@ class DefaultPublishService(PublishService):
 
             bot_config = bot_record.config
 
+            # Prefer deploy_config from this Scale Publish, then fall back
+            # to Bot's persisted config, then to template defaults.
+            effective_deploy_config = (
+                publish_config.deploy_config
+                if publish_config and publish_config.deploy_config
+                else bot_config.deploy_config
+                if bot_config
+                else None
+            )
+
             total_new_devices = sum(b.batch_capacity for b in batch_records)
 
             event_type = PublishEventType.CREATE.value
@@ -1021,7 +1033,7 @@ class DefaultPublishService(PublishService):
                     operator=operator,
                     extra_config=DeviceConfig(
                         template_uuid=bot_record.template_uuid,
-                        deploy_config=bot_config.deploy_config if bot_config else None,
+                        deploy_config=effective_deploy_config,
                     ),
                 )
                 device = self._device_service.create_device(

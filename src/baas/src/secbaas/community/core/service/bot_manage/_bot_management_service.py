@@ -32,7 +32,11 @@ from secbaas.community.api.bot_manage import (
     UpdateDevicesResponse,
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
-from secbaas.community.api.device_manage import DeviceInfo, DeviceListResponse
+from secbaas.community.api.device_manage import (
+    DeployConfig,
+    DeviceInfo,
+    DeviceListResponse,
+)
 from secbaas.community.api.health_check.bot import (
     BotHealthCheckerService as BotHealthCheckerServiceProtocol,
 )
@@ -98,6 +102,26 @@ def resolve_callback_timeout(
         "System config repo is not available, use the DEFAULT_CALLBACK_TIMEOUT_SECONDS"
     )
     return DEFAULT_CALLBACK_TIMEOUT_SECONDS
+
+
+def merge_deploy_config(
+    current: DeployConfig | None,
+    override: DeployConfig | dict,
+) -> DeployConfig:
+    """Merge override fields into current deploy_config at field level.
+
+    Only non-None fields from ``override`` replace corresponding fields
+    in ``current``. This prevents a partial override (e.g. only
+    docker_image) from zeroing out unrelated fields (envs, mount_points,
+    resource_spec, etc.) that already exist on the current config.
+    """
+    current_data = current.model_dump(exclude_none=True) if current else {}
+    override_data = (
+        override.model_dump(exclude_none=True)
+        if isinstance(override, DeployConfig)
+        else override
+    )
+    return DeployConfig.model_validate({**current_data, **override_data})
 
 
 class DefaultBotManagementService(BotManageService):
@@ -785,7 +809,10 @@ class DefaultBotManagementService(BotManageService):
             if bot_config.share_policy is not None:
                 existing_config.share_policy = bot_config.share_policy
             if bot_config.deploy_config is not None:
-                existing_config.deploy_config = bot_config.deploy_config
+                existing_config.deploy_config = merge_deploy_config(
+                    existing_config.deploy_config,
+                    bot_config.deploy_config,
+                )
             if bot_config.entity_id:
                 existing_config.entity_id = bot_config.entity_id
             if bot_config.entity_type:
@@ -922,7 +949,10 @@ class DefaultBotManagementService(BotManageService):
             if bot_config.share_policy is not None:
                 stored_config.share_policy = bot_config.share_policy
             if bot_config.deploy_config is not None:
-                stored_config.deploy_config = bot_config.deploy_config
+                stored_config.deploy_config = merge_deploy_config(
+                    stored_config.deploy_config,
+                    bot_config.deploy_config,
+                )
             if bot_config.entity_id:
                 stored_config.entity_id = bot_config.entity_id
             if bot_config.entity_type:
@@ -1180,7 +1210,10 @@ class DefaultBotManagementService(BotManageService):
             if config.share_policy is not None:
                 stored_config.share_policy = config.share_policy
             if config.deploy_config is not None:
-                stored_config.deploy_config = config.deploy_config
+                stored_config.deploy_config = merge_deploy_config(
+                    stored_config.deploy_config,
+                    config.deploy_config,
+                )
             if config.entity_id:
                 stored_config.entity_id = config.entity_id
             if config.entity_type:
