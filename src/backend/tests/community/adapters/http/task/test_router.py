@@ -426,3 +426,11 @@ def test_router_registers_claim_release_routes():
     paths = {getattr(r, "path", None) for r in router.routes}
     assert "/api/tasks/{task_id}/nodes/{node_id}/claim" in paths
     assert "/api/tasks/{task_id}/nodes/{node_id}/release" in paths
+
+
+def test_app_registers_illegal_transition_409_handler():
+    """Production app.py must register the IllegalTransitionError→409 handler
+    (the route tests use a mirror app; this guards the real registration)."""
+    from agentclaw.community.adapters.http.app import app
+    from agentclaw.community.core.task.domain.state_machine import IllegalTransitionError
+    assert IllegalTransitionError in app.exception_handlers
