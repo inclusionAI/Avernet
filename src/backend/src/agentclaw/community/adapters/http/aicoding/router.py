@@ -87,6 +87,32 @@ def _get_bindings_path(
     return bot_engine_dir / "workspace" / BINDINGS_FILE_NAME
 
 
+def _require_bindings_owner(
+    entity_type: str,
+    entity_id: str,
+    bot_id: str,
+    operator_id: str,
+    bot_repo: BotRepository,
+) -> dict[str, Any]:
+    """Require the authenticated caller to own the requested Bot."""
+    bot = bot_repo.get_by_id_and_owner(bot_id, operator_id)
+    if not bot:
+        log.warning(
+            "[aicoding.bindings] access denied: operator=%s, entity=%s/%s, bot=%s",
+            operator_id, entity_type, entity_id, bot_id,
+        )
+        raise HTTPException(status_code=404, detail="Bot not found or no permission")
+
+    if bot.get("entity_type") != entity_type or bot.get("entity_id") != entity_id:
+        log.warning(
+            "[aicoding.bindings] entity mismatch: operator=%s, entity=%s/%s, bot=%s",
+            operator_id, entity_type, entity_id, bot_id,
+        )
+        raise HTTPException(status_code=404, detail="Bot not found or no permission")
+
+    return bot
+
+
 async def _read(file_path: Path, bot_id: str, owner_id: str, bot_repo, resolver, dispatcher) -> str:
     try:
         device_provider, sandbox_id = device_info_lookup.get_device_info(bot_id, owner_id, bot_repo)
@@ -129,27 +155,29 @@ async def get_bot_bindings(
     entity_type: str,
     entity_id: str,
     bot_id: str,
-    user_id: Optional[str] = Query(None, description="Operator user ID; defaults to current user"),
     ctx: RequestContext = Depends(get_request_context),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
 ) -> AiCodingBindingsResponse:
-    operator_id = user_id or ctx.user_id
-    log.info(
-        f"[aicoding.get_bot_bindings] operator={operator_id}, entity={entity_type}/{entity_id}, bot={bot_id}"
-    )
+    operator_id = ctx.user_id
     _validate_entity_type(entity_type)
-    file_path = _get_bindings_path(entity_type, entity_id, bot_id, path_factory)
+    bot = _require_bindings_owner(entity_type, entity_id, bot_id, operator_id, bot_repo)
+    authorized_entity_type = bot["entity_type"]
+    authorized_entity_id = bot["entity_id"]
+    log.info(
+        f"[aicoding.get_bot_bindings] operator={operator_id}, entity={authorized_entity_type}/{authorized_entity_id}, bot={bot_id}"
+    )
+    file_path = _get_bindings_path(authorized_entity_type, authorized_entity_id, bot_id, path_factory)
     content = await _read(file_path, bot_id, operator_id, bot_repo, resolver, device_fs_dispatcher)
     if not content:
         content = DEFAULT_BINDINGS_CONTENT
     return AiCodingBindingsResponse(
         success=True,
         file_type=BINDINGS_FILE_NAME,
-        entity_type=entity_type,
-        entity_id=entity_id,
+        entity_type=authorized_entity_type,
+        entity_id=authorized_entity_id,
         bot_id=bot_id,
         content=content,
         file_path=str(file_path),
@@ -165,27 +193,29 @@ async def update_bot_bindings(
     entity_id: str,
     bot_id: str,
     request: AiCodingBindingsContent,
-    user_id: Optional[str] = Query(None, description="Operator user ID; defaults to current user"),
     ctx: RequestContext = Depends(get_request_context),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(DeviceFilesystemDispatcher),
 ) -> AiCodingBindingsUpdateResponse:
-    operator_id = user_id or ctx.user_id
-    log.info(
-        f"[aicoding.update_bot_bindings] operator={operator_id}, entity={entity_type}/{entity_id}, bot={bot_id}"
-    )
+    operator_id = ctx.user_id
     _validate_entity_type(entity_type)
     _validate_json(request.content)
-    file_path = _get_bindings_path(entity_type, entity_id, bot_id, path_factory)
+    bot = _require_bindings_owner(entity_type, entity_id, bot_id, operator_id, bot_repo)
+    authorized_entity_type = bot["entity_type"]
+    authorized_entity_id = bot["entity_id"]
+    log.info(
+        f"[aicoding.update_bot_bindings] operator={operator_id}, entity={authorized_entity_type}/{authorized_entity_id}, bot={bot_id}"
+    )
+    file_path = _get_bindings_path(authorized_entity_type, authorized_entity_id, bot_id, path_factory)
     await _write(file_path, request.content, bot_id, operator_id, bot_repo, resolver, device_fs_dispatcher)
     return AiCodingBindingsUpdateResponse(
         success=True,
-        message=f"{entity_type}/{entity_id}/bot/{bot_id} {BINDINGS_FILE_NAME} updated successfully",
+        message=f"{authorized_entity_type}/{authorized_entity_id}/bot/{bot_id} {BINDINGS_FILE_NAME} updated successfully",
         file_type=BINDINGS_FILE_NAME,
-        entity_type=entity_type,
-        entity_id=entity_id,
+        entity_type=authorized_entity_type,
+        entity_id=authorized_entity_id,
         bot_id=bot_id,
         file_path=str(file_path),
     )

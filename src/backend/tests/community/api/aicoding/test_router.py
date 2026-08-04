@@ -39,7 +39,19 @@ def arca_device_fs():
 
 
 @pytest.fixture
-def client(mock_ctx, fake_path_factory, arca_device_fs):
+def mock_bot_repo():
+    repo = MagicMock()
+    repo.get_by_id_and_owner.return_value = {
+        "bot_id": "abc",
+        "owner_id": "user_001",
+        "entity_type": "staff",
+        "entity_id": "emp001",
+    }
+    return repo
+
+
+@pytest.fixture
+def client(mock_ctx, fake_path_factory, arca_device_fs, mock_bot_repo):
     from fastapi_injector import attach_injector
     from injector import Injector, Module
     from agentclaw.community.core.bot_management.repository.protocol import BotRepository
@@ -54,7 +66,7 @@ def client(mock_ctx, fake_path_factory, arca_device_fs):
 
     class _M(Module):
         def configure(self, binder):
-            binder.bind(BotRepository, to=MagicMock())
+            binder.bind(BotRepository, to=mock_bot_repo)
             binder.bind(WorkspacePathFactory, to=fake_path_factory)
             binder.bind(DeviceContextResolver, to=resolver)
             binder.bind(DeviceFilesystemDispatcher, to=dispatcher)
@@ -170,3 +182,82 @@ class TestArcaBranchSelection:
         args, _ = arca_device_fs.write_file.call_args
         assert args[0].endswith("aicoding/workspace/aicoding.bindings.json")
         assert args[1] == body_str.encode("utf-8")
+
+
+# ==================== 8.3 Bindings 授权测试 ====================
+
+
+class TestBindingsAuthorization:
+    def test_get_query_user_id_cannot_override_authenticated_user(self, client, mock_bot_repo):
+        """A caller-supplied user_id must not replace the authenticated user."""
+        async def fake_read(path, bot_id, owner_id, *a, **kw):
+            assert owner_id == "user_001"
+            return DEFAULT
+
+        with patch("agentclaw.community.adapters.http.aicoding.router._read", new=fake_read):
+            resp = client.get(URL_TEMPLATE + "?user_id=victim_398718")
+
+        assert resp.status_code == 200
+        mock_bot_repo.get_by_id_and_owner.assert_called_once_with("abc", "user_001")
+
+    def test_put_query_user_id_cannot_override_authenticated_user(self, client, mock_bot_repo):
+        """PUT must also use the authenticated user for authorization and I/O."""
+        async def fake_write(path, content, bot_id, owner_id, *a, **kw):
+            assert owner_id == "user_001"
+
+        with patch("agentclaw.community.adapters.http.aicoding.router._write", new=fake_write):
+            resp = client.put(
+                URL_TEMPLATE + "?user_id=victim_398718",
+                json={"content": "{}"},
+            )
+
+        assert resp.status_code == 200
+        mock_bot_repo.get_by_id_and_owner.assert_called_once_with("abc", "user_001")
+
+    def test_get_rejects_non_owner(self, client, mock_bot_repo):
+        mock_bot_repo.get_by_id_and_owner.return_value = None
+
+        with patch(
+            "agentclaw.community.adapters.http.aicoding.router._read", new=AsyncMock(),
+        ) as read:
+            resp = client.get(URL_TEMPLATE)
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Bot not found or no permission"
+        mock_bot_repo.get_by_id_and_owner.assert_called_once_with("abc", "user_001")
+        read.assert_not_awaited()
+
+    def test_put_rejects_non_owner(self, client, mock_bot_repo):
+        mock_bot_repo.get_by_id_and_owner.return_value = None
+
+        with patch(
+            "agentclaw.community.adapters.http.aicoding.router._write", new=AsyncMock(),
+        ) as write:
+            resp = client.put(URL_TEMPLATE, json={"content": "{}"})
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Bot not found or no permission"
+        mock_bot_repo.get_by_id_and_owner.assert_called_once_with("abc", "user_001")
+        write.assert_not_awaited()
+
+    def test_get_rejects_entity_id_mismatch(self, client, mock_bot_repo):
+        mock_bot_repo.get_by_id_and_owner.return_value["entity_id"] = "another_entity"
+
+        with patch(
+            "agentclaw.community.adapters.http.aicoding.router._read", new=AsyncMock(),
+        ) as read:
+            resp = client.get(URL_TEMPLATE)
+
+        assert resp.status_code == 404
+        read.assert_not_awaited()
+
+    def test_put_rejects_entity_type_mismatch(self, client, mock_bot_repo):
+        mock_bot_repo.get_by_id_and_owner.return_value["entity_type"] = "team"
+
+        with patch(
+            "agentclaw.community.adapters.http.aicoding.router._write", new=AsyncMock(),
+        ) as write:
+            resp = client.put(URL_TEMPLATE, json={"content": "{}"})
+
+        assert resp.status_code == 404
+        write.assert_not_awaited()
