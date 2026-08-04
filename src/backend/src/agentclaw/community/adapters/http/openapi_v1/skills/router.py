@@ -38,6 +38,9 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.skill_center.errors import LocalSkillInvalidPackageError
 from agentclaw.community.di import Injected
 
@@ -229,6 +232,17 @@ async def deactivate_skill(
 
 
 @router.delete("/{skill_id}", response_model=Envelope[Deleted])
-async def delete_skill(skill_id: str, principal: PrincipalDep) -> Envelope[Deleted]:
-    """Delete one Inactive Local Skill selected by its Skill ID."""
-    raise NotImplementedError
+@envelope_errors
+async def delete_skill(
+    skill_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    delete_service: LocalSkillDeleteServiceProtocol = Injected(
+        LocalSkillDeleteServiceProtocol
+    ),
+) -> Envelope[Deleted]:
+    """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
+    await delete_service.delete_local_skill(
+        skill_id=skill_id, actor_id=caller_owner_id(principal)
+    )
+    return envelope(Deleted(), request)

@@ -20,6 +20,16 @@ class LocalSkillCleanupRepository(Protocol):
         requires_runtime_restore: bool,
     ) -> int | None: ...
 
+    def record_repair_required(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+        package_locator: str,
+    ) -> int | None: ...
+
     def list_pending(self, *, env: str, owner_id: str, bot_id: str) -> list[dict]: ...
 
     def mark_cleaned(
