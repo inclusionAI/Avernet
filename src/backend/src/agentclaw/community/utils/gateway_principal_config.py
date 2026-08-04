@@ -60,7 +60,9 @@ re-read, so rotating the shared secret requires a restart on both sides.
 from __future__ import annotations
 
 from agentclaw.community.core.gateway_principal import (
+    MIN_SIGNING_KEY_BYTES,
     PrincipalVerifierConfig,
+    is_weak_signing_key,
     key_fingerprint,
 )
 from agentclaw.community.log import get_logger
@@ -147,6 +149,22 @@ def init_principal_verifier_config(
             _AUDIENCE,
             _ISSUER,
         )
+        if is_weak_signing_key(signing_key):
+            # The line above publishes a fingerprint of this key, and that is
+            # only safe while the key is strong — against a guessable one a
+            # truncated digest confirms a dictionary guess offline. Warn rather
+            # than withhold the fingerprint: the diagnostic matters most on a
+            # misconfigured deployment, and the real remedy is a better secret.
+            logger.warning(
+                "the gateway principal signing key is %d bytes, below the "
+                "%d-byte minimum for HMAC-SHA256 (RFC 7518 §3.2). Replace it "
+                "with at least %d random bytes: a guessable shared secret can "
+                "be recovered from the fingerprint logged above, and whoever "
+                "recovers it can forge any caller identity",
+                len(signing_key.encode("utf-8")),
+                MIN_SIGNING_KEY_BYTES,
+                MIN_SIGNING_KEY_BYTES,
+            )
     else:
         logger.warning(
             "gateway principal verification has no signing key — every "

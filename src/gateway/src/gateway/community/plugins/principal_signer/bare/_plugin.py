@@ -19,9 +19,13 @@ failure on another host that named neither this component nor this cause.
 
 So a missing key now fails closed, mirroring the backend's contract exactly:
 
-- in ``pre``/``prod`` the process refuses to boot — see ``strict`` on
-  :func:`load_signer_config`. A gateway that cannot sign is broken, not
-  degraded, and the rollout should fail rather than a ticket land later.
+- in a strict profile the process refuses to boot — see ``strict`` on
+  :func:`load_signer_config`, and ``_STRICT_ENVS`` in
+  ``bootstrap/_principal_signer.py`` for which ``SERVER_ENV`` spellings those
+  are (``prepub`` and ``gray`` are aliases the backend folds into ``pre`` and
+  ``prod``, so both sides must honour them or the contract splits). A gateway
+  that cannot sign is broken, not degraded, and the rollout should fail rather
+  than a ticket land later.
 - everywhere else it boots with an empty key and :meth:`BarePrincipalSigner.sign`
   raises on every attempt. The forwarder already answers ``500 principal
   signing failed`` and logs the traceback, so the failure names the component
@@ -45,6 +49,24 @@ from gateway.community.spi.secret_resolver import SecretResolver
 # What a fingerprint of no key at all reads as. Mirrors the backend so the two
 # log lines are comparable even in the degenerate case.
 _UNSET_FINGERPRINT = "unset"
+
+# RFC 7518 §3.2: an HMAC key for SHA-256 must be at least as long as the hash
+# output. Mirrors the backend's constant of the same name — this is one shared
+# secret, so both ends judge its strength by the same rule.
+MIN_SIGNING_KEY_BYTES = 32
+
+
+def is_weak_signing_key(key: str) -> bool:
+    """Whether ``key`` is below the strength the shared-secret contract assumes.
+
+    Length is a coarse proxy for entropy — it cannot tell 32 random bytes from
+    32 repetitions of ``a`` — but the keys that turn up short are overwhelmingly
+    the human-chosen ones, so it catches the case that matters. Measured in
+    bytes, not characters, because that is what HMAC consumes — a non-ASCII
+    passphrase carries more bytes than it has characters, and counting
+    characters would reject a key the algorithm is content with.
+    """
+    return 0 < len(key.encode("utf-8")) < MIN_SIGNING_KEY_BYTES
 
 
 class PrincipalSigningKeyMissingError(RuntimeError):
@@ -70,11 +92,16 @@ def key_fingerprint(key: str) -> str:
     the same inputs — change the algorithm here alone and those tests fail
     rather than the comparison quietly becoming meaningless.
 
-    Safe to log: SHA-256 is not reversible and the shared key is required to be
-    at least 32 random bytes, so a truncated digest is no practical
-    brute-force oracle for someone who can already read the logs. Safe to log
-    is not safe to *serve* — this must never appear on an HTTP endpoint, where
-    it would let an unauthenticated caller confirm a guessed key.
+    Safe to log **for a key of the mandated strength**, and the qualifier is the
+    argument: SHA-256 is not reversible, so against ≥32 random bytes a truncated
+    digest is no practical brute-force oracle for someone who can already read
+    the logs. Against a short or human-chosen key it *is* one, and confirming
+    the shared secret means being able to forge identity tokens. Nothing
+    enforces that strength, so :func:`is_weak_signing_key` gates a boot warning
+    rather than the precondition being merely asserted.
+
+    Safe to log is not safe to *serve* — this must never appear on an HTTP
+    endpoint, where it would let an unauthenticated caller confirm a guessed key.
     """
     if not key:
         return _UNSET_FINGERPRINT
@@ -246,4 +273,20 @@ def load_signer_config(
         config.issuer,
         config.ttl_seconds,
     )
+    if is_weak_signing_key(config.signing_key):
+        # The line above publishes a fingerprint of this key, which is only
+        # safe while the key is strong — against a guessable one a truncated
+        # digest confirms a dictionary guess offline. Warn rather than withhold
+        # the fingerprint: the diagnostic matters most on a misconfigured
+        # deployment, and the real remedy is a better secret.
+        get_logger("principal_signer").warning(
+            "the principal signing key is %d bytes, below the %d-byte minimum "
+            "for HMAC-SHA256 (RFC 7518 §3.2). Replace it with at least %d "
+            "random bytes: a guessable shared secret can be recovered from the "
+            "fingerprint logged above, and whoever recovers it can forge any "
+            "caller identity to every upstream.",
+            len(config.signing_key.encode("utf-8")),
+            MIN_SIGNING_KEY_BYTES,
+            MIN_SIGNING_KEY_BYTES,
+        )
     return config

@@ -17,7 +17,11 @@ import logging
 
 import pytest
 
-from agentclaw.community.core.gateway_principal import key_fingerprint
+from agentclaw.community.core.gateway_principal import (
+    MIN_SIGNING_KEY_BYTES,
+    is_weak_signing_key,
+    key_fingerprint,
+)
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.utils.gateway_principal_config import (
     get_principal_verifier_config,
@@ -254,3 +258,57 @@ def test_two_deployments_holding_the_same_key_log_the_same_fingerprint():
     """The property the whole diagnostic rests on."""
     assert key_fingerprint(KEY) == key_fingerprint(KEY)
     assert key_fingerprint(KEY) != key_fingerprint(KEY + "-rotated")
+
+
+# ── weak keys ────────────────────────────────────────────────────────────────
+#
+# The boot line publishes a fingerprint, and that is only safe while the key is
+# strong: against a guessable one a truncated digest confirms a dictionary guess
+# offline, and confirming the shared secret means forging any caller identity.
+# Nothing enforces the strength, so it is warned about rather than assumed.
+
+
+WEAK_KEY = "hunter2"
+
+
+def test_a_weak_key_warns_but_still_reports_its_fingerprint(caplog):
+    """Withholding the fingerprint would remove the diagnostic exactly when a
+    deployment is most misconfigured. The remedy is a better secret."""
+    with caplog.at_level(logging.INFO):
+        init_principal_verifier_config(
+            _FakeResolver(_Secret(WEAK_KEY)), SECRET_NAME, strict=False
+        )
+
+    line = "\n".join(r.getMessage() for r in caplog.records)
+    assert f"key fp={key_fingerprint(WEAK_KEY)}" in line, "still diagnosable"
+    assert "below the 32-byte minimum" in line
+    assert "forge any caller identity" in line, "says why it matters"
+    assert WEAK_KEY not in line, "and never prints the key itself"
+
+
+def test_a_strong_key_does_not_warn(caplog):
+    with caplog.at_level(logging.WARNING):
+        init_principal_verifier_config(
+            _FakeResolver(_Secret(KEY)), SECRET_NAME, strict=False
+        )
+
+    assert "minimum" not in "\n".join(r.getMessage() for r in caplog.records)
+
+
+def test_a_weak_key_still_configures_the_verifier(caplog):
+    """A warning, not a refusal: rejecting a short key here would deny every
+    request on a deployment that was at least partly working, which is a
+    bigger change than this diagnostic is entitled to make."""
+    init_principal_verifier_config(
+        _FakeResolver(_Secret(WEAK_KEY)), SECRET_NAME, strict=False
+    )
+
+    assert get_principal_verifier_config().signing_key == WEAK_KEY
+
+
+def test_the_strength_threshold_is_shared_with_the_gateway():
+    """Both ends judge one shared secret by one rule."""
+    assert MIN_SIGNING_KEY_BYTES == 32
+    assert is_weak_signing_key("a" * 31)
+    assert not is_weak_signing_key("a" * 32)
+    assert not is_weak_signing_key(""), "absent is its own state, warned elsewhere"

@@ -11,12 +11,15 @@ from dataclasses import dataclass
 import jwt
 import pytest
 
+from gateway.community.bootstrap._principal_signer import build_principal_signer
 from gateway.community.config import PrincipalSignerPluginConfig
 from gateway.community.logger import get_logger
 from gateway.community.plugins.principal_signer.bare import (
+    MIN_SIGNING_KEY_BYTES,
     BarePrincipalSigner,
     PrincipalSignerConfig,
     PrincipalSigningKeyMissingError,
+    is_weak_signing_key,
     key_fingerprint,
     load_signer_config,
 )
@@ -193,6 +196,17 @@ def _captured(level: int = logging.INFO):
     finally:
         logger.removeHandler(handler)
         logger.setLevel(previous)
+
+
+class _UserConfigStub:
+    """Only ``principal_signer`` is read by the composition root under test."""
+
+    def __init__(self, signer: PrincipalSignerPluginConfig) -> None:
+        self.principal_signer = signer
+
+
+def _user_config_with_signer() -> _UserConfigStub:
+    return _UserConfigStub(_block())
 
 
 def _lines(records: list[logging.LogRecord]) -> str:
@@ -374,3 +388,100 @@ def test_no_committed_key_remains_in_the_module() -> None:
 
     assert "NOT-FOR-PROD" not in source
     assert not hasattr(_plugin, "_DEV_FALLBACK_KEY")
+
+
+# ── strict-profile aliases ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "server_env",
+    ["pre", "prepub", "prod", "gray", "PROD", " prepub "],
+    ids=["pre", "prepub", "prod", "gray", "uppercase", "padded"],
+)
+def test_strict_profiles_refuse_to_boot_without_a_key(
+    server_env: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``prepub`` and ``gray`` are aliases, not extras.
+
+    The backend does not compare ``SERVER_ENV`` raw — ``get_current_env`` folds
+    ``prepub`` into ``pre`` and ``gray`` into ``prod`` before gating its
+    verifier. ``scripts/app.sh`` exports ``SERVER_ENV=prepub`` for its supported
+    ``--env prepub``, so a raw comparison here would leave the backend refusing
+    to boot while this side booted and answered 500 per request — the two sides
+    disagreeing in precisely the profiles where the contract matters most.
+    """
+    monkeypatch.setenv("SERVER_ENV", server_env)
+
+    with pytest.raises(PrincipalSigningKeyMissingError):
+        build_principal_signer(
+            user_config=_user_config_with_signer(),
+            secret_resolver=_FakeResolver(None),
+        )
+
+
+@pytest.mark.parametrize("server_env", ["", "dev", "local", "test", "stable"])
+def test_non_strict_profiles_boot_without_a_key(
+    server_env: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SERVER_ENV", server_env)
+
+    signer = build_principal_signer(
+        user_config=_user_config_with_signer(),
+        secret_resolver=_FakeResolver(None),
+    )
+
+    assert signer is not None
+
+
+# ── weak keys ────────────────────────────────────────────────────────────────
+
+
+def test_a_short_key_is_flagged_as_weak() -> None:
+    assert is_weak_signing_key("envk")
+    assert is_weak_signing_key("a" * 31)
+
+
+def test_a_key_at_the_minimum_is_not_weak() -> None:
+    assert not is_weak_signing_key("a" * MIN_SIGNING_KEY_BYTES)
+
+
+def test_no_key_is_not_reported_as_weak() -> None:
+    """Absent is its own state, already covered by a louder message."""
+    assert not is_weak_signing_key("")
+
+
+def test_strength_is_measured_in_bytes_not_characters() -> None:
+    """HMAC consumes bytes, so bytes are what the RFC 7518 threshold counts.
+
+    The two units disagree for any non-ASCII key, and in this direction: 20
+    ``é`` is 20 characters but 40 UTF-8 bytes, so it clears a threshold that 20
+    ASCII characters does not. Counting characters would reject a key HMAC is
+    perfectly happy with.
+    """
+    assert len("é" * 20) == 20 and len(("é" * 20).encode("utf-8")) == 40
+    assert not is_weak_signing_key("é" * 20), "40 bytes clears the minimum"
+    assert is_weak_signing_key("a" * 20), "the same character count in ASCII does not"
+
+
+def test_a_weak_key_warns_but_still_reports_its_fingerprint() -> None:
+    """Withholding the fingerprint would remove the diagnostic exactly when a
+    deployment is most misconfigured. The remedy is a better secret, and the
+    warning says so."""
+    with _captured(logging.INFO) as records:
+        load_signer_config(_block(), _FakeResolver("envk"), strict=False)
+
+    line = _lines(records)
+    assert f"key fp={key_fingerprint('envk')}" in line, "still diagnosable"
+    assert "below the 32-byte minimum" in line
+    assert "forge any caller identity" in line, "says why it matters"
+
+
+def test_a_strong_key_does_not_warn() -> None:
+    with _captured(logging.WARNING) as records:
+        load_signer_config(
+            _block(),
+            _FakeResolver("a-shared-secret-of-at-least-32-bytes!!"),
+            strict=False,
+        )
+
+    assert "minimum" not in _lines(records)

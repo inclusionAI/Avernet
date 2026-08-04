@@ -23,11 +23,20 @@ from gateway.community.plugins.principal_signer.bare import (
 from gateway.community.spi.principal_signer import PrincipalSigner
 from gateway.community.spi.secret_resolver import SecretResolver
 
-# Deployment profiles that must have a real signing key. Read from the same
-# ``SERVER_ENV`` the config loader reads and gated on the same two values the
-# backend gates its verifier on, so one contract has one rule rather than a
-# per-side interpretation of it.
-_STRICT_ENVS = ("pre", "prod")
+# ``SERVER_ENV`` spellings that mean a deployment which must have a real signing
+# key. Read from the same variable the config loader reads.
+#
+# The **aliases are load-bearing**, not defensive padding. The backend does not
+# compare ``SERVER_ENV`` raw: ``utils/env_utils.py::get_current_env`` folds
+# ``prepub`` into ``pre`` and ``gray`` into ``prod`` before gating its verifier
+# on the result. Both aliases are reachable — ``scripts/app.sh`` exports
+# ``SERVER_ENV=prepub`` for its supported ``--env prepub`` — and a raw
+# comparison here would silently split the two sides apart in exactly those
+# profiles: the backend refuses to boot without a key while the gateway boots
+# and answers 500 per request. That is the "one contract, one rule" claim
+# failing in the deployments that most need it, so the two mappings must stay in
+# step. Backend-side change here means a change there, and vice versa.
+_STRICT_ENVS = frozenset({"pre", "prepub", "prod", "gray"})
 
 
 def build_principal_signer(
@@ -43,12 +52,15 @@ def build_principal_signer(
     is handed.
 
     Raises:
-        PrincipalSigningKeyMissingError: in ``pre``/``prod`` with no key.
+        PrincipalSigningKeyMissingError: in a strict profile with no key —
+            ``pre``/``prepub``/``prod``/``gray``, matching what the backend
+            normalizes those spellings to.
     """
+    server_env = os.getenv("SERVER_ENV", "").strip().lower()
     return BarePrincipalSigner(
         load_signer_config(
             user_config.principal_signer,
             secret_resolver,
-            strict=os.getenv("SERVER_ENV", "").strip() in _STRICT_ENVS,
+            strict=server_env in _STRICT_ENVS,
         )
     )
