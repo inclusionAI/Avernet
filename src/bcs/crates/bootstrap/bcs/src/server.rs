@@ -1208,18 +1208,6 @@ fn outbound_url_guard_from_config(config: &BcsConfig) -> OutboundUrlGuard {
     OutboundUrlGuard::new(policy.block_private_networks, policy.allow_loopback)
 }
 
-fn secret_log_preview(value: &str) -> String {
-    let len = value.len();
-    let chars: Vec<char> = value.chars().collect();
-    if chars.len() > 8 {
-        let prefix: String = chars.iter().take(4).collect();
-        let suffix: String = chars[chars.len() - 4..].iter().collect();
-        format!("{prefix}…{suffix}(len={len})")
-    } else {
-        format!("<redacted>(len={len})")
-    }
-}
-
 fn gateway_principal_signing_key(material: Option<&str>) -> crate::Result<&str> {
     material
         .filter(|value| !value.trim().is_empty())
@@ -1247,18 +1235,36 @@ fn build_gateway_principal_verifier(
     Ok(Arc::new(verifier))
 }
 
+fn log_gateway_principal_signing_key_from_env(env: &str) {
+    info!(
+        source = "env",
+        env = %env,
+        "Resolved Gateway Principal signing key"
+    );
+}
+
+fn log_gateway_principal_signing_key_from_secret(secret_name: &str) {
+    info!(
+        source = "secret_access",
+        secret_name = %secret_name,
+        "Resolved Gateway Principal signing key"
+    );
+}
+
+fn log_group_session_signing_key_from_secret(secret_name: &str) {
+    info!(
+        source = "secret_access",
+        secret_name = %secret_name,
+        "Resolved group session WebSocket JWT signing key"
+    );
+}
+
 fn build_gateway_principal_verifier_from_process(
     config: &GatewayPrincipalConfig,
 ) -> crate::Result<Arc<dyn PrincipalVerifier>> {
     let material = std::env::var(&config.signing_key_env).ok();
-    if let Some(value) = material.as_deref().filter(|value| !value.trim().is_empty()) {
-        info!(
-            source = "env",
-            env = %config.signing_key_env,
-            signing_key = %secret_log_preview(value),
-            signing_key_len = value.len(),
-            "Resolved Gateway Principal signing key"
-        );
+    if material.as_deref().is_some_and(|value| !value.trim().is_empty()) {
+        log_gateway_principal_signing_key_from_env(&config.signing_key_env);
     }
     build_gateway_principal_verifier(config, material.as_deref())
 }
@@ -1280,13 +1286,7 @@ async fn build_gateway_principal_verifier_from_secret_access(
                 "Gateway Principal signing key secret '{secret_name}' is required"
             ))
         })?;
-        info!(
-            source = "secret_access",
-            secret_name = %secret_name,
-            signing_key = %secret_log_preview(&record.value),
-            signing_key_len = record.value.len(),
-            "Resolved Gateway Principal signing key"
-        );
+        log_gateway_principal_signing_key_from_secret(secret_name);
         return build_gateway_principal_verifier(config, Some(record.value.as_str()));
     }
 
@@ -1335,13 +1335,7 @@ async fn build_group_session_token_port(
             "group_session_ws.signing_key_secret '{secret_name}' must resolve to non-empty material"
         ))
     })?;
-    info!(
-        source = "secret_access",
-        secret_name = %secret_name,
-        signing_key = %secret_log_preview(&secret.value),
-        signing_key_len = secret.value.len(),
-        "Resolved group session WebSocket JWT signing key"
-    );
+    log_group_session_signing_key_from_secret(secret_name);
     Ok(Arc::new(tokens))
 }
 
@@ -1483,6 +1477,7 @@ mod gateway_principal_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn configured_invite_token_secret_is_preserved() {
         let mut config = BcsConfig::default();
         config.invite.token_secret = Some("configured-invite-secret".to_string());
@@ -1494,6 +1489,7 @@ mod gateway_principal_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn gateway_principal_material_must_be_explicit_and_non_blank() {
         for material in [None, Some(""), Some("   ")] {
             assert!(matches!(
@@ -1505,6 +1501,7 @@ mod gateway_principal_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn explicit_gateway_principal_material_is_accepted() {
         assert_eq!(
             gateway_principal_signing_key(Some("explicit-test-key"))
@@ -1514,13 +1511,61 @@ mod gateway_principal_tests {
     }
 
     #[test]
-    fn secret_log_preview_masks_secret_material() {
-        assert_eq!(secret_log_preview("abcd1234wxyz"), "abcd…wxyz(len=12)");
-        assert_eq!(secret_log_preview("short"), "<redacted>(len=5)");
-        assert_eq!(secret_log_preview(""), "<redacted>(len=0)");
+    #[serial_test::serial]
+    fn successful_secret_resolution_logs_do_not_include_key_material() {
+        use std::io::{self, Write};
+        use std::sync::Mutex as StdMutex;
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone)]
+        struct SharedWriter(Arc<StdMutex<Vec<u8>>>);
+
+        impl<'a> MakeWriter<'a> for SharedWriter {
+            type Writer = SharedWriter;
+
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        impl Write for SharedWriter {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().expect("capture logs").extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let captured = Arc::new(StdMutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(SharedWriter(captured.clone()))
+            .with_max_level(tracing::Level::INFO)
+            .finish();
+        let principal_key = "principal-secret-key-that-must-not-leak";
+        let group_key = "group-session-secret-key-that-must-not-leak";
+
+        tracing::subscriber::with_default(subscriber, || {
+            log_gateway_principal_signing_key_from_secret("principal-secret-name");
+            log_group_session_signing_key_from_secret("group-secret-name");
+        });
+
+        let logs = String::from_utf8(captured.lock().expect("capture logs").clone())
+            .expect("logs are utf8");
+        assert!(logs.contains("Resolved Gateway Principal signing key"));
+        assert!(logs.contains("Resolved group session WebSocket JWT signing key"));
+        assert!(logs.contains("principal-secret-name"));
+        assert!(logs.contains("group-secret-name"));
+        assert!(!logs.contains(principal_key));
+        assert!(!logs.contains(group_key));
+        assert!(!logs.contains("signing_key"));
+        assert!(!logs.contains("signing_key_len"));
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn gateway_principal_signing_key_can_come_from_secret_access() {
         let mut config = trust_config();
         config.signing_key_secret =
@@ -1543,6 +1588,7 @@ mod gateway_principal_tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
         for field in ["issuer", "audience", "key_id", "signing_key_env"] {
             let mut config = trust_config();
@@ -1561,6 +1607,7 @@ mod gateway_principal_tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn group_session_websocket_signing_key_is_required_and_non_empty() {
         let missing: Arc<dyn bcs_service_api::port::SecretAccessPort> =
             Arc::new(InMemorySecretAccess::new());
@@ -1592,6 +1639,7 @@ mod gateway_principal_tests {
     }
 
     #[tokio::test]
+    #[serial_test::serial]
     async fn explicit_group_session_websocket_signing_key_is_accepted() {
         let secret_material = "test-only-group-session-key-at-least-32-bytes";
         let config = GroupSessionWsConfig {
