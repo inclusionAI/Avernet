@@ -20,7 +20,7 @@ def test_shipped_config_loads_and_requires_user() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
-_SOCKET_PATH = "/openapi/v1/bots/messages/ARCA_x@0:20003/api/openclaw/ws"
+_SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
 
 
 def test_shipped_config_exempts_the_bot_socket_handshake() -> None:
@@ -38,7 +38,7 @@ def test_shipped_config_exempts_the_bot_socket_handshake() -> None:
 def test_the_socket_exemption_beats_the_bots_user_requirement() -> None:
     """It is nested inside an authenticated prefix and must win there.
 
-    Ranked by literal segment count: four to three. Were it the other way, the
+    Ranked by literal segment count: five to three. Were it the other way, the
     handshake would be challenged for an identity a browser cannot present.
     """
     raw = yaml.safe_load(_CONFIG.read_text())
@@ -47,6 +47,21 @@ def test_the_socket_exemption_beats_the_bots_user_requirement() -> None:
     bots = rs.resolve("WEBSOCKET", "/openapi/v1/bots/abc")
     assert bots is not None
     assert bots[PrincipalType.USER] is Presence.REQUIRED
+
+
+def test_the_socket_exemption_stops_at_the_ws_segment() -> None:
+    """It exempts the socket's own subtree, not the whole ``messages`` channel.
+
+    ``messages`` names a channel that HTTP endpoints are expected to grow under.
+    Anchoring the exemption one segment deeper keeps those endpoints behind the
+    user requirement on *every* plane, so a handshake is not a way to reach a
+    sibling path unauthenticated.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    sibling = rs.resolve("WEBSOCKET", "/openapi/v1/bots/messages/history")
+    assert sibling is not None
+    assert sibling[PrincipalType.USER] is Presence.REQUIRED
 
 
 def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
