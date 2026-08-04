@@ -78,6 +78,7 @@ class DispatchResult:
     run_mode: RunMode
     accept_token: str = ""
     dispatched_at: str = ""
+    lease_until: Optional[str] = None  # BBS 兜底租期截止 ISO(系统按 T_fallback 设,非 bot 预测)
 
 
 @dataclass
@@ -169,7 +170,13 @@ class TaskService(Protocol):
         Rejects illegal transitions (raises IllegalTransitionError)."""
         ...
 
-    def claim_node(self, task_id: str, node_id: str, executor_id: str) -> DispatchResult:
+    def claim_node(
+        self,
+        task_id: str,
+        node_id: str,
+        executor_id: str,
+        run_mode: Optional[RunMode] = None,
+    ) -> DispatchResult:
         """Atomically mark a node RUNNING + record the executor attempt.
         Raises if the node is already claimed or terminal."""
         ...

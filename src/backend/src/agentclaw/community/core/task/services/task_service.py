@@ -22,6 +22,7 @@ not ``T | None``; required non-optional; ``@inject`` constructor injection.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from injector import inject
@@ -82,6 +83,14 @@ logger = get_logger()
 
 
 # --- helpers ----------------------------------------------------------------
+
+
+BBS_LEASE_FALLBACK_SECONDS: int = 3600  # 兜底租期(全局,非 bot 预测);崩溃检出延迟上界。取值评审项(spec §7.2)
+
+
+def _utcnow() -> datetime:
+    """UTC now seam — tests monkeypatch this to control lease expiry."""
+    return datetime.now(timezone.utc)
 
 
 def _new_task_id() -> str:
@@ -238,10 +247,19 @@ class TaskService(GraphStateOpsMixin):
         return self._task_repo.get_by_id(task_id)
 
     def claim_node(
-        self, task_id: str, node_id: str, executor_id: str
+        self,
+        task_id: str,
+        node_id: str,
+        executor_id: str,
+        run_mode: Optional[RunMode] = None,
     ) -> Optional[DispatchResult]:
         """CAS: PENDING → RUNNING + assignee + record the attempt. Raises if
-        the node is already claimed or terminal."""
+        the node is already claimed or terminal.
+
+        ``run_mode``(可选,BBS 自主接单传入)写入 ``node.run_mode``;未传时保留
+        节点已有 mode,再退 ``SINGLE_BOT``。系统按全局 ``BBS_LEASE_FALLBACK_SECONDS``
+        算兜底 ``lease_until``(非 bot 预测,仅为 sweeper 崩溃检出兜底),存
+        ``node.properties["lease_until"]`` 并随 :class:`DispatchResult` 返回。"""
         task = self._load(task_id)
         if task is None:
             return None
@@ -251,7 +269,9 @@ class TaskService(GraphStateOpsMixin):
         require_node_transition(node.status, NodeStatus.RUNNING)
         node.status = NodeStatus.RUNNING
         node.assignee = executor_id
-        node.run_mode = node.run_mode or RunMode.SINGLE_BOT
+        node.run_mode = run_mode or node.run_mode or RunMode.SINGLE_BOT
+        lease_iso = (_utcnow() + timedelta(seconds=BBS_LEASE_FALLBACK_SECONDS)).isoformat()
+        node.properties["lease_until"] = lease_iso
         node.attempted_executors.append(
             self._attempt_record(executor_id, node)
         )
@@ -264,14 +284,15 @@ class TaskService(GraphStateOpsMixin):
         token = _new_accept_token()
         self._task_repo.save(task)
         logger.info(
-            "[Task] task=%s claim_node node=%s → running executor=%s run_mode=%s",
-            task_id, node_id, executor_id, node.run_mode.value,
+            "[Task] task=%s claim_node node=%s → running executor=%s run_mode=%s lease_until=%s",
+            task_id, node_id, executor_id, node.run_mode.value, lease_iso,
         )
         return DispatchResult(
             node_id=node_id,
             executor_id=executor_id,
             run_mode=node.run_mode,
             accept_token=token,
+            lease_until=lease_iso,
         )
 
     # --- query face --------------------------------------------------------

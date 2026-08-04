@@ -58,6 +58,14 @@ def _graph_with_n1(svc: TaskService) -> Task:
     return svc.get(task.id)
 
 
+class _Monkey:
+    """Swap module-level _utcnow for a test, restore on exit."""
+    def __init__(self, mod): self._mod, self._orig = mod, mod._utcnow
+    def set_utcnow(self, dt): self._mod._utcnow = lambda: dt
+    def __enter__(self): return self
+    def __exit__(self, *exc): self._mod._utcnow = self._orig
+
+
 # --- init_execution_graph --------------------------------------------------------
 
 
@@ -193,6 +201,23 @@ def test_claim_node_records_attempt_with_routed_trigger():
     assert rec.executor_id == "bot-a"
     assert rec.trigger.value == "routed"
     assert rec.round == 1
+
+
+def test_claim_node_sets_lease_until_and_run_mode():
+    import datetime as _dt
+    from agentclaw.community.core.task.services import task_service as ts_mod
+    svc = _service()
+    task = _graph_with_n1(svc)  # PENDING node n1
+    frozen = _dt.datetime(2026, 8, 4, 12, 0, tzinfo=_dt.timezone.utc)
+    expected = (frozen + _dt.timedelta(seconds=ts_mod.BBS_LEASE_FALLBACK_SECONDS)).isoformat()
+    with _Monkey(ts_mod) as m:
+        m.set_utcnow(frozen)
+        res = svc.claim_node(task.id, "n1", "bot-A", run_mode=RunMode.BBS)
+    assert res.run_mode is RunMode.BBS
+    assert res.lease_until == expected
+    node = next(n for n in svc.get(task.id).execution_graph.nodes if n.node_id == "n1")
+    assert node.properties.get("lease_until") == expected
+    assert node.run_mode is RunMode.BBS
 
 
 # --- mark_graph_status / set_node_status guards ----------------------------
