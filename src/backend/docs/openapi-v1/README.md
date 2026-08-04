@@ -588,7 +588,7 @@ messages
 ```
 
 - `messages` — the gateway serves the bot's chat WebSocket at
-  `/openapi/v1/bots/messages/**`, relayed to the engine proxy
+  `/openapi/v1/bots/messages/ws/**`, relayed to the engine proxy
   (`src/gateway/configs/application.yaml`). That claim is on the **socket plane
   only**, so an HTTP request to the address still reaches this service; the name
   is held for the HTTP endpoint intended there. See

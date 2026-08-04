@@ -178,7 +178,7 @@ def test_the_engines_socket_path_is_requested_from_the_provider():
 
 def test_a_relay_url_the_gateway_prefix_cannot_express_is_refused():
     """``/wsrelay/{session_id}`` cannot be rebuilt from a target and a path, and
-    the gateway only rewrites ``/openapi/v1/bots/messages/`` onto ``/proxypass/``. Publishing the
+    the gateway only rewrites ``/openapi/v1/bots/messages/ws/`` onto ``/proxypass/``. Publishing the
     provider's own URL instead would name the hop behind the gateway."""
     devices = _Devices(url="wss://relay.example/wsrelay/s1/api/openclaw/ws")
     with pytest.raises(EngineUpstreamError):
@@ -261,7 +261,7 @@ def test_a_deployment_fronting_no_gateway_is_an_upstream_error():
 
 
 def test_a_gateway_base_without_a_scheme_is_an_upstream_error():
-    """``gw.example/openapi/v1/bots/messages/…`` is not openable. Refused rather than published,
+    """``gw.example/openapi/v1/bots/messages/ws/…`` is not openable. Refused rather than published,
     since the value comes from a deployment overlay this build does not own."""
     with pytest.raises(EngineUpstreamError):
         _build(_svc(gateway=_gateway(base="gw.example")))
@@ -270,7 +270,7 @@ def test_a_gateway_base_without_a_scheme_is_an_upstream_error():
 def test_the_relay_url_is_readdressed_onto_the_gateway():
     result = _build(_svc())
     assert result.sockets[0].url == (
-        "wss://gw.example/openapi/v1/bots/messages/tgt/api/openclaw/ws?x-proxypass-token=tok"
+        "wss://gw.example/openapi/v1/bots/messages/ws/tgt/api/openclaw/ws?x-proxypass-token=tok"
     )
 
 
@@ -281,12 +281,12 @@ def test_the_published_url_never_names_the_hop_behind_the_gateway():
 def test_an_http_gateway_base_becomes_ws():
     """The branch singlebox actually runs — its overlay ships an http base."""
     result = _build(_svc(gateway=_gateway(base="http://127.0.0.1:9999")))
-    assert result.sockets[0].url.startswith("ws://127.0.0.1:9999/openapi/v1/bots/messages/")
+    assert result.sockets[0].url.startswith("ws://127.0.0.1:9999/openapi/v1/bots/messages/ws/")
 
 
 def test_a_gateway_base_already_spelled_as_a_socket_origin_is_kept():
     result = _build(_svc(gateway=_gateway(base="wss://gw.example")))
-    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/")
+    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/")
 
 
 @pytest.mark.parametrize(
@@ -294,7 +294,7 @@ def test_a_gateway_base_already_spelled_as_a_socket_origin_is_kept():
 )
 def test_a_gateway_base_carrying_a_path_is_refused(base):
     """``/engine`` has to sit at the root — that is where the gateway's rewrite
-    is anchored. A base with a path would double the namespace (``/api/openapi/v1/bots/messages/…``), which the
+    is anchored. A base with a path would double the namespace (``/api/openapi/v1/bots/messages/ws/…``), which the
     gateway does not route, so the socket would be unopenable rather than
     named."""
     with pytest.raises(EngineUpstreamError):
@@ -303,7 +303,7 @@ def test_a_gateway_base_carrying_a_path_is_refused(base):
 
 def test_a_trailing_slash_and_stray_whitespace_are_normalised():
     result = _build(_svc(gateway=_gateway(base="  https://gw.example//  ")))
-    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/")
+    assert result.sockets[0].url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/")
 
 
 def test_a_relay_url_carrying_a_fragment_is_refused():
@@ -323,7 +323,7 @@ def test_a_provider_query_is_preserved_and_the_credential_appended():
     )
     url = _build(_svc(devices=devices)).sockets[0].url
     assert url == (
-        "wss://gw.example/openapi/v1/bots/messages/tgt/api/openclaw/ws"
+        "wss://gw.example/openapi/v1/bots/messages/ws/tgt/api/openclaw/ws"
         "?session=s1&x-proxypass-token=tok"
     )
 
@@ -335,7 +335,7 @@ def test_the_provider_path_is_carried_through_verbatim():
         url="wss://proxy.example/proxypass/tgt/v2/api/openclaw/ws"
     )
     url = _build(_svc(devices=devices)).sockets[0].url
-    assert url.startswith("wss://gw.example/openapi/v1/bots/messages/tgt/v2/api/openclaw/ws?")
+    assert url.startswith("wss://gw.example/openapi/v1/bots/messages/ws/tgt/v2/api/openclaw/ws?")
 
 
 @pytest.mark.parametrize("base", ["https://gw.example/#", "https://gw.example/?x=1"])
@@ -384,7 +384,7 @@ def test_a_malformed_provider_url_is_named_rather_than_a_500():
 
 def test_a_provider_relay_url_of_an_unknown_shape_is_refused():
     """Same guard as the ``/wsrelay/`` case: anything this endpoint cannot
-    re-address onto ``/openapi/v1/bots/messages/`` is an upstream error, not a passthrough."""
+    re-address onto ``/openapi/v1/bots/messages/ws/`` is an upstream error, not a passthrough."""
     devices = _Devices(url="wss://relay.example/route/xyz")
     with pytest.raises(EngineUpstreamError):
         _build(_svc(devices=devices))
@@ -396,7 +396,7 @@ def test_only_the_origin_and_routing_prefix_change():
     devices = _Devices(url="wss://proxy.example/proxypass/tgt/api/openclaw/ws")
     result = _build(_svc(devices=devices))
     assert result.sockets[0].url == (
-        "wss://gw.example/openapi/v1/bots/messages/tgt/api/openclaw/ws?x-proxypass-token=tok"
+        "wss://gw.example/openapi/v1/bots/messages/ws/tgt/api/openclaw/ws?x-proxypass-token=tok"
     )
 
 
@@ -421,7 +421,7 @@ def test_no_credential_publishes_no_query_string():
     header."""
     devices = _Devices(token="", ws_token="")
     url = _build(_svc(devices=devices)).sockets[0].url
-    assert url == "wss://gw.example/openapi/v1/bots/messages/tgt/api/openclaw/ws"
+    assert url == "wss://gw.example/openapi/v1/bots/messages/ws/tgt/api/openclaw/ws"
     assert "?" not in url
 
 
@@ -436,7 +436,7 @@ def test_the_target_segment_is_not_percent_encoded():
     gateway matches the target raw."""
     devices = _Devices(target="ARCA_ARCA-SANDBOX-abc@0:20003")
     url = _build(_svc(devices=devices)).sockets[0].url
-    assert "/openapi/v1/bots/messages/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws" in url
+    assert "/openapi/v1/bots/messages/ws/ARCA_ARCA-SANDBOX-abc@0:20003/api/openclaw/ws" in url
 
 
 def test_a_local_ipv6_target_keeps_its_brackets():

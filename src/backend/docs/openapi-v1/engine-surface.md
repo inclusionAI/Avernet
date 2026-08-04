@@ -181,7 +181,7 @@ sockets, never proxypass topology:
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<gateway>/openapi/v1/bots/messages/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
+      "url": "wss://<gateway>/openapi/v1/bots/messages/ws/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -212,7 +212,7 @@ Rules this endpoint must hold:
   this same socket the same way. _Corrected 2026-07-31._
 - **The address is the gateway's, not the hop behind it.** The published origin
   comes from the `gateway` config block (`base_url` / `base_url_pre`, selected
-  by env), under an `/openapi/v1/bots/messages/{target}{path}` prefix the gateway
+  by env), under an `/openapi/v1/bots/messages/ws/{target}{path}` prefix the gateway
   rewrites onto that hop. A deployment that fronts no gateway — the community
   build's normal state — is a named upstream error, not a 500 and not a
   published address nothing serves. The prefix sits inside the published API
@@ -229,11 +229,11 @@ Rules this endpoint must hold:
   finished URL around the engine path it is given — that path passthrough is why
   a `claude_code` bot is not handed openclaw's default and rejected with 4001 on
   connect. Exactly two things then change: the origin becomes the gateway's, and
-  the hop's `/proxypass/` prefix becomes `/openapi/v1/bots/messages/`. Everything past that prefix
+  the hop's `/proxypass/` prefix becomes `/openapi/v1/bots/messages/ws/`. Everything past that prefix
   — target, engine path, any query the provider set — is carried through as the
   provider wrote it, so this endpoint holds no opinion about a URL grammar it
   does not own and cannot silently drop a part it did not anticipate. A provider
-  URL of a shape the `/openapi/v1/bots/messages` prefix cannot express — BaaS's LOCAL platform
+  URL of a shape the `/openapi/v1/bots/messages/ws` prefix cannot express — BaaS's LOCAL platform
   answers `/wsrelay/{session_id}` — is refused rather than published, so a wrong
   assumption surfaces server-side instead of as a socket that will not open.
   _Corrected 2026-07-31._
