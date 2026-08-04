@@ -16,9 +16,9 @@ from gateway.community.bootstrap._authn import build_authenticator
 from gateway.community.bootstrap._configs import DatabaseConfig
 from gateway.community.config import UserConfig
 from gateway.community.core.access_key import AccessKeyRepository
-from gateway.community.core.app import AppRepository
+from gateway.community.core.app import AppRepository, AppRow
 from gateway.community.core.authn import IdentityChain, authenticate
-from gateway.community.core.bot import BotRepository
+from gateway.community.core.bot import BotRepository, BotRow
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
@@ -46,9 +46,30 @@ _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 
 
 def _db() -> DataSourcePlugin:
-    return initialize_database(
+    db = initialize_database(
         SqliteDatabasePlugin(), DatabaseConfig(plugin_type="SQLITE_ORM", db_url="")
     )
+    with db.orm_session() as session:
+        session.add(
+            AppRow(
+                app_name="Demo App",
+                app_type="assistant",
+                token="app-key",
+                owners="org-1",
+                tenant="t",
+            )
+        )
+        session.add(
+            BotRow(
+                id=1,
+                session_token="bot-key",
+                bot_uuid="bot-7",
+                env="",
+                created_by="owner-1",
+                agent_code="agent-1",
+            )
+        )
+    return db
 
 
 def _strategy_pool(db: DataSourcePlugin):
