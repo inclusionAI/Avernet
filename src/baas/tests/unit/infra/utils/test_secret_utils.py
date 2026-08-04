@@ -77,17 +77,13 @@ class TestVerifyJwtToken:
 
     def test_verify_jwt_token_rejects_malformed_token(self):
         invalid_token = "header.payload"
-        is_valid, error, payload = verify_jwt_token(
-            invalid_token, "secret"
-        )
+        is_valid, error, payload = verify_jwt_token(invalid_token, "secret")
         assert is_valid is False
         assert payload is None
 
     def test_verify_jwt_token_rejects_token_with_more_parts(self):
         invalid_token = "a.b.c.d"
-        is_valid, error, payload = verify_jwt_token(
-            invalid_token, "secret"
-        )
+        is_valid, error, payload = verify_jwt_token(invalid_token, "secret")
         assert is_valid is False
         assert payload is None
 

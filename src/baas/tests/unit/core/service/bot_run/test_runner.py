@@ -2042,10 +2042,13 @@ class TestListSessions:
     """BotRunner.list_sessions() coverage."""
 
     @pytest.mark.asyncio
-    async def test_delegates_to_bot_service(self, mock_bot_service, mock_selector, mock_run_repo, context):
+    async def test_delegates_to_bot_service(
+        self, mock_bot_service, mock_selector, mock_run_repo, context
+    ):
         """list_sessions resolves route and delegates to bot_service."""
+        from datetime import UTC, datetime
+
         from secbaas.community.api.bot_runtime import SessionInfo
-        from datetime import datetime, UTC
 
         binding = BotBindingInfo(
             bot_id=BOT_ID,
@@ -2080,7 +2083,9 @@ class TestListSessions:
         route.binding_info = binding
         route.bot_service = mock_bot_service
 
-        with patch.object(runner, "_resolve_bot_route", new_callable=AsyncMock, return_value=route):
+        with patch.object(
+            runner, "_resolve_bot_route", new_callable=AsyncMock, return_value=route
+        ):
             result = await runner.list_sessions(
                 bot_id=BOT_ID,
                 context=context,

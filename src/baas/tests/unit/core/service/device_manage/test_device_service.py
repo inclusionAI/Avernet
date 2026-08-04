@@ -201,7 +201,7 @@ class TestRecordToResponseEdgeCases:
 
 class TestDecryptHeaderRuleValuesEdgeCases:
     def test_decryption_failure_raises_value_error(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 
@@ -221,7 +221,7 @@ class TestDecryptHeaderRuleValuesEdgeCases:
                 _decrypt_header_rule_values(outbound, mock_secret)
 
     def test_non_encryptable_non_sdk_type_returns_none(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 

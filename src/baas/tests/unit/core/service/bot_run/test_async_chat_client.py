@@ -1747,16 +1747,19 @@ class TestBotSessionError:
         async def simulate_agent_error(*args, **kwargs):
             sk = kwargs["session_key"]
             # Simulate agent event with state=error (as per the bug report)
-            client._on_agent({
-                "sessionKey": sk,
-                "state": "error",
-                "errorMessage": "CONNECTION_ERROR",
-            })
+            client._on_agent(
+                {
+                    "sessionKey": sk,
+                    "state": "error",
+                    "errorMessage": "CONNECTION_ERROR",
+                }
+            )
 
         mock_bot_ws_instance.chat_send.side_effect = simulate_agent_error
 
         with pytest.raises(BotSessionError, match="session ended with error state"):
             await client.send_message("Hi", session_key="sk-agent-err")
+
     async def test_send_message_stream_emits_error_on_chat_request_error(
         self, mock_bot_ws, mock_bot_ws_instance
     ):

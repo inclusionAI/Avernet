@@ -13,10 +13,10 @@ import pytest
 from fastapi import HTTPException
 
 from secbaas.community.adapters.web.routers.open_api.message_router import (
-    normalize_bot_id,
     deliver_message,
     deliver_message_stream,
     get_message_result,
+    normalize_bot_id,
 )
 from secbaas.community.api.api_gateway import APIKeyRecord
 from secbaas.community.api.bot_runtime import (
