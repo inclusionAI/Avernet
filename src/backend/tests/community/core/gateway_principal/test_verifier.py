@@ -478,9 +478,9 @@ def test_config_exposes_its_own_fingerprint():
 def test_a_key_mismatch_is_diagnosable_from_the_message_alone():
     """The failure this whole section exists for.
 
-    ``Signature verification failed`` on its own cannot distinguish a shared
-    secret that drifted from a token nobody we trust minted. The suffix must
-    name the key we judged it against and the signer that produced it.
+    ``Signature verification failed`` on its own cannot say which key the token
+    was judged against. The suffix must name it, alongside the contract this
+    component enforces — all of it read from our own configuration.
     """
     token = mint([user_principal()], key="not-the-shared-secret-but-also-32-bytes+")
 
@@ -490,9 +490,57 @@ def test_a_key_mismatch_is_diagnosable_from_the_message_alone():
     message = str(exc.value)
     assert "Signature verification failed" in message, "PyJWT's own reason survives"
     assert f"verifier key fp={key_fingerprint(KEY)}" in message
-    assert "alg='HS256'" in message
-    assert "kid='bare'" in message, "the gateway's bare signer stamps this kid"
     assert f"aud={AUDIENCE!r}" in message and f"iss={ISSUER!r}" in message
+    assert "alg='HS256'" in message
+    assert "kid='bare'" in message
+
+
+def test_the_jose_header_is_labelled_as_caller_supplied():
+    """A failed signature authenticates nothing, including the header.
+
+    Any caller can stamp ``kid: bare`` on a token they minted, so presenting it
+    as provenance would hand a forger the power to point an operator at a
+    healthy shared secret. The line must mark it as untrusted, and must not
+    claim it identifies the signer.
+    """
+    token = mint([user_principal()], key="not-the-shared-secret-but-also-32-bytes+")
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(token, CONFIG)
+
+    message = str(exc.value)
+    assert "unverified caller-supplied header" in message
+    # The trustworthy half is stated first, so the line reads as
+    # "here is what we hold" before "here is what they claimed".
+    assert message.index("verifier key fp=") < message.index("unverified")
+
+
+def test_a_forged_kid_cannot_impersonate_the_gateway_in_the_log():
+    """The concrete abuse the labelling exists to defuse.
+
+    A forger who never touched our gateway can still present ``kid='bare'``.
+    The message must read the same either way — no wording that would tell an
+    operator this came from their gateway.
+    """
+    claims = {
+        "iss": ISSUER,
+        "aud": AUDIENCE,
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60,
+        "principals": [user_principal()],
+    }
+    forged = jwt.encode(
+        claims, "an-attacker-key-of-at-least-32-bytes!!", algorithm="HS256",
+        headers={"kid": "bare"},
+    )
+
+    with pytest.raises(PrincipalVerificationError) as exc:
+        verify_principal_token(forged, CONFIG)
+
+    message = str(exc.value)
+    assert "unverified caller-supplied header" in message
+    for claim in ("our gateway", "signed by", "produced by", "provenance"):
+        assert claim not in message.lower(), f"must not assert {claim!r}"
 
 
 def test_the_diagnostic_never_carries_the_key_or_the_token():
@@ -530,7 +578,11 @@ def test_a_token_with_no_readable_header_says_so():
     with pytest.raises(PrincipalVerificationError) as exc:
         verify_principal_token("not-a-jwt-at-all", CONFIG)
 
-    assert "unparseable JOSE header" in str(exc.value)
+    message = str(exc.value)
+    assert "unparseable JOSE header" in message
+    assert f"verifier key fp={key_fingerprint(KEY)}" in message, (
+        "the trustworthy half is present even when the header is not"
+    )
 
 
 def test_a_hostile_kid_cannot_forge_log_lines():

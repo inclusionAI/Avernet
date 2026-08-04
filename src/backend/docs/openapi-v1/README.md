@@ -395,14 +395,28 @@ Per-request, the backend logs one line per failure, and it names the cause:
 
 ```text
 rejected forwarded principal on GET /openapi/v1/bots: principal token rejected:
-Signature verification failed [token alg='HS256' kid='bare'; verifier key
-fp=eb128a7a, expects aud='backend' iss='gateway']
+Signature verification failed [verifier key fp=eb128a7a, expects aud='backend'
+iss='gateway'; unverified caller-supplied header alg='HS256' kid='bare']
 ```
 
-`alg`/`kid` come from the token's unverified JOSE header — the only readable
-part when a signature fails, and what distinguishes "our gateway, wrong key"
-(`kid='bare'`) from a token no gateway of ours minted. None of it reaches the
-caller: every failure answers the same fixed `401 Unauthorized`.
+**The two halves of that suffix do not carry equal weight, and the difference
+decides what you should do about it.**
+
+`verifier key fp`, `aud` and `iss` come from this process's own configuration.
+They are trustworthy, and together with the gateway's boot line they are what
+a diagnosis should rest on.
+
+`alg` and `kid` come from the token's JOSE header, which a failed signature
+means nothing has authenticated. Anyone who can reach the surface can stamp
+`kid: bare` on a token they minted. So `kid='bare'` is **not** evidence the
+gateway sent it — treating it as such during a burst of forged traffic would
+have you rotate a shared secret that was never broken. Read it as a hint that
+is useful mainly in the negative: an unexpected `alg`, an unfamiliar `kid`, or
+a header that will not parse says *look somewhere other than the key*.
+
+When the fingerprints match and forged-looking traffic persists, the token is
+not coming from your gateway, whatever its `kid` claims. None of this reaches
+the caller: every failure answers the same fixed `401 Unauthorized`.
 
 A **missing** header logs distinctly (`no X-Avernet-Principal header on ...`)
 and is not an auth failure at all — the gateway injects that header on every

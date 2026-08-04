@@ -116,11 +116,13 @@ def _verify_from_headers(request: Request) -> VerifiedCaller | None:
         return verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         # Log the reason (never the token) and treat the caller as absent. The
-        # request goes on to answer 401 from require_principal. The reason now
-        # carries the token's ``alg``/``kid`` and the fingerprint of the key it
-        # was judged against — see ``core/gateway_principal/verifier.py`` — so
-        # this one line separates a key mismatch from an expiry, a wrong
-        # audience, or a token no gateway of ours minted.
+        # request goes on to answer 401 from require_principal. The reason
+        # carries the fingerprint of the key this component judged the token
+        # against, plus the token's own JOSE header marked as caller-supplied —
+        # see ``core/gateway_principal/verifier.py``. The fingerprint is the
+        # part to reason from: compared against the gateway's boot line it
+        # separates a key mismatch from an expiry or a wrong audience, while
+        # the header is unauthenticated and can say anything a forger likes.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
             request.method,

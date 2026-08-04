@@ -224,20 +224,26 @@ def verify_principal_token(
         # PyJWT's own message already separates the failure modes ("Signature
         # verification failed" vs "Signature has expired" vs "Invalid
         # audience"), so it is kept verbatim. What it cannot say is *which key
-        # and which contract* we judged the token against, and that is the
-        # difference between "the gateway and this component disagree about the
-        # shared secret" and "someone forged a token" — indistinguishable from
-        # the PyJWT message alone. The suffix supplies exactly that, all of it
-        # our own configuration plus the token's unverified JOSE header.
+        # and which contract* we judged the token against — and that is what
+        # turns an unattributable rejection into a diagnosis.
+        #
+        # The two halves of the suffix have very different standing, and the
+        # wording keeps them apart. Our key fingerprint, audience and issuer
+        # come from this process's own configuration: trustworthy, and the
+        # thing to reason from. The JOSE header comes from the request and is
+        # unauthenticated — a forger sets ``kid`` to whatever makes their token
+        # look legitimate — so it is labelled as caller-supplied rather than
+        # presented as provenance. Reading it as proof would mean rotating a
+        # healthy secret the moment someone starts forging tokens.
         #
         # None of this reaches the caller: every failure here funnels into one
         # fixed ``401 Unauthorized`` (``openapi_v1/responses.py``), so naming
         # the mismatch for the operator does not tell a forger what to fix.
         raise PrincipalVerificationError(
             f"principal token rejected: {exc} "
-            f"[{_token_provenance(token)}; verifier key fp="
-            f"{config.key_fingerprint}, expects aud={config.audience!r} "
-            f"iss={config.issuer!r}]"
+            f"[verifier key fp={config.key_fingerprint}, "
+            f"expects aud={config.audience!r} iss={config.issuer!r}; "
+            f"{_unverified_token_header(token)}]"
         ) from exc
 
     principals = _parse_principals(claims.get("principals"))
@@ -258,27 +264,40 @@ def _clip(value: object) -> str:
     return repr(text)
 
 
-def _token_provenance(token: str) -> str:
-    """Describe *which signer* produced ``token``, from its JOSE header.
+def _unverified_token_header(token: str) -> str:
+    """Render the token's JOSE header for a log line, marked as unverified.
 
-    Read **without verifying**, which is the only option available: on a
-    signature failure there is nothing to verify against. ``alg`` and ``kid``
-    are what separate "our gateway, wrong shared key" (``alg=HS256 kid=bare``,
-    the values its ``bare`` signer stamps) from "not our gateway at all" — the
-    single most useful fact when the signature does not check out, and one the
-    PyJWT message never carries.
+    **This is a hint, never evidence of provenance, and the log line says so.**
+    A failed signature means nothing about the token has been authenticated —
+    including its header — so anyone able to reach this component can put
+    ``alg: HS256, kid: bare`` on a token they minted themselves. Reading
+    ``kid=bare`` as "our gateway with the wrong key" is therefore exactly the
+    inference a forger gets for free, and during forged-token traffic it would
+    send an operator to rotate a shared secret that was never broken.
 
-    The header is attacker-controlled, so it is used for **nothing but this log
-    string**: no decision reads it, the verifier's ``alg`` stays pinned to
-    :data:`_ALGORITHMS`, and :func:`_clip` bounds and escapes it on the way out.
-    Only the header is read — never the payload, whose claims are exactly the
-    unverified assertions this function exists to be sceptical of.
+    What it is good for is the cheap negative and the corroborating detail: an
+    unexpected ``alg``, an unfamiliar ``kid``, a header that will not parse at
+    all. Those say "look somewhere other than the shared key" and cost nothing
+    to carry.
+
+    **The authoritative signal is the pair of boot fingerprints** — those come
+    from each component's own resolved configuration, not from the request, so
+    they cannot be influenced by a caller. Any diagnosis that matters should
+    rest on them; see the runbook in ``docs/openapi-v1/README.md``.
+
+    Used for nothing but this string: no decision reads it, the verifier's
+    ``alg`` stays pinned to :data:`_ALGORITHMS`, and :func:`_clip` bounds and
+    escapes it on the way out. Only the header is read — never the payload,
+    whose claims are the unverified assertions this function exists to distrust.
     """
     try:
         header = jwt.get_unverified_header(token)
     except jwt.PyJWTError:
-        return "token has an unparseable JOSE header"
-    return f"token alg={_clip(header.get('alg'))} kid={_clip(header.get('kid'))}"
+        return "unparseable JOSE header"
+    return (
+        "unverified caller-supplied header "
+        f"alg={_clip(header.get('alg'))} kid={_clip(header.get('kid'))}"
+    )
 
 
 def _parse_principals(raw: object) -> tuple[GatewayPrincipal, ...]:
