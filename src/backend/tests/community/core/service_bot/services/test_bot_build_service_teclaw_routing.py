@@ -94,6 +94,23 @@ def test_release_routes_arca_to_create_bot_unchanged():
 
 
 @pytest.mark.unit
+def test_release_routes_arca_pinned_image_to_template_config():
+    svc, baas = _svc("baas")
+
+    svc.release(
+        _BOT,
+        user_id="u1",
+        migration_path="/m/1",
+        publish_stage=PublishStage.VERIFY,
+        docker_image="registry/arka:v2",
+    )
+
+    assert baas.create_bot.call_args.kwargs["template_config"] == {
+        "image": "registry/arka:v2"
+    }
+
+
+@pytest.mark.unit
 def test_release_routes_arca_with_template_uuid_from_system_config():
     resolver = _template_resolver()
     svc, baas = _svc("baas", baas_template_resolver=resolver)
@@ -157,6 +174,41 @@ def test_upgrade_routes_teclaw_to_update_teclaw_bot():
     svc._passport_plugin.query_token.assert_not_called()
     baas.update_teclaw_outbound_rule_by_bot_uuid.assert_not_called()
     baas.upgrade_bot.assert_not_called()
+
+
+@pytest.mark.unit
+def test_upgrade_routes_arca_pinned_image_to_template_config():
+    svc, baas = _svc("baas")
+
+    svc.upgrade(
+        "BOT-a",
+        _BOT,
+        user_id="u1",
+        migration_path="/m/1",
+        publish_stage=PublishStage.ONLINE,
+        docker_image="registry/arka:v2",
+    )
+
+    assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
+        "image": "registry/arka:v2"
+    }
+
+
+@pytest.mark.unit
+def test_teclaw_ignores_arka_docker_image():
+    svc, baas = _svc("teclaw")
+
+    svc.release(
+        _BOT,
+        user_id="u1",
+        migration_path="",
+        publish_stage=PublishStage.VERIFY,
+        delivery=DeliveryArtifact(_ARTIFACT),
+        docker_image="registry/arka:v2",
+    )
+
+    baas.create_teclaw_bot.assert_called_once()
+    assert "template_config" not in baas.create_teclaw_bot.call_args.kwargs
 
 
 @pytest.mark.unit

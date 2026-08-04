@@ -167,6 +167,41 @@ class TestUpgradePublish:
         assert "binding" not in inserted_ext
         assert "publish" not in inserted_ext
 
+    def test_upgrade_publish_snapshots_only_image_pin_from_current_bot(self):
+        mock_repo = Mock()
+        original_record = _create_mock_record(
+            record_id=1,
+            status=PublishStatus.SUCCESS,
+            version=1,
+            ext={"binding": {"online": 99}},
+        )
+        mock_repo.get_by_id.return_value = original_record
+        mock_repo.get_by_last_pub_id.return_value = None
+        mock_repo.get_by_publish_bot_id_and_version.return_value = None
+        mock_repo.get_by_publish_bot_id.return_value = original_record
+        mock_repo.insert.return_value = _create_mock_record(
+            record_id=2,
+            status=PublishStatus.DRAFT,
+            version=2,
+            last_pub_id=1,
+        )
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "ext": {
+                "service_bot_config": {"device_count": 3},
+                "sbot_pin_image": True,
+                "sbot_docker_image": "registry/arka:v2",
+            }
+        }
+
+        service = _make_service(mock_repo, bot_repo=bot_repo)
+        service.upgrade_publish(publish_id=1, owner_id="user_001")
+
+        assert mock_repo.insert.call_args.args[0]["ext"] == {
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        }
+
     def test_upgrade_publish_not_found(self):
         """发布单不存在时抛出 PublishNotFoundError。"""
         mock_repo = Mock()

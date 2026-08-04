@@ -23,6 +23,9 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    copy_image_pin_to_ext,
+)
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
@@ -206,6 +209,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 raise PublishAlreadyExistsError(
                     f"Publish record already exists: {publish_bot_id}, owner={owner_id}, v{version}"
                 )
+
+        source_bot = self._bot_repo.get_by_id_and_owner(source_bot_id, owner_id)
+        source_bot_ext = (
+            source_bot.get("ext") if isinstance(source_bot, dict) else None
+        )
+        ext = copy_image_pin_to_ext(source_bot_ext, ext)
 
         record = self._repo.insert({
             "source_bot_pk": source_bot_pk,

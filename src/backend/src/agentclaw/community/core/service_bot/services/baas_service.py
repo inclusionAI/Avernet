@@ -792,6 +792,7 @@ class BaasService:  # pragma: no cover
         auto_approve_publish: bool = True,
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -811,6 +812,7 @@ class BaasService:  # pragma: no cover
             version: str = "1",发布版本
             auto_approve_publish: 是否由 BaaS 创建后自动审批发布单
             ext_info: Bot 额外信息
+            template_config: 沙箱覆写配置（镜像/规格/envs）
 
         Returns:
             BaaS 层返回的 Bot 信息，包含：
@@ -860,6 +862,7 @@ class BaasService:  # pragma: no cover
             auto_approve_publish=auto_approve_publish,
             ext_info=ext_info,
             extra_envs=extra_envs,
+            template_config=template_config,
         )
 
         logger.info(
@@ -1272,6 +1275,7 @@ class BaasService:  # pragma: no cover
         request_id: str,
         target_count: int,
         auto_approve_publish: bool = False,
+        config: BotConfig | Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 扩缩容 Bot。
 
@@ -1314,6 +1318,15 @@ class BaasService:  # pragma: no cover
             "request_id": request_id,
             "auto_approve_publish": auto_approve_publish,
         }
+        if config is not None:
+            # Scale config is a patch. Accept a sparse wire dict so callers can
+            # override only docker_image without materializing BotDeployConfig
+            # defaults (TTL/hooks), which would overwrite the frozen publish
+            # configuration in BaaS. Existing BotConfig callers keep the legacy
+            # full serialization behavior.
+            payload["config"] = (
+                config.to_dict() if isinstance(config, BotConfig) else dict(config)
+            )
 
         logger.info(
             f"[BaasService.scale_bot] "
