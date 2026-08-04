@@ -607,6 +607,15 @@ class TaskService(GraphStateOpsMixin):
             # 人确认不升 → FAILED 终态(§13 三终止之一)。
             self._advance_phase(task, GraphStatus.FAILED)
             return
+        if kind == EventKind.NODE_RELEASED:
+            # BBS 接单让出/兜底收回(§10.4/§10.3):RUNNING→FAILED,可接力,不升人工、不泵 tick。
+            node = self._find_node(task, node_id)
+            if node is not None and node.status is NodeStatus.RUNNING:
+                require_node_transition(node.status, NodeStatus.FAILED)
+                node.status = NodeStatus.FAILED
+                node.assignee = None
+                node.properties["release_outcome"] = str(payload.get("outcome") or "handoff")
+            return
         # Unknown kinds — ignore.
 
     def _apply_goal_verdict(self, task: Task, verdict: str) -> None:

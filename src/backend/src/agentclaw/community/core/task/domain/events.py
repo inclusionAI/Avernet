@@ -52,6 +52,8 @@ class EventKind(StrEnum):
     # BBS 确认/cancel 通道(plan §13/§18.1-10,经 POST /tasks/{id}/events 回投):
     BBS_CONFIRMED = "bbs.confirmed"    # 人确认升 BBS:HUMAN_REQUIRED→BBS_ACTIVE(任务级模式,不落节点)
     HANG_CANCELLED = "hang.cancelled"  # 人确认不升 → task FAILED 终态
+    NODE_RELEASED = "node.released"   # BBS 接单让出/兜底收回(§10.4/§10.3):RUNNING→FAILED
+                                      # 不泵 scheduler tick、不升 HUMAN_REQUIRED。outcome ∈ {handoff,lease_expired}
     # Retained on the enum so the event-log deserializer can still read historical
     # HUNG entries; new code must not emit it.
 
@@ -266,6 +268,17 @@ class NodeFailed(_ReportedEvent):
     def __post_init__(self) -> None:
         super().__post_init__()
         self.payload = {"node_id": self.node_id, "verifier": self.verifier, "reason": self.reason}
+
+
+@dataclass
+class NodeReleased(TaskEvent):
+    kind: EventKind = EventKind.NODE_RELEASED
+    node_id: str = ""
+    outcome: str = "handoff"  # handoff(主动让出) | lease_expired(清扫器收回)
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.payload = {"node_id": self.node_id, "outcome": self.outcome}
 
 
 @dataclass

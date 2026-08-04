@@ -15,6 +15,7 @@ from agentclaw.community.core.task.domain.models import (
     GraphStatus,
     NodeStatus,
     NodeType,
+    RunMode,
     SubTaskSpec,
 )
 from agentclaw.community.core.task.services import TaskService
@@ -153,3 +154,35 @@ def test_three_terminals_hang_cancel_failed():
     svc.on_event(_ev(task.id, EventKind.NODE_HANG, next_seq(0), node_id="n_bot_search", hang=True))
     svc.on_event(_ev(task.id, EventKind.HANG_CANCELLED, next_seq(1)))
     assert svc.get(task.id).status is GraphStatus.FAILED
+
+
+# --- NODE_RELEASED fold(BBS 让出/兜底,Task 1)------------------------------
+
+def _running_claimed_node(svc):
+    """建一个已被 bot-A claim 的 RUNNING 节点 n1,供 NODE_RELEASED fold 测试。"""
+    t = svc.create(title="t")
+    svc.clarify(t.id, {}, confirmed=True)          # DRAFTING → DEFINED
+    task = svc.get(t.id)
+    svc.init_execution_graph(task)                 # 落 recognition/clarify/execute_start + 根
+    svc.add_node(
+        task.id,
+        SubTaskSpec(node_id="n1", spec="a", run_mode=RunMode.BBS),
+        "n_execute_start",
+        NodeType.DISPATCH,
+    )
+    svc.claim_node(t.id, "n1", "bot-A")            # PENDING → RUNNING + assignee=bot-A
+    return t.id, "n1"
+
+
+def test_node_released_fold_running_to_failed_no_escalation():
+    svc = _service()
+    task_id, node_id = _running_claimed_node(svc)
+    before = svc.get(task_id).execution_graph.status
+    svc.on_event({"task_id": task_id, "kind": "node.released",
+                  "payload": {"node_id": node_id, "outcome": "handoff"}})
+    task = svc.get(task_id)
+    node = next(n for n in task.execution_graph.nodes if n.node_id == node_id)
+    assert node.status is NodeStatus.FAILED
+    assert node.assignee is None
+    assert node.properties.get("release_outcome") == "handoff"
+    assert task.execution_graph.status is before  # 不升人工:graph 状态不变
