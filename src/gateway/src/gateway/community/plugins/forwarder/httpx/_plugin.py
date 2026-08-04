@@ -54,10 +54,10 @@ class HttpxForwarder(Forwarder):
             content=request.content,
         )
         logger.info(
-            "forwarding request %s %s headers=%s content_len=%d",
+            "forwarding request %s %s headers_len=%d content_len=%d",
             request.method,
             request.url,
-            request.headers,
+            len(request.headers),
             len(request.content),
         )
         try:
