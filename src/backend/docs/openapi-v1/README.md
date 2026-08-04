@@ -723,11 +723,11 @@ package storage, authorization, and runtime synchronization behind it.
 
 | Method | Path | Purpose | Success | Status |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[LocalSkill]]` | in stub |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[LocalSkill]` | in stub |
-| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[LocalSkillUpload]` | in stub |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[LocalSkillState]` | in stub |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[LocalSkillState]` | in stub |
+| GET | `/openapi/v1/bots/skills` | Local Skills of one bot (`bot_id` required; `owner_entity_id`, `active`, `keyword`, paged) | `Envelope[Page[Skill]]` | in stub |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | Skill detail | `Envelope[Skill]` | in stub |
+| POST | `/openapi/v1/bots/skills/upload` | Upload raw ZIP (`bot_id` required; `owner_entity_id` optional; Inactive on create) | `201/200 Envelope[SkillUpload]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | Activate a Skill | `Envelope[SkillState]` | in stub |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | Deactivate a Skill | `Envelope[SkillState]` | in stub |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | Delete a Skill | `Envelope[Deleted]` | in stub |
 
 ### 🟩 lucas-xzp · P1 — routines (7 endpoints) · `openapi_v1/routines/router.py`

@@ -637,11 +637,11 @@ router stub 现已精确暴露这份定案契约。它们只定义 transport sha
 
 | 方法 | 路径 | 用途 | 成功响应 | 状态 |
 |---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[LocalSkill]]` | 桩内 |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[LocalSkill]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[LocalSkillUpload]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[LocalSkillState]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[LocalSkillState]` | 桩内 |
+| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[Skill]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[SkillUpload]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[SkillState]` | 桩内 |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[SkillState]` | 桩内 |
 | DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 桩内 |
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`

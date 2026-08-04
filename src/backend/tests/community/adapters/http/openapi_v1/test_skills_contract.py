@@ -57,12 +57,12 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
     list_schema = paths["/openapi/v1/bots/skills"]["get"]["responses"]["200"][
         "content"
     ]["application/json"]["schema"]
-    assert list_schema["$ref"].endswith("Envelope_Page_LocalSkill__")
+    assert list_schema["$ref"].endswith("Envelope_Page_Skill__")
 
     detail = paths["/openapi/v1/bots/skills/{skill_id}"]
     assert detail["get"]["responses"]["200"]["content"]["application/json"]["schema"][
         "$ref"
-    ].endswith("Envelope_LocalSkill_")
+    ].endswith("Envelope_Skill_")
     assert detail["delete"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ]["$ref"].endswith("Envelope_Deleted_")
@@ -72,14 +72,14 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"][
             "$ref"
-        ].endswith("Envelope_LocalSkillUpload_")
+        ].endswith("Envelope_SkillUpload_")
 
     for action in ("activate", "deactivate"):
         operation = paths[f"/openapi/v1/bots/skills/{{skill_id}}/{action}"]["post"]
         assert operation["responses"]["200"]["content"]["application/json"]["schema"][
             "$ref"
-        ].endswith("Envelope_LocalSkillState_")
+        ].endswith("Envelope_SkillState_")
 
-    assert schema["components"]["schemas"]["LocalSkillUpload"]["properties"][
-        "operation"
-    ]["enum"] == ["created", "updated"]
+    assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"][
+        "enum"
+    ] == ["created", "updated"]

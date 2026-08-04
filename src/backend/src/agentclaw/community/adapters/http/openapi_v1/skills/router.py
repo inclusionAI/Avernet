@@ -23,14 +23,14 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
 
-from .schemas import LocalSkill, LocalSkillState, LocalSkillUpload
+from .schemas import Skill, SkillState, SkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("", response_model=Envelope[Page[LocalSkill]])
+@router.get("", response_model=Envelope[Page[Skill]])
 async def list_skills(
     page: PageParamsDep,
     principal: PrincipalDep,
@@ -44,13 +44,13 @@ async def list_skills(
     keyword: str | None = Query(
         default=None, description="Case-insensitive name or description filter."
     ),
-) -> Envelope[Page[LocalSkill]]:
+) -> Envelope[Page[Skill]]:
     """List one Bot's Local Skills from persisted desired state."""
     raise NotImplementedError
 
 
-@router.get("/{skill_id}", response_model=Envelope[LocalSkill])
-async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[LocalSkill]:
+@router.get("/{skill_id}", response_model=Envelope[Skill])
+async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[Skill]:
     """Get public metadata for one Local Skill selected by its Skill ID."""
     raise NotImplementedError
 
@@ -58,10 +58,10 @@ async def get_skill(skill_id: str, principal: PrincipalDep) -> Envelope[LocalSki
 @router.post(
     "/upload",
     status_code=201,
-    response_model=Envelope[LocalSkillUpload],
+    response_model=Envelope[SkillUpload],
     responses={
         200: {
-            "model": Envelope[LocalSkillUpload],
+            "model": Envelope[SkillUpload],
             "description": "Same-name Local Skill replaced successfully.",
         },
         413: {
@@ -77,29 +77,29 @@ async def upload_skill(
     owner_entity_id: str | None = Query(
         default=None, description="Verified Bot owner locator."
     ),
-) -> Envelope[LocalSkillUpload]:
+) -> Envelope[SkillUpload]:
     """Create or safely replace one Local Skill from a raw ZIP body."""
     raise NotImplementedError
 
 
 @router.post(
     "/{skill_id}/activate",
-    response_model=Envelope[LocalSkillState],
+    response_model=Envelope[SkillState],
 )
 async def activate_skill(
     skill_id: str, principal: PrincipalDep
-) -> Envelope[LocalSkillState]:
+) -> Envelope[SkillState]:
     """Set one Local Skill's desired state to Active."""
     raise NotImplementedError
 
 
 @router.post(
     "/{skill_id}/deactivate",
-    response_model=Envelope[LocalSkillState],
+    response_model=Envelope[SkillState],
 )
 async def deactivate_skill(
     skill_id: str, principal: PrincipalDep
-) -> Envelope[LocalSkillState]:
+) -> Envelope[SkillState]:
     """Set one Local Skill's desired state to Inactive."""
     raise NotImplementedError
 
