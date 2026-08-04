@@ -44,6 +44,7 @@ statement shape and predicates:
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from datetime import datetime
 from typing import List, Optional
 
@@ -682,10 +683,7 @@ class SkillRepository:
         every database error to the caller.
         """
         with self._db.transactional_orm_session() as db:
-            db.query(self.SkillSetSkill).filter(
-                self.SkillSetSkill.skill_id == int(skill_id),
-                self.SkillSetSkill.env == get_current_env(),
-            ).delete(synchronize_session=False)
+            self._delete_skill_set_associations(db, int(skill_id))
             rowcount = (
                 db.query(self.Skill)
                 .filter(
@@ -695,6 +693,63 @@ class SkillRepository:
                 .delete(synchronize_session=False)
             )
             return rowcount > 0
+
+    @staticmethod
+    def _delete_skill_set_associations(db, skill_id: int) -> None:
+        """Apply #684's association cleanup inside the caller's transaction."""
+        from agentclaw.community.core.models import SkillSetSkill
+
+        db.query(SkillSetSkill).filter(
+            SkillSetSkill.skill_id == skill_id,
+            SkillSetSkill.env == get_current_env(),
+        ).delete(synchronize_session=False)
+
+    def delete_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        quarantine_locator: str,
+    ) -> int | None:
+        """Atomically delete one Local Skill and enqueue its quarantine purge."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+        from agentclaw.community.core.skill_center.local_skill_cleanup import (
+            LocalSkillCleanupWorkModel,
+        )
+
+        with self._db.transactional_orm_session() as db:
+            skill = db.query(self.Skill).filter(
+                self.Skill.id == int(skill_id),
+                self.Skill.env == get_current_env(),
+                self.Skill.user_id == _normalize_user_id(owner_id),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.git_path.like("local://%"),
+            ).one_or_none()
+            if skill is None:
+                return None
+            db.query(DefaultSkillsetSkillExclusion).filter(
+                DefaultSkillsetSkillExclusion.user_id == _normalize_user_id(owner_id),
+                DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                DefaultSkillsetSkillExclusion.skill_id == int(skill_id),
+            ).delete(synchronize_session=False)
+            self._delete_skill_set_associations(db, int(skill_id))
+            db.delete(skill)
+            cleanup = LocalSkillCleanupWorkModel(
+                env=get_current_env(),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=int(skill_id),
+                package_locator=quarantine_locator,
+                package_locator_hash=sha256(quarantine_locator.encode("utf-8")).hexdigest(),
+                requires_runtime_restore=False,
+                status="pending",
+            )
+            db.add(cleanup)
+            db.flush()
+            return int(cleanup.id)
 
     def check_skill_blocked_by_bot(
         self, name: str, env: Optional[str] = None
