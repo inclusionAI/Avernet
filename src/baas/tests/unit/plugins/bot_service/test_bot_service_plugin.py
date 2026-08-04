@@ -922,9 +922,7 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
             )
         )
 
-        result = await plugin.get_binding(
-            "bot_personal_001", "20881234", "online"
-        )
+        result = await plugin.get_binding("bot_personal_001", "20881234", "online")
 
         assert result.engine_type == runtime_engine_type
 
@@ -955,9 +953,7 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
         with patch(
             "secbaas.community.plugins.bot_service.real._plugin.logger"
         ) as mock_logger:
-            result = await plugin.get_binding(
-                "bot_personal_001", "20881234", "online"
-            )
+            result = await plugin.get_binding("bot_personal_001", "20881234", "online")
 
         assert result.engine_type == "claude_code"
         if warning_expected:
@@ -973,9 +969,7 @@ class TestAiohttpBotServicePluginRuntimeEngineSelection:
         with patch(
             "secbaas.community.plugins.bot_service.real._plugin.logger"
         ) as mock_logger:
-            result = await plugin.get_binding(
-                "bot_personal_001", "20881234", "online"
-            )
+            result = await plugin.get_binding("bot_personal_001", "20881234", "online")
 
         assert result.engine_type == "claude_code"
         mock_logger.warning.assert_not_called()

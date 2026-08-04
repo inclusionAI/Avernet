@@ -593,7 +593,9 @@ class TestListSessions:
             await service.list_sessions(binding_info=baas_binding)
 
     @pytest.mark.asyncio
-    async def test_success_path_with_pagination(self, service, arca_binding, monkeypatch):
+    async def test_success_path_with_pagination(
+        self, service, arca_binding, monkeypatch
+    ):
         """Successful list_sessions delegates to session client with correct args."""
         from secbaas.community.core.service.bot_run._async_session_client import (
             SessionInfo as AdapterSessionInfo,
@@ -645,7 +647,9 @@ class TestListSessions:
             await service.list_sessions(binding_info=arca_binding)
 
     @pytest.mark.asyncio
-    async def test_bot_service_error_passthrough(self, service, arca_binding, monkeypatch):
+    async def test_bot_service_error_passthrough(
+        self, service, arca_binding, monkeypatch
+    ):
         """Existing BotServiceError passes through without re-wrapping."""
         session_client = AsyncMock()
         session_client.__aenter__ = AsyncMock(return_value=session_client)

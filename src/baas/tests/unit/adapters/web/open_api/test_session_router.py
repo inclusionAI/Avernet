@@ -961,8 +961,7 @@ class TestListSessions:
 
         mock_runner.list_sessions.assert_called_once()
         assert (
-            mock_runner.list_sessions.call_args[1]["bot_id"]
-            == "bot-explicit:entity-1"
+            mock_runner.list_sessions.call_args[1]["bot_id"] == "bot-explicit:entity-1"
         )
 
     @pytest.mark.asyncio

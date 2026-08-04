@@ -89,7 +89,7 @@ class TestBaasLoggerPlugin:
 
         with (
             patch("os.makedirs"),
-patch(
+            patch(
                 "secbaas.community.plugins.logger.bare._plugin.TimedRotatingFileHandler"
             ),
         ):

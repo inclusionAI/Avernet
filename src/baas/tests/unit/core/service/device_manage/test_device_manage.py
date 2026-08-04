@@ -163,7 +163,7 @@ class TestEncryptHeaderRuleValues:
     """Test _encrypt_header_rule_values standalone function."""
 
     def test_encrypts_matching_rules(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _encrypt_header_rule_values,
         )
 
@@ -196,7 +196,7 @@ class TestEncryptHeaderRuleValues:
         # Full encrypt flow test requires direct EncryptableOutBoundRule on deploy_config.
 
     def test_skips_if_encrypt_value_false(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _encrypt_header_rule_values,
         )
 
@@ -227,7 +227,7 @@ class TestEncryptHeaderRuleValues:
         )
 
     def test_skips_non_encryptable_rule(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _encrypt_header_rule_values,
         )
 
@@ -247,7 +247,7 @@ class TestEncryptHeaderRuleValues:
         mock_enc.assert_not_called()
 
     def test_none_extra_config(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _encrypt_header_rule_values,
         )
 
@@ -266,7 +266,7 @@ class TestDecryptHeaderRuleValues:
     """Test _decrypt_header_rule_values standalone function."""
 
     def test_decrypts_encrypted_rules(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 
@@ -289,7 +289,7 @@ class TestDecryptHeaderRuleValues:
         assert result.header_operation_rules[0].value == "decrypted"
 
     def test_returns_none_for_none_input(self):
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 
@@ -298,7 +298,7 @@ class TestDecryptHeaderRuleValues:
 
     def test_passes_through_sdk_rule(self):
         from secbaas.community.api.device_manage import OutBoundOperationRule
-        from secbaas.community.core.service.device_manage import (
+        from secbaas.community.core.service.device_manage._device_service import (
             _decrypt_header_rule_values,
         )
 

@@ -298,3 +298,22 @@ class TestInjectEnterprisePlugins:
         bootstrap_mod._container = None
         registry_mod._extra_options.clear()
         registry_mod._authn_strategy_providers.clear()
+
+    def test_set_container_handles_import_error(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        import gateway.community.bootstrap as bootstrap_mod
+        from gateway.community.bootstrap import set_container
+        from gateway.community.bootstrap._container import ApplicationContainer
+
+        container = ApplicationContainer()
+        bootstrap_mod._container = None
+
+        # Simulate ImportError when plugin_registry is unavailable
+        # by blocking the import in sys.modules
+        with patch.dict(sys.modules, {"gateway.community.plugin_registry": None}):
+            set_container(container)
+
+        assert bootstrap_mod._container is container
+        bootstrap_mod._container = None
