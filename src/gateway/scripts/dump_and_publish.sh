@@ -65,6 +65,7 @@ _upstream_dir() {
     case "$1" in
         backend) echo "src/backend" ;;
         baas)    echo "src/baas" ;;
+        bcn)     echo "src/bcs" ;;
         *)       echo "" ;;
     esac
 }
@@ -73,6 +74,7 @@ _upstream_env() {
     case "$1" in
         backend) echo "DEPLOY_PROFILE=community" ;;
         baas)    echo "SECBAAS_RUN_MODE=bare" ;;
+        bcn)     echo "" ;;
         *)       echo "" ;;
     esac
 }
@@ -93,7 +95,12 @@ _dump_upstream() {
         if [[ -n "$env_vars" ]]; then
             export ${env_vars//,/ }
         fi
-        uv run python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "${extra_args[@]:-}"
+        if [[ "$name" == "bcn" ]]; then
+            uv run --project "$GATEWAY_DIR" --locked \
+                python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
+        else
+            uv run python "scripts/dump_openapi.py" "$TMPDIR/${name}.openapi.json" "$@"
+        fi
     )
     log_info "$name dumped → $TMPDIR/${name}.openapi.json"
 }
@@ -138,6 +145,14 @@ main() {
             baas \
             "$SCHEMAS_DIR/baas.openapi.json" \
             "$TMPDIR/baas.openapi.json"
+    fi
+
+    _dump_upstream bcn
+    if ! $DRY_RUN; then
+        _gate_and_publish \
+            bcn \
+            "$SCHEMAS_DIR/bcn.openapi.json" \
+            "$TMPDIR/bcn.openapi.json"
     fi
 
     log_step "Done"

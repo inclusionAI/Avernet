@@ -13,6 +13,7 @@ _CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 _VARS = {
     "backend_server_url": "http://backend:8080",
     "baas_server_url": "http://baas:9090",
+    "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
 }
 

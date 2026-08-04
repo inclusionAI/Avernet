@@ -13,6 +13,7 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
 
 - `baas.openapi.json` — BaaS service OpenAPI spec
 - `bots.openapi.json` — Bots service OpenAPI spec (the backend's public
+- `bcn.openapi.json` — BCN collaboration service OpenAPI spec
   `/openapi/v1/bots` surface, narrowed to public paths and the components they
   reference)
 
