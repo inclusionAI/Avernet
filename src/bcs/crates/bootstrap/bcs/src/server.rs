@@ -1208,6 +1208,18 @@ fn outbound_url_guard_from_config(config: &BcsConfig) -> OutboundUrlGuard {
     OutboundUrlGuard::new(policy.block_private_networks, policy.allow_loopback)
 }
 
+fn secret_log_preview(value: &str) -> String {
+    let len = value.len();
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() > 8 {
+        let prefix: String = chars.iter().take(4).collect();
+        let suffix: String = chars[chars.len() - 4..].iter().collect();
+        format!("{prefix}…{suffix}(len={len})")
+    } else {
+        format!("<redacted>(len={len})")
+    }
+}
+
 fn gateway_principal_signing_key(material: Option<&str>) -> crate::Result<&str> {
     material
         .filter(|value| !value.trim().is_empty())
@@ -1239,6 +1251,15 @@ fn build_gateway_principal_verifier_from_process(
     config: &GatewayPrincipalConfig,
 ) -> crate::Result<Arc<dyn PrincipalVerifier>> {
     let material = std::env::var(&config.signing_key_env).ok();
+    if let Some(value) = material.as_deref().filter(|value| !value.trim().is_empty()) {
+        info!(
+            source = "env",
+            env = %config.signing_key_env,
+            signing_key = %secret_log_preview(value),
+            signing_key_len = value.len(),
+            "Resolved Gateway Principal signing key"
+        );
+    }
     build_gateway_principal_verifier(config, material.as_deref())
 }
 
@@ -1259,6 +1280,13 @@ async fn build_gateway_principal_verifier_from_secret_access(
                 "Gateway Principal signing key secret '{secret_name}' is required"
             ))
         })?;
+        info!(
+            source = "secret_access",
+            secret_name = %secret_name,
+            signing_key = %secret_log_preview(&record.value),
+            signing_key_len = record.value.len(),
+            "Resolved Gateway Principal signing key"
+        );
         return build_gateway_principal_verifier(config, Some(record.value.as_str()));
     }
 
@@ -1307,6 +1335,13 @@ async fn build_group_session_token_port(
             "group_session_ws.signing_key_secret '{secret_name}' must resolve to non-empty material"
         ))
     })?;
+    info!(
+        source = "secret_access",
+        secret_name = %secret_name,
+        signing_key = %secret_log_preview(&secret.value),
+        signing_key_len = secret.value.len(),
+        "Resolved group session WebSocket JWT signing key"
+    );
     Ok(Arc::new(tokens))
 }
 
@@ -1476,6 +1511,13 @@ mod gateway_principal_tests {
                 .expect("explicit material"),
             "explicit-test-key"
         );
+    }
+
+    #[test]
+    fn secret_log_preview_masks_secret_material() {
+        assert_eq!(secret_log_preview("abcd1234wxyz"), "abcd…wxyz(len=12)");
+        assert_eq!(secret_log_preview("short"), "<redacted>(len=5)");
+        assert_eq!(secret_log_preview(""), "<redacted>(len=0)");
     }
 
     #[tokio::test]
