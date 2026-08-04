@@ -832,9 +832,10 @@ class TestPreparePoolLayout:
     def test_noop_when_not_agentbox(self, mod, tmp_root: Path):
         with patch.object(mod, "_is_agentbox_env", return_value=False):
             with patch.object(mod, "prepare_desktop_pool") as mock_prepare:
-                mod.prepare_pool_layout(home=tmp_root)
+                prepared = mod.prepare_pool_layout(home=tmp_root)
 
         mock_prepare.assert_not_called()
+        assert prepared is False
 
     def test_reuses_current_repo_for_configured_engine(
         self,
@@ -844,7 +845,7 @@ class TestPreparePoolLayout:
     ):
         target_dir.mkdir(parents=True)
         expected = SimpleNamespace(
-            status=SimpleNamespace(value="PREPARED"),
+            status=mod.DesktopPreparationStatus.PREPARED,
             preparation_id="P1",
             reason=None,
         )
@@ -859,13 +860,36 @@ class TestPreparePoolLayout:
                     "prepare_desktop_pool",
                     return_value=expected,
                 ) as mock_prepare:
-                    mod.prepare_pool_layout(home=tmp_root)
+                    prepared = mod.prepare_pool_layout(home=tmp_root)
 
         mock_prepare.assert_called_once_with(
             engine="hermes",
             repo_source=target_dir,
             home=tmp_root,
         )
+        assert prepared is True
+
+    def test_reports_failed_preparation(
+        self,
+        mod,
+        target_dir: Path,
+        tmp_root: Path,
+    ):
+        target_dir.mkdir(parents=True)
+        failed = SimpleNamespace(
+            status=mod.DesktopPreparationStatus.FAILED,
+            preparation_id=None,
+            reason="ambiguous repo delivery",
+        )
+        with patch.object(mod, "_is_agentbox_env", return_value=True):
+            with patch.object(
+                mod,
+                "prepare_desktop_pool",
+                return_value=failed,
+            ):
+                prepared = mod.prepare_pool_layout(home=tmp_root)
+
+        assert prepared is False
 
     def test_preparation_failure_is_non_fatal(
         self,
@@ -880,7 +904,9 @@ class TestPreparePoolLayout:
                 "load_engine_config",
                 side_effect=RuntimeError("broken config"),
             ):
-                mod.prepare_pool_layout(home=tmp_root)
+                prepared = mod.prepare_pool_layout(home=tmp_root)
+
+        assert prepared is False
 
 
 # ===================================================================
@@ -998,6 +1024,45 @@ class TestBootstrapOnStartup:
 
         assert (target_dir / "hello.txt").read_text() == "world"
 
+    def test_existing_repo_is_not_downloaded_after_preparation_failure(
+        self,
+        mod,
+        target_dir: Path,
+    ):
+        target_dir.mkdir(parents=True)
+        (target_dir / "keep.txt").write_text("existing")
+        with patch.object(mod, "_is_agentbox_env", return_value=True):
+            with patch.object(mod, "prepare_pool_layout", return_value=False):
+                with patch.object(mod, "_get_download_info") as mock_meta:
+                    with patch.object(mod, "_download_and_save") as mock_download:
+                        mod.bootstrap_on_startup()
+
+        mock_meta.assert_not_called()
+        mock_download.assert_not_called()
+        assert (target_dir / "keep.txt").read_text() == "existing"
+
+    def test_fresh_runtime_can_download_before_first_preparation(
+        self,
+        mod,
+        target_dir: Path,
+    ):
+        with patch.object(mod, "_is_agentbox_env", return_value=True):
+            with patch.object(mod, "prepare_pool_layout", return_value=False):
+                with patch.object(
+                    mod,
+                    "_get_download_info",
+                    return_value=("https://x.com/tar", '"e1"'),
+                ):
+                    with patch.object(mod, "_should_download", return_value=True):
+                        with patch.object(
+                            mod,
+                            "_download_and_save",
+                            return_value=True,
+                        ) as mock_download:
+                            mod.bootstrap_on_startup()
+
+        mock_download.assert_called_once_with("https://x.com/tar", '"e1"')
+
     def test_skips_download_when_should_download_false(self, mod):
         with patch.dict(os.environ, {"MAC_CONTAINER": "true"}):
             with patch.object(mod, "_is_agentbox_env", return_value=True):
@@ -1032,6 +1097,22 @@ class TestBootstrapOnStartup:
 
 
 class TestSyncOnce:
+    def test_existing_repo_is_not_refreshed_after_preparation_failure(
+        self,
+        mod,
+        target_dir: Path,
+    ):
+        target_dir.mkdir(parents=True)
+        (target_dir / "keep.txt").write_text("existing")
+        with patch.object(mod, "prepare_pool_layout", return_value=False):
+            with patch.object(mod, "_get_download_info") as mock_meta:
+                with patch.object(mod, "_download_and_save") as mock_download:
+                    mod._sync_once()
+
+        mock_meta.assert_not_called()
+        mock_download.assert_not_called()
+        assert (target_dir / "keep.txt").read_text() == "existing"
+
     def test_no_url_still_refreshes_preparation(self, mod):
         with patch.object(mod, "_get_download_info", return_value=(None, None)):
             with patch.object(mod, "prepare_pool_layout") as mock_prepare:

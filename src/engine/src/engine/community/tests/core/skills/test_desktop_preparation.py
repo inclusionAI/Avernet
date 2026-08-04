@@ -224,6 +224,69 @@ def test_preparation_reuses_downloaded_repo_and_preserves_legacy_layout(
     assert repeated.preparation_id == result.preparation_id
 
 
+@pytest.mark.parametrize("engine", FILESYSTEM_ENGINES)
+def test_preparation_upgrades_legacy_forward_repo_bridge(
+    tmp_path: Path,
+    engine: str,
+) -> None:
+    """Upgrade the layout emitted by the first Desktop Pool preparation."""
+
+    home = tmp_path / "home/admin"
+    layout, repo_source, managed, external = _legacy_runtime(home, engine)
+    managed_before = _target(managed)
+    external_before = _target(external)
+    layout.pool_root.mkdir(parents=True, exist_ok=True)
+    layout.pool_repo.symlink_to(repo_source, target_is_directory=True)
+    layout.ready_marker.write_text(
+        json.dumps(
+            {
+                "engine": engine,
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": "legacy-preparation",
+                "prepared_at": "2026-07-30T00:00:00Z",
+                "pool_local_root": str(layout.pool_local),
+                "pool_repo_root": str(layout.pool_repo),
+                "repo_delivery": "download",
+                "repo_delivery_source": str(repo_source),
+                "validation_summary": {
+                    "all_valid": True,
+                    "repo_delivery_bridge": {
+                        "path": str(layout.pool_repo),
+                        "target": str(repo_source),
+                        "valid": True,
+                    },
+                },
+            }
+        )
+    )
+
+    result = prepare_desktop_pool(
+        engine=engine,
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.PREPARED
+    assert result.preparation_id not in {None, "legacy-preparation"}
+    assert layout.pool_repo.is_dir() and not layout.pool_repo.is_symlink()
+    assert (layout.pool_repo / "business/reviewer/SKILL.md").read_text() == "repo"
+    assert repo_source.is_symlink()
+    assert _target(repo_source) == layout.pool_repo
+    assert layout.legacy_repo.is_symlink()
+    assert _target(layout.legacy_repo) == layout.pool_repo
+    assert _target(managed) == managed_before
+    assert _target(external) == external_before
+    marker = json.loads(layout.ready_marker.read_text())
+    assert marker["repo_delivery_source"] == str(layout.pool_repo)
+    probe = inspect_runtime_layout(
+        engine=engine,
+        home=home,
+        repo_delivery=RepoDelivery.DOWNLOAD,
+    )
+    assert probe.status is RuntimeLayoutInspectionStatus.READY
+    assert probe.preparation_id == result.preparation_id
+
+
 @pytest.mark.parametrize(
     ("engine", "activate"),
     [
@@ -448,6 +511,81 @@ def test_repo_move_loser_accepts_winner_published_reverse_bridge(
     assert (layout.pool_repo / "legacy.txt").read_text() == "legacy"
     assert repo_source.is_symlink()
     assert _target(repo_source) == layout.pool_repo
+
+
+@pytest.mark.parametrize("engine", FILESYSTEM_ENGINES)
+def test_concurrent_legacy_forward_bridge_upgrade_converges(
+    tmp_path: Path,
+    engine: str,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source, _managed, _external = _legacy_runtime(home, engine)
+    layout.pool_root.mkdir(parents=True, exist_ok=True)
+    layout.pool_repo.symlink_to(repo_source, target_is_directory=True)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: prepare_desktop_pool(
+                    engine=engine,
+                    repo_source=repo_source,
+                    home=home,
+                ),
+                range(2),
+            )
+        )
+
+    assert {result.status for result in results} <= {
+        DesktopPreparationStatus.PREPARED,
+        DesktopPreparationStatus.ALREADY_PREPARED,
+    }
+    assert layout.pool_repo.is_dir() and not layout.pool_repo.is_symlink()
+    assert repo_source.is_symlink()
+    assert _target(repo_source) == layout.pool_repo
+    assert (
+        inspect_runtime_layout(
+            engine=engine,
+            home=home,
+            repo_delivery=RepoDelivery.DOWNLOAD,
+        ).status
+        is RuntimeLayoutInspectionStatus.READY
+    )
+
+
+def test_forward_bridge_upgrade_failure_restores_legacy_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout, repo_source = _fresh_legacy_runtime(home, "openclaw")
+    (repo_source / "legacy.txt").write_text("legacy")
+    layout.pool_root.mkdir(parents=True, exist_ok=True)
+    layout.pool_repo.symlink_to(repo_source, target_is_directory=True)
+    original_publish = desktop_preparation._publish_repo_delivery_bridge
+
+    def fail_reverse_bridge_once(path: Path, source: Path) -> None:
+        if path == repo_source and source == layout.pool_repo:
+            raise OSError("injected reverse bridge publish failure")
+        original_publish(path, source)
+
+    monkeypatch.setattr(
+        desktop_preparation,
+        "_publish_repo_delivery_bridge",
+        fail_reverse_bridge_once,
+    )
+
+    result = prepare_desktop_pool(
+        engine="openclaw",
+        repo_source=repo_source,
+        home=home,
+    )
+
+    assert result.status is DesktopPreparationStatus.FAILED
+    assert repo_source.is_dir() and not repo_source.is_symlink()
+    assert (repo_source / "legacy.txt").read_text() == "legacy"
+    assert layout.pool_repo.is_symlink()
+    assert _target(layout.pool_repo) == repo_source
+    assert not layout.ready_marker.exists()
 
 
 def test_invalid_existing_claude_repo_bridge_never_publishes_ready_marker(

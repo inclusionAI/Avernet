@@ -112,8 +112,17 @@ def _canonicalize_downloaded_repo_locked(
         if not pool_repo.is_dir() or pool_repo.is_symlink():
             raise OSError(f"Canonical Pool repo is not a directory: {pool_repo}")
         return
+    legacy_forward_bridge_removed = False
     if pool_repo.is_symlink():
-        raise OSError(f"Canonical Pool repo must not be a symlink: {pool_repo}")
+        if _lexical_target(pool_repo) != repo_source:
+            raise OSError(f"Canonical Pool repo points elsewhere: {pool_repo}")
+        if repo_source.is_symlink() or not repo_source.is_dir():
+            raise OSError(f"Legacy repo source is not a directory: {repo_source}")
+        # The first Desktop rollout prepared ``Pool -> Legacy``. Remove only
+        # that exact bridge before atomically moving the same corpus in the
+        # canonical direction. Any other Pool symlink remains fail-closed.
+        pool_repo.unlink()
+        legacy_forward_bridge_removed = True
     if pool_repo.exists():
         if not pool_repo.is_dir():
             raise OSError(f"Canonical Pool repo is not a directory: {pool_repo}")
@@ -129,23 +138,34 @@ def _canonicalize_downloaded_repo_locked(
         raise OSError(f"Legacy repo source is not a directory: {repo_source}")
     moved_repo = False
     try:
-        os.replace(repo_source, pool_repo)
-        moved_repo = True
-    except OSError as error:
-        if pool_repo.is_dir() and not pool_repo.is_symlink():
-            if repo_source.is_symlink() and _lexical_target(repo_source) == pool_repo:
-                return
-            if isinstance(error, FileNotFoundError) and (
-                not repo_source.exists() and not repo_source.is_symlink()
-            ):
-                _publish_repo_delivery_bridge(repo_source, pool_repo)
-                return
-        raise
-    try:
+        try:
+            os.replace(repo_source, pool_repo)
+            moved_repo = True
+        except OSError as error:
+            if pool_repo.is_dir() and not pool_repo.is_symlink():
+                if (
+                    repo_source.is_symlink()
+                    and _lexical_target(repo_source) == pool_repo
+                ):
+                    return
+                if isinstance(error, FileNotFoundError) and (
+                    not repo_source.exists() and not repo_source.is_symlink()
+                ):
+                    _publish_repo_delivery_bridge(repo_source, pool_repo)
+                    return
+            raise
         _publish_repo_delivery_bridge(repo_source, pool_repo)
     except OSError:
         if moved_repo and not repo_source.exists() and not repo_source.is_symlink():
             os.replace(pool_repo, repo_source)
+        if (
+            legacy_forward_bridge_removed
+            and repo_source.is_dir()
+            and not repo_source.is_symlink()
+            and not pool_repo.exists()
+            and not pool_repo.is_symlink()
+        ):
+            _publish_repo_delivery_bridge(pool_repo, repo_source)
         raise
 
 

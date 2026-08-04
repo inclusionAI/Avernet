@@ -58,6 +58,7 @@ from engine.community.core.skills.layout_planner import (
 )
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.skills_pool.desktop_preparation import (
+    DesktopPreparationStatus,
     prepare_desktop_pool,
 )
 
@@ -556,11 +557,19 @@ def _download_and_save(url: str, etag: str | None) -> bool:
     return ok
 
 
-def prepare_pool_layout(*, home: Path | None = None) -> None:
-    """Best-effort Desktop Pool preparation over the existing repo delivery."""
+def _has_existing_repo_delivery() -> bool:
+    """Return whether a real or dangling Legacy/Pool repo entry already exists."""
+
+    return any(
+        path.exists() or path.is_symlink() for path in {TARGET_DIR, LEGACY_TARGET_DIR}
+    )
+
+
+def prepare_pool_layout(*, home: Path | None = None) -> bool:
+    """Prepare Desktop Pool and report whether existing delivery is safe to update."""
 
     if not _is_agentbox_env():
-        return
+        return False
     try:
         engine = normalize(load_engine_config().default_engine)
         repo_source = TARGET_DIR
@@ -584,10 +593,16 @@ def prepare_pool_layout(*, home: Path | None = None) -> None:
             result.preparation_id,
             result.reason,
         )
+        return result.status in {
+            DesktopPreparationStatus.PREPARED,
+            DesktopPreparationStatus.ALREADY_PREPARED,
+            DesktopPreparationStatus.ACTIVE_LAYOUT,
+        }
     except Exception:
         log.exception(
             "Desktop skills Pool preparation failed; preserving Legacy layout"
         )
+        return False
 
 
 def bootstrap_on_startup() -> None:
@@ -615,7 +630,13 @@ def bootstrap_on_startup() -> None:
     log.info("Skills-repo bootstrap starting...")
     # Upgrade old Desktop storage before the downloader decides which corpus
     # needs refreshing. Failure is non-fatal and leaves the old runtime intact.
-    prepare_pool_layout()
+    prepared = prepare_pool_layout()
+    if not prepared and _has_existing_repo_delivery():
+        log.error(
+            "Skills-repo bootstrap blocked: existing delivery could not be "
+            "prepared safely"
+        )
+        return
     url, etag = _get_download_info()
     if not url:
         log.info("No skills-repo URL available — skipping bootstrap download")
@@ -639,7 +660,12 @@ def bootstrap_on_startup() -> None:
 def _sync_once() -> None:
     """Run one periodic repo refresh and keep Pool preparation in sync."""
 
-    prepare_pool_layout()
+    prepared = prepare_pool_layout()
+    if not prepared and _has_existing_repo_delivery():
+        log.error(
+            "Background sync blocked: existing delivery could not be prepared safely"
+        )
+        return
     url, etag = _get_download_info()
     if not url:
         log.info("Background sync: no URL available, skipping")
