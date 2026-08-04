@@ -229,9 +229,11 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
-        # Mark restart in progress. Cleared on an observed terminal workflow by
-        # sync_restart_progress (which the restart poll drives), or by the restart
-        # task's failure branch when the submit below never happened.
+        # Mark restart in progress, and note that every failure return above this
+        # point leaves it untouched — the restart task's failure branch relies on
+        # that to avoid clearing a concurrent restart's marker. Cleared on an
+        # observed terminal workflow by sync_restart_progress, which the restart
+        # poll now drives.
         def _set_restarting_flag(latest_ext: dict) -> None:
             latest_ext.setdefault("restart", {})["restarting"] = True
 

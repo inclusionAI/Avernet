@@ -912,19 +912,6 @@ class PublishFlowService(
         restart_ext = (record.ext or {}).get("restart")
         return isinstance(restart_ext, dict) and bool(restart_ext.get("restarting"))
 
-    def clear_restart_in_progress(self, publish_id: int) -> None:
-        """Drop the ``ext.restart.restarting`` marker.
-
-        ``execute_restart`` sets it *before* issuing the deploy and only the sync
-        clears it on an observed terminal workflow — so a restart that never got
-        issued needs this, or the record reads "restarting" forever."""
-        def _mutator(latest_ext: dict) -> None:
-            restart_ext = latest_ext.get("restart")
-            if isinstance(restart_ext, dict):
-                restart_ext.pop("restarting", None)
-
-        self._mutate_and_update_ext(publish_id=publish_id, mutator=_mutator)
-
     def is_current_online_deployment(self, publish_id: int) -> bool:
         """True when this record's online release is the *current live* deployment
         on its bot — i.e. the latest version-setting op that has landed on the

@@ -395,14 +395,16 @@ class PublishRestartHandler(_PublishTaskBase):
         )
         if not result or not result.get("success"):
             message = (result or {}).get("message", "unknown error")
-            # execute_restart sets ext.restart.restarting *before* it issues, and
-            # only the sync clears it — so a restart that never got issued would
-            # leave the record reading "restarting" forever. Clear it here,
-            # mirroring retry's own cleanup of its restart flag on a failed
-            # submit. (A raised exception deliberately does NOT clear it: the task
-            # retries and the same op resumes, so the restart really is still in
-            # flight.)
-            self._flow.clear_restart_in_progress(publish_id)
+            # Deliberately does NOT touch ext.restart.restarting. Every
+            # ``success: False`` return in execute_restart is a preflight check
+            # that runs *before* the marker is written (record / binding / device
+            # / bot / artifact); past that write it only ever returns success or
+            # raises. So this branch means *this* execution never set the marker,
+            # and anything present belongs to someone else — ``restart_bot`` does
+            # not reject a restart while one is in flight, so a concurrent
+            # restart's marker (and its poll's wait state) can be sitting there.
+            # Clearing it would strand that restart exactly the way this task
+            # exists to prevent.
             return Fail(f"restart failed: publish_id={publish_id}, {message}")
 
         # Enqueue the poll HERE rather than alongside ``enqueue_restart``: by now

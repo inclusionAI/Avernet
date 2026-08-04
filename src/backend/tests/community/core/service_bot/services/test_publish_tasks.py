@@ -333,10 +333,6 @@ class _FakeRestartFlow:
     def is_restart_in_progress(self, publish_id):
         return self.restarting
 
-    def clear_restart_in_progress(self, publish_id):
-        self.calls.append("clear_marker")
-        self.restarting = False
-
     def sync_restart_progress(self, publish_id):
         self.calls.append("sync_restart")
         status = self._sync_statuses.pop(0) if len(self._sync_statuses) > 1 else (
@@ -369,17 +365,31 @@ def test_restart_success_enqueues_restart_poll():
     assert tq.enqueue.call_args.args[1] == {"publish_id": 1}
 
 
-def test_restart_failure_clears_marker_and_enqueues_nothing():
-    # execute_restart sets the marker before issuing; a submit that never landed
-    # must not leave the record reading "restarting" forever.
-    flow = _FakeRestartFlow(restart_succeeds=False)
+def test_restart_failure_preserves_a_concurrent_restarts_marker():
+    # Every ``success: False`` return in execute_restart is a preflight check that
+    # runs BEFORE the marker is written, so a failing handler never set it. Since
+    # restart_bot does not reject a restart while one is in flight, the marker it
+    # would see belongs to a *concurrent* restart whose poll is still using it as
+    # its wait state — clearing it would strand that restart.
+    flow = _FakeRestartFlow(restart_succeeds=False, restarting=True)
     restart, _poll, tq = _restart_handlers(flow)
     outcome = restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
     assert isinstance(outcome, Fail)
     assert "restart failed" in outcome.error and "restart boom" in outcome.error
-    assert flow.calls == ["execute_restart", "clear_marker"]
-    assert flow.restarting is False
+    assert flow.calls == ["execute_restart"]  # no clear_marker
+    assert flow.restarting is True  # the other restart's poll still has its wait state
     tq.enqueue.assert_not_called()
+
+
+def test_restart_failure_leaves_the_concurrent_poll_working():
+    # End-to-end of the above: the failed handler must not turn the other
+    # restart's poll into an immediate no-op.
+    flow = _FakeRestartFlow(restart_succeeds=False, sync_statuses=["SUCCESS"])
+    restart, poll, _tq = _restart_handlers(flow)
+    restart.handle({"publish_id": 1, "stage": "online", "operator": "op"})
+    outcome = poll.handle({"publish_id": 1})
+    assert isinstance(outcome, Complete)
+    assert flow.calls == ["execute_restart", "sync_restart"]  # sync still ran
 
 
 def test_restart_poll_reschedules_while_baas_pending():
