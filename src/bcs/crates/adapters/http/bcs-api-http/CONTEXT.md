@@ -32,17 +32,22 @@
 
 ## Configuration
 
-- Production bootstrap does not mount this crate yet.
-- The adapter must not read environment variables or select a production
-  Principal trust mechanism.
+- Production bootstrap mounts this Router directly at its contract-owned
+  `/openapi/v1/collaboration/**` paths and injects completed V1 application
+  services plus the Gateway Principal verifier.
+- The focused session-token Router remains a separate delivery slice; production
+  bootstrap composes it explicitly with the shared V1 Session facade and the
+  same Principal verifier.
+- The adapter must not read environment variables, select concrete V1
+  implementations, or select a production Principal trust mechanism.
 
 ## Runtime ownership
 
 This crate owns HTTP parsing, versioned wire DTOs, Gateway token verification,
 request IDs, envelopes, no-store token responses, and HTTP error mapping.
-Header extraction, production trust selection, router mounting, resource
-authorization, Actor selection, and business policy remain outside this
-delivery boundary.
+Bootstrap owns concrete service selection, production trust selection, and
+Router mounting; application facades own resource authorization, Actor
+selection, and business policy.
 
 ## Tests
 

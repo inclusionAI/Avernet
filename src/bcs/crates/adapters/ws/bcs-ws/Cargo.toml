@@ -25,6 +25,7 @@ thiserror   = { workspace = true }
 futures     = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
+form_urlencoded = "1"
 
 bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
@@ -38,5 +39,6 @@ tokio-test  = "0.4"
 tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
 bcs-test-support = { workspace = true }
+bcs-services-container = { workspace = true, features = ["test-support"] }
 tracing-subscriber = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

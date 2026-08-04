@@ -217,6 +217,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn env_plugin_resolves_the_fixed_group_session_websocket_key() {
+        let env = HashMap::from([(
+            "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT".to_string(),
+            "test-only-key".to_string(),
+        )]);
+        let plugin = EnvSecretAccess::from_map("BCS_SECRET_", env);
+
+        let secret = plugin
+            .get_secret("bcn-group-session-ws-jwt")
+            .await
+            .expect("fixed group-session key");
+
+        assert_eq!(secret.value, "test-only-key");
+    }
+
+    #[tokio::test]
     async fn noop_is_always_unavailable() {
         let plugin = NoopSecretAccess;
         assert!(matches!(

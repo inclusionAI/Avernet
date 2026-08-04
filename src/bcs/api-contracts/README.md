@@ -4,7 +4,7 @@
 models and resource path items live in separate YAML fragments so a domain can
 evolve without creating one monolithic file.
 
-The current contract contains 32 approved operations across Bot, Group,
+The current contract contains 34 approved operations across Bot, Group,
 GroupParticipant, Session, SessionParticipant, Invitation, Friendship, and
 FriendRequest resources. Every operation is published below the single BCN
 ownership prefix `/openapi/v1/collaboration/**`. These are the exact endpoints
@@ -32,6 +32,20 @@ Group's Sessions remains nested at
 prefix separates both resources from Backend and BaaS paths while preserving
 their natural names.
 
+Session-bound WebSocket access adds two operations to that HTTP surface:
+
+- `POST /openapi/v1/collaboration/sessions/{session_id}/token` issues the
+  short-lived connection credential after normal user authentication and
+  session authorization.
+- `GET /openapi/v1/collaboration/messages/ws?token=...` describes the WebSocket
+  HTTP Upgrade handshake. The OpenAPI contract intentionally covers only the
+  connection credential, authentication failures, and `101` upgrade response;
+  WebSocket message envelopes remain governed by the existing protocol tests.
+
+The WebSocket operation uses `x-avernet-protocol: websocket` so publication
+and Gateway integration can distinguish an Upgrade endpoint from an ordinary
+HTTP GET without inventing a JSON response body for status `101`.
+
 Validate the contract:
 
 ```bash
@@ -47,6 +61,18 @@ uv run --with pyyaml python src/bcs/scripts/bundle_openapi_contract.py \
   --root src/bcs/api-contracts/v1 \
   --output-dir /tmp/bcn-openapi
 ```
+
+Export the same validated contract as deterministic JSON for Gateway
+consumption:
+
+```bash
+uv run --with pyyaml python src/bcs/scripts/dump_openapi.py \
+  /tmp/bcn.openapi.json
+```
+
+Pass `--root src/bcs/api-contracts/v1` to export a different checked-out
+contract root. The generated JSON is self-contained: source-fragment `$ref`
+entries are resolved and discriminator mappings point inside the JSON document.
 
 Run the contract tests without changing the repository-wide Python
 dependencies:

@@ -37,6 +37,13 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Runtime lookup only; set this environment variable to real secret material.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "https://bcs.example.com",
@@ -70,6 +77,14 @@ structured_output = "json_schema"
 
 [database]
 type = "mysql"
+
+# Select a linked secret backend in deployments that do not use environment
+# variables. The session-bound WebSocket key is resolved by its fixed name.
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
 
 [cache]
 type = "redis"

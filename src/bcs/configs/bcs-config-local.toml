@@ -37,6 +37,14 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Local launchers inject an explicit test value; every other deployment must
+# provide real secret material through this lookup.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "http://localhost:8000",
@@ -69,6 +77,12 @@ type = "sqlite"
 
 [database.sqlite]
 path = "bcs.db"
+
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
 
 [collaboration.templates]
 storage_type = "file"

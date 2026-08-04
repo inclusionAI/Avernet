@@ -10,6 +10,7 @@ CreateFriendRequestRequest:
 ListFriendshipsPath:
   get:
     operationId: list_bot_friendships
+    tags: ["Collaboration / Friendships"]
     summary: List a Bot's friendships.
     x-avernet-security:
       user: required
@@ -75,6 +76,7 @@ ListFriendshipsPath:
 FriendshipPath:
   delete:
     operationId: delete_bot_friendship
+    tags: ["Collaboration / Friendships"]
     summary: Remove a friendship symmetrically and idempotently.
     x-avernet-security:
       user: required
@@ -126,6 +128,7 @@ FriendshipPath:
 BotFriendRequestsPath:
   post:
     operationId: create_bot_friend_request
+    tags: ["Collaboration / Friendships"]
     summary: Send a friend request from the path Bot to a target Bot.
     x-avernet-security:
       user: required
@@ -192,6 +195,7 @@ BotFriendRequestsPath:
 
   get:
     operationId: list_bot_friend_requests
+    tags: ["Collaboration / Friendships"]
     summary: List friend requests sent by or received by a Bot.
     x-avernet-security:
       user: required
@@ -265,6 +269,7 @@ BotFriendRequestsPath:
 AcceptFriendRequestPath:
   post:
     operationId: accept_friend_request
+    tags: ["Collaboration / Friendships"]
     summary: Accept a friend request as the receiver; idempotent after acceptance.
     x-avernet-security:
       user: required
@@ -324,6 +329,7 @@ AcceptFriendRequestPath:
 RejectFriendRequestPath:
   post:
     operationId: reject_friend_request
+    tags: ["Collaboration / Friendships"]
     summary: Reject a friend request as the receiver; idempotent after rejection.
     x-avernet-security:
       user: required

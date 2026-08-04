@@ -38,6 +38,10 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
         "bcs-friend",
         "bcs-bot",
         "bcs-relation",
+        "bcs-app-bot",
+        "bcs-app-group",
+        "bcs-app-session",
+        "bcs-app-invitation",
     ] {
         assert!(
             !manifest_declares_dependency(&manifest, forbidden),
@@ -47,7 +51,7 @@ fn manifest_does_not_depend_on_legacy_or_concrete_bcs_crates() {
 }
 
 #[test]
-fn production_bootstrap_does_not_mount_the_versioned_http_adapter() {
+fn production_bootstrap_composes_the_versioned_http_adapter_and_v1_facades() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let bootstrap_manifest =
         match fs::read_to_string(manifest_dir.join("../../../bootstrap/bcs/Cargo.toml")) {
@@ -55,10 +59,18 @@ fn production_bootstrap_does_not_mount_the_versioned_http_adapter() {
             Err(_) => panic!("read production bootstrap manifest"),
         };
 
-    assert!(
-        !manifest_declares_dependency(&bootstrap_manifest, "bcs-api-http"),
-        "production bootstrap must not mount bcs-api-http in this preparatory change"
-    );
+    for dependency in [
+        "bcs-api-http",
+        "bcs-app-bot",
+        "bcs-app-group",
+        "bcs-app-session",
+        "bcs-app-invitation",
+    ] {
+        assert!(
+            manifest_declares_dependency(&bootstrap_manifest, dependency),
+            "production bootstrap must compose {dependency}"
+        );
+    }
 }
 
 #[test]

@@ -54,7 +54,7 @@ fn config_with_auth(bots_dir: &PathBuf, auth: Value) -> BcsConfig {
 async fn start(
     config: BcsConfig,
 ) -> (SocketAddr, tokio::task::JoinHandle<Result<(), BcsError>>) {
-    BcsServer::new(config)
+    BcsServer::new_allowing_private_outbound_for_tests(config)
         .run_on_random_port()
         .await
         .expect("Failed to start server")
@@ -225,7 +225,7 @@ async fn auth_user_returns_oauth_name_and_avatar_from_cookie() {
     );
 
     // Need the in-process state to seed the identity row + bind the JWT hash.
-    let (addr, handle, state) = BcsServer::new(config)
+    let (addr, handle, state) = BcsServer::new_allowing_private_outbound_for_tests(config)
         .run_on_random_port_with_state()
         .await
         .expect("start server with state");

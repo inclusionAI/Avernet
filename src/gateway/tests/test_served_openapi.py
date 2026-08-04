@@ -16,8 +16,16 @@ from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import build_served_openapi
 
 _FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bots.openapi.json"
+_BAAS_ARTIFACT = (
+    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "baas.openapi.json"
+)
+_BCN_ARTIFACT = (
+    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bcn.openapi.json"
+)
+_SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
+_SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)
 
 
 def _served() -> dict[str, Any]:
@@ -63,3 +71,74 @@ def test_empty_catalog_yields_empty_but_valid_doc() -> None:
     )
     assert doc["openapi"].startswith("3.")
     assert doc["paths"] == {}
+
+
+def test_top_level_tags_are_merged_once_in_domain_order() -> None:
+    descriptions = {
+        "first": {
+            "tags": [{"name": "Collaboration / Bots", "description": "Bot resources."}],
+            "paths": {},
+        },
+        "second": {
+            "tags": [
+                {"name": "Collaboration / Bots", "description": "Bot resources."},
+                {"name": "Collaboration / Groups", "description": "Group resources."},
+            ],
+            "paths": {},
+        },
+    }
+
+    document = build_served_openapi(
+        ["first", "second"],
+        descriptions.__getitem__,
+        _RULES,
+        title="gateway",
+        version="0.1.0",
+    )
+
+    assert document["tags"] == [
+        {"name": "Collaboration / Bots", "description": "Bot resources."},
+        {"name": "Collaboration / Groups", "description": "Group resources."},
+    ]
+
+
+def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
+    descriptions = {
+        "bots": json.loads(_FIXTURE.read_text()),
+        "sessions": json.loads(_BAAS_ARTIFACT.read_text()),
+        "collaboration": json.loads(_BCN_ARTIFACT.read_text()),
+    }
+    document = build_served_openapi(
+        ["bots", "sessions", "collaboration"],
+        descriptions.__getitem__,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+    )
+
+    paths = document["paths"]
+    assert "/openapi/v1/bots" in paths
+    assert "/openapi/v1/sessions/{session_id}" in paths
+    assert "/openapi/v1/collaboration/bots/mine" in paths
+    assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
+    assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
+    assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
+        "x-avernet-security"
+    ] == {"user": "required"}
+    assert (
+        paths["/openapi/v1/collaboration/messages/ws"]["get"]["x-avernet-security"]
+        == {}
+    )
+    assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
+        "tags"
+    ] == ["Collaboration / Sessions"]
+    assert paths["/openapi/v1/collaboration/messages/ws"]["get"]["tags"] == [
+        "Collaboration / Sessions"
+    ]
+    assert [tag["name"] for tag in document["tags"]] == [
+        "Collaboration / Bots",
+        "Collaboration / Friendships",
+        "Collaboration / Groups",
+        "Collaboration / Sessions",
+        "Collaboration / Invitations",
+    ]

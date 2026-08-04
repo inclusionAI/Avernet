@@ -3,6 +3,17 @@ info:
   title: BCN OpenAPI
   version: 1.0.0
   description: Versioned public contract for Bot Collaboration Network resources.
+tags:
+  - name: Collaboration / Bots
+    description: Bot discovery, lookup, and management within BCN.
+  - name: Collaboration / Friendships
+    description: Bot friendships and friend-request lifecycle operations.
+  - name: Collaboration / Groups
+    description: Collaboration groups and their participants.
+  - name: Collaboration / Sessions
+    description: Group sessions, participants, messages, and connection access.
+  - name: Collaboration / Invitations
+    description: Invitations for joining collaboration groups and sessions.
 paths:
   /openapi/v1/collaboration/bots/mine:
     $ref: ./openapi/bots.yaml#/MyBotsPath
@@ -40,6 +51,8 @@ paths:
     $ref: ./openapi/sessions.yaml#/SessionCompletionPath
   /openapi/v1/collaboration/sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
+  /openapi/v1/collaboration/sessions/{session_id}/token:
+    $ref: ./openapi/connections.yaml#/SessionConnectionTokenPath
   /openapi/v1/collaboration/sessions/{session_id}/participants:
     $ref: ./openapi/sessions.yaml#/AddSessionParticipantPath
   /openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}:
@@ -48,6 +61,8 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
+  /openapi/v1/collaboration/messages/ws:
+    $ref: ./openapi/connections.yaml#/GroupSessionWebSocketPath
 components:
   schemas:
     Bot:
