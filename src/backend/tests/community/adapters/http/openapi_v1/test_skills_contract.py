@@ -68,10 +68,11 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
     ]["$ref"].endswith("Envelope_Deleted_")
 
     upload = paths["/openapi/v1/bots/skills/upload"]["post"]
-    assert {"201", "413"} <= set(upload["responses"])
-    assert upload["responses"]["201"]["content"]["application/json"]["schema"][
-        "$ref"
-    ].endswith("Envelope_SkillUpload_")
+    assert {"200", "201", "413"} <= set(upload["responses"])
+    for status in ("200", "201"):
+        assert upload["responses"][status]["content"]["application/json"]["schema"][
+            "$ref"
+        ].endswith("Envelope_SkillUpload_")
 
     for action in ("activate", "deactivate"):
         operation = paths[f"/openapi/v1/bots/skills/{{skill_id}}/{action}"]["post"]
@@ -80,5 +81,5 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
         ].endswith("Envelope_SkillState_")
 
     assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"][
-        "const"
-    ] == "created"
+        "enum"
+    ] == ["created", "updated"]
