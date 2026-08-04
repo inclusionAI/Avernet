@@ -73,7 +73,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         contract["paths"][GROUPS_PATH]["post"]["responses"]["404"][
             "x-error-codes"
         ]
-    ) == {"bot_not_found", "collaboration_definition_not_found"}
+    ) == {"bot_not_found"}
     assert set(
         contract["paths"][GROUPS_PATH]["post"]["responses"]["409"][
             "x-error-codes"
@@ -235,3 +235,74 @@ def test_list_groups_is_scoped_by_path_bot_without_view_bot_query() -> None:
     assert "view_bot_id" not in query_names
     assert "get" not in contract["paths"]["/openapi/v1/collaboration/groups"]
     assert "post" in contract["paths"]["/openapi/v1/collaboration/groups"]
+
+
+def test_delete_group_accepts_optional_acting_bot_id_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUP_PATH]["delete"]
+    queries = {
+        parameter["name"]: parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert queries == {
+        "acting_bot_id": {
+            "name": "acting_bot_id",
+            "in": "query",
+            "required": False,
+            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "schema": {"type": "string", "minLength": 1},
+        }
+    }
+
+
+def test_create_group_request_defaults_private_visibility_and_chat_delivery() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUPS_PATH]["post"]
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    create_group_schema = next(
+        schema
+        for schema in request_schema["oneOf"]
+        if schema["properties"]["group_kind"]["const"] == "normal"
+    )
+
+    assert "visibility" not in create_group_schema["properties"]
+    chat_config = next(
+        schema
+        for schema in create_group_schema["properties"]["collaboration"]["oneOf"]
+        if schema["properties"]["strategy"]["const"] == "chat"
+    )
+    assert chat_config["required"] == ["strategy"]
+    assert chat_config["properties"]["delivery_policy"]["default"] == {
+        "bot_final_delivery": "send_to_driver"
+    }
+    delivery_policy = chat_config["properties"]["delivery_policy"]
+    assert delivery_policy["required"] == ["bot_final_delivery"]
+    assert delivery_policy["properties"]["bot_final_delivery"]["default"] == "send_to_driver"
+
+
+def test_create_state_machine_group_accepts_definition_content_yaml() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][GROUPS_PATH]["post"]
+    request_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    create_group_schema = next(
+        schema
+        for schema in request_schema["oneOf"]
+        if schema["properties"]["group_kind"]["const"] == "normal"
+    )
+    state_machine_config = next(
+        schema
+        for schema in create_group_schema["properties"]["collaboration"]["oneOf"]
+        if schema["properties"]["strategy"]["const"] == "state_machine"
+    )
+    definition = state_machine_config["properties"]["definition"]
+
+    assert definition == {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["content_yaml"],
+        "properties": {"content_yaml": {"type": "string", "minLength": 1}},
+    }
+    assert "definition_id" not in repr(state_machine_config)
+    assert "version" not in definition["properties"]

@@ -100,3 +100,25 @@ def test_add_session_participant_accepts_only_bot_uuid() -> None:
         "required": ["bot_uuid"],
         "properties": {"bot_uuid": {"type": "string"}},
     }
+
+
+def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/sessions/{session_id}"
+    ]["delete"]
+    queries = {
+        parameter["name"]: parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "query"
+    }
+
+    assert queries == {
+        "acting_bot_id": {
+            "name": "acting_bot_id",
+            "in": "query",
+            "required": False,
+            "description": "Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.",
+            "schema": {"type": "string", "minLength": 1},
+        }
+    }

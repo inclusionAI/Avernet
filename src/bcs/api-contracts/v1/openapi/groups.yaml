@@ -147,10 +147,9 @@ GroupsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: A referenced Bot Actor or collaboration definition is missing.
+        description: A referenced Bot Actor is missing.
         x-error-codes:
           - bot_not_found
-          - collaboration_definition_not_found
         content:
           application/json:
             schema:
@@ -301,6 +300,7 @@ GroupPath:
       user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ActingBotIdQuery
     responses:
       "200":
         description: Idempotent delete result.
@@ -371,19 +371,30 @@ AddGroupParticipantRequest:
       type: string
 
 CreateDeliveryPolicy:
-  $ref: ../domain-models.yaml#/DeliveryPolicy
+  type: object
+  additionalProperties: false
+  required:
+    - bot_final_delivery
+  properties:
+    bot_final_delivery:
+      type: string
+      enum:
+        - send_to_driver
+        - inject_observers
+      default: send_to_driver
 
 CreateChatConfiguration:
   type: object
   additionalProperties: false
   required:
     - strategy
-    - delivery_policy
   properties:
     strategy:
       const: chat
     delivery_policy:
       $ref: "#/CreateDeliveryPolicy"
+      default:
+        bot_final_delivery: send_to_driver
 
 CreateManagerWorkerConfiguration:
   type: object
@@ -393,6 +404,16 @@ CreateManagerWorkerConfiguration:
   properties:
     strategy:
       const: manager_worker
+
+CreateStateMachineDefinitionContent:
+  type: object
+  additionalProperties: false
+  required:
+    - content_yaml
+  properties:
+    content_yaml:
+      type: string
+      minLength: 1
 
 CreateStateMachineConfiguration:
   type: object
@@ -405,7 +426,7 @@ CreateStateMachineConfiguration:
     strategy:
       const: state_machine
     definition:
-      $ref: ../domain-models.yaml#/StateMachineDefinitionReference
+      $ref: "#/CreateStateMachineDefinitionContent"
     participant_bindings:
       type: array
       items:
@@ -434,12 +455,6 @@ CreateCollaborationGroup:
       type: string
     context:
       type: string
-    visibility:
-      type: string
-      enum:
-        - private
-        - public
-      default: private
     driver_bot_uuid:
       type: string
     participants:

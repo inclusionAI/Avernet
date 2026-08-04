@@ -309,6 +309,7 @@ SessionPath:
       user: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/ActingBotIdQuery
     responses:
       "200":
         description: Idempotent delete result.

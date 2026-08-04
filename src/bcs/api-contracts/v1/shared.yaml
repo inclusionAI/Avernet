@@ -57,6 +57,15 @@ ViewBotIdQuery:
     type: string
     minLength: 1
 
+ActingBotIdQuery:
+  name: acting_bot_id
+  in: query
+  required: false
+  description: Optional Bot identity perspective for the delete decision. Omit to evaluate the authenticated Human perspective.
+  schema:
+    type: string
+    minLength: 1
+
 BotUuidPath:
   name: bot_uuid
   in: path
