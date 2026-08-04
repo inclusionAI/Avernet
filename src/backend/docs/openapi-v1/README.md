@@ -551,6 +551,22 @@ as reference).
 All responses use the `Envelope[T]` / `Page[T]` shapes from
 `openapi_v1/contracts.py` unless noted (binary streams bypass the envelope).
 
+### ✅ shared — hello (1 endpoint) · `openapi_v1/hello/router.py` — **IMPLEMENTED**
+Not a Track B category and not owned by a slice: a no-input smoke-test endpoint
+for integrators and for our own testing. It reads nothing and calls no service,
+so a failure on it is the transport or the caller's credentials — never the
+domain. It is **not** exempt from the surface-wide auth: like every other route
+it requires a verified principal, which is most of what a smoke test is for.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/hello` | Fixed greeting; no path/query/body input | `Envelope[Hello]` — `data.message` is always `"Hello, World!"` |
+
+_Nested under `/openapi/v1/bots/` like the other groups, deliberately: the
+gateway picks the upstream from the first segment after `/openapi/v1`, so a
+top-level `/openapi/v1/hello` would need a new domain and a new `route_security`
+rule to be reachable at all._
+
 ### ✅ totalfrank · P1 — bots (13 endpoints) · `openapi_v1/bots/router.py` — **IMPLEMENTED (PR #494)**
 All 13 wired to the internal bot services. Kept here as the reference shape for
 the other six: this is what "done" looks like per category.
@@ -1017,3 +1033,17 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   cross-repo test pins that contract, so a rename on either side leaves both
   suites green and 401s production. Full suite 10204 passed / 3 skipped. SDD:
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`.
+- **2026-08-04** — **`GET /openapi/v1/bots/hello` added** — a no-input smoke-test
+  endpoint that answers a fixed `Hello, World!` in the standard envelope. New
+  `openapi_v1/hello/` group, mounted in `_SUBGROUPS` ahead of the bots router so
+  the literal path is not read as a bot whose id is `hello`. Three decisions
+  worth knowing: it is **nested under `/openapi/v1/bots/`** because the gateway
+  selects the upstream from the first segment after `/openapi/v1`, so a
+  top-level `/openapi/v1/hello` would need a new domain plus a `route_security`
+  rule before it could be reached at all; it **requires a principal** like every
+  other route on this surface (the surface-wide dependency in
+  `build_public_router()` gives it no way to opt out, and an unauthenticated
+  smoke test would prove less anyway); and it carries **no `@envelope_errors`**
+  because it raises no domain error — its only failure is the dependency's 401,
+  which the app-level handler already envelopes. Board unmoved: this is not a
+  Track B category and no track's definition of done changes.

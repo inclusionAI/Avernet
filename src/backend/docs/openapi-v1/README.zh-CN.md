@@ -483,6 +483,20 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
 （二进制流不走信封）。
 
+### ✅ 公共 —— hello（1 个端点）· `openapi_v1/hello/router.py` —— **已实现**
+它不属于 Track B 的任何类别，也不归某个切片所有：这是一个不接受任何输入的冒烟测试端点，
+供集成方以及我们自己做联调用。它不读取任何数据、不调用任何服务，所以它一旦失败，问题
+只会出在链路或调用方的凭据上，绝不会在业务域里。它**不豁免**面级认证：和其余路由一样
+需要通过验证的 principal —— 而这恰恰是冒烟测试最想验证的那一段。
+
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/hello` | 固定问候语；无 path/query/body 输入 | `Envelope[Hello]` —— `data.message` 恒为 `"Hello, World!"` |
+
+_和其余组一样嵌套在 `/openapi/v1/bots/` 之下，这是刻意的：网关按 `/openapi/v1` 之后的
+第一段选择上游，所以顶层的 `/openapi/v1/hello` 需要新增一个 domain 和一条
+`route_security` 规则才能被路由到。_
+
 ### ✅ totalfrank · P1 —— bots（13 个端点）· `openapi_v1/bots/router.py` —— **已实现（PR #494）**
 13 个端点已全部接到内部 bot 服务上。这里保留下来，是作为其余六个类别的参照形态：
 一个类别"做完了"长什么样。
@@ -872,3 +886,13 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
+- **2026-08-04** —— **新增 `GET /openapi/v1/bots/hello`** —— 一个不接受任何输入的冒烟
+  测试端点，用标准信封返回固定的 `Hello, World!`。新增 `openapi_v1/hello/` 组，挂在
+  `_SUBGROUPS` 里、位于 bots 路由之前，这样字面路径不会被当成 id 为 `hello` 的 Agent。
+  三点值得知道的决定：它**嵌套在 `/openapi/v1/bots/` 之下**，因为网关按 `/openapi/v1`
+  之后的第一段选择上游，顶层的 `/openapi/v1/hello` 需要新增 domain 和 `route_security`
+  规则才可能被路由到；它和本面上其余路由一样**需要 principal**（`build_public_router()`
+  的面级依赖让它没有豁免的余地，而且免认证的冒烟测试能验证的东西更少）；它**没有加
+  `@envelope_errors`**，因为它不会抛出任何业务域错误 —— 它唯一的失败是依赖抛出的 401，
+  而那已经由应用级处理器包成信封了。看板未动：它不是 Track B 的类别，也不改变任何
+  track 的完成定义。
