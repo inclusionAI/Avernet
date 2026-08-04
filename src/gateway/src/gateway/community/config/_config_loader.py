@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from gateway.community.logger import get_logger
+
 from ._models import (
     Config,
     LogConfig,
@@ -14,6 +16,8 @@ from ._models import (
     UserConfig,
     WebConfig,
 )
+
+logger = get_logger("config")
 
 
 class ConfigLoader:
@@ -28,6 +32,11 @@ class ConfigLoader:
         if overlay_path and overlay_path.exists():
             overlay = _load_yaml(overlay_path)
             base = _merge(base, overlay)
+            logger.info(
+                "config loaded: base=%s overlay=%s env=%s", base_path, overlay_path, env
+            )
+        else:
+            logger.info("config loaded: base=%s env=%s", base_path, env or "(none)")
 
         config_dir = base_path.parent if base_path is not None else None
         return _parse_config(base, config_dir=config_dir)

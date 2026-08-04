@@ -183,6 +183,12 @@ async def forward_websocket(websocket: WebSocket) -> None:
         headers=headers,
         subprotocols=tuple(websocket.scope.get("subprotocols") or ()),
     )
+    logger.info(
+        "ws forwarding request url=%s headers=%s subprotocols=%s",
+        request.url,
+        request.headers,
+        request.subprotocols,
+    )
     try:
         cm = state.ws_forwarder.connect(request)
         upstream = await cm.__aenter__()
@@ -195,6 +201,8 @@ async def forward_websocket(websocket: WebSocket) -> None:
         logger.warning("relay upstream unavailable", exc_info=True)
         await _refuse(websocket, _CLOSE_UPSTREAM_UNAVAILABLE, "upstream unavailable")
         return
+
+    logger.info("ws upstream connected subprotocol=%s", upstream.subprotocol)
 
     # Past this point the upstream is open and the exit is owed unconditionally
     # — whatever the client does next, and whether the relay ends cleanly, by

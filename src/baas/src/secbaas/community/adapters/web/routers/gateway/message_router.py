@@ -54,7 +54,7 @@ router = APIRouter(prefix="/openapi/v1/chat", tags=["messages"])
 
 
 @router.post(
-    "/messages",
+    "",
     response_model=MessageResponse,
     summary="Gateway message delivery",
     description="Deliver a message to a specified Bot using a JWT-authenticated request",
@@ -161,7 +161,7 @@ async def deliver_message(
 
 
 @router.post(
-    "/messages/stream",
+    "/stream",
     summary="Gateway streaming message delivery",
     description="Deliver a message to a specified Bot using a JWT-authenticated request, returning results as an SSE stream",
     response_model=None,
