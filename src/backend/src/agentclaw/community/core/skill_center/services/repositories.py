@@ -98,6 +98,17 @@ class SkillRepository(Protocol):
     ) -> bool:
         ...
 
+    def delete_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        quarantine_locator: str,
+    ) -> int | None:
+        """Atomically delete scoped state and create durable package cleanup work."""
+        ...
+
     def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:
         """Return bot ids whose active skill-sets reference this skill
         (deletion blockers); empty list if none."""

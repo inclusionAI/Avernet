@@ -17,6 +17,7 @@ provides:
   - "LocalSkillQueryService"
   - "LocalSkillUploadService"
   - "LocalSkillStateService"
+  - "LocalSkillDeleteService"
   - "LocalSkillCleanupWorkModel"
 consumes:
   - "BotRepository"
@@ -85,3 +86,15 @@ before it attempts byte cleanup. Cleanup identity uses the full SHA-256 of the
 locator, while retaining the locator itself for execution; a digest collision
 fails closed. Apply
 `sql/2026_08_04_local_skill_cleanup_work.sql` before deploying this behavior.
+
+Public Local Skill deletion copies and verifies package bytes in a unique
+Bot-scoped quarantine before its one transaction removes the default-set
+exclusion, all Skill Set associations, and the Skill row. If that transaction
+fails, the package is restored from quarantine before the request fails. A
+post-commit purge failure records the same durable cleanup work; it never
+recreates the deleted Skill.
+
+If a device reports source deletion failure after a partial delete and the
+authoritative package cannot be verified repaired, the complete quarantine is
+retained as `repair_required` cleanup work. It is deliberately excluded from
+ordinary obsolete-byte purge retries until package repair is resolved.
