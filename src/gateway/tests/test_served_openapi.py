@@ -105,11 +105,11 @@ def test_top_level_tags_are_merged_once_in_domain_order() -> None:
 def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
     descriptions = {
         "bots": json.loads(_FIXTURE.read_text()),
-        "sessions": json.loads(_BAAS_ARTIFACT.read_text()),
+        "chat": json.loads(_BAAS_ARTIFACT.read_text()),
         "collaboration": json.loads(_BCN_ARTIFACT.read_text()),
     }
     document = build_served_openapi(
-        ["bots", "sessions", "collaboration"],
+        ["bots", "chat", "collaboration"],
         descriptions.__getitem__,
         _SHIPPED_RULES,
         title="gateway",
@@ -118,16 +118,21 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
 
     paths = document["paths"]
     assert "/openapi/v1/bots" in paths
-    assert "/openapi/v1/sessions/{session_id}" in paths
+    # REL #748 renamed the BaaS chat/session surface to /openapi/v1/chat/**;
+    # the shipped baas artifact now serves the sessions path under chat.
+    assert "/openapi/v1/chat/sessions/{session_id}" in paths
     assert "/openapi/v1/collaboration/bots/mine" in paths
     assert "post" in paths["/openapi/v1/collaboration/sessions/{session_id}/token"]
     assert "get" in paths["/openapi/v1/collaboration/messages/ws"]
     assert paths["/openapi/v1/collaboration/bots/mine"]["get"][
         "x-avernet-security"
     ] == {"user": "required"}
+    # REL qualified the collaboration messages/ws exemption by plane: only the
+    # WEBSOCKET handshake is exempt (BCN verifies its session credential); the
+    # HTTP GET operation on the same path keeps the user requirement.
     assert (
         paths["/openapi/v1/collaboration/messages/ws"]["get"]["x-avernet-security"]
-        == {}
+        == {"user": "required"}
     )
     assert paths["/openapi/v1/collaboration/sessions/{session_id}/token"]["post"][
         "tags"

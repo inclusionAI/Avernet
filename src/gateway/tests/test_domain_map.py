@@ -82,7 +82,7 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
 
-    collaboration = dm.domain_for("/openapi/v1/collaboration/groups/group-1")
+    collaboration = dm.http_domain_for("/openapi/v1/collaboration/groups/group-1")
     assert collaboration is not None
     assert collaboration.server.name == "bcs"
     assert collaboration.server.base_url == "http://bcs:8081"

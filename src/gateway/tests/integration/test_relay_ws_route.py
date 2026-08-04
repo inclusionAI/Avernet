@@ -202,7 +202,7 @@ def _build_collaboration() -> tuple[FastAPI, _FakeAuth, _StubForwarder]:
         variables={},
     )
     app.state.domain_map = domain_map
-    for route in relay_routes(domain_map.base_path, "collaboration"):
+    for route in relay_routes(f"{domain_map.base_path}/collaboration"):
         app.add_api_websocket_route(route, forward_websocket)
     return app, auth, forwarder
 
