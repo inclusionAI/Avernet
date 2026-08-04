@@ -34,11 +34,15 @@ def build_served_openapi(
 
     ``describe(domain)`` returns that domain's latest published description (from
     the schema catalog). Domains with no description yet contribute nothing.
+
+    Each domain filters paths using ``{base_path}/{domain_name}``, so only paths
+    beneath that domain's prefix are included.
     """
     paths: dict[str, Any] = {}
     components: dict[str, Any] = {}
     for domain in domains:
-        doc = generate_openapi(describe(domain), rules, base_path)
+        domain_prefix = f"{base_path.rstrip('/')}/{domain}"
+        doc = generate_openapi(describe(domain), rules, domain_prefix)
         paths.update(doc.get("paths", {}))
         for section, items in doc.get("components", {}).items():
             components.setdefault(section, {}).update(items)
