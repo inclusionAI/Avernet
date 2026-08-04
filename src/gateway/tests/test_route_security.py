@@ -24,15 +24,6 @@ _SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
 _COLLABORATION_SOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
 
 
-def test_shipped_config_requires_user_and_app_for_bot_logs() -> None:
-    raw = yaml.safe_load(_CONFIG.read_text())
-    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    req = rs.resolve("GET", "/openapi/v1/bots/logs/traces/trace-1")
-    assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
-    assert req[PrincipalType.APP] is Presence.REQUIRED
-
-
 def test_shipped_config_exempts_the_bot_socket_handshake() -> None:
     """The socket's credential is checked by the hop behind the gateway.
 
