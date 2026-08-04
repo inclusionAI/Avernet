@@ -38,7 +38,10 @@ class TestServedOpenAPI:
             "bots.openapi.json must publish both Bot Logs operations"
         )
         for path in expected:
-            assert paths[path]["get"]["x-avernet-security"] == {"user": "required"}
+            assert paths[path]["get"]["x-avernet-security"] == {
+                "user": "required",
+                "app": "required",
+            }
         assert not any(path.startswith("/openapi/v1/bot-chats") for path in paths)
 
     def test_baas_domain_served(self, app_no_lifespan: FastAPI) -> None:

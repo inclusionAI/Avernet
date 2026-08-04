@@ -185,8 +185,23 @@ async def test_mixed_app_and_google_user_resolve_both() -> None:
     )
     result = await authenticate(
         creds,
-        {PrincipalType.USER: Presence.REQUIRED, PrincipalType.APP: Presence.OPTIONAL},
+        {PrincipalType.USER: Presence.REQUIRED, PrincipalType.APP: Presence.REQUIRED},
         _google_strategies(),
     )
     assert PrincipalType.USER in result
     assert PrincipalType.APP in result
+
+
+async def test_user_alone_does_not_satisfy_required_app() -> None:
+    creds = CredentialBundle(
+        headers={"x-avernet-google-token": "tok"}, cookies={}, query={}
+    )
+    with pytest.raises(AuthError, match="no credential for app"):
+        await authenticate(
+            creds,
+            {
+                PrincipalType.USER: Presence.REQUIRED,
+                PrincipalType.APP: Presence.REQUIRED,
+            },
+            _google_strategies(),
+        )
