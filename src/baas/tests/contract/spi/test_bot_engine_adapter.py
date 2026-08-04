@@ -1,6 +1,6 @@
 """BotEngineAdapter SPI 契约测试。
 
-断言 Protocol 形状(4 个公共成员 + @runtime_checkable)与各 adapter 实现满足 isinstance。
+断言 Protocol 形状(5 个公共成员 + @runtime_checkable)与各 adapter 实现满足 isinstance。
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ EXPECTED_MEMBERS = {
     "engine_type",
     "ws_path",
     "session_consistency_key",
+    "build_session_id",
     "create_adapter_session",
 }
 
@@ -63,6 +64,9 @@ def test_protocol_is_runtime_checkable() -> None:
             return "/api/ws"
 
         def session_consistency_key(self, **_: object) -> str | None:
+            return None
+
+        def build_session_id(self, **_: object) -> str | None:
             return None
 
         async def create_adapter_session(self, **_: object) -> tuple[str, bool]:
