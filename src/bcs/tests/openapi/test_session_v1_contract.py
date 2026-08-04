@@ -122,3 +122,16 @@ def test_delete_session_accepts_optional_acting_bot_id_query() -> None:
             "schema": {"type": "string", "minLength": 1},
         }
     }
+
+
+def test_create_group_session_does_not_accept_driver_or_participants() -> None:
+    contract = load_contract(CONTRACT_ROOT)
+    operation = contract["paths"][
+        "/openapi/v1/collaboration/groups/{group_id}/sessions"
+    ]["post"]
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "required" not in schema
+    assert set(schema["properties"]) == {"title", "input"}
+    assert "driver_bot_uuid" not in schema["properties"]
+    assert "participants" not in schema["properties"]

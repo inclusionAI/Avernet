@@ -1,22 +1,11 @@
 CreateSessionRequest:
   type: object
   additionalProperties: false
-  required:
-    - driver_bot_uuid
-    - participants
   properties:
     title:
       type: string
     input:
       $ref: ../domain-models.yaml#/SessionInput
-    driver_bot_uuid:
-      type: string
-    participants:
-      type: array
-      minItems: 1
-      uniqueItems: true
-      items:
-        $ref: "#/SessionParticipantInput"
 
 SessionParticipantInput:
   type: object
