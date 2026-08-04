@@ -519,7 +519,7 @@ mcp  models  resources  routines  sessions  skills
 messages
 ```
 
-- `messages` —— 网关在 `/openapi/v1/bots/messages/**` 上提供 Agent 的聊天 WebSocket，
+- `messages` —— 网关在 `/openapi/v1/bots/messages/ws/**` 上提供 Agent 的聊天 WebSocket，
   并中继到 engine proxy（`src/gateway/configs/application.yaml`）。该占用**只在 socket
   平面**上成立，因此发往该地址的 HTTP 请求仍会到达本服务；这个名字是为将来要放在那里的
   HTTP 端点保留的。参见

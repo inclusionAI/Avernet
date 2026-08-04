@@ -718,10 +718,13 @@ def test_every_key_the_shipped_config_uses_is_recognised() -> None:
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     domain_map = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
-    socket = domain_map.websocket_domain_for("/openapi/v1/bots/messages/t/ws")
+    socket = domain_map.websocket_domain_for("/openapi/v1/bots/messages/ws/t/api/ws")
     assert socket is not None
     assert socket.serves_websocket and not socket.serves_http
-    assert socket.mount_prefix == "/openapi/v1/bots/messages"
+    assert socket.mount_prefix == "/openapi/v1/bots/messages/ws"
+    # The claim stops at the socket's own segment: a sibling under `messages` is
+    # not this domain's, on either plane.
+    assert domain_map.websocket_domain_for("/openapi/v1/bots/messages/t/api") is None
 
 
 # ── path patterns: match first, then most specific ───────────────────────────
