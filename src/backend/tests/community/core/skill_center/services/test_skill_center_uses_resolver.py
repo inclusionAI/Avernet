@@ -15,10 +15,7 @@ Task 2.1 of `docs/superpowers/plans/2026-06-15-device-sync-supplier-for-bot-clea
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
