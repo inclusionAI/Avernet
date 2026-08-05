@@ -72,6 +72,12 @@ class LocalSkillStateService:
             )
             if default_set is None:
                 raise LocalSkillNotFoundError()
+            if active:
+                self._ensure_default_set_membership(
+                    default_set=default_set,
+                    skill_id=skill_id,
+                    owner_id=owner_id,
+                )
             changed = bool(skill["active"]) != active
             if changed:
                 self._write_desired_state(
@@ -201,6 +207,23 @@ class LocalSkillStateService:
                 owner_id, bot_id, skill_set_id, skill_id
             )
         if not changed:
+            raise LocalSkillStorageError()
+
+    def _ensure_default_set_membership(
+        self,
+        *,
+        default_set: dict[str, Any],
+        skill_id: str,
+        owner_id: str,
+    ) -> None:
+        """Repair legacy Local Skills before making an active state visible."""
+        default_set_id = str(default_set["id"])
+        members = self._skill_set_repo.get_skills_in_set(default_set_id)
+        if any(str(member.get("id")) == skill_id for member in members):
+            return
+        if not self._skill_set_repo.add_skill_to_set(
+            default_set_id, skill_id, user_id=owner_id
+        ):
             raise LocalSkillStorageError()
 
     def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:

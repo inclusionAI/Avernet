@@ -46,12 +46,21 @@ class _Skills:
 
 
 class _Sets:
-    def __init__(self, skills: _Skills) -> None:
+    def __init__(self, skills: _Skills, *, associated: bool = True) -> None:
         self.skills = skills
         self.events: list[str] = []
+        self.associated = associated
 
     def get_default(self, **kwargs):
         return {"id": "4"}
+
+    def get_skills_in_set(self, _skill_set_id: str):
+        return [{"id": "9"}] if self.associated else []
+
+    def add_skill_to_set(self, *_args, **_kwargs):
+        self.events.append("associate")
+        self.associated = True
+        return True
 
     def remove_default_skill_exclusion(self, *args):
         self.events.append("remove")
@@ -130,11 +139,12 @@ def _service(
     git_path: str = "local://one",
     status: str = "ACTIVE",
     entity_id: str = "owner",
+    associated: bool = True,
     collaborators=None,
     on_acquire=None,
 ):
     skills = _Skills(active=active, git_path=git_path)
-    sets = _Sets(skills)
+    sets = _Sets(skills, associated=associated)
     guard = _Guard(on_acquire)
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
@@ -164,6 +174,20 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
         "engine_type": "openclaw",
         "entity_type": "staff",
     }
+
+
+@pytest.mark.asyncio
+async def test_activate_repairs_missing_default_set_membership_before_runtime_sync():
+    service, _skills, sets, _guard, runtime, _factory = _service(associated=False)
+
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=True
+    )
+
+    assert result["active"] is True
+    assert sets.associated is True
+    assert sets.events == ["associate", "remove"]
+    assert runtime.calls == 1
 
 
 @pytest.mark.asyncio
