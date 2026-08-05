@@ -390,21 +390,40 @@ class LocalSkillUploadService:
                 old_locator=old_locator,
                 new_locator=new_locator,
                 description=description,
-                requires_runtime_restore=bool(skill["active"]),
+                # Replacements always reconcile the runtime before the old
+                # package can be cleaned up, including an inactive skill
+                # whose desired state is represented by an exclusion.
+                requires_runtime_restore=True,
                 cleanup_work_id=old_cleanup_work_id,
             )
             if committed_cleanup_id != old_cleanup_work_id:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
-            runtime_sync_attempted = bool(skill["active"])
-            if runtime_sync_attempted:
+            runtime_sync_attempted = True
+            if bool(skill["active"]):
                 self._ensure_default_set_membership(
                     owner_id=owner_id,
                     bot_id=bot_id,
                     engine_type=bot.get("active_engine"),
                     skill_id=str(skill["id"]),
                 )
-            if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
+            else:
+                # A prior default-set exclusion can be stale after defaults
+                # are recreated.  Mirror the desired inactive state into the
+                # current default set before publishing the replacement.
+                default_set = self._ensure_default_set(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                )
+                if not self._skill_set_repo.add_default_skill_exclusion(
+                    owner_id,
+                    bot_id,
+                    int(default_set["id"]),
+                    int(skill["id"]),
+                ):
+                    raise LocalSkillStorageError()
+            if not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
                 {
@@ -502,7 +521,6 @@ class LocalSkillUploadService:
                 raise LocalSkillStorageError()
             if (
                 runtime_sync_attempted
-                and bool(skill["active"])
                 and not self._sync_runtime(bot, owner_id, bot_id)
             ):
                 # Runtime may have switched partway before reporting failure.
