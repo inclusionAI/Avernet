@@ -102,7 +102,10 @@ def _real_ledger():
 def _pf(*args, **kw):
     """Construct PublishFlowService for tests, defaulting the DI-required teclaw
     promotion deps to Mocks (the arca/verify flow tests don't exercise them)."""
-    kw.setdefault("common_config_service", Mock())
+    if "common_config_service" not in kw:
+        common_config = Mock()
+        common_config.get_value.return_value = None
+        kw["common_config_service"] = common_config
     kw.setdefault("task_queue_service", Mock())
     kw.setdefault("resolver", Mock())
     kw.setdefault("device_fs_dispatcher", Mock())
@@ -1659,7 +1662,9 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     # identity keys stable across the promotion
     assert delivered["engine_ext"]["bot_id"] == "b2"
     assert delivered["engine_ext"]["owner_id"] == "u1"
-    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
+    # TeClaw does not consume ARKA image Pin fields even if a historical row
+    # happens to contain them.
+    assert build_service.release_async.await_args.kwargs["docker_image"] is None
 
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
@@ -1701,7 +1706,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
-    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] is None
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
 
@@ -2635,13 +2640,19 @@ async def test_scale_bot_falls_back_to_common_config_default_device_count():
     publish_service.get_publish_by_id = Mock(return_value=record)
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
     bot_service.get_bot = Mock(return_value={"bot_id": "bot-source", "ext": {}})
-    common_config_service.get_value = Mock(return_value=2)
+    common_config_service.get_value = Mock(
+        side_effect=lambda **kwargs: (
+            2
+            if kwargs["business_code"] == "service_bot_device_count"
+            else None
+        )
+    )
     baas_service.scale_bot = Mock(return_value={"publish_id": 999, "target_count": 2})
 
     result = await svc.scale_bot(publish_id=13, operator="u1")
 
     assert result["target_count"] == 2
-    common_config_service.get_value.assert_called_once()
+    assert common_config_service.get_value.call_count == 2
     _, kwargs = baas_service.scale_bot.call_args
     assert kwargs["bot_uuid"] == "BOT-UUID-2"
     assert kwargs["owner_id"] == "u1"
