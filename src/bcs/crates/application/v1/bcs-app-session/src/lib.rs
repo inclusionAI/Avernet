@@ -825,9 +825,10 @@ impl SessionMessageService for SessionServiceImpl {
         // VSN7A/VUlai/VHxMU — reuse the legacy `bcs-message` visibility helper
         // (single source of truth) so the V1 session list applies the EXACT
         // same scoping the group history path does: the full 3-state
-        // `MessageOwnerFilter` (incl. ManagerWorker public-only `IsNull`) and
-        // the spec §5.2 new-participant `visible_from_seq` cutoff. The V1 facade
-        // no longer reimplements these predicates.
+        // `MessageOwnerFilter` (incl. ManagerWorker manager-viewer
+        // `PublicOrOwner`) and the spec §5.2 new-participant
+        // `visible_from_seq` cutoff. The V1 facade no longer reimplements
+        // these predicates.
         let group = self.load_group(&session.group_id).await?;
         let (owner_filter, visible_from_seq) =
             MessageService::compute_session_history_query(

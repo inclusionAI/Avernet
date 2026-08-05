@@ -20,6 +20,8 @@ bcs-bot = { workspace = true }
 bcs-group = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-session-store = { workspace = true }
+bcs-system-message = { workspace = true }
+bcs-test-support = { workspace = true }
 
 [lints]
 workspace = true

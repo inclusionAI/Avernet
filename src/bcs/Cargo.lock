@@ -1176,6 +1176,8 @@ dependencies = [
  "bcs-message-store",
  "bcs-service-api",
  "bcs-session-store",
+ "bcs-system-message",
+ "bcs-test-support",
  "serde_json",
  "tokio",
  "tracing",
