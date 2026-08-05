@@ -631,7 +631,7 @@ list still equals the literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity
+approvals  ceiling  check-name  connection  engine  identity  logs
 mcp  models  resources  routines  sessions  skills
 ```
 
