@@ -1340,27 +1340,48 @@ impl GroupService for GroupServiceImpl {
             ));
         };
         // `AddGroupParticipant` carries no `actor_kind`; resolve it from the
-        // registry so legacy `add_member` gets the right Bot/Human split.
-        let actor_kind = if self
+        // registry so legacy `add_member` gets the target Actor ID for both Bot
+        // and Human participants. If the V1 caller references a Human actor that
+        // has not been materialized yet, create the legacy Human actor at this
+        // boundary before delegating.
+        let target_actor = self
             .registry
             .try_get(&command.actor_id)
             .await
-            .map_err(map_service_error)?
-            .is_some()
-        {
-            ActorKind::Bot
-        } else {
-            ActorKind::Human
-        };
-        let (bot_id, human_actor_id) = match actor_kind {
-            ActorKind::Bot => (command.actor_id.clone(), None),
-            ActorKind::Human => (String::new(), Some(command.actor_id.clone())),
+            .map_err(map_service_error)?;
+        if target_actor.is_none() && let Some(staff_no) = command.actor_id.strip_prefix("human_") {
+            self.registry
+                .ensure_human_actor(staff_no, staff_no)
+                .await
+                .map_err(map_service_error)?;
+        }
+        let bot_id = command.actor_id.clone();
+        let legacy_human_actor_id = match &principal {
+            Principal::Human(human) => {
+                let human_actor_id = format!("human_{}", human.subject.id);
+                if manage_actor_id == human_actor_id {
+                    None
+                } else {
+                    let manage_actor = self
+                        .registry
+                        .try_get(&manage_actor_id)
+                        .await
+                        .map_err(map_service_error)?;
+                    manage_actor
+                        .filter(|actor| {
+                            actor.actor_kind == ActorKind::Bot
+                                && actor.created_by.as_deref() == Some(human.subject.id.as_str())
+                        })
+                        .map(|_| human_actor_id)
+                }
+            }
+            Principal::Bot(_) => None,
         };
         let result = self
             .management
             .add_member(GroupAddMemberCommand {
                 caller_actor_id: Some(manage_actor_id),
-                human_actor_id,
+                human_actor_id: legacy_human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
                 role: Some(role_name(command.role).to_string()),

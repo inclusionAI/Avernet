@@ -295,6 +295,25 @@ async fn human_owner_of_group_driver_can_add_participant_without_human_membershi
 }
 
 #[tokio::test]
+async fn human_owner_of_group_driver_can_add_human_participant() {
+    let fixture = seed_owned_driver_without_human_participant().await;
+
+    let added = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-driver"),
+            group_id: GROUP_ID.into(),
+            actor_id: "human_bob".into(),
+            role: ParticipantRole::Observer,
+        })
+        .await
+        .expect("Human owner of driver Bot can add a Human participant");
+
+    assert_eq!(added.actor_id, "human_bob");
+    assert_eq!(added.role, ParticipantRole::Observer);
+}
+
+#[tokio::test]
 async fn human_owner_of_bot_participant_can_update_that_participant_as_self_service() {
     let fixture = seed_owned_participant_without_human_participant().await;
 
