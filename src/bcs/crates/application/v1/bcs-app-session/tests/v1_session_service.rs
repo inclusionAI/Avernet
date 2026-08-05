@@ -1051,6 +1051,177 @@ async fn list_messages_rejects_malformed_before_cursor() {
     assert_eq!(error.code(), "invalid_request");
 }
 
+
+#[tokio::test]
+async fn human_owner_of_group_driver_can_add_session_participant_without_human_membership() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "newcomer"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("driver", "staff-driver", true)
+        .await
+        .expect("assign driver owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("expert", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let err = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("staff-unrelated"),
+            session_id: session.id.clone(),
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect_err("unrelated Human cannot manage session through Bot ownership");
+    assert!(matches!(
+        err,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+
+    let added = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("staff-driver"),
+            session_id: session.id,
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect("Human owner of group driver can manage session");
+
+    assert_eq!(added.actor_id, "newcomer");
+}
+
+#[tokio::test]
+async fn human_owner_of_session_creator_can_update_session_without_group_management() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "creator-bot"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("creator-bot", "staff-creator", true)
+        .await
+        .expect("assign creator owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("expert", ParticipantRole::Consultant)],
+                group_version: Some(group.version),
+                created_by: Some("creator-bot".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let err = fixture
+        .service
+        .update(UpdateSession {
+            caller: human_principal("staff-unrelated"),
+            session_id: session.id.clone(),
+            title: Some("unrelated update".into()),
+        })
+        .await
+        .expect_err("unrelated Human cannot manage session through creator ownership");
+    assert!(matches!(
+        err,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+
+    let detail = fixture
+        .service
+        .update(UpdateSession {
+            caller: human_principal("staff-creator"),
+            session_id: session.id,
+            title: Some("owned creator update".into()),
+        })
+        .await
+        .expect("Human owner of session creator can manage session");
+
+    assert_eq!(detail.title.as_deref(), Some("owned creator update"));
+}
+
+#[tokio::test]
+async fn chat_manager_role_does_not_grant_session_management_to_human_owner() {
+    let fixture = Fixture::new().await;
+    for bot in ["driver", "expert", "manager", "newcomer"] {
+        fixture.add_bot(bot).await;
+    }
+    fixture
+        .bots
+        .save_created_by("manager", "staff-manager-owner", true)
+        .await
+        .expect("assign manager owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let mut group = fixture.groups.get("g1").await.expect("group exists");
+    group
+        .participants
+        .push(Participant::bot("manager", ParticipantRole::Manager));
+    fixture.groups.upsert(group.clone()).await.expect("store group");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("expert", ParticipantRole::Consultant),
+                    Participant::bot("manager", ParticipantRole::Manager),
+                ],
+                group_version: Some(group.version),
+                created_by: Some("expert".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+
+    let err = fixture
+        .service
+        .add_participant(AddSessionParticipant {
+            caller: human_principal("staff-manager-owner"),
+            session_id: session.id,
+            bot_uuid: "newcomer".into(),
+            mode: Some(BotParticipantMode::Auto),
+        })
+        .await
+        .expect_err("Chat manager role must not grant session management authority");
+    assert!(matches!(
+        err,
+        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
+    ));
+}
+
 #[tokio::test]
 async fn participant_add_update_remove_lifecycle() {
     let fixture = Fixture::new().await;

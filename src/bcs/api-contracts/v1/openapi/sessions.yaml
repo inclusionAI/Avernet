@@ -278,7 +278,15 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the session.
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
         x-error-codes:
           - forbidden
         content:
@@ -335,7 +343,12 @@ SessionPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot delete the session.
+        description: >-
+          Principal cannot delete the session. A Human Principal may delete
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
         x-error-codes:
           - forbidden
         content:
@@ -513,7 +526,15 @@ AddSessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the session.
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
         x-error-codes:
           - forbidden
         content:
@@ -581,7 +602,13 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot manage the participant.
+        description: >-
+          Principal cannot manage the participant. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against those target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot.
         x-error-codes:
           - forbidden
         content:
@@ -640,7 +667,12 @@ SessionParticipantPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
-        description: Principal cannot remove the participant.
+        description: >-
+          Principal cannot remove the participant. A Human Principal may remove
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
         x-error-codes:
           - forbidden
         content:
