@@ -8,7 +8,11 @@ from agentclaw.community.core.harness.diagnostics.agents.safety_rules import Age
 from agentclaw.community.core.harness.diagnostics.agents.fail_first import AgentsFailFirstDiagnostic
 from agentclaw.community.core.harness.diagnostics.agents.behavior_boundaries import AgentsBehaviorBoundariesDiagnostic
 from agentclaw.community.core.harness.diagnostics.tools.declaration import ToolsDeclarationDiagnostic
-from agentclaw.community.core.harness.diagnostics.tools.mcp_format import ToolsMcpFormatDiagnostic
+from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+    ToolsMcpFormatDiagnostic,
+    _compact_tool_for_prompt,
+    _MAX_TOOLS_PER_MCP_IN_PROMPT,
+)
 from agentclaw.community.core.harness.diagnostics.config.soul import SoulPersonaDiagnostic
 from agentclaw.community.core.harness.models import Severity
 
@@ -671,7 +675,9 @@ class TestToolsMcpFormatDiagnostic:
     async def test_input_schema_keeps_template_and_forwards_schema(self):
         """A tool exposing inputSchema is schema-derivable: keep the auto-fix
         template (so Phase 3 emits a real, schema-transcribed call-spec patch
-        instead of a TODO) and forward inputSchema to the diagnostic LLM.
+        instead of a TODO) and forward a *compact* param table (flattened from
+        inputSchema — not the full nested JSON, which would bloat the prompt
+        past antchat's ~90s gateway window) to the diagnostic LLM.
         The finding is NOT bumped (it is recoverable)."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
@@ -711,11 +717,14 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].severity == Severity.WARNING
         assert findings[0].score == 55
         assert findings[0].result != "pass"
-        # inputSchema content is forwarded (not stripped) for transcription.
-        assert "inputSchema" in captured_user
+        # inputSchema is flattened to a compact params table for transcription;
+        # the full nested JSON is NOT forwarded (that's what used to bloat the
+        # prompt past antchat's ~90s gateway window).
+        assert "inputSchema" not in captured_user
+        assert '"params"' in captured_user
         assert "generateWorkSummary" in captured_user
         assert "startDate" in captured_user
-        assert "可据 schema 转录" in captured_user
+        assert "可据参数表转录" in captured_user
 
     @pytest.mark.asyncio
     async def test_all_unreachable_clears_template_and_bumps(self):
@@ -771,6 +780,82 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].suggested_template_ids == [2]
         assert findings[0].score == 60
         assert findings[0].severity == Severity.WARNING
+
+    def test_compact_tool_flattens_input_schema(self):
+        """_compact_tool_for_prompt flattens a nested inputSchema into a flat
+        param table (name/type/required/one-line desc) and drops the nested
+        JSON — the slimmed payload that goes into the diagnostic prompt."""
+        tool = {
+            "name": "create_doc",
+            "description": "创建语雀文档\n第二行不该进入 prompt",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "文档标题"},
+                    "tags": {"type": "array", "description": "标签列表"},
+                    "private": {"type": "boolean", "description": "是否私有"},
+                },
+                "required": ["title"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact == {
+            "name": "create_doc",
+            "desc": "创建语雀文档",
+            "params": [
+                {"name": "title", "type": "string", "required": True, "desc": "文档标题"},
+                {"name": "tags", "type": "array", "required": False, "desc": "标签列表"},
+                {"name": "private", "type": "boolean", "required": False, "desc": "是否私有"},
+            ],
+        }
+
+    def test_compact_tool_without_schema_returns_empty_params(self):
+        """A tool with no inputSchema yields an empty params list (it still
+        has a name/desc so the LLM can list it in the mapping table)."""
+        compact = _compact_tool_for_prompt({"name": "bare_tool", "description": "no schema"})
+        assert compact == {"name": "bare_tool", "desc": "no schema", "params": []}
+
+    @pytest.mark.asyncio
+    async def test_tools_capped_per_mcp_with_omitted(self):
+        """An MCP exposing more tools than the per-MCP cap only forwards the
+        first N (compacted); the remainder is summarised as ``tools_omitted``
+        so a 27-tool MCP doesn't dominate the prompt and blow the gateway
+        window."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "big", "name": "big"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 5
+        tools = [{
+            "name": f"tool_{i}",
+            "description": f"desc {i}",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"p": {"type": "string", "description": "p"}},
+                "required": ["p"],
+            },
+        } for i in range(total)]
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "big", "description": "big mcp", "tools": tools,
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert '"tools_omitted": 5' in captured_user
+        # First capped tool and the boundary tool are present …
+        assert "tool_0" in captured_user
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT - 1}" in captured_user
+        # … the truncated tail is not.
+        assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT + 4}" not in captured_user
 
 
 class TestSoulPersonaDiagnostic:
