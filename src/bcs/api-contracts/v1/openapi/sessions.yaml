@@ -281,7 +281,7 @@ SessionPath:
         description: >-
           Principal cannot manage the session. A Human Principal may manage
           when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or manager participant.
+          management actor: the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against these target actors:
           direct human_{user.id}, a Bot whose created_by equals the Human user
           id, or a creator relation edge from human_{user.id} to that Bot. The
@@ -529,7 +529,7 @@ AddSessionParticipantPath:
         description: >-
           Principal cannot manage the session. A Human Principal may manage
           when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or manager participant.
+          management actor: the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against these target actors:
           direct human_{user.id}, a Bot whose created_by equals the Human user
           id, or a creator relation edge from human_{user.id} to that Bot. The
@@ -605,7 +605,7 @@ SessionParticipantPath:
         description: >-
           Principal cannot manage the participant. A Human Principal may manage
           when it can act as the Session creator or at least one parent Group
-          management actor: the driver, originator, or manager participant.
+          management actor: the driver, originator, or ManagerWorker manager participant.
           Human-to-actor authority is checked only against those target actors:
           direct human_{user.id}, a Bot whose created_by equals the Human user
           id, or a creator relation edge from human_{user.id} to that Bot.

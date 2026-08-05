@@ -268,7 +268,7 @@ GroupPath:
         description: >-
           Principal cannot manage the group. A Human Principal may manage when
           it can act as at least one Group management actor: the driver,
-          originator, or manager participant. Human-to-actor authority is
+          originator, or ManagerWorker manager participant. Human-to-actor authority is
           checked only against these target actors: direct human_{user.id}, a
           Bot whose created_by equals the Human user id, or a creator relation
           edge from human_{user.id} to that Bot. The server does not enumerate
@@ -335,7 +335,7 @@ GroupPath:
         description: >-
           Principal cannot delete the group. A Human Principal may delete when
           it can act as at least one Group management actor: the driver,
-          originator, or manager participant. Human-to-actor authority is
+          originator, or ManagerWorker manager participant. Human-to-actor authority is
           checked only against these target actors rather than by enumerating
           all Bots created by the Human.
         x-error-codes:
@@ -537,7 +537,7 @@ AddGroupParticipantPath:
         description: >-
           Principal cannot manage the group. A Human Principal may manage when
           it can act as at least one Group management actor: the driver,
-          originator, or manager participant. Human-to-actor authority is
+          originator, or ManagerWorker manager participant. Human-to-actor authority is
           checked only against these target actors: direct human_{user.id}, a
           Bot whose created_by equals the Human user id, or a creator relation
           edge from human_{user.id} to that Bot. The server does not enumerate
@@ -615,7 +615,7 @@ GroupParticipantPath:
           Principal cannot manage the participant. A Human Principal may manage
           the participant when it can act as the target actor (self-service) or
           as at least one Group management actor: the driver, originator, or
-          manager participant. Human-to-actor authority is checked only against
+          ManagerWorker manager participant. Human-to-actor authority is checked only against
           those target actors: direct human_{user.id}, a Bot whose created_by
           equals the Human user id, or a creator relation edge from
           human_{user.id} to that Bot.

@@ -251,13 +251,15 @@ impl GroupServiceImpl {
 
     fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
         let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
-        actor_ids.extend(
-            group
-                .participants
-                .iter()
-                .filter(|participant| participant.role == bcs_service_api::ParticipantRole::Manager)
-                .map(|participant| participant.bot_uuid.clone()),
-        );
+        if group.group_strategy == GroupStrategy::ManagerWorker {
+            actor_ids.extend(
+                group
+                    .participants
+                    .iter()
+                    .filter(|participant| participant.role == bcs_service_api::ParticipantRole::Manager)
+                    .map(|participant| participant.bot_uuid.clone()),
+            );
+        }
         actor_ids
     }
 

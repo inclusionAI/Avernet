@@ -277,6 +277,44 @@ async fn human_owner_of_bot_participant_can_update_that_participant_as_self_serv
 }
 
 #[tokio::test]
+async fn chat_manager_role_does_not_grant_group_management_to_human_owner() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-driver").await;
+    fixture
+        .add_public_bot_owned_by("bot-manager", "staff-manager-owner")
+        .await;
+    fixture.add_public_bot("bot-b").await;
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-manager", ParticipantRole::Manager),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("bot-driver".into());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store group");
+
+    let err = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-manager-owner"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+            role: ParticipantRole::Consultant,
+        })
+        .await
+        .expect_err("Chat manager role must not grant management authority");
+    assert!(matches!(err, ApplicationError::Forbidden(_)));
+}
+
+#[tokio::test]
 async fn human_manager_can_add_bot_participant() {
     let fixture = seed().await;
     let caller = human_caller("staff-manager");

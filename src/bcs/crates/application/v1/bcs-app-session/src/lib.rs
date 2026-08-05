@@ -100,13 +100,15 @@ impl SessionServiceImpl {
     /// Mirrors `bcs-app-group`'s targeted Human-to-actor authority semantics.
     fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
         let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
-        actor_ids.extend(
-            group
-                .participants
-                .iter()
-                .filter(|participant| participant.role == ParticipantRole::Manager)
-                .map(|participant| participant.bot_uuid.clone()),
-        );
+        if group.group_strategy == GroupStrategy::ManagerWorker {
+            actor_ids.extend(
+                group
+                    .participants
+                    .iter()
+                    .filter(|participant| participant.role == ParticipantRole::Manager)
+                    .map(|participant| participant.bot_uuid.clone()),
+            );
+        }
         actor_ids
     }
 
