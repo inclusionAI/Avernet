@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS `baas_bot_run_queue_chunk` (
    `gmt_modified` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   `run_id`      varchar(128) NOT NULL COMMENT '关联 baas_bot_run.run_id',
   `seq`         int(11) NOT NULL COMMENT 'chunk 序号，严格递增',
-  `chunk_type`  varchar(16) NOT NULL COMMENT 'delta / final / error / usage / agent',
+  `chunk_type`  varchar(16) NOT NULL COMMENT 'delta / final / error / usage / agent / interaction',
   `content`     mediumtext DEFAULT NULL COMMENT 'chunk 内容 (JSON 或纯文本)',
   `metadata`    text DEFAULT NULL COMMENT 'chunk 元数据 JSON (engine_frame 等)',
   PRIMARY KEY (`id`),

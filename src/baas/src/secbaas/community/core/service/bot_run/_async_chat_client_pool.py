@@ -23,6 +23,7 @@ from secbaas.community.api.config_manage import SystemConfigManageService
 from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
 
+from ..bot_interaction import BotInteractionService
 from ._async_chat_client import AsyncChatClient
 
 logger = get_logger("core-bot-run")
@@ -58,6 +59,7 @@ class AsyncChatClientPool:
         max_retries: int = 1,
         retry_base_backoff: float = 0.5,
         system_config_service: SystemConfigManageService | None = None,
+        interaction_service: BotInteractionService | None = None,
     ) -> None:
         """初始化连接池
 
@@ -77,6 +79,7 @@ class AsyncChatClientPool:
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
         self._system_config_service = system_config_service
+        self._interaction_service = interaction_service
         # sandbox_id -> 连接列表
         self._clients: dict[str, list[_ConnEntry]] = {}
         # per-key lock，保护同一 sandbox_id 的并发创建
@@ -177,6 +180,7 @@ class AsyncChatClientPool:
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
                 ignore_case=self._read_ignore_case(self._system_config_service),
+                interaction_service=self._interaction_service,
             )
             await new_client.connect()
 

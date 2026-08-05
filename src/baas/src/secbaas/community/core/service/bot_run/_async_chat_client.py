@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -25,7 +26,13 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
 from secbaas.community.tracer import get_tracer_plugin
 
+from ..bot_interaction import BotInteractionService
 from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
+from ._interaction_protocol import (
+    EngineInteractionRequestedEvent,
+    EngineInteractionResolvedEvent,
+    JsonObject,
+)
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import _SessionState
 
@@ -150,6 +157,7 @@ class AsyncChatClient:
         max_retries: int = 1,
         retry_base_backoff: float = 0.5,
         ignore_case: bool = False,
+        interaction_service: BotInteractionService | None = None,
     ):
         """初始化客户端
 
@@ -176,6 +184,8 @@ class AsyncChatClient:
         self._max_retries = max_retries
         self._retry_base_backoff = retry_base_backoff
         self._ignore_case = ignore_case
+        self._interaction_service = interaction_service
+        self._interaction_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
 
         # 并发信号量：限制单连接总并发会话数，提供背压
         self._concurrency_sem: asyncio.Semaphore | None = (
@@ -252,6 +262,9 @@ class AsyncChatClient:
 
         _client.on_event("chat", self._on_chat)
         _client.on_event("agent", self._on_agent)
+        _client.on_event("interaction.requested", self._on_interaction_requested)
+        _client.on_event("interaction.resolved", self._on_interaction_resolved)
+        _client.on_event("interaction.resolve", self._on_interaction_resolved)
         _client.on_event("error", self._on_error)
         _client.on_event("*", self._log_event)
         _client.on_disconnect(self._on_disconnect)
@@ -604,6 +617,13 @@ class AsyncChatClient:
             await self._client.close()
             self._client = None
 
+        interaction_tasks = list(self._interaction_tasks.values())
+        for task in interaction_tasks:
+            task.cancel()
+        if interaction_tasks:
+            await asyncio.gather(*interaction_tasks, return_exceptions=True)
+        self._interaction_tasks.clear()
+
         # 清理所有 session state，并唤醒等待中的协程
         async with self._condition:
             self._sessions.clear()
@@ -840,6 +860,188 @@ class AsyncChatClient:
         else:
             state.last_stream_is_assistant = False
 
+    @_with_session_trace("_on_interaction_requested")
+    def _on_interaction_requested(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: _SessionState | None,
+    ) -> None:
+        """Persist and expose a validated engine interaction request."""
+        event = EngineInteractionRequestedEvent.from_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        created = True
+        if self._interaction_service is not None:
+            created = self._interaction_service.record_requested(
+                session_key=event.session_key,
+                interaction_id=event.interaction_id,
+                envelope=event.envelope,
+                allowed_decisions=event.allowed_decisions,
+                expires_at_ms=event.expires_at_ms,
+            )
+        if created and state is not None:
+            self._emit_stream_chunk(
+                state,
+                StreamChunk(
+                    type="interaction",
+                    content="",
+                    metadata={
+                        "event": "interaction.requested",
+                        "payload": event.envelope,
+                    },
+                ),
+            )
+
+        if self._interaction_service is None or self._client is None:
+            return
+        task_key = (event.session_key, event.interaction_id)
+        if task_key in self._interaction_tasks:
+            return
+        task = asyncio.create_task(
+            self._dispatch_interaction_answer(
+                session_key=event.session_key,
+                interaction_id=event.interaction_id,
+                deadline_ms=event.expires_at_ms,
+            )
+        )
+        self._interaction_tasks[task_key] = task
+        task.add_done_callback(
+            lambda completed, key=task_key: self._discard_interaction_task(
+                key, completed
+            )
+        )
+
+    @_with_session_trace("_on_interaction_resolved")
+    def _on_interaction_resolved(
+        self,
+        payload: JsonObject,
+        *,
+        session_key: str,
+        state: _SessionState | None,
+    ) -> None:
+        """Persist one terminal event and expose it as interaction.resolve."""
+        event = EngineInteractionResolvedEvent.from_payload(
+            session_key=session_key,
+            payload=payload,
+        )
+        applied = True
+        if self._interaction_service is not None:
+            applied = self._interaction_service.mark_resolved(
+                session_key=event.session_key,
+                interaction_id=event.interaction_id,
+                envelope=event.envelope,
+            )
+        if not applied:
+            return
+
+        if state is not None:
+            self._emit_stream_chunk(
+                state,
+                StreamChunk(
+                    type="interaction",
+                    content="",
+                    metadata={
+                        "event": "interaction.resolve",
+                        "payload": event.envelope,
+                    },
+                ),
+            )
+
+    def _discard_interaction_task(
+        self,
+        key: tuple[str, str],
+        completed: asyncio.Task[None],
+    ) -> None:
+        if self._interaction_tasks.get(key) is completed:
+            self._interaction_tasks.pop(key, None)
+        if completed.cancelled():
+            return
+        error = completed.exception()
+        if error is not None:
+            logger.error(
+                "[interaction] dispatch task failed: sessionKey=%s interactionId=%s",
+                key[0],
+                key[1],
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+    async def _dispatch_interaction_answer(
+        self,
+        *,
+        session_key: str,
+        interaction_id: str,
+        deadline_ms: int | None,
+    ) -> None:
+        """Poll the DB, claim one queued answer, and send it to the engine."""
+        interaction_service = self._interaction_service
+        if interaction_service is None:
+            return
+        if deadline_ms is None:
+            deadline_ms = int(time.time() * 1000) + 300_000
+
+        while int(time.time() * 1000) <= deadline_ms:
+            command = interaction_service.claim_for_dispatch(
+                session_key=session_key,
+                interaction_id=interaction_id,
+            )
+            if command is not None:
+                client = self._client
+                if client is None:
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error="engine websocket is disconnected",
+                    )
+                    return
+                try:
+                    exchange = await client.interaction_resolve(
+                        interaction_id=command.interaction_id,
+                        decision=command.decision,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[interaction] dispatch failed: sessionKey=%s interactionId=%s",
+                        session_key,
+                        interaction_id,
+                        exc_info=True,
+                    )
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error=str(exc),
+                    )
+                    return
+
+                interaction_service.record_engine_exchange(
+                    session_key=session_key,
+                    interaction_id=interaction_id,
+                    engine_req=exchange.request,
+                    engine_res=exchange.response,
+                )
+                if not exchange.accepted:
+                    interaction_service.mark_failed(
+                        session_key=session_key,
+                        interaction_id=interaction_id,
+                        error=exchange.error_message
+                        or "engine rejected interaction.resolve",
+                    )
+                return
+
+            if not interaction_service.should_poll(
+                session_key=session_key,
+                interaction_id=interaction_id,
+            ):
+                return
+            await asyncio.sleep(0.2)
+
+        interaction_service.mark_expired(
+            session_key=session_key,
+            interaction_id=interaction_id,
+        )
+
     @_with_session_trace("_on_error")
     def _on_error(
         self,
@@ -995,6 +1197,15 @@ class AsyncChatClient:
                     )
                     new_client.on_event("chat", self._on_chat)
                     new_client.on_event("agent", self._on_agent)
+                    new_client.on_event(
+                        "interaction.requested", self._on_interaction_requested
+                    )
+                    new_client.on_event(
+                        "interaction.resolved", self._on_interaction_resolved
+                    )
+                    new_client.on_event(
+                        "interaction.resolve", self._on_interaction_resolved
+                    )
                     new_client.on_event("error", self._on_error)
                     new_client.on_event("*", self._log_event)
                     new_client.on_disconnect(self._on_disconnect)

@@ -12,6 +12,7 @@ from secbaas.community.core.service.bcn.uplink import (
     BcnUplinkClient,
     BcnUplinkConfig,
 )
+from secbaas.community.core.service.bot_interaction import BotInteractionService
 from secbaas.community.core.service.bot_manage import (
     DefaultBotCrudService,
     DefaultBotManagementService,
@@ -193,6 +194,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     local_user_machine_repo = providers.Dependency()
     bot_run_repository = providers.Dependency()
     bot_run_queue_repository = providers.Dependency()
+    bot_run_interaction_repository = providers.Dependency()
     bot_run_queue_chunk_repository = providers.Dependency()
     bot_qpm_repository = providers.Dependency()
     distributed_lock_repository = providers.Dependency()
@@ -216,6 +218,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=system_config_repo,
     )
 
+    bot_interaction_service = providers.Singleton(
+        BotInteractionService,
+        repository=bot_run_interaction_repository,
+    )
+
     chat_client_pool = providers.Singleton(
         AsyncChatClientPool,
         max_size=config.chat_client_pool.max_size,
@@ -225,6 +232,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         max_retries=config.chat_client_pool.max_retries,
         retry_base_backoff=config.chat_client_pool.retry_base_backoff,
         system_config_service=system_config_service,
+        interaction_service=bot_interaction_service,
     )
 
     tenant_service = providers.Singleton(
