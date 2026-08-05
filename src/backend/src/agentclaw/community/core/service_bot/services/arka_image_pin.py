@@ -68,17 +68,14 @@ def resolve_current_arka_image(
     common_config_service: CommonConfigService | None,
     *,
     env: str,
-) -> str:
+) -> str | None:
     """Return the enabled legacy-protection image.
 
-    Historical ARKA publishes have no safe fallback: missing, disabled, and
-    malformed configuration all fail closed so they cannot silently move to the
-    platform default image.
+    Missing/disabled means the feature is not active and preserves the historical
+    platform-default behavior. An enabled but malformed value fails closed.
     """
     if common_config_service is None:
-        raise ImagePinConfigError(
-            f"{IMAGE_PIN_PARAM_CODE} config service is unavailable: env={env}"
-        )
+        return None
     value = common_config_service.get_value(
         business_code=IMAGE_PIN_BUSINESS_CODE,
         param_code=IMAGE_PIN_PARAM_CODE,
@@ -87,9 +84,7 @@ def resolve_current_arka_image(
         only_enabled=True,
     )
     if value is None:
-        raise ImagePinConfigError(
-            f"{IMAGE_PIN_PARAM_CODE} config is missing or disabled: env={env}"
-        )
+        return None
     image = value.get("image") if isinstance(value, dict) else None
     if isinstance(image, str) and image.strip():
         return image.strip()
@@ -244,6 +239,9 @@ def resolve_publish_image_pin(
         common_config_service,
         env=env or publish_record.env,
     )
+    if image is None:
+        return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
+
     pinned_ext = apply_image_pin_to_ext(ext, image)
     if persist_ext is not None:
         persist_ext(pinned_ext)
@@ -349,6 +347,10 @@ class PublishImagePolicyResolver:
             image = resolve_current_arka_image(
                 self._common_config_service, env=latest.env
             )
+            if image is None:
+                publish_record.ext = latest.ext
+                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
+
             pinned_ext = apply_image_pin_to_ext(latest.ext, image)
             updated = self._publish_repository.compare_and_set_ext(
                 publish_id=latest.id,

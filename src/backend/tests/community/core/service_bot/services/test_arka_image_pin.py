@@ -56,12 +56,11 @@ def test_resolve_current_image_uses_enabled_common_config():
     )
 
 
-def test_resolve_current_image_fails_closed_for_disabled_or_missing_config():
+def test_resolve_current_image_returns_none_for_disabled_or_missing_config():
     service = MagicMock()
     service.get_value.return_value = None
 
-    with pytest.raises(ImagePinConfigError, match="missing or disabled"):
-        resolve_current_arka_image(service, env="pre")
+    assert resolve_current_arka_image(service, env="pre") is None
 
 
 @pytest.mark.parametrize("value", [{}, {"image": ""}, "registry/arka:v2"])
@@ -165,17 +164,19 @@ def test_resolve_default_publish_does_not_read_common_config():
     common_config.get_value.assert_not_called()
 
 
-def test_resolve_legacy_publish_with_disabled_config_fails_closed():
+def test_resolve_legacy_publish_with_disabled_config_keeps_platform_default():
     common_config = MagicMock()
     common_config.get_value.return_value = None
     persist = MagicMock()
 
-    with pytest.raises(ImagePinConfigError, match="missing or disabled"):
-        resolve_publish_image_pin(
-            _record({"migration_path": "/build/v1"}),
-            common_config_service=common_config,
-            persist_ext=persist,
-        )
+    resolved = resolve_publish_image_pin(
+        _record({"migration_path": "/build/v1"}),
+        common_config_service=common_config,
+        persist_ext=persist,
+    )
+
+    assert resolved.state == ImagePolicyState.LEGACY
+    assert resolved.docker_image is None
     persist.assert_not_called()
 
 
@@ -280,6 +281,27 @@ def test_persisted_resolver_returns_successful_cas_snapshot():
         expected_ext=legacy.ext,
         ext=persisted.ext,
     )
+
+
+def test_persisted_resolver_keeps_legacy_when_switch_disabled():
+    legacy = _record({"migration_path": "/build/v1"})
+    publish_repo = MagicMock()
+    publish_repo.get_by_id.return_value = legacy
+    common_config = MagicMock()
+    common_config.get_value.return_value = None
+    resolver = PublishImagePolicyResolver(
+        publish_repository=publish_repo,
+        binding_repository=MagicMock(),
+        common_config_service=common_config,
+    )
+    original = _record()
+
+    resolved = resolver.resolve(original)
+
+    assert resolved.state == ImagePolicyState.LEGACY
+    assert resolved.docker_image is None
+    assert original.ext == legacy.ext
+    publish_repo.compare_and_set_ext.assert_not_called()
 
 
 def test_persisted_resolver_reloads_concurrent_default_after_cas_conflict():
