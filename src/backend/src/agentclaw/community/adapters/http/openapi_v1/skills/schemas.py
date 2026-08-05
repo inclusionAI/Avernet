@@ -22,9 +22,9 @@ class Skill(BaseModel):
 
 
 class SkillUpload(BaseModel):
-    """Response for a Skill create or same-name package replacement."""
+    """Response for a first-time Skill upload."""
 
-    operation: Literal["created", "updated"]
+    operation: Literal["created"]
     skill: Skill
 
 

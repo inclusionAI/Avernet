@@ -15,8 +15,12 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.core.bot_collaborator.protocols import CollaboratorServiceProtocol
-from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    BotCollabLogRepositoryProtocol,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
@@ -66,9 +70,12 @@ class LocalSkillUploadService:
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
         name, description, files = self._unpack(package)
-        if self._skill_repo.get_bot_local_by_name(
-            bot_id=bot_id, name=name, user_id=owner_id
-        ) is not None:
+        if (
+            self._skill_repo.get_bot_local_by_name(
+                bot_id=bot_id, name=name, user_id=owner_id
+            )
+            is not None
+        ):
             # #725 owns replacement.  Never overwrite a package in this ticket.
             raise LocalSkillDuplicateError()
 
@@ -99,12 +106,12 @@ class LocalSkillUploadService:
                     "source_type": "upload",
                 }
             )
-            default_set = self._skill_set_repo.get_default(
-                user_id=owner_id,
-                bolt_id=bot_id,
+            default_set = self._ensure_default_set(
+                owner_id=owner_id,
+                bot_id=bot_id,
                 engine_type=bot.get("active_engine"),
             )
-            if default_set is None or not self._skill_set_repo.add_skill_to_set(
+            if not self._skill_set_repo.add_skill_to_set(
                 default_set["id"], skill["id"], user_id=owner_id
             ):
                 raise RuntimeError("default Skill Set association failed")
@@ -115,8 +122,14 @@ class LocalSkillUploadService:
                 raise RuntimeError("default Skill Set exclusion failed")
             excluded = True
             self._audit_log_repo.insert(
-                {"bot_id": bot_id, "owner_id": owner_id, "operator_id": actor_id,
-                 "detail": json.dumps({"action": "local_skill_upload", "skill_id": skill["id"]})}
+                {
+                    "bot_id": bot_id,
+                    "owner_id": owner_id,
+                    "operator_id": actor_id,
+                    "detail": json.dumps(
+                        {"action": "local_skill_upload", "skill_id": skill["id"]}
+                    ),
+                }
             )
             return {
                 "operation": "created",
@@ -137,7 +150,9 @@ class LocalSkillUploadService:
                     pass
             if associated and skill is not None:
                 try:
-                    self._skill_set_repo.remove_skill_from_set(default_set["id"], skill["id"])
+                    self._skill_set_repo.remove_skill_from_set(
+                        default_set["id"], skill["id"]
+                    )
                 except Exception:
                     pass
             if skill is not None:
@@ -151,17 +166,46 @@ class LocalSkillUploadService:
                 pass
             raise LocalSkillStorageError() from exc
 
+    def _ensure_default_set(
+        self, *, owner_id: str, bot_id: str, engine_type: str | None
+    ) -> dict[str, Any]:
+        default_set = self._skill_set_repo.get_default(
+            user_id=owner_id,
+            bolt_id=bot_id,
+            engine_type=engine_type,
+        )
+        if default_set is not None:
+            return default_set
+        return self._skill_set_repo.create(
+            {
+                "name": "默认技能集",
+                "description": "系统默认技能集，用户可以根据需要添加或移除技能",
+                "user_id": owner_id,
+                "bolt_id": bot_id,
+                "is_default": True,
+                "is_builtin": False,
+                "is_active": False,
+                "engine_type": engine_type,
+            }
+        )
+
     def _authorize(self, bot_id: str, owner_id: str, actor_id: str) -> dict[str, Any]:
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
         if bot is None:
-            from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+            from agentclaw.community.core.skill_center.errors import (
+                LocalSkillNotFoundError,
+            )
+
             raise LocalSkillNotFoundError()
         if actor_id != owner_id:
             permission = self._collaborators.check_collaborator_permission(
                 bot_id, owner_id, actor_id, PermissionLevel.MEMBER
             )
             if not permission.get("has_permission"):
-                from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
+                from agentclaw.community.core.skill_center.errors import (
+                    LocalSkillNotFoundError,
+                )
+
                 raise LocalSkillNotFoundError()
         return bot
 
@@ -221,8 +265,16 @@ class LocalSkillUploadService:
         desc_match = re.search(r"(?m)^description:\s*([^\n]+)\s*$", text)
         if not name_match or not desc_match:
             raise LocalSkillInvalidPackageError()
-        name, description = name_match.group(1).strip(' "\''), desc_match.group(1).strip(' "\'')
-        if not name or not description or not _NAME.fullmatch(name) or name.lower() in {"skills-local", "skills-repo"}:
+        name, description = (
+            name_match.group(1).strip(" \"'"),
+            desc_match.group(1).strip(" \"'"),
+        )
+        if (
+            not name
+            or not description
+            or not _NAME.fullmatch(name)
+            or name.lower() in {"skills-local", "skills-repo"}
+        ):
             raise LocalSkillInvalidPackageError()
         if wrapper and wrapper != name:
             raise LocalSkillInvalidPackageError()
@@ -230,5 +282,5 @@ class LocalSkillUploadService:
             not path.startswith(f"{wrapper}/") for path, _ in files
         ):
             raise LocalSkillInvalidPackageError()
-        normalized = [(p[len(wrapper) + 1:] if wrapper else p, c) for p, c in files]
+        normalized = [(p[len(wrapper) + 1 :] if wrapper else p, c) for p, c in files]
         return name, description, normalized
