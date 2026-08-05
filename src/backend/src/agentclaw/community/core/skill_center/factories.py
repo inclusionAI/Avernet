@@ -272,6 +272,18 @@ class SkillServiceFactory:
                 resolved_locator = local_dir.parent / resolved_locator
             else:
                 resolved_locator = local_dir / resolved_locator
+        resolved_base = local_dir.resolve()
+        resolved_candidate = resolved_locator.resolve()
+        try:
+            relative_locator = resolved_candidate.relative_to(resolved_base)
+        except ValueError as exc:
+            raise ValueError("Local Skill cleanup locator escapes skills-local") from exc
+        if not relative_locator.parts:
+            raise ValueError("Local Skill cleanup locator must name a package")
+        # Keep the original path form for the device adapter (notably Teclaw's
+        # relative ``skills-local`` namespace), after lexical containment has
+        # been proven against an absolute normalized base.
+        resolved_locator = local_dir / relative_locator
         local_skill_path_adapter = service._local_skill_path_adapter
         if is_teclaw and not service.runtime_uses_pool_paths:
             local_skill_path_adapter = to_local_skill_engine_path
