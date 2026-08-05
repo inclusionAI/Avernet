@@ -220,7 +220,7 @@ async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
 
 
 @pytest.mark.asyncio
-async def test_idempotent_deactivate_still_reconciles_without_mutating_database():
+async def test_idempotent_deactivate_normalizes_current_default_exclusion():
     service, _skills, sets, _guard, runtime, _factory = _service(active=False)
 
     result = await service.set_local_skill_active(
@@ -229,7 +229,7 @@ async def test_idempotent_deactivate_still_reconciles_without_mutating_database(
 
     assert result["active"] is False
     assert result["changed"] is False
-    assert sets.events == []
+    assert sets.events == ["add"]
     assert runtime.calls == 1
 
 

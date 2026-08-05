@@ -111,6 +111,18 @@ class LocalSkillStateService:
                         ):
                             raise LocalSkillRuntimeSyncError()
                         raise
+            elif not active:
+                # ``get_bot_local_skill`` treats an exclusion from any former
+                # default set as inactive, while runtime mapping filters the
+                # current default set. Mirror that inactive desired state into
+                # the current set before publishing an idempotent deactivate.
+                self._write_desired_state(
+                    active=False,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(default_set["id"]),
+                    skill_id=int(skill_id),
+                )
             if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
                 if changed:
                     try:
