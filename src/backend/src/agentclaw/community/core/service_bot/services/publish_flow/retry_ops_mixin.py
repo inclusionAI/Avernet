@@ -7,6 +7,8 @@ Extracted from ``publish_flow_service.py`` to keep that file within the R9 line 
 """
 from __future__ import annotations
 
+import copy
+
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -115,6 +117,7 @@ class RetryOpsMixin:
 
         # Step 3: Get the pre-failure status from ext
         ext = self._get_latest_ext(publish_id)
+        expected_ext = copy.deepcopy(ext)
         source_status = ext.get("source_status")
         if not source_status:
             raise PublishFlowServiceError(
@@ -148,6 +151,7 @@ class RetryOpsMixin:
                 target_status=rollback_status,
                 source_status=PublishStatus.FAILED,
                 ext=ext,
+                expected_ext=expected_ext,
             )
         except Exception as e:
             raise PublishFlowServiceError(

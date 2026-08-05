@@ -160,7 +160,7 @@ def _make_service(
     svc._device_binding_repo = device_binding_repo if device_binding_repo is not None else MagicMock()
     svc._bot_publish_repo = bot_publish_repo if bot_publish_repo is not None else MagicMock()
     svc._baas_template_resolver = baas_template_resolver
-    svc._task_queue_service = task_queue_service
+    svc._task_queue_service = task_queue_service or MagicMock()
     svc._common_config_service = common_config_service
     svc._teclaw_provision_provider = lambda: SimpleNamespace(
         is_teclaw=lambda active_engine: active_engine == "teclaw"
@@ -308,7 +308,10 @@ class TestRestartGuardOrchestration:
 
         assert result["status"] == "PENDING"
         assert result["binding_id"] == 42
-        assert result["ext"]["restart_publish_id"] == "9377"
+        assert result["ext"] == {}
+        assert svc._device_binding_repo.update_device_props.call_args_list[-1].kwargs[
+            "props"
+        ]["restart_publish_id"] == "9377"
         assert "restart_in_progress" not in result
 
     def test_recycled_bot_restart_is_rejected_without_side_effects(self):
@@ -1842,37 +1845,41 @@ class TestRestartBaasPendingAndQueue:
         # upgrade_bot 调用
         baas.upgrade_bot.assert_called_once()
         assert baas.upgrade_bot.call_args.kwargs["mount_home_dir_storage"] is True
-        # bot 行置 PENDING，并记录当前 restart publish 轮次。
+        # bot 行先置 PENDING；publish_id 在 Binding 上单独补记。
         bot_repo.update_by_owner.assert_called_with(
             "bot-1",
             "u1",
-            {"status": "PENDING", "ext": {"restart_publish_id": "9377"}},
+            {"status": "PENDING"},
         )
         # binding 置 PENDING
         bind_repo.update_status.assert_called_with(
             binding_id=42, status=DeviceBindingStatus.PENDING
         )
-        bind_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "9377",
-                "restart_publish_id": "9377",
-                "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
-                "restart_image_policy_on_success": None,
-            },
-        )
+        request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
+        assert bind_repo.update_device_props.call_args_list[0].kwargs["props"] == {
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 0,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+        assert bind_repo.update_device_props.call_args_list[1].kwargs["props"] == {
+            "publish_id": "9377",
+            "restart_publish_id": "9377",
+        }
         task_queue_service.enqueue.assert_called_once()
         enqueue_args = task_queue_service.enqueue.call_args
         assert enqueue_args.args[0] == BAAS_RESTART_PUBLISH_POLL_TASK
         assert enqueue_args.args[1]["binding_id"] == 42
         assert enqueue_args.args[1]["bot_id"] == "bot-1"
         assert enqueue_args.args[1]["owner_id"] == "u1"
-        assert enqueue_args.args[1]["publish_id"] == 9377
+        assert "publish_id" not in enqueue_args.args[1]
         assert enqueue_args.args[1]["bot_uuid"] == "BOT-x"
-        assert enqueue_args.kwargs == {"deadline_seconds": 86400}
+        assert enqueue_args.args[1]["request_id"] == request_id
+        assert enqueue_args.args[1]["workflow_baseline"] == 0
+        assert enqueue_args.kwargs == {"deadline_seconds": 86400, "delay_seconds": 2}
 
-    def test_baas_restart_missing_publish_id_skips_poll_task(self):
-        """publish_id 缺失：仅 log，不抛，不入队；status 仍置 PENDING。"""
+    def test_baas_restart_missing_publish_id_keeps_adoption_task(self):
+        """publish_id 缺失时，durable task 仍按 baseline 查询并认领 workflow。"""
         baas = MagicMock()
         baas.upgrade_bot.return_value = {"bot_uuid": "BOT-x"}  # 无 publish_id
         device_provider = MagicMock()
@@ -1901,4 +1908,5 @@ class TestRestartBaasPendingAndQueue:
         bot_repo.update_by_owner.assert_called_with(
             "bot-1", "u1", {"status": "PENDING"}
         )
-        task_queue_service.enqueue.assert_not_called()
+        task_queue_service.enqueue.assert_called_once()
+        assert "publish_id" not in task_queue_service.enqueue.call_args.args[1]

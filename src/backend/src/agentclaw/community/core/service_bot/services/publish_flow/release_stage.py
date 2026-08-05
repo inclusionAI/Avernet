@@ -27,6 +27,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    RUNTIME_KIND_TECLAW,
     ServiceBotImagePin,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -36,6 +37,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.ext_state import
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehavior,
     ProviderBehaviorRouter,
+)
+from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
+    TECLAW_DEVICE_PROVIDER,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
     PublishOperationRunner,
@@ -87,6 +91,8 @@ class ReleaseRecordOps(Protocol):
         self,
         publish_record: BotPublishRecord,
     ) -> ServiceBotImagePin: ...
+
+    def resolve_publish_runtime_kind(self, publish_record: BotPublishRecord) -> str: ...
 
 
 
@@ -151,10 +157,13 @@ class ReleaseStageRunner:
         self._ops = ops
         self._operation_runner = operation_runner
 
-    def _provider_behavior(self, bot: dict) -> ProviderBehavior:
-        """The :class:`ProviderBehavior` for ``bot``'s container."""
+    def _provider_behavior(self, publish_record: BotPublishRecord) -> ProviderBehavior:
+        """Provider behavior frozen by the target Publish contract."""
+        runtime_kind = self._ops.resolve_publish_runtime_kind(publish_record)
         return self._provider_behaviors.resolve(
-            self._baas_service.resolve_container_provider(bot)
+            TECLAW_DEVICE_PROVIDER
+            if runtime_kind == RUNTIME_KIND_TECLAW
+            else "baas"
         )
 
     async def first_release(
@@ -198,6 +207,7 @@ class ReleaseStageRunner:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
             )
             if spec.first_release_passes_version:
                 release_kwargs["version"] = f"{publish_record.version}"
@@ -297,6 +307,7 @@ class ReleaseStageRunner:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self._ops.resolve_publish_runtime_kind(publish_record),
             )
 
         try:
@@ -343,10 +354,10 @@ class ReleaseStageRunner:
 
         # Reuse the existing binding; update ext (binding/publish refs, provider
         # per-stage promotion state, refresh the teclaw read handle).
-        ext = self._ext_state.get_latest_ext(publish_id)
+        ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
         ext.setdefault("binding", {})[spec.stage.value] = existing_binding_id
         ext.setdefault("publish", {})[spec.stage.value] = baas_publish_id
-        self._provider_behavior(bot).persist_stage_promotion(
+        self._provider_behavior(publish_record).persist_stage_promotion(
             ext=ext, stage=spec.stage, engine_overrides=overrides
         )
         self._ops.refresh_publish_handle(existing_binding_id, baas_publish_id)
@@ -355,6 +366,7 @@ class ReleaseStageRunner:
             target_status=spec.target_status,
             source_status=spec.source_status,
             ext=ext,
+            expected_ext=expected_ext,
         )
         self._operation_runner.complete_operation(op)
 

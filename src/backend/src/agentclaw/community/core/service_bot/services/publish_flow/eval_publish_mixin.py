@@ -97,6 +97,7 @@ class EvalPublishMixin:
                 delivery=delivery,
                 ext_info=ext_info,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)

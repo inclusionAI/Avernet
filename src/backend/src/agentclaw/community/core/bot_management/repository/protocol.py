@@ -163,6 +163,17 @@ class BotRepository(Protocol):
         """Update bot record by bot_id and owner_id."""
         ...
 
+    def compare_and_set_ext(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Replace ``ext`` only when the full stored value is unchanged."""
+        ...
+
     def soft_delete_by_owner(self, bot_id: str, owner_id: str) -> bool:
         """Soft delete a bot by bot_id and owner_id."""
         ...

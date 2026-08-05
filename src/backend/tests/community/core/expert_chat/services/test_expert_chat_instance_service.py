@@ -52,7 +52,11 @@ class MockPublishRecord:
 
     def __post_init__(self):
         if self.ext is None:
-            self.ext = {"migration_path": "/nas/migration/path"}
+            self.ext = {
+                "migration_path": "/nas/migration/path",
+                "sbot_use_default_image": True,
+                "sbot_runtime_kind": "arka",
+            }
 
 
 def _make_ws_info():
@@ -113,9 +117,11 @@ def _make_service(
 
 def _wire_publish(publish_repo, record=None):
     """Wire publish_repo to return a success publish record."""
+    publish_record = record or MockPublishRecord()
     publish_repo.get_by_publish_bot_id = MagicMock(
-        return_value=record or MockPublishRecord()
+        return_value=publish_record
     )
+    publish_repo.get_by_id = MagicMock(return_value=publish_record)
 
 
 def _wire_bot_repo(bot_repo, bot_info=None):
@@ -1201,9 +1207,18 @@ class TestGetCallerConnectionEdgeCases:
             return_value={"id": 1, "status": "success", "ext": existing_ext}
         )
         # publish_version is None, defaults to 1, which is less than 2
-        record = MockPublishRecord(id=123, version=None, ext={"migration_path": "/path"})
+        record = MockPublishRecord(
+            id=123,
+            version=None,
+            ext={
+                "migration_path": "/path",
+                "sbot_use_default_image": True,
+                "sbot_runtime_kind": "arka",
+            },
+        )
         record.version = None
         publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.get_by_id = MagicMock(return_value=record)
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 

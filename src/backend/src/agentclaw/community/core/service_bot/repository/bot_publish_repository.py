@@ -275,6 +275,18 @@ class BotPublishRepositoryProtocol(Protocol):
         """
         ...
 
+    def compare_and_set_status_with_ext(
+        self,
+        *,
+        publish_id: int,
+        source_status: str,
+        target_status: str,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+    ) -> Optional[BotPublishRecord]:
+        """Atomically replace status and ext when both snapshots still match."""
+        ...
+
     def rollback_flip(
         self,
         *,

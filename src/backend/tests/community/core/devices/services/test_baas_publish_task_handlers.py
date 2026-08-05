@@ -75,10 +75,12 @@ def _make_restart_handler(
     baas_device_service: MagicMock,
     publish_repository: MagicMock | None = None,
     template_service: MagicMock | None = None,
+    baas_service: MagicMock | None = None,
     clock=lambda: 200.0,
 ) -> tuple[BaasRestartPublishPollHandler, MagicMock]:
     handler = BaasRestartPublishPollHandler(
         binding_repository=repo,
+        baas_service=baas_service,
         bot_repository=bot_repository,
         publish_repository=publish_repository or MagicMock(),
         baas_device_service=baas_device_service,
@@ -87,6 +89,85 @@ def _make_restart_handler(
         clock=clock,
     )
     return handler, baas_device_service
+
+
+def test_restart_task_adopts_workflow_after_process_loses_publish_id():
+    repo = MagicMock()
+    request_id = "restart-request-1"
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 1000,
+            "restart_publish_id": None,
+        },
+    )
+    baas_service = MagicMock()
+    baas_service.list_bot_publishes.return_value = [
+        {"id": 1000, "publish_type": "UPDATE"},
+        {"id": 1001, "publish_type": "UPDATE"},
+    ]
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = DeviceBindingStatus.PENDING.value
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        baas_service=baas_service,
+        baas_device_service=baas_device_service,
+    )
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=None,
+            started_at_epoch_s=190.0,
+            bot_uuid="uuid-001",
+            request_id=request_id,
+            workflow_baseline=1000,
+        )
+    )
+
+    assert outcome == Reschedule(10.0)
+    repo.update_device_props.assert_called_once_with(
+        binding_id=42,
+        props={"publish_id": "1001", "restart_publish_id": "1001"},
+    )
+    baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1001)
+
+
+def test_restart_task_waits_for_binding_intent_commit():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props={},
+    )
+    baas_service = MagicMock()
+    baas_device_service = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        baas_service=baas_service,
+        baas_device_service=baas_device_service,
+    )
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=None,
+            started_at_epoch_s=190.0,
+            bot_uuid="uuid-001",
+            request_id="not-committed-yet",
+            workflow_baseline=1000,
+        )
+    )
+
+    assert outcome == Reschedule(10.0)
+    baas_service.list_bot_publishes.assert_not_called()
+    baas_device_service.poll_publish_once.assert_not_called()
 
 
 def test_read_codefuse_token_supports_personal_coding():
@@ -701,13 +782,17 @@ def test_restart_poll_marks_active_and_clears_old_baas_failure_ext_on_success():
     bot_repository.update_by_owner.assert_called_once_with(
         "bot-001",
         "owner-001",
-        {
-            "status": DeviceBindingStatus.ACTIVE.value,
-            "ext": {
-                "keep": "value",
-                "restart_publish_id": "1001",
-            },
+        {"status": DeviceBindingStatus.ACTIVE.value},
+    )
+    bot_repository.compare_and_set_ext.assert_called_once_with(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        expected_ext={
+            "start_status": "FAILED",
+            "start_message": "BaaS publish FAILED: publish_id=999",
+            "keep": "value",
         },
+        ext={"keep": "value", "restart_publish_id": "1001"},
     )
     repo.update_status.assert_called_once_with(
         binding_id=42,
@@ -754,19 +839,54 @@ def test_restart_poll_marks_failed_with_current_publish_id_on_failure():
     bot_repository.update_by_owner.assert_called_once_with(
         "bot-001",
         "owner-001",
-        {
-            "status": DeviceBindingStatus.FAILED.value,
-            "ext": {
-                "keep": "value",
-                "start_status": "FAILED",
-                "start_message": "BaaS publish FAILED: publish_id=1001",
-                "restart_publish_id": "1001",
-            },
+        {"status": DeviceBindingStatus.FAILED.value},
+    )
+    bot_repository.compare_and_set_ext.assert_called_once_with(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        expected_ext={"keep": "value"},
+        ext={
+            "keep": "value",
+            "start_status": "FAILED",
+            "start_message": "BaaS publish FAILED: publish_id=1001",
+            "restart_publish_id": "1001",
         },
     )
     repo.update_status.assert_called_once_with(
         binding_id=42,
         status=DeviceBindingStatus.FAILED.value,
+    )
+
+
+def test_restart_status_cas_preserves_nullable_bot_ext_snapshot():
+    repo = MagicMock()
+    bot_repository = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        baas_device_service=MagicMock(),
+    )
+    bot_repository.update_by_owner.return_value = {"status": "FAILED", "ext": None}
+    bot_repository.get_by_id_and_owner.return_value = {"ext": None}
+    bot_repository.compare_and_set_ext.return_value = {"ext": {"start_status": "FAILED"}}
+
+    handler._persist_restart_status(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        binding_id=42,
+        status=DeviceBindingStatus.FAILED.value,
+        publish_id=None,
+        failure_message="workflow adoption failed",
+    )
+
+    bot_repository.compare_and_set_ext.assert_called_once_with(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        expected_ext=None,
+        ext={
+            "start_status": "FAILED",
+            "start_message": "workflow adoption failed",
+        },
     )
 
 
@@ -808,14 +928,17 @@ def test_restart_poll_marks_failed_on_business_timeout():
     bot_repository.update_by_owner.assert_called_once_with(
         "bot-001",
         "owner-001",
-        {
-            "status": DeviceBindingStatus.FAILED.value,
-            "ext": {
-                "keep": "value",
-                "start_status": "FAILED",
-                "start_message": "BaaS publish timeout after 600s (publish_id=1001)",
-                "restart_publish_id": "1001",
-            },
+        {"status": DeviceBindingStatus.FAILED.value},
+    )
+    bot_repository.compare_and_set_ext.assert_called_once_with(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        expected_ext={"keep": "value"},
+        ext={
+            "keep": "value",
+            "start_status": "FAILED",
+            "start_message": "BaaS publish timeout after 600s (publish_id=1001)",
+            "restart_publish_id": "1001",
         },
     )
     repo.update_status.assert_called_once_with(
@@ -1725,7 +1848,11 @@ def test_restart_default_policy_is_persisted_only_after_active():
         )
         repo.update_device_props.assert_called_once_with(
             binding_id=42,
-            props={"restart_image_policy_on_success": None},
+            props={
+                "restart_request_id": None,
+                "restart_workflow_baseline": None,
+                "restart_image_policy_on_success": None,
+            },
         )
         assert len(received) == 1
         assert received[0].publish_kind == "restart"
@@ -1866,7 +1993,11 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
     persist.assert_called_once()
     repo.update_device_props.assert_called_once_with(
         binding_id=42,
-        props={"restart_image_policy_on_success": None},
+        props={
+            "restart_request_id": None,
+            "restart_workflow_baseline": None,
+            "restart_image_policy_on_success": None,
+        },
     )
 
 

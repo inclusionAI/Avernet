@@ -456,6 +456,7 @@ class BotBuildService:
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -507,13 +508,15 @@ class BotBuildService:
             logger.warning(
                 f"[BotBuildService.release] queryToken failed: bot_id={bot_id}, "
                 f"owner_id={owner_id}, error={e}"
-            )
+        )
 
         try:
-            is_teclaw_release = (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
             )
+            is_teclaw_release = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
             if is_teclaw_release:
                 # teclaw: non-mount delivery — hand the frozen artifact to BaaS,
                 # which forwards it to the external container. No migration_path.
@@ -581,6 +584,7 @@ class BotBuildService:
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -620,6 +624,7 @@ class BotBuildService:
             ext_info=ext_info,
             extra_envs=extra_envs,
             docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )
 
     def _sync_skill_links(
@@ -1095,6 +1100,7 @@ class BotBuildService:
             delivery: DeliveryArtifact = DeliveryArtifact(None),
             extra_envs: Optional[Dict[str, Any]] = None,
             docker_image: str | None = None,
+            runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1128,10 +1134,13 @@ class BotBuildService:
         )
 
         try:
-            if (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
-            ):
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
+            )
+            is_teclaw_upgrade = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
+            if is_teclaw_upgrade:
                 # teclaw re-publish: re-deliver the frozen artifact to the
                 # existing container (non-mount). No migration_path. The artifact
                 # IS the delivery payload, so fail loudly if it is missing rather
@@ -1588,6 +1597,7 @@ class BotBuildService:
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1611,4 +1621,5 @@ class BotBuildService:
             delivery=delivery,
             extra_envs=extra_envs,
             docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )
