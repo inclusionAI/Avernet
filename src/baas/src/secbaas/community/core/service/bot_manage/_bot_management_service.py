@@ -821,10 +821,9 @@ class DefaultBotManagementService(BotManageService):
                 existing_config.sla_grade = bot_config.sla_grade
             if bot_config.auto_approve_publish is not None:
                 existing_config.auto_approve_publish = bot_config.auto_approve_publish
-            if bot_config.callback_timeout_seconds is not None:
-                existing_config.callback_timeout_seconds = (
-                    bot_config.callback_timeout_seconds
-                )
+            existing_config.callback_timeout_seconds = (
+                bot_config.callback_timeout_seconds
+            )
 
         # Create publish via PublishService
         scale_amount = abs(target_count - current_count)
@@ -833,9 +832,10 @@ class DefaultBotManagementService(BotManageService):
             batch_capacity=min(10, scale_amount),
             auto_approve=auto_approve_publish,
             deploy_config=existing_config.deploy_config,
-            callback_timeout_seconds=resolve_callback_timeout(
-                existing_config.callback_timeout_seconds, self._system_config_repo
-            ),
+            callback_timeout_seconds=(
+                bot_config.callback_timeout_seconds if bot_config is not None else None
+            )
+            or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -976,10 +976,9 @@ class DefaultBotManagementService(BotManageService):
                     stored_config.sla_grade = bot_config.sla_grade
                 if bot_config.auto_approve_publish is not None:
                     stored_config.auto_approve_publish = bot_config.auto_approve_publish
-                if bot_config.callback_timeout_seconds is not None:
-                    stored_config.callback_timeout_seconds = (
-                        bot_config.callback_timeout_seconds
-                    )
+                stored_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
@@ -1003,9 +1002,12 @@ class DefaultBotManagementService(BotManageService):
                 replica_desired=device_count,
                 batch_capacity=min(5, device_count) if device_count > 0 else 5,
                 deploy_config=stored_config.deploy_config,
-                callback_timeout_seconds=resolve_callback_timeout(
-                    stored_config.callback_timeout_seconds, self._system_config_repo
-                ),
+                callback_timeout_seconds=(
+                    bot_config.callback_timeout_seconds
+                    if bot_config is not None
+                    else None
+                )
+                or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
                 auto_approve=stored_config.auto_approve_publish,
                 template_uuid=template_uuid,
             )
@@ -1238,8 +1240,7 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = config.sla_grade
             if config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = config.auto_approve_publish
-            if config.callback_timeout_seconds is not None:
-                stored_config.callback_timeout_seconds = config.callback_timeout_seconds
+            stored_config.callback_timeout_seconds = config.callback_timeout_seconds
 
             # Persist merged config to bot record
             bot_repo.update_bot(
@@ -1256,9 +1257,8 @@ class DefaultBotManagementService(BotManageService):
                 replica_desired=len(unique_device_uuids),
                 target_device_uuids=unique_device_uuids,
                 deploy_config=stored_config.deploy_config,
-                callback_timeout_seconds=resolve_callback_timeout(
-                    stored_config.callback_timeout_seconds, self._system_config_repo
-                ),
+                callback_timeout_seconds=config.callback_timeout_seconds
+                or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
             )
         else:
             # No config change — use existing bot config for device records
