@@ -81,6 +81,49 @@ class TestSkillSetServiceUsesResolver:
         dispatcher.dispatch.assert_called_once_with(ctx)
         sync_plugin.sync_symlinks.assert_called_once_with([])
 
+    def test_sync_runtime_keeps_owner_scope_when_paths_use_bot_entity(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        ctx = _make_ctx()
+        resolver = MagicMock()
+        resolver.resolve_for_bot.return_value = ctx
+        dispatcher = MagicMock()
+        sync_plugin = MagicMock()
+        sync_plugin.sync_symlinks.return_value = {"success": True, "message": "ok"}
+        dispatcher.dispatch.return_value = sync_plugin
+        bot_repo = MagicMock()
+
+        with patch(
+            "agentclaw.community.core.skill_center.services.skill_set_service."
+            "WorkspacePathFactory"
+        ):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=bot_repo,
+                user_id="owner-1",
+                entity_id="project-1",
+                entity_type="project",
+                bot_id="bot-1",
+                resolver=resolver,
+                device_sync_dispatcher=dispatcher,
+                path_factory=MagicMock(),
+            )
+
+        svc.get_symlink_mappings = MagicMock(return_value=[])
+
+        assert svc.sync_runtime() is True
+        svc.get_symlink_mappings.assert_called_once_with(
+            user_id="owner-1", bolt_id="bot-1"
+        )
+        resolver.resolve_for_bot.assert_called_once_with("bot-1", "owner-1")
+        bot_repo.get_by_id_and_owner.assert_called_once_with("bot-1", "owner-1")
+
 
 # ── _DeviceSyncMixin via SkillSetSwitcher ────────────────────────────
 
