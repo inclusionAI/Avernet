@@ -193,6 +193,29 @@ def _seed_active_delete(world) -> None:
     _seed_delete(world, active=True)
 
 
+def _seed_inactive_skill_in_active_custom_set(world) -> None:
+    _seed_delete(world, active=False)
+    with avernet_tenant_scope(_TENANT):
+        skill = world.get(SkillRepository).get_bot_local_skill(
+            skill_id="1", bot_id=_BOT_ID, user_id=_OWNER
+        )
+        assert skill is not None
+        active_set = world.get(SkillSetRepository).create(
+            {
+                "name": "Active custom",
+                "user_id": _OWNER,
+                "bolt_id": _BOT_ID,
+                "is_default": False,
+                "is_builtin": False,
+                "is_active": True,
+                "engine_type": "openclaw",
+            }
+        )
+        world.get(SkillSetRepository).add_skill_to_set(
+            active_set["id"], skill["id"], user_id=_OWNER
+        )
+
+
 @endpoint_test(
     method="DELETE",
     path="/openapi/v1/bots/skills/{skill_id}",
@@ -218,3 +241,18 @@ def delete_inactive_local_skill():
 )
 def delete_active_local_skill_is_rejected():
     """The active conflict is visible through the assembled public endpoint."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/skills/{skill_id}",
+    scenario="rejects_inactive_default_skill_referenced_by_active_custom_set",
+    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    seed=_seed_inactive_skill_in_active_custom_set,
+    expect=ExpectError(
+        status=409,
+        json_contains={"code": 409102, "message": "Skill is active", "data": None},
+    ),
+)
+def delete_skill_referenced_by_active_custom_set_is_rejected():
+    """Default exclusion cannot override an active custom SkillSet reference."""
