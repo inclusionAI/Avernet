@@ -15,17 +15,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
+from datetime import datetime
 from typing import Optional
 
 from injector import inject
 from sqlalchemy import and_
 
 from agentclaw.community.core.task.domain.models import (
+    GraphStatus,
+    NodeStatus,
     Task,
     TaskExecutionGraph,
     TaskSource,
     TaskSpec,
-    GraphStatus,
 )
 from agentclaw.community.core.task.domain.repository import TaskNotFoundError
 from agentclaw.community.core.task.repository.models import AcTaskModel
@@ -97,6 +99,37 @@ class OrmTaskRepository:
                 .all()
             )
             return [_model_to_task(r) for r in rows]
+
+    def find_expired_lease_nodes(self, now_iso: str) -> list[tuple[str, str]]:
+        """Scan every RUNNING node carrying a ``lease_until`` past ``now_iso``
+        → ``[(task_id, node_id)]`` for the兜底租期清扫器(§10.3/FR-EXT-04). Mirrors
+        :meth:`InMemoryTaskRepo.find_expired_lease_nodes` (the reference impl): the
+        ORM has no per-node lease column, so the scan loads each task's
+        ``execution_graph_json`` and inspects nodes in Python. Malformed timestamps
+        are skipped (never raise) so one bad row never shots down a sweep pass."""
+        try:
+            now = datetime.fromisoformat(now_iso)
+        except ValueError:
+            return []
+        expired: list[tuple[str, str]] = []
+        with self._db.orm_session() as session:
+            rows = session.query(AcTaskModel).all()
+            for row in rows:
+                graph = _deserialize_graph(row.execution_graph_json)
+                if graph is None:
+                    continue
+                for n in graph.nodes:
+                    if n.status is not NodeStatus.RUNNING:
+                        continue
+                    lu = n.properties.get("lease_until")
+                    if not lu:
+                        continue
+                    try:
+                        if datetime.fromisoformat(lu) < now:
+                            expired.append((row.task_id, n.node_id))
+                    except ValueError:
+                        continue
+        return expired
 
 
 def _apply_task_to_model(task: Task, model: AcTaskModel) -> None:

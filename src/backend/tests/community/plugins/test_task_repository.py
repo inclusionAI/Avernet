@@ -157,6 +157,125 @@ def test_save_round_trips_full_aggregate_with_graph(task_repo):
     assert fetched.execution_graph.edges[0].kind is EdgeKind.DEPENDENCY
 
 
+# --- find_expired_lease_nodes (prod sweeper conformance, §10.3/FR-EXT-04) ---
+
+
+def test_orm_task_repository_has_find_expired_lease_nodes():
+    # Contract guard: the prod ORM repo must satisfy the TaskRepo Protocol seam
+    # added in Task 7. Without this, LeaseSweeper.sweep_once() raises
+    # AttributeError (silently swallowed) the first time a periodic trigger
+    # fires against the ORM profile.
+    assert hasattr(OrmTaskRepository, "find_expired_lease_nodes")
+
+
+def test_find_expired_lease_nodes_empty_when_no_graph(task_repo):
+    # No execution_graph → no RUNNING nodes → [] (no raise).
+    task_repo.save(_task())
+    assert task_repo.find_expired_lease_nodes("2099-01-01T00:00:00+00:00") == []
+
+
+def test_find_expired_lease_nodes_returns_past_lease_running_node(task_repo):
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    t = _task()
+    t.status = GraphStatus.RUNNING
+    t.execution_graph = TaskExecutionGraph(
+        status=GraphStatus.RUNNING,
+        nodes=[
+            Node(
+                node_id="n1",
+                spec="do x",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={"lease_until": "2026-01-01T00:00:00+00:00"},
+            ),
+        ],
+    )
+    task_repo.save(t)
+    # now_iso after the lease → expired
+    pairs = task_repo.find_expired_lease_nodes("2026-08-04T00:00:00+00:00")
+    assert pairs == [("task-1", "n1")]
+
+
+def test_find_expired_lease_nodes_skips_active_lease_and_non_running(task_repo):
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    t = _task()
+    t.status = GraphStatus.RUNNING
+    t.execution_graph = TaskExecutionGraph(
+        status=GraphStatus.RUNNING,
+        nodes=[
+            Node(
+                node_id="n-running-active",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={"lease_until": "2099-01-01T00:00:00+00:00"},  # future
+            ),
+            Node(
+                node_id="n-running-expired",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={"lease_until": "2026-01-01T00:00:00+00:00"},  # past
+            ),
+            Node(
+                node_id="n-pending-expired",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.PENDING,
+                properties={"lease_until": "2026-01-01T00:00:00+00:00"},  # not RUNNING
+            ),
+            Node(
+                node_id="n-running-no-lease",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={},  # no lease_until
+            ),
+        ],
+    )
+    task_repo.save(t)
+    pairs = task_repo.find_expired_lease_nodes("2026-08-04T00:00:00+00:00")
+    assert pairs == [("task-1", "n-running-expired")]
+
+
+def test_find_expired_lease_nodes_skips_malformed_timestamp(task_repo):
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    t = _task()
+    t.status = GraphStatus.RUNNING
+    t.execution_graph = TaskExecutionGraph(
+        status=GraphStatus.RUNNING,
+        nodes=[
+            Node(
+                node_id="n-bad",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={"lease_until": "not-a-timestamp"},
+            ),
+            Node(
+                node_id="n-good-expired",
+                spec="",
+                run_mode=None,
+                status=NodeStatus.RUNNING,
+                properties={"lease_until": "2026-01-01T00:00:00+00:00"},
+            ),
+        ],
+    )
+    task_repo.save(t)
+    # Malformed row skipped (never raises); the good expired row still returned.
+    pairs = task_repo.find_expired_lease_nodes("2026-08-04T00:00:00+00:00")
+    assert pairs == [("task-1", "n-good-expired")]
+
+
+def test_find_expired_lease_nodes_malformed_now_returns_empty(task_repo):
+    # Malformed now_iso → [] (mirrors InMemoryTaskRepo; never raises).
+    task_repo.save(_task())
+    assert task_repo.find_expired_lease_nodes("not-a-timestamp") == []
+
+
 # --- TaskEventRepo append-only + single-writer seq -------------------------
 
 
