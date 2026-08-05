@@ -10,8 +10,8 @@ use crate::noop::{
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, ChannelBindingCleanupPort, DmActorSpec, DmCreateCommand, DmCreateResult,
-    FriendCoreService, Group as DomainGroup, GroupAddMemberCommand, GroupAddMemberResult,
-    GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
+    CollaborationRuntimeService, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
+    GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
     GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry,
     GroupListResult, GroupManagementService, GroupParticipantModeCommand,
     GroupParticipantModeResult, GroupParticipantView, GroupPatchSettingsCommand,
@@ -60,6 +60,136 @@ pub struct GroupManagement {
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
+}
+
+pub struct GroupManagementWithRuntimeCleanup {
+    inner: Arc<dyn GroupManagementService>,
+    collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+}
+
+impl GroupManagementWithRuntimeCleanup {
+    pub fn new(
+        inner: Arc<dyn GroupManagementService>,
+        collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        Self {
+            inner,
+            collaboration_runtime,
+        }
+    }
+
+    async fn cleanup_group_runtime(&self, group_id: &str) -> Result<(), GroupUseCaseError> {
+        self.collaboration_runtime
+            .cancel_group_runs(group_id, "group_deleted")
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "Failed to cancel active state-machine runs for deleted group '{group_id}': {error}"
+                ))
+            })?;
+        self.collaboration_runtime
+            .delete_group_runtime_state(group_id)
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "Failed to delete state-machine runtime state for group '{group_id}': {error}"
+                ))
+            })?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl GroupManagementService for GroupManagementWithRuntimeCleanup {
+    async fn create_group(
+        &self,
+        cmd: GroupCreateCommand,
+    ) -> Result<GroupDetailResult, GroupUseCaseError> {
+        self.inner.create_group(cmd).await
+    }
+
+    async fn create_dm(&self, cmd: DmCreateCommand) -> Result<DmCreateResult, GroupUseCaseError> {
+        self.inner.create_dm(cmd).await
+    }
+
+    async fn update_status(
+        &self,
+        cmd: GroupStatusCommand,
+    ) -> Result<GroupDetailResult, GroupUseCaseError> {
+        self.inner.update_status(cmd).await
+    }
+
+    async fn add_member(
+        &self,
+        cmd: GroupAddMemberCommand,
+    ) -> Result<GroupAddMemberResult, GroupUseCaseError> {
+        self.inner.add_member(cmd).await
+    }
+
+    async fn remove_member(
+        &self,
+        cmd: GroupRemoveMemberCommand,
+    ) -> Result<GroupRemoveMemberResult, GroupUseCaseError> {
+        self.inner.remove_member(cmd).await
+    }
+
+    async fn delete_group(
+        &self,
+        cmd: GroupDeleteCommand,
+    ) -> Result<GroupDeleteResult, GroupUseCaseError> {
+        let result = self.inner.delete_group(cmd).await?;
+        self.cleanup_group_runtime(&result.group_id).await?;
+        Ok(result)
+    }
+
+    async fn terminate_group(
+        &self,
+        cmd: GroupTerminateCommand,
+    ) -> Result<GroupDetailResult, GroupUseCaseError> {
+        self.inner.terminate_group(cmd).await
+    }
+
+    async fn update_label(
+        &self,
+        cmd: GroupUpdateLabelCommand,
+    ) -> Result<GroupDetailResult, GroupUseCaseError> {
+        self.inner.update_label(cmd).await
+    }
+
+    async fn update_visibility(
+        &self,
+        cmd: GroupUpdateVisibilityCommand,
+    ) -> Result<GroupDetailResult, GroupUseCaseError> {
+        self.inner.update_visibility(cmd).await
+    }
+
+    async fn update_workspace(
+        &self,
+        cmd: GroupUpdateWorkspaceCommand,
+    ) -> Result<GroupWorkspaceResult, GroupUseCaseError> {
+        self.inner.update_workspace(cmd).await
+    }
+
+    async fn update_routing_policy(
+        &self,
+        cmd: GroupRoutingPolicyCommand,
+    ) -> Result<GroupRoutingPolicyResult, GroupUseCaseError> {
+        self.inner.update_routing_policy(cmd).await
+    }
+
+    async fn update_participant_mode(
+        &self,
+        cmd: GroupParticipantModeCommand,
+    ) -> Result<GroupParticipantModeResult, GroupUseCaseError> {
+        self.inner.update_participant_mode(cmd).await
+    }
+
+    async fn patch_group_settings(
+        &self,
+        cmd: GroupPatchSettingsCommand,
+    ) -> Result<GroupPatchSettingsResult, GroupUseCaseError> {
+        self.inner.patch_group_settings(cmd).await
+    }
 }
 
 fn validate_service_spec_callback_urls(

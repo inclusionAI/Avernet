@@ -17,7 +17,9 @@ from gateway.community.spi.bot import RegisteredBot
 class _FakeBotRegistry:
     """Resolves only ``bot-key`` → a fixed RegisteredBot; else None (soft miss)."""
 
-    _BOT = RegisteredBot(bot_uuid="bot-7", owner_id="owner-1", tenant="t")
+    _BOT = RegisteredBot(
+        bot_uuid="bot-7", owner_id="owner-1", app_id=1, agent_code="agent-1", tenant="t"
+    )
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None:
         return self._BOT if token == "bot-key" else None
@@ -31,8 +33,16 @@ def _creds(headers: dict[str, str]) -> CredentialBundle:
     return CredentialBundle(headers=headers, cookies={}, query={})
 
 
-async def test_dedicated_header_wins_over_authorization() -> None:
-    creds = _creds({"x-bot-token": "bot-key", "authorization": "Bearer other"})
+async def test_authorization_wins_over_dedicated_header() -> None:
+    creds = _creds({"x-avernet-bot-token": "nope", "authorization": "Bearer bot-key"})
+    result = await _strat().build(creds)
+    assert isinstance(result, BotPrincipal)
+    assert result.bot.token == "bot-key"
+
+
+async def test_jwt_authorization_falls_back_to_dedicated_header() -> None:
+    # A JWT-shaped Authorization is not a bot token → fall back to the dedicated header.
+    creds = _creds({"x-avernet-bot-token": "bot-key", "authorization": "Bearer a.b.c"})
     result = await _strat().build(creds)
     assert isinstance(result, BotPrincipal)
     assert result.bot.token == "bot-key"
@@ -44,6 +54,9 @@ async def test_bearer_non_jwt_resolves_via_registry() -> None:
     assert result.tenant == "t"
     assert result.bot.bot_uuid == "bot-7"
     assert result.bot.owner_id == "owner-1"
+    assert result.bot.app_id == 1
+    assert result.bot.agent_code == "agent-1"
+    assert result.bot.tenant == "t"
     assert result.bot.token == "bot-key"
 
 
@@ -55,13 +68,13 @@ async def test_bearer_jwt_shaped_returns_none() -> None:
 
 async def test_dedicated_header_with_jwt_is_taken_as_is() -> None:
     # The dedicated header wins and bypasses the JWT-shape check.
-    result = await _strat().build(_creds({"x-bot-token": "a.b.c"}))
+    result = await _strat().build(_creds({"x-avernet-bot-token": "a.b.c"}))
     # The registry does not know this token → soft miss → None.
     assert result is None
 
 
 async def test_unknown_token_returns_none_soft_miss() -> None:
-    assert await _strat().build(_creds({"x-bot-token": "nope"})) is None
+    assert await _strat().build(_creds({"x-avernet-bot-token": "nope"})) is None
 
 
 async def test_absent_token_returns_none() -> None:

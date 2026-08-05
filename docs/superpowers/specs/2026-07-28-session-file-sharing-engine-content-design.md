@@ -29,23 +29,24 @@ separate owners and are not changed here.
 
 ## Content Delivery
 
-`GET /api/session-resources/{resource_id}/content?disposition=inline|attachment`
-is the public Backend endpoint. Backend authorizes owner, Bot, session, and
-`ready` state, then streams the Engine endpoint
-`GET /api/resource-materializations/{resource_id}/content` through the
-`DeviceAdapterTransport` stream contract.
+After a resource becomes `ready`, Frontend reads the Engine user data plane
+through the existing Bot proxypass:
 
-The Engine endpoint is internally authenticated, accepts only `resource_id`,
-and resolves the file from a ready manifest. It rejects missing manifests,
-non-ready entries, workspace escapes, and missing files. It selects a safe
-content type and disposition from trusted manifest metadata and streams the
-file without buffering it in memory.
+- `GET /api/session-files?sessionKey=...`
+- `GET /api/session-files/{resource_id}/content?sessionKey=...&disposition=inline|attachment`
+- `DELETE /api/session-files/{resource_id}?sessionKey=...`
 
-Only `Content-Type`, `Content-Length`, and `Content-Disposition` cross the
-Backend proxy boundary. If the Engine reports `resource_not_materialized`,
-Backend closes the upstream response, CAS-transitions the record to
-`device_syncing`, queues a new materialization task, and returns
-`resource_materializing`. It never falls back to BaaS or OSS download URLs.
+The proxypass is the authentication boundary: it validates the browser login
+Cookie, proxypass connection token, and target Bot before forwarding to Engine.
+The Engine Router does not require or inspect `x-iam-token`. It resolves only
+manifest-controlled entries for the supplied session hash, rejects missing or
+changed files and workspace escapes, and streams without buffering the file.
+It accepts no caller path.
+
+`/api/resource-materializations/{resource_id}/content` remains an internal
+Backend-to-Engine route and is not a browser fallback. Neither data path falls
+back to BaaS or OSS download URLs. Any new ingress that bypasses proxypass must
+provide equivalent authentication before it can reach `/api/session-files`.
 
 ## Compatibility And Safety
 

@@ -39,6 +39,7 @@ use bcs_service_api::{
     RespondHumanNodeOutcome, RunFallbackDelivery, ServiceError, SessionChannelDeliveryOutcome,
     SessionChannelOutboundPort, SessionHistoryResult, SessionKind, SessionManagementService,
     SessionStateMachinePermissionCommand, SessionStateMachinePermissionView, SessionStatus,
+    SessionUseCaseError,
     StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
@@ -56,7 +57,8 @@ use uuid::Uuid;
 const RUNTIME_CLEANUP_SESSION_LIMIT: u64 = i64::MAX as u64;
 
 use crate::definition::{
-    CompiledStateMachine, reject_explicit_participant_roles, validate_definition,
+    CompiledStateMachine, project_definition_graph, reject_explicit_participant_roles,
+    validate_definition,
 };
 use crate::validation::validate_authoring_definition_yaml;
 
@@ -1864,6 +1866,105 @@ impl CollaborationRuntime {
         }
         Ok(())
     }
+
+    async fn process_expired_node_timeout_candidate(
+        &self,
+        node: &StateMachineNodeRun,
+        now: u64,
+        timeout_grace_ms: u64,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&node.run_id).await? else {
+            return Ok(false);
+        };
+        if run.status != StateMachineRunStatus::Running {
+            return Ok(false);
+        }
+        let Some(group) = self.groups.get(&run.group_id).await else {
+            self.cancel_state_machine_run(CancelStateMachineRunCommand {
+                run_id: run.run_id.clone(),
+                reason: Some("group_not_found".to_string()),
+            })
+            .await?;
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.run_aborted_missing_group",
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                node_id = %node.node_id,
+                "state-machine run aborted because its group no longer exists"
+            );
+            return Ok(true);
+        };
+        let session_exists = self
+            .sessions
+            .get(&run.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .is_some();
+        if !session_exists {
+            self.cancel_state_machine_run(CancelStateMachineRunCommand {
+                run_id: run.run_id.clone(),
+                reason: Some("session_not_found".to_string()),
+            })
+            .await?;
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.run_aborted_missing_session",
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                node_id = %node.node_id,
+                "state-machine run aborted because its session no longer exists"
+            );
+            return Ok(true);
+        }
+        let definition = self.load_run_definition(&run).await?;
+        let compiled = validate_definition(definition)?;
+        let timeout_ms = node.node_timeout_ms.unwrap_or_default();
+        let deadline_ms = node.timeout_deadline_ms;
+        let error = format!(
+            "state-machine node '{}' timed out after {}ms",
+            node.node_id, timeout_ms
+        );
+        self.events
+            .append_event(
+                &run.run_id,
+                Some(&node.node_id),
+                Some(node.attempt),
+                "state_machine.node.timeout",
+                serde_json::json!({
+                    "run_id": run.run_id.clone(),
+                    "node_id": node.node_id.clone(),
+                    "attempt": node.attempt,
+                    "node_timeout_ms": timeout_ms,
+                    "timeout_deadline_ms": deadline_ms,
+                    "observed_at_ms": now,
+                    "timeout_grace_ms": timeout_grace_ms,
+                    "delivery_request_id": node.delivery_request_id.clone(),
+                    "bot_delivery_run_id": node.bot_delivery_run_id.clone(),
+                }),
+                now,
+            )
+            .await?;
+        let failed = self
+            .runs
+            .fail_node_attempt(&run.run_id, &node.node_id, node.attempt, error.clone(), now)
+            .await?;
+        if !failed {
+            return Ok(false);
+        }
+        log_state_machine_timeout(&run, node, timeout_ms, deadline_ms, timeout_grace_ms);
+        self.fail_node_or_schedule_retry(
+            &compiled,
+            &group,
+            &run,
+            &node.node_id,
+            node.attempt,
+            error,
+        )
+        .await?;
+        Ok(true)
+    }
 }
 
 #[async_trait]
@@ -2825,16 +2926,25 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             )
             .await?;
         let is_chat_session = self.is_chat_session(&run.session_id).await?;
-        let completed_session = if is_chat_session {
-            None
+        let (completed_session, session_missing) = if is_chat_session {
+            (None, false)
         } else {
-            self.sessions
+            match self
+                .sessions
                 .complete_if_running(&run.session_id, None, Some("aborted".to_string()))
                 .await
-                .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            {
+                Ok(completed_session) => (completed_session, false),
+                Err(SessionUseCaseError::NotFound(_)) => (None, true),
+                Err(error) => {
+                    return Err(CollaborationRuntimeError::InvalidRequest(error.to_string()));
+                }
+            }
         };
         let session_complete_result = if is_chat_session {
             "chat_preserved"
+        } else if session_missing {
+            "missing"
         } else if completed_session.is_some() {
             "completed"
         } else {
@@ -3221,65 +3331,33 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .list_expired_running_node_runs(now, timeout_grace_ms, limit)
             .await?;
         let mut processed = 0usize;
+        let mut skipped = 0usize;
+        let mut first_skipped = None;
         for node in expired_nodes {
-            let Some(run) = self.runs.get_run(&node.run_id).await? else {
-                continue;
-            };
-            if run.status != StateMachineRunStatus::Running {
-                continue;
+            match self
+                .process_expired_node_timeout_candidate(&node, now, timeout_grace_ms)
+                .await
+            {
+                Ok(true) => processed += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    skipped += 1;
+                    if first_skipped.is_none() {
+                        first_skipped = Some((node.run_id, node.node_id, error.to_string()));
+                    }
+                }
             }
-            let definition = self.load_run_definition(&run).await?;
-            let compiled = validate_definition(definition)?;
-            let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
-                CollaborationRuntimeError::InvalidRequest(format!(
-                    "group not found: {}",
-                    run.group_id
-                ))
-            })?;
-            let timeout_ms = node.node_timeout_ms.unwrap_or_default();
-            let deadline_ms = node.timeout_deadline_ms;
-            let error = format!(
-                "state-machine node '{}' timed out after {}ms",
-                node.node_id, timeout_ms
+        }
+        if let Some((run_id, node_id, error)) = first_skipped {
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.candidates_skipped",
+                skipped,
+                first_run_id = %run_id,
+                first_node_id = %node_id,
+                first_error = %error,
+                "state-machine timeout scanner skipped unprocessable candidates"
             );
-            self.events
-                .append_event(
-                    &run.run_id,
-                    Some(&node.node_id),
-                    Some(node.attempt),
-                    "state_machine.node.timeout",
-                    serde_json::json!({
-                        "run_id": run.run_id.clone(),
-                        "node_id": node.node_id.clone(),
-                        "attempt": node.attempt,
-                        "node_timeout_ms": timeout_ms,
-                        "timeout_deadline_ms": deadline_ms,
-                        "observed_at_ms": now,
-                        "timeout_grace_ms": timeout_grace_ms,
-                        "delivery_request_id": node.delivery_request_id.clone(),
-                        "bot_delivery_run_id": node.bot_delivery_run_id.clone(),
-                    }),
-                    now,
-                )
-                .await?;
-            let failed = self
-                .runs
-                .fail_node_attempt(&run.run_id, &node.node_id, node.attempt, error.clone(), now)
-                .await?;
-            if !failed {
-                continue;
-            }
-            processed += 1;
-            log_state_machine_timeout(&run, &node, timeout_ms, deadline_ms, timeout_grace_ms);
-            self.fail_node_or_schedule_retry(
-                &compiled,
-                &group,
-                &run,
-                &node.node_id,
-                node.attempt,
-                error,
-            )
-            .await?;
         }
         Ok(processed)
     }
@@ -3315,6 +3393,34 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.group_collaboration_definition_view(group_id).await
     }
 
+    async fn cancel_session_runs(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let mut first_error = None;
+        for run in self.runs.list_runs_by_session_id(session_id).await? {
+            if !matches!(
+                run.status,
+                StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+            ) {
+                continue;
+            }
+            if let Err(error) = self
+                .cancel_state_machine_run(CancelStateMachineRunCommand {
+                    run_id: run.run_id,
+                    reason: Some(reason.to_string()),
+                })
+                .await
+            {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
     async fn cancel_group_runs(
         &self,
         group_id: &str,
@@ -3336,23 +3442,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
         let mut first_error = None;
         for session in sessions {
-            for run in self.runs.list_runs_by_session_id(&session.id).await? {
-                if !matches!(
-                    run.status,
-                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
-                ) {
-                    continue;
-                }
-                if let Err(error) = self
-                    .cancel_state_machine_run(CancelStateMachineRunCommand {
-                        run_id: run.run_id,
-                        reason: Some(reason.to_string()),
-                    })
-                    .await
-                {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
+            if let Err(error) = self.cancel_session_runs(&session.id, reason).await {
+                if first_error.is_none() {
+                    first_error = Some(error);
                 }
             }
         }
@@ -4293,16 +4385,17 @@ fn run_graph_view(
         .iter()
         .map(|node| (node.node_id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
-    let nodes = state_machine
+    let projection = project_definition_graph(compiled)?;
+    let nodes = projection
         .nodes
-        .iter()
-        .map(|(node_id, node)| {
-            let run_node = node_runs_by_id.get(node_id.as_str()).copied();
+        .into_iter()
+        .map(|node| {
+            let run_node = node_runs_by_id.get(node.node_id.as_str()).copied();
             StateMachineGraphNodeView {
-                node_id: node_id.clone(),
-                display_name: node.display_name.clone(),
+                node_id: node.node_id,
+                display_name: node.display_name,
                 kind: node.kind,
-                assignee: node.assignee.clone(),
+                assignee: node.assignee,
                 final_output: node.final_output,
                 status: run_node.map(|node| node.status),
                 attempt: run_node.map(|node| node.attempt),
@@ -4313,19 +4406,16 @@ fn run_graph_view(
             }
         })
         .collect();
-    let mut edges = Vec::new();
-    for (source, node) in &state_machine.nodes {
-        for (outcome, transition) in &node.transitions {
-            for target in &transition.targets {
-                edges.push(StateMachineGraphEdgeView {
-                    source: source.clone(),
-                    outcome: outcome.clone(),
-                    target: target.clone(),
-                    guard: transition.guard.clone(),
-                });
-            }
-        }
-    }
+    let edges = projection
+        .edges
+        .into_iter()
+        .map(|edge| StateMachineGraphEdgeView {
+            source: edge.source,
+            outcome: edge.outcome,
+            target: edge.target,
+            guard: edge.guard,
+        })
+        .collect();
     Ok(StateMachineRunGraphView {
         run,
         definition: StateMachineGraphDefinitionView {

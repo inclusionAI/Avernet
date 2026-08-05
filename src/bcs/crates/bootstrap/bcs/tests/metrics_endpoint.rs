@@ -13,7 +13,7 @@ async fn metrics_disabled_endpoint_returns_404() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = false;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let response = reqwest::get(format!("http://{addr}/metrics"))
@@ -31,7 +31,7 @@ async fn metrics_enabled_endpoint_renders_prometheus_text() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let response = reqwest::get(format!("http://{addr}/metrics"))
@@ -66,7 +66,7 @@ async fn metrics_ws_bot_lifecycle_is_recorded() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let (mut ws, _response) =
@@ -119,7 +119,7 @@ async fn metrics_ws_bot_registration_success_and_rejection_are_recorded() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let (mut ok_ws, _response) =
@@ -201,7 +201,7 @@ async fn metrics_ws_frontend_lifecycle_is_recorded() {
     let bots_dir = helpers::create_temp_bots_dir();
     let mut config = helpers::create_test_config(&bots_dir.path().to_path_buf());
     config.metrics.enabled = true;
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, handle) = server.run_on_random_port().await.expect("start server");
 
     let (mut ws, _response) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))

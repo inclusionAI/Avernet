@@ -67,6 +67,10 @@
       "enable_metrics": false,
       "max_connections": 100
     },
+    "gateway": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
       "enable_oss_sync": true
@@ -186,6 +190,10 @@
       "base_url": "",
       "base_url_pre": ""
     },
+    "gateway": {
+      "base_url": "",
+      "base_url_pre": ""
+    },
     "kb": {
       "base_url": "",
       "function_name": "",
@@ -207,7 +215,8 @@
     },
     "secret_names": {
       "aiworkbench_repo_url": "",
-      "dormant_internal_token": ""
+      "dormant_internal_token": "",
+      "gateway_principal_signing_key": "gateway_principal_signing_key"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",

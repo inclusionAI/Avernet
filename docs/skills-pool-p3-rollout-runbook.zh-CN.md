@@ -7,7 +7,7 @@
 ## 发布前置
 
 生产环境不由 Backend 自动建表。发布新 Backend 前，必须先通过 OceanBase
-数据库变更流程创建 `ac_skill_migration_quarantine` 和
+数据库变更流程创建或升级 `ac_skill_migration_quarantine` 和
 `ac_skills_pool_rollout_audit`，并分别执行 `SELECT 1 ... LIMIT 1` 作为发布
 preflight；任一表不存在或不可读写时禁止开启 rollout。Avernet 仓库只维护
 ORM，数据库变更单需使用以下与 ORM 一致的 DDL：
@@ -64,6 +64,8 @@ CREATE TABLE ac_skill_migration_quarantine (
 CREATE TABLE ac_skills_pool_rollout_audit (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT
     COMMENT '自增主键',
+  avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw',
   env VARCHAR(20) NOT NULL
     COMMENT 'Rollout 配置所属部署环境',
   config_id BIGINT(20) UNSIGNED NOT NULL
@@ -90,15 +92,32 @@ CREATE TABLE ac_skills_pool_rollout_audit (
     ON UPDATE CURRENT_TIMESTAMP
     COMMENT '审计记录的数据库修改时间',
   PRIMARY KEY (id),
-  UNIQUE KEY uk_skills_pool_rollout_audit_revision
-    (env, effective_config_version) GLOBAL,
+  UNIQUE KEY uk_skills_pool_rollout_audit_tenant_revision
+    (avernet_tenant, env, effective_config_version) GLOBAL,
   KEY idx_skills_pool_rollout_audit_batch
     (env, batch_id, id) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
   COMMENT = 'Skills Pool 灰度配置变更追加式审计记录';
 
+-- 已存在上述两表的环境不得重复 CREATE。只有 rollout audit 是 tenant
+-- 隔离表：发布读取该列的 Backend 前，按以下顺序升级 audit 表。
+ALTER TABLE ac_skills_pool_rollout_audit
+  ADD COLUMN avernet_tenant VARCHAR(64) NOT NULL DEFAULT 'teamclaw'
+    COMMENT '数据隔离租户；既有内部数据归属 teamclaw';
+
+ALTER TABLE ac_skills_pool_rollout_audit
+  ADD UNIQUE KEY uk_skills_pool_rollout_audit_tenant_revision
+    (avernet_tenant, env, effective_config_version) GLOBAL;
+
+ALTER TABLE ac_skills_pool_rollout_audit
+  DROP INDEX uk_skills_pool_rollout_audit_revision;
+
 SELECT 1 FROM ac_skill_migration_quarantine LIMIT 1;
 SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
+SELECT COUNT(*) AS null_tenant_rows
+  FROM ac_skills_pool_rollout_audit WHERE avernet_tenant IS NULL;
+SHOW INDEX FROM ac_skill_migration_quarantine;
+SHOW INDEX FROM ac_skills_pool_rollout_audit;
 ```
 
 数据库变更顺序固定为：建表并 preflight → 发布 Backend → 保持 feature disabled
@@ -110,10 +129,12 @@ SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
    精确白名单和对照样本。
 2. 通过 `POST /rollout/feature` 启用 rollout。初始配置固定
    `enable_all=false`，不存在通配入口。
-3. 通过 `POST /rollout/promote` 按
-   OpenClaw、Claude Code、AICoding、Hermes 的顺序人工晋级引擎。
-   除首个 OpenClaw 外，请求必须携带上一引擎已通过验收的
-   `acceptance_batch_id`；Backend 只接受已冻结的批次验收记录。
+3. 通过 `POST /rollout/promote` 独立人工晋级 OpenClaw、Claude Code、
+   AICoding 或 Hermes；各引擎可并行建立精确白名单批次并执行 B0--B2。
+   `promoted_engines` 始终按该固定引擎顺序存储为唯一的规范子集，例如
+   `["openclaw", "aicoding"]` 合法。接口保留可选
+   `acceptance_batch_id` 以兼容既有调用方，但晋级不会读取、校验或审计其他
+   引擎的验收；它不是跨引擎门禁。
 4. 通过 `POST /rollout/controls` 为当前批次登记至少一个同环境、同引擎、
    未命中白名单的负对照，以及一个 Teclaw 对照。
 5. 通过 `POST /rollout/whitelist` 添加精确 `(owner_id, bot_id)` 条目和
@@ -125,12 +146,14 @@ SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
    `GET /batches/{batch_id}?engine=...` 生成批次验收报告。
 8. 只有批次报告 `promotion_ready=true` 且人工确认实际业务指标后，才调用
    `POST /rollout/batches/accept` 冻结该批次的验收报告。扩大批次时，新
-   `batch_id` 必须引用当前引擎最近的 `acceptance_batch_id`；晋级下一引擎
-   也必须引用上一引擎已验收批次。Backend 不会自动验收、扩大或晋级。
+   `batch_id` 必须引用当前引擎最近的 `acceptance_batch_id`。owner 全量和
+   环境全量仍要求各目标引擎已晋级、存在最近已验收批次且没有该引擎 open
+   batch；Backend 不会自动验收、扩大或晋级。
 9. 如需在当前环境内按员工覆盖其存量重启和未来新建 Bot，调用
    `POST /rollout/owners`，传入精确 `owner_id`、`engine`、`enabled` 和该
    引擎最近一次已验收的 `acceptance_batch_id`。规则按
-   `(owner_id, engine)` 隔离，不会越过引擎晋级顺序，也不会影响其他员工。
+   `(owner_id, engine)` 隔离，不会越过该引擎的晋级和验收门禁，也不会影响
+   其他员工。
    精确负对照优先于 owner 全量并保持 Legacy；关闭规则只阻止尚未认领的
    Bot，已认领 Bot 继续前滚。
 
@@ -203,7 +226,8 @@ SELECT 1 FROM ac_skills_pool_rollout_audit LIMIT 1;
 | 服务发布固定草稿布局并向容器传递 | `test_arca_snapshot_producer.py::test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact` 与 `::test_release_translates_frozen_layout_into_container_env` |
 | 服务重启、回滚和扩容继承冻结制品布局 | `test_publish_flow_service.py::test_restart_and_recreate_preserve_frozen_pool_layout`、`::test_execute_rollback_with_config_artifact` 与 `::test_scale_bot_success_prefers_bot_ext_device_count` |
 | 批次必须有健康负对照、Teclaw 对照且无数据不一致 | `test_operational_query.py` |
-| 同一引擎扩大批次和跨引擎晋级都必须引用已冻结验收 | `test_operations.py::test_next_batch_requires_latest_persisted_acceptance` 与 `::test_next_engine_requires_and_audits_a_passing_batch` |
+| 各引擎可独立晋级；同一引擎扩大批次仍必须引用已冻结验收 | `test_operations.py::test_engine_promotion_audit_does_not_depend_on_another_engine_batch`、`::test_other_engine_can_promote_while_existing_engine_batch_is_open` 与 `::test_next_batch_requires_latest_persisted_acceptance` |
+| 非前缀多引擎环境全量仍逐一要求验收且无 open batch | `test_operations.py::test_environment_full_rollout_checks_every_non_prefix_promoted_engine` |
 
 镜像 preparation 脚本、Hermes H0 和各引擎 companion 的验收由对应镜像/引擎
 仓库 CI 承担；本 Backend 报告只读取已提交的控制面与运行时证据，不推断容器

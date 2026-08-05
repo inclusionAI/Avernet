@@ -1,5 +1,11 @@
 # BCN OpenAPI V1 架构与接口设计
 
+> **Path exposure update (2026-08-03):** Resource semantics in this document
+> remain historical design context, but its path examples are superseded by
+> [`2026-08-03-bcn-collaboration-prefix-design.md`](./2026-08-03-bcn-collaboration-prefix-design.md).
+> Every current BCN V1 endpoint is exposed below
+> `/openapi/v1/collaboration/**`.
+
 > 状态：Draft for review
 >
 > 日期：2026-07-28

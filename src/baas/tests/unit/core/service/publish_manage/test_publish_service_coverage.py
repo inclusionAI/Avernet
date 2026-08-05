@@ -860,6 +860,47 @@ class TestCreateDeviceRecordsForPublish:
         assert svc._device_service.create_device.call_count == 2
         assert svc._rel_repo.insert_rel.call_count == 2
 
+    def test_scale_up_uses_publish_config_deploy_config(self):
+        svc = _make_service()
+        bot = _make_bot_record()
+        bot.config = MagicMock()
+        bot.config.deploy_config = MagicMock()
+        template = MagicMock()
+        svc._template_service.get_online_template_by_uuid.return_value = template
+
+        new_device = _make_device(id=100, device_uuid="new-dev-1", status="PENDING")
+        svc._device_service.create_device.return_value = new_device
+
+        from secbaas.community.api.device_manage import DeployConfig
+
+        publish_deploy_config = DeployConfig(docker_image="v2")
+        publish_config = PublishConfig(
+            replica_desired=5,
+            deploy_config=publish_deploy_config,
+        )
+        batch = _make_batch_record(batch_capacity=1)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.SCALE_UP,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+                publish_config=publish_config,
+            )
+
+        call_args = svc._device_service.create_device.call_args
+        kwargs = call_args.kwargs
+        device_create_data = kwargs["data"]
+
+        assert device_create_data.extra_config.deploy_config == publish_deploy_config
+
     def test_scale_down_selects_active_devices(self):
         svc = _make_service()
         bot = _make_bot_record()

@@ -90,6 +90,8 @@ class SkillsPoolMigrationClaimService:
         bot_type = bot.get("bot_type")
         if bot_type == "personal":
             return BotRuntimeForm.PERSONAL
+        if bot_type == "desktop":
+            return BotRuntimeForm.DESKTOP
         if bot_type != "service":
             return None
 

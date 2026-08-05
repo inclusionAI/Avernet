@@ -57,7 +57,6 @@ from agentclaw.community.core.devices.services.device_filesystem_dispatcher impo
 )
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.bot_repository import BotRepository
 
 from .schemas import Preview, Resource, ResourceCreate, ResourceType, ResourceUpdate
 
@@ -139,23 +138,21 @@ async def list_resources(
     """List resources (filter + paginate)."""
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
-    # Map openapi ResourceType → legacy ResourceType enum the slim service
-    # expects (it does ``.value`` internally). ``None`` (no filter) means
-    # "all types". BUT if the caller passes type=FOLDER (an openapi type with
-    # no legacy equivalent), we MUST NOT fall through to None-=="all types" —
-    # that would leak every resource under a FOLDER filter. Explicit FOLDER →
-    # empty page (no legacy folders exist).
-    legacy_type = _legacy_type_for(type)
-    if type is not None and legacy_type is None:
+    if type is not None and _legacy_type_for(type) is None:
         # type is an openapi type with no legacy mapping (FOLDER) → no rows
-        openapi_items: list[Resource] = []
-    else:
-        items = service.list_resources(resource_type=legacy_type)
-        openapi_items = [_to_openapi_resource(r) for r in items]
+        return page_envelope(0, [], request)
+    legacy_type = _legacy_type_for(type)
     start = (page.page - 1) * page.page_size
-    end = start + page.page_size
-    page_items = openapi_items[start:end]
-    return page_envelope(len(openapi_items), page_items, request)
+    # Push the page bound down to the service so we only materialise Resource /
+    # openapi models for the requested page, not the full set (the service still
+    # reads the full repo row-set today — a repo-level LIMIT/COUNT is the deeper
+    # follow-up). total uses the repo count, not the page length.
+    items = service.list_resources(
+        resource_type=legacy_type, limit=page.page_size, offset=start
+    )
+    page_items = [_to_openapi_resource(r) for r in items]
+    total = service.count_resources(resource_type=legacy_type)
+    return page_envelope(total, page_items, request)
 
 
 @router.get("/check-name", response_model=Envelope[NameCheck])
@@ -252,7 +249,6 @@ async def upload_resource(
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
         DeviceFilesystemDispatcher
@@ -260,11 +256,10 @@ async def upload_resource(
 ) -> Envelope[Resource]:
     """Upload a file's raw bytes as a new resource.
 
-    device_fs is resolved per-bot (Task 2 paradigm); upload_file is async and
-    raises ValueError on duplicate name → 409 Conflict (legacy parity with
-    create). device_fs operations are delivered through the
-    dispatcher-resolved boundary directly. owner_id comes from the verified
-    principal (``caller_owner_id``), fail-closed — mirroring the bots router.
+    device_fs is resolved per-bot; upload_file is async and raises
+    DuplicateResourceError on duplicate name → 409 (via @envelope_errors).
+    owner_id comes from the verified principal (``caller_owner_id``),
+    fail-closed — mirroring the bots router.
     """
     effective_bot_id = bot_id
     owner_id = caller_owner_id(principal)
@@ -348,7 +343,6 @@ async def delete_resource(
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
         DeviceFilesystemDispatcher
@@ -356,20 +350,26 @@ async def delete_resource(
 ) -> Envelope[Deleted]:
     """Delete a resource (file → device FS, link/folder → DB soft-delete).
 
-    ``device_fs`` is resolved per-bot from ``ac_bots``; ``owner_id`` comes from
-    the verified principal (``caller_owner_id``), fail-closed — mirroring the
-    bots router. The four injected deps (factory, bot_repo, resolver,
-    device_fs_dispatcher) stay out of the served OpenAPI schema — see
-    ``tests/community/contracts/gateway/test_public_namespace.py``.
+    owner_id comes from the verified principal (``caller_owner_id``),
+    fail-closed. device_fs is resolved per-bot ONLY for FILE resources — a
+    link/folder soft-delete never touches device_fs, so it must not fail on an
+    unbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no
+    binding). The injected deps (factory, resolver, device_fs_dispatcher) stay
+    out of the served OpenAPI schema — see test_public_namespace.py.
     """
     effective_bot_id = bot_id
     owner_id = caller_owner_id(principal)
+    # Follow-up (#4): device_fs resolution is unconditional — a link/folder
+    # soft-delete never touches device_fs but the handler can't tell the type
+    # until the service reads the row, so an unbound bot raises
+    # DeviceNotBoundError (→409) even for a link delete. The clean fix moves
+    # the lazy device_fs dispatch into the service (it knows is_file); left as
+    # a service-layer follow-up with totalfrank's comment, not a router
+    # get_resource work-around (2× reads + breaks the stub-service test shape).
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
-    # NOTE: ``delete_resource`` on the concrete service is ASYNC now (Phase 3
-    # slim service awaits device_fs.delete_file for file resources) — must
-    # be ``await``ed. Returns False when the record is missing → 404.
+    # delete_resource is ASYNC. Returns False when the record is missing → 404.
     ok = await service.delete_resource(resource_id, device_fs=device_fs)
     if not ok:
         raise HTTPException(status_code=404, detail="Resource not found")
@@ -380,12 +380,12 @@ async def delete_resource(
     "/{resource_id}/download",
     responses={200: {"content": {"application/octet-stream": {}}}},
 )
+@envelope_errors
 async def download_resource(
     resource_id: str,
     principal: PrincipalDep,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
         DeviceFilesystemDispatcher
@@ -393,12 +393,11 @@ async def download_resource(
 ) -> Response:
     """Download a resource's bytes (raw, not enveloped).
 
-    device_fs is resolved per-bot from ``ac_bots`` (same chain as delete /
-    upload); owner_id comes from the verified principal (``caller_owner_id``),
-    fail-closed — mirroring the bots router. ``device_fs.read_file`` is
-    delivered through the dispatcher-resolved boundary directly (parallel to
-    upload_file). Service returns ``(bytes, mime)`` or ``None`` → 404
-    (not-found / not-a-file / is-directory / read-failure all collapse to 404).
+    owner_id comes from the verified principal (``caller_owner_id``),
+    fail-closed — mirroring the bots router. device_fs is resolved per-bot
+    (unconditional today; see #4 follow-up — only a file has bytes, but the
+    handler can't tell the type before the service reads the row). Service
+    returns ``(bytes, mime)`` or ``None`` → 404.
     """
     effective_bot_id = bot_id
     owner_id = caller_owner_id(principal)
@@ -422,7 +421,6 @@ async def preview_resource(
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
-    bot_repo: BotRepository = Injected(BotRepository),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
     device_fs_dispatcher: DeviceFilesystemDispatcher = Injected(
         DeviceFilesystemDispatcher
@@ -430,29 +428,17 @@ async def preview_resource(
 ) -> Envelope[Preview]:
     """Get a resource preview (text-ified content, enveloped).
 
-    device_fs is resolved per-bot from ``ac_bots`` (same chain as delete /
-    upload / download); owner_id comes from the verified principal
-    (``caller_owner_id``), fail-closed — mirroring the bots router.
-    ``device_fs.read_file`` is delivered through the dispatcher-resolved
-    boundary directly. Service returns a dict ``{content, content_type,
-    size}`` or ``None`` → 404 (not-found / not-a-file / is-directory /
-    read-failure all collapse to 404 — service already filters non-file /
-    directory / empty-bytes). ``ValueError`` from the service (content > 1
-    MB cap) → 413 (legacy parity). Unlike download (raw ``Response``),
-    preview returns an enveloped ``Preview`` schema so the caller gets a
-    structured content_type + content pair.
-
-    The four injected deps (factory, bot_repo, resolver, device_fs_dispatcher)
-    stay out of the served OpenAPI schema — see
-    ``tests/community/contracts/gateway/test_public_namespace.py``.
+    owner_id comes from the verified principal (``caller_owner_id``),
+    fail-closed — mirroring the bots router. device_fs is resolved per-bot
+    (unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)
+    → 413 via @envelope_errors; a None result is not-found / not-a-file /
+    read-failure → 404.
     """
     effective_bot_id = bot_id
     owner_id = caller_owner_id(principal)
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
     device_fs = device_fs_dispatcher.dispatch(ctx)
     service = factory.create(bot_id=effective_bot_id)
-    # FileTooLargeError (413) propagates to @envelope_errors; a None result is
-    # not-found / not-a-file / read-failure, collapsed to 404 below.
     result = await service.preview_resource(resource_id, device_fs=device_fs)
     if result is None:
         raise HTTPException(

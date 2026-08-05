@@ -73,7 +73,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
 /// Start a BCS server on a random port.
 async fn start_test_server(bots_dir: &PathBuf) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     let config = create_test_config(bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server.run_on_random_port().await.expect("Failed to start server")
 }
 
@@ -1986,7 +1986,7 @@ async fn test_create_group_returns_chat_url() {
     });
 
     let config: BcsConfig = serde_json::from_value(config_json).expect("Failed to parse BcsConfig");
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _server_handle) = server.run_on_random_port().await.expect("Failed to start server");
 
     tokio::time::sleep(Duration::from_millis(50)).await;

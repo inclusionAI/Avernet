@@ -86,7 +86,130 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert expected.read_bytes() == content
     assert pull.calls == 1
     assert callback.results == [result]
-    assert service.manifest_store.get("sr_001").status == "ready"
+    entry = service.manifest_store.get("sr_001")
+    assert entry.status == "ready"
+    assert entry.observed_size == len(content)
+    assert entry.observed_mtime_ns is not None
+    assert entry.observed_inode is not None
+
+
+@pytest.mark.asyncio
+async def test_materialize_supports_filename_near_filesystem_segment_limit(
+    tmp_path: Path,
+):
+    content = b"long filename content"
+    filename = f"{'a' * 240}.txt"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    target = (
+        tmp_path
+        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
+        / filename
+    )
+    assert result.ready is True
+    assert target.read_bytes() == content
+    assert not list(target.parent.glob(".part-*"))
+
+
+@pytest.mark.asyncio
+async def test_materialize_supports_unicode_filename(tmp_path: Path):
+    content = b"unicode filename content"
+    filename = "\u4e2d\u6587 \u62a5\u544a (final)\uff08\u5df2\u5ba1\uff09.txt"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    target = (
+        tmp_path
+        / ".teamclaw/session-files/scope_abc/session_abc/sr_001"
+        / filename
+    )
+    assert result.ready is True
+    assert target.read_bytes() == content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filename",
+    [".", "..", "folder/report.txt", r"folder\report.txt", "report?.txt", "report\n.txt"],
+)
+async def test_materialize_rejects_unsafe_filename_characters(
+    tmp_path: Path,
+    filename: str,
+):
+    content = b"unsafe filename content"
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    assert result.ready is False
+    assert result.error_code == "invalid_device_path"
+    assert callback.results == [result]
+
+
+@pytest.mark.asyncio
+async def test_materialize_rejects_filename_exceeding_utf8_segment_limit(tmp_path: Path):
+    content = b"too long unicode filename"
+    filename = f"{'\u4e2d' * 86}.txt"
+    callback = _CallbackClient()
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=callback,
+        workspace_root_provider=lambda: tmp_path,
+    )
+    request = _request(
+        content,
+        filename=filename,
+        device_path=(
+            "workspace/.teamclaw/session-files/scope_abc/session_abc/"
+            f"sr_001/{filename}"
+        ),
+    )
+
+    result = await service.materialize(request)
+
+    assert result.ready is False
+    assert result.error_code == "invalid_device_path"
+    assert callback.results == [result]
 
 
 @pytest.mark.asyncio
@@ -182,7 +305,7 @@ async def test_hash_mismatch_removes_partial_file_and_reports_failure(tmp_path: 
 
 
 @pytest.mark.asyncio
-async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path):
+async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path, caplog):
     callback = _CallbackClient()
     service = ResourceMaterializationService(
         pull_client=_PullClient(b"x"),
@@ -200,6 +323,8 @@ async def test_materialize_rejects_untrusted_device_path_escape(tmp_path: Path):
     assert result.error_code == "invalid_device_path"
     assert callback.results == [result]
     assert not (tmp_path.parent / "outside/report.txt").exists()
+    assert "reason=device_path traversal is forbidden" in caplog.text
+    assert "../../outside/report.txt" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -283,6 +408,22 @@ def test_open_content_rejects_missing_or_non_ready_manifest_file(tmp_path: Path)
 
     with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
         service.open_content(resource_id="missing", disposition="inline")
+
+
+@pytest.mark.asyncio
+async def test_open_content_rejects_same_size_hash_changed_file(tmp_path: Path):
+    content = b"ready content"
+    service = ResourceMaterializationService(
+        pull_client=_PullClient(content),
+        callback_client=_CallbackClient(),
+        workspace_root_provider=lambda: tmp_path,
+    )
+    await service.materialize(_request(content))
+    target = tmp_path / ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
+    target.write_bytes(b"changed bytes")
+
+    with pytest.raises(ResourceNotMaterializedError, match="resource_not_materialized"):
+        service.open_content(resource_id="sr_001", disposition="inline")
 
 
 @pytest.mark.asyncio

@@ -114,7 +114,7 @@ def test_rewrite_rejects_hash_changed_file(tmp_path: Path):
     target.write_bytes(b"HELLO")
     service = ResourceReferenceService(workspace_root_provider=lambda: tmp_path)
 
-    with pytest.raises(ResourceReferenceError, match="content_hash_mismatch"):
+    with pytest.raises(ResourceReferenceError, match="resource_changed"):
         service.rewrite(
             '<file-ref insert_id="ins_1"></file-ref>',
             "session-a",

@@ -97,6 +97,7 @@ class SingleboxBaasDeviceService(BaasDeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         connection = super().get_device_connection(
             binding_id=binding_id,
@@ -105,6 +106,7 @@ class SingleboxBaasDeviceService(BaasDeviceService):
             ttl=ttl,
             device_uuid=device_uuid,
             ws_conn_mode=ws_conn_mode,
+            path=path,
         )
         if (
             connection.type == BAAS_DEVICE_PROVIDER

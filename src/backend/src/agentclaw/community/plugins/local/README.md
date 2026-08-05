@@ -25,6 +25,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat
+  - agentclaw.community.core.config.yaml_provider  # LocalSecretResolver reuses the provider's deep-merge so both read one effective config
   - agentclaw.community.core.devices
   - agentclaw.community.core.errors
   - agentclaw.community.core.expert_chat
@@ -76,6 +77,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.avernet_tenant_guard  # Shared tenant isolation for local SQLite ORM models
 ```
 
 ### Change impact

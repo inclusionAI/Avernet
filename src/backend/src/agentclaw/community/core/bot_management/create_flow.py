@@ -34,6 +34,10 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    get_current_avernet_tenant,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -201,11 +205,13 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    apply = (
-        passport_plugin.apply_first_agent_passport
-        if is_first_bot
-        else passport_plugin.apply_agent_passport
-    )
+    # 默认租户:首 bot → applyFirst(跳过审批),非首 → applyAgent(走审批)。
+    # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
+    # 且 applyFirst 对重复调用幂等,故不依赖 is_first_bot。见 #556 的根因修复。
+    if get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT and not is_first_bot:
+        apply = passport_plugin.apply_agent_passport
+    else:
+        apply = passport_plugin.apply_first_agent_passport
     try:
         return apply(
             bot_id=bot_id,
@@ -326,12 +332,16 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    is_first_bot = bot_id == "default"
+    is_first_bot = bot_service.is_first_bot(user_id)
 
-    # Pre-flight before Passport, so a limit or a taken name is reported before
-    # the user is sent through authorization and before an external Passport
-    # identity is minted (raises BotLimitExceededError / BotNameExistsError).
-    bot_service.check_create_bot_preflight(user_id=user_id, bot_name=bot_name)
+    # Pre-flight before Passport, so quota, name, and reserved-bot engine
+    # violations are reported before an external Passport identity is minted.
+    bot_service.check_create_bot_preflight(
+        user_id=user_id,
+        bot_id=bot_id,
+        engine_type=spec.engine_type,
+        bot_name=bot_name,
+    )
 
     passport_result = _apply_passport(
         passport_plugin,

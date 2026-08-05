@@ -52,6 +52,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -850,12 +851,14 @@ class SkillSetRepository:
     @inject
     def __init__(self, db: DatabasePlugin):
         from agentclaw.community.core.models import (
+            Skill,
             SkillSet,
             SkillSetMCPServer,
             SkillSetSkill,
         )
 
         self._db = db
+        self.Skill = Skill
         self.SkillSet = SkillSet
         self.SkillSetSkill = SkillSetSkill
         self.SkillSetMCPServer = SkillSetMCPServer
@@ -1104,6 +1107,24 @@ class SkillSetRepository:
         user_id: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            skill = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            if skill_set is None or skill is None:
+                return False
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
@@ -1268,6 +1289,17 @@ class SkillSetRepository:
         env: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            target_env = env or get_current_env()
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == target_env,
+                )
+                .one_or_none()
+            )
+            if skill_set is None:
+                return False
             db.add(
                 self.SkillSetMCPServer(
                     skill_set_id=int(skill_set_id),
@@ -1367,6 +1399,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetMcpExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1385,6 +1418,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",
@@ -1503,6 +1537,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetSkillExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1521,6 +1556,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",

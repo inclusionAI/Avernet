@@ -5,13 +5,25 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Callable
 from uuid import uuid4
 
+from engine.community.config import RepoDelivery, current_repo_delivery
+from engine.community.core.skills.layout_planner import (
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    SkillLayoutResolutionError,
+    resolve_filesystem_skill_layout,
+    resolve_local_skill_locators,
+    resolved_filesystem_layout_evidence,
+)
+from engine.community.core.skills.layout_planner import (
+    ResolvedFilesystemLayoutPlan as _Layout,
+)
 from engine.community.plugins.skills_pool.layout_atomic import (
     atomic_exchange_paths,
 )
@@ -45,6 +57,24 @@ class MappingSourceLayout(StrEnum):
 
     POOL = "pool"
     LEGACY = "legacy"
+
+
+class ActiveRepoRetirementError(RuntimeError):
+    """A runtime-owned active-root corpus could not be safely retired."""
+
+    def __init__(self, reason: str, **evidence: object) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.evidence = evidence
+
+
+class ActiveRepoRestorationError(RuntimeError):
+    """A runtime-owned Legacy active-root corpus could not be restored."""
+
+    def __init__(self, reason: str, **evidence: object) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.evidence = evidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,92 +121,6 @@ class MappingPublishResult:
         return {"published": self.published, "evidence": self.evidence}
 
 
-@dataclass(frozen=True, slots=True)
-class _Layout:
-    legacy_root: Path
-    legacy_local: Path
-    pool_root: Path
-    pool_local: Path
-    pool_repo: Path
-    legacy_repo: Path
-    local_bridge: Path
-    repo_bridge: Path
-    active_marker: Path
-
-    @classmethod
-    def for_home(cls, home: Path) -> "_Layout":
-        return cls.for_engine("openclaw", home)
-
-    @classmethod
-    def for_engine(cls, engine: str, home: Path) -> "_Layout":
-        if engine == "hermes":
-            workspace = home / ".hermes" / "workspace"
-            legacy_root = home / ".hermes" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".hermes" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=home / ".hermes" / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine == "aicoding":
-            workspace = home / ".aicoding" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".aicoding" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=home / ".aicoding" / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine == "claude_code":
-            workspace = home / ".claude_code" / "workspace"
-            legacy_root = home / ".claude" / "skills"
-            legacy_local = workspace / "skills" / "skills-local"
-            pool_root = workspace / "skills-pool"
-            return cls(
-                legacy_root=legacy_root,
-                legacy_local=legacy_local,
-                pool_root=pool_root,
-                pool_local=pool_root / "skills-local",
-                pool_repo=pool_root / "skills-repo",
-                legacy_repo=home / ".claude_code" / "skills-repo",
-                local_bridge=legacy_root / "skills-local",
-                repo_bridge=legacy_root / "skills-repo",
-                active_marker=pool_root / ".pool-active",
-            )
-        if engine != "openclaw":
-            raise ValueError(f"unsupported filesystem Pool engine: {engine}")
-        workspace = home / ".openclaw" / "workspace"
-        legacy_root = workspace / "skills"
-        pool_root = workspace / "skills-pool"
-        legacy_local = legacy_root / "skills-local"
-        legacy_repo = legacy_root / "skills-repo"
-        return cls(
-            legacy_root=legacy_root,
-            legacy_local=legacy_local,
-            pool_root=pool_root,
-            pool_local=pool_root / "skills-local",
-            pool_repo=pool_root / "skills-repo",
-            legacy_repo=legacy_repo,
-            local_bridge=legacy_local,
-            repo_bridge=legacy_repo,
-            active_marker=pool_root / ".pool-active",
-        )
-
-
 def mapping_sources_use_pool(
     *,
     engine: str,
@@ -207,6 +151,11 @@ def mapping_sources_use_pool(
             layout.repo_bridge,
         )
     )
+    stable_repo_root = (
+        Path(os.path.abspath(layout.repo_bridge))
+        if engine in {"aicoding", "hermes"}
+        else None
+    )
     has_pool = False
     has_legacy = False
     for raw_source in sources:
@@ -216,13 +165,20 @@ def mapping_sources_use_pool(
         normalized = Path(os.path.abspath(source))
         if any(normalized.is_relative_to(root) for root in pool_roots):
             has_pool = True
+        elif stable_repo_root is not None and normalized.is_relative_to(
+            stable_repo_root
+        ):
+            if _active_marker_selects_pool(layout=layout, engine=engine):
+                has_pool = True
+            else:
+                has_legacy = True
         elif any(normalized.is_relative_to(root) for root in legacy_roots):
             has_legacy = True
     if has_pool and has_legacy:
         raise ValueError("mapping sources mix Legacy and Pool managed roots")
     if has_pool:
         return True
-    if has_legacy or not sources:
+    if has_legacy:
         return False
     return _active_marker_selects_pool(layout=layout, engine=engine)
 
@@ -268,7 +224,12 @@ def _retired_storage_entries(
     """
 
     entries = [layout.legacy_local, layout.local_bridge]
-    if engine in {"openclaw", "claude_code"}:
+    if engine == "aicoding":
+        entries.append(layout.active_root / "skills-repo")
+    if engine in {"openclaw", "claude_code"} and not (
+        engine == "openclaw"
+        and current_repo_delivery() is RepoDelivery.DOWNLOAD
+    ):
         entries.append(layout.repo_bridge)
     return tuple(dict.fromkeys(entries))
 
@@ -286,6 +247,55 @@ class _PostCutoverFinalization:
     post_sync: dict[str, object]
     cleanup_pending: bool
     failure: PoolActivationResult | None = None
+
+
+def _with_resolution_evidence(
+    result_factory: Callable[[], PoolActivationResult],
+    *,
+    engine: str,
+    source_layout: MappingSourceLayout,
+    registered_local_names: list[str],
+    home: str | Path,
+) -> PoolActivationResult:
+    try:
+        plan = resolve_filesystem_skill_layout(
+            LayoutIdentity(
+                engine_type=engine,
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            ),
+            RuntimeLayoutContext(home=Path(home)),
+        )
+        local_root = (
+            plan.pool_local
+            if source_layout is MappingSourceLayout.POOL
+            else plan.legacy_local
+        )
+        repo_root = (
+            plan.pool_repo
+            if source_layout is MappingSourceLayout.POOL
+            else plan.legacy_repo
+        )
+        local_locators = resolve_local_skill_locators(
+            local_root,
+            registered_local_names,
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid("registered_local_name_invalid", error=str(error))
+    result = result_factory()
+    if not result.committed:
+        return result
+    return PoolActivationResult(
+        result.status,
+        {
+            **result.evidence,
+            "resolved_layout": resolved_filesystem_layout_evidence(
+                plan,
+                local_root=local_root,
+                repo_root=repo_root,
+            ),
+            "local_locators": local_locators,
+        },
+    )
 
 
 def _read_active_marker(path: Path) -> dict[str, object] | None:
@@ -361,6 +371,42 @@ def _retire_bridge(path: Path, *, allowed_targets: tuple[Path, ...]) -> None:
     path.unlink()
 
 
+def _publish_structural_bridge(path: Path, target: Path) -> None:
+    """Atomically publish a descriptor-owned directory symlink."""
+
+    target = Path(os.path.abspath(target))
+    if path.is_symlink() and _lexical_target(path) == target:
+        return
+    if path.exists() and not path.is_symlink():
+        raise OSError(f"stable structure entry is not a symlink: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{uuid4().hex}.pool-bridge")
+    try:
+        temporary.symlink_to(target, target_is_directory=True)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _restore_legacy_repo_bridge(
+    *,
+    engine: str,
+    layout: _Layout,
+) -> None:
+    """Restore the descriptor's Legacy repo view after rollback."""
+
+    repo_delivery = current_repo_delivery()
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine == "openclaw":
+        return
+    if repo_delivery is RepoDelivery.MOUNT:
+        target = layout.pool_repo
+    elif layout.repo_bridge != layout.legacy_repo:
+        target = layout.legacy_repo
+    else:
+        target = _lexical_target(layout.pool_repo)
+    _publish_structural_bridge(layout.repo_bridge, target)
+
+
 def _finalize_active_root(
     *,
     layout: _Layout,
@@ -370,6 +416,8 @@ def _finalize_active_root(
     mappings: list[SkillMapping],
     quarantine: Path,
     retire_path: Callable[[Path, Path], None],
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None,
+    repo_is_mounted: Callable[[Path], bool],
 ) -> PoolActivationResult | None:
     published = publish_pool_mappings(
         mappings=mappings,
@@ -405,6 +453,49 @@ def _finalize_active_root(
         mappings=mappings,
         activation_state="finalizing",
     )
+    active_repo = layout.active_root / "skills-repo"
+    if engine == "aicoding" and (active_repo.exists() or active_repo.is_symlink()):
+        if retire_active_repo is None:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_required",
+                    "path": str(active_repo),
+                },
+            )
+        try:
+            retirement_evidence = retire_active_repo(
+                migration_generation,
+                preparation_id,
+            )
+        except ActiveRepoRetirementError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_failed",
+                    "retirement_reason": error.reason,
+                    **error.evidence,
+                },
+            )
+        except OSError as error:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_failed",
+                    "retirement_reason": "active_repo_retirement_io_error",
+                    "error_type": type(error).__name__,
+                    "errno": error.errno,
+                },
+            )
+        if active_repo.exists() or active_repo.is_symlink():
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "active_repo_retirement_unverified",
+                    "path": str(active_repo),
+                    "retirement": retirement_evidence,
+                },
+            )
     _residue_evidence, residue_failure = _capture_recreated_legacy_local(
         layout=layout,
         quarantine=quarantine,
@@ -416,7 +507,13 @@ def _finalize_active_root(
         layout.local_bridge,
         allowed_targets=(layout.legacy_local, layout.pool_local),
     )
-    if engine in {"openclaw", "claude_code"}:
+    repo_delivery = current_repo_delivery()
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine in {"aicoding", "hermes"}:
+        _publish_structural_bridge(layout.repo_bridge, layout.pool_repo)
+    if engine in {"openclaw", "claude_code"} and not (
+        engine == "openclaw"
+        and repo_delivery is RepoDelivery.DOWNLOAD
+    ):
         _retire_bridge(
             layout.repo_bridge,
             allowed_targets=(layout.legacy_repo, layout.pool_repo),
@@ -437,6 +534,51 @@ def _finalize_active_root(
             {
                 "reason": "legacy_storage_entries_remain",
                 "paths": sorted(remaining_storage_entries),
+            },
+        )
+    if engine in {"aicoding", "hermes"}:
+        try:
+            stable_repo_bridge_valid = (
+                layout.repo_bridge.is_symlink()
+                and _lexical_target(layout.repo_bridge)
+                == Path(os.path.abspath(layout.pool_repo))
+            )
+        except OSError:
+            stable_repo_bridge_valid = False
+        if not stable_repo_bridge_valid:
+            return PoolActivationResult(
+                PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                {
+                    "reason": "stable_repo_bridge_invalid",
+                    "path": str(layout.repo_bridge),
+                },
+            )
+    final_verification = verify_skill_mappings(
+        mappings=mappings,
+        home=layout.pool_root.parents[2],
+        engine=engine,
+    )
+    if not final_verification.valid:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "post_retirement_mapping_verify_failed",
+                "mapping": final_verification.evidence,
+            },
+        )
+    final_inspection = inspect_runtime_layout(
+        engine=engine,
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=layout.pool_root.parents[2],
+        repo_is_mounted=repo_is_mounted,
+    )
+    if final_inspection.status is not RuntimeLayoutInspectionStatus.READY:
+        return PoolActivationResult(
+            PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+            {
+                "reason": "post_retirement_layout_invalid",
+                "probe_status": final_inspection.status.value,
+                "probe": final_inspection.evidence,
             },
         )
     _write_active_marker(
@@ -576,7 +718,7 @@ def _active_entry_inventory(
     external: list[Path] = []
     occupied: list[Path] = []
     reserved = {layout.local_bridge, layout.repo_bridge}
-    for entry in sorted(layout.legacy_root.iterdir(), key=lambda path: path.name):
+    for entry in sorted(layout.active_root.iterdir(), key=lambda path: path.name):
         if entry in reserved or entry.name.startswith(".skills-local.pool-cutover-"):
             continue
         if not entry.is_symlink():
@@ -621,7 +763,7 @@ def _mapping_plan(
             )
         if not reason and (
             not target.is_absolute()
-            or target.parent != layout.legacy_root
+            or target.parent != layout.active_root
             or target
             in {
                 layout.legacy_local,
@@ -629,6 +771,10 @@ def _mapping_plan(
                 layout.local_bridge,
                 layout.repo_bridge,
             }
+            or (
+                layout.engine_type == "aicoding"
+                and target == layout.active_root / "skills-repo"
+            )
         ):
             reason = "target_invalid"
         elif not reason and target in desired and desired[target] != source:
@@ -1057,6 +1203,7 @@ def _activate_pool(
     home: str | Path = "/home/admin",
     repo_is_mounted: Callable[[Path], bool] | None = None,
     retire_path: Callable[[Path, Path], None] = os.replace,
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None = None,
     before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
@@ -1072,19 +1219,51 @@ def _activate_pool(
 
     home_path = Path(home)
     layout = _Layout.for_engine(engine, home_path)
+    repo_mount_probe = repo_is_mounted or os.path.ismount
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", migration_generation):
         return _invalid("migration_generation_invalid")
+    try:
+        normalized_names = list(
+            resolve_local_skill_locators(
+                layout.pool_local,
+                registered_local_names,
+            )
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid(
+            "registered_local_name_invalid",
+            error=str(error),
+        )
+
+    active_marker = _read_active_marker(layout.active_marker)
+    if active_marker is not None and (
+        active_marker.get("engine") != engine
+        or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
+        or active_marker.get("preparation_id") != preparation_id
+        or active_marker.get("migration_generation") != migration_generation
+        or active_marker.get("activation_state") not in {"finalizing", "active"}
+    ):
+        return _invalid("active_marker_identity_mismatch")
 
     inspection = inspect_runtime_layout(
         engine=engine,
         expected_contract_version=LAYOUT_CONTRACT_VERSION,
         home=home_path,
-        repo_is_mounted=repo_is_mounted or os.path.ismount,
+        repo_is_mounted=repo_mount_probe,
     )
-    if (
-        inspection.status is not RuntimeLayoutInspectionStatus.READY
-        or inspection.preparation_id != preparation_id
-    ):
+    layout_ready = (
+        inspection.status is RuntimeLayoutInspectionStatus.READY
+        and inspection.preparation_id == preparation_id
+    )
+    trusted_finalizing_retirement_retry = (
+        engine == "aicoding"
+        and active_marker is not None
+        and active_marker.get("activation_state") == "finalizing"
+        and inspection.status is RuntimeLayoutInspectionStatus.INVALID
+        and inspection.preparation_id == preparation_id
+        and inspection.evidence.get("reason") == "active_repo_corpus_present"
+    )
+    if not layout_ready and not trusted_finalizing_retirement_retry:
         return _invalid(
             "runtime_layout_not_ready",
             probe_status=inspection.status.value,
@@ -1103,16 +1282,7 @@ def _activate_pool(
     baseline_path = layout.pool_root / (
         f".cutover-baseline-{migration_generation}.json"
     )
-    active_marker = _read_active_marker(layout.active_marker)
     if active_marker is not None:
-        if (
-            active_marker.get("engine") != engine
-            or active_marker.get("layout_contract_version") != LAYOUT_CONTRACT_VERSION
-            or active_marker.get("preparation_id") != preparation_id
-            or active_marker.get("migration_generation") != migration_generation
-            or active_marker.get("activation_state") not in {"finalizing", "active"}
-        ):
-            return _invalid("active_marker_identity_mismatch")
         if active_marker.get("activation_state") == "finalizing":
             ownership_failure = _ensure_quarantine_generation_owned(
                 quarantine=quarantine,
@@ -1132,6 +1302,8 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
         except OSError as error:
             return PoolActivationResult(
@@ -1150,21 +1322,15 @@ def _activate_pool(
             {
                 "active_marker": str(layout.active_marker),
                 "legacy_storage_entries_absent": True,
+                "quarantine": str(quarantine),
+                # Finalization has already crossed the irreversible boundary.
+                # Keep cleanup evidence conservative and deterministic instead
+                # of probing persistent storage again while building the
+                # ALREADY_COMMITTED response.
+                "quarantine_cleanup_pending": True,
             },
         )
 
-    normalized_names: list[str] = []
-    for name in registered_local_names:
-        path = Path(name)
-        if (
-            not name
-            or path.is_absolute()
-            or len(path.parts) != 1
-            or name in {".", ".."}
-        ):
-            return _invalid("registered_local_name_invalid", name=name)
-        if name not in normalized_names:
-            normalized_names.append(name)
     try:
         if layout.legacy_local.is_symlink():
             if _lexical_target(layout.legacy_local) != Path(
@@ -1205,6 +1371,8 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1273,6 +1441,8 @@ def _activate_pool(
                 mappings=mappings,
                 quarantine=quarantine,
                 retire_path=retire_path,
+                retire_active_repo=retire_active_repo,
+                repo_is_mounted=repo_mount_probe,
             )
             if completion_failure is not None:
                 return completion_failure
@@ -1401,6 +1571,8 @@ def _activate_pool(
             mappings=mappings,
             quarantine=quarantine,
             retire_path=retire_path,
+            retire_active_repo=retire_active_repo,
+            repo_is_mounted=repo_mount_probe,
         )
         if completion_failure is not None:
             return completion_failure
@@ -1432,21 +1604,33 @@ def _activate_pool(
         committed = layout.legacy_local.is_symlink() and _lexical_target(
             layout.legacy_local
         ) == Path(os.path.abspath(layout.pool_local))
+        evidence: dict[str, object] = {
+            "reason": (
+                "post_cutover_cleanup_failed"
+                if committed
+                else "filesystem_operation_failed"
+            ),
+            "error_type": type(error).__name__,
+            "errno": error.errno,
+        }
+        if committed:
+            evidence.update(
+                {
+                    "quarantine": str(quarantine),
+                    # We are already handling an I/O failure after the
+                    # irreversible cutover. Do not probe the filesystem again
+                    # while constructing the COMMITTED response: Python 3.12
+                    # may re-raise permission/I/O errors from Path predicates.
+                    "quarantine_cleanup_pending": True,
+                }
+            )
         return PoolActivationResult(
             (
                 PoolActivationStatus.COMMITTED
                 if committed
                 else PoolActivationStatus.TRANSIENT_ERROR
             ),
-            {
-                "reason": (
-                    "post_cutover_cleanup_failed"
-                    if committed
-                    else "filesystem_operation_failed"
-                ),
-                "error_type": type(error).__name__,
-                "errno": error.errno,
-            },
+            evidence,
         )
 
 
@@ -1466,17 +1650,23 @@ def activate_openclaw_pool(
     # Deprecated compatibility seam for existing in-process callers. Forward
     # activation no longer depends on atomic exchange.
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="openclaw",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="openclaw",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1494,17 +1684,23 @@ def activate_claude_code_pool(
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="claude_code",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="claude_code",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1518,21 +1714,29 @@ def activate_aicoding_pool(
     repo_is_mounted: Callable[[Path], bool] | None = None,
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
     retire_path: Callable[[Path, Path], None] = os.replace,
+    retire_active_repo: Callable[[str, str], dict[str, object]] | None = None,
     before_legacy_retire: Callable[[], None] | None = None,
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="aicoding",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            retire_active_repo=retire_active_repo,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="aicoding",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1550,17 +1754,23 @@ def activate_hermes_pool(
     before_post_sync: Callable[[], None] | None = None,
 ) -> PoolActivationResult:
     del exchange_paths
-    return _activate_pool(
+    return _with_resolution_evidence(
+        lambda: _activate_pool(
+            engine="hermes",
+            migration_generation=migration_generation,
+            preparation_id=preparation_id,
+            registered_local_names=registered_local_names,
+            mappings=mappings,
+            home=home,
+            repo_is_mounted=repo_is_mounted,
+            retire_path=retire_path,
+            before_legacy_retire=before_legacy_retire,
+            before_post_sync=before_post_sync,
+        ),
         engine="hermes",
-        migration_generation=migration_generation,
-        preparation_id=preparation_id,
+        source_layout=MappingSourceLayout.POOL,
         registered_local_names=registered_local_names,
-        mappings=mappings,
         home=home,
-        repo_is_mounted=repo_is_mounted,
-        retire_path=retire_path,
-        before_legacy_retire=before_legacy_retire,
-        before_post_sync=before_post_sync,
     )
 
 
@@ -1571,29 +1781,108 @@ def _rollback_pool(
     registered_local_names: list[str],
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    restore_active_repo: Callable[[str, str], dict[str, object]] | None = None,
 ) -> PoolActivationResult:
     """Rebuild Legacy from Pool for the pre-recursive-engine rollout window."""
 
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", rollback_generation):
         return _invalid("rollback_generation_invalid")
     layout = _Layout.for_engine(engine, Path(home))
-    normalized_names: list[str] = []
-    for name in registered_local_names:
-        path = Path(name)
-        if (
-            not name
-            or path.is_absolute()
-            or len(path.parts) != 1
-            or name in {".", ".."}
-        ):
-            return _invalid("registered_local_name_invalid", name=name)
-        if name not in normalized_names:
-            normalized_names.append(name)
+    try:
+        normalized_names = list(
+            resolve_local_skill_locators(
+                layout.legacy_local,
+                registered_local_names,
+            )
+        )
+    except SkillLayoutResolutionError as error:
+        return _invalid(
+            "registered_local_name_invalid",
+            error=str(error),
+        )
 
     rebuild = layout.legacy_local.parent / (
         f".skills-local.pool-rollback-{rollback_generation}"
     )
     copy_staging = layout.pool_root / (f".rollback-copy-{rollback_generation}")
+
+    def finish_legacy_structure() -> PoolActivationResult | None:
+        _restore_legacy_repo_bridge(engine=engine, layout=layout)
+        active_repo = layout.active_root / "skills-repo"
+        if (
+            engine == "aicoding"
+            and current_repo_delivery() is RepoDelivery.MOUNT
+            and not (active_repo.exists() or active_repo.is_symlink())
+        ):
+            if restore_active_repo is None:
+                return PoolActivationResult(
+                    PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                    {
+                        "reason": "active_repo_restoration_required",
+                        "path": str(active_repo),
+                    },
+                )
+            try:
+                active_marker = _read_active_marker(layout.active_marker)
+                if active_marker is None:
+                    return PoolActivationResult(
+                        PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                        {"reason": "active_repo_restoration_identity_unavailable"},
+                    )
+                migration_generation = active_marker.get("migration_generation")
+                preparation_id = active_marker.get("preparation_id")
+                if not isinstance(migration_generation, str) or not isinstance(
+                    preparation_id, str
+                ):
+                    return PoolActivationResult(
+                        PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                        {"reason": "active_repo_restoration_identity_invalid"},
+                    )
+                restoration = restore_active_repo(
+                    migration_generation,
+                    preparation_id,
+                )
+            except ActiveRepoRestorationError as error:
+                return PoolActivationResult(
+                    PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                    {
+                        "reason": "active_repo_restoration_failed",
+                        "restoration_reason": error.reason,
+                        **error.evidence,
+                    },
+                )
+            except OSError as error:
+                return PoolActivationResult(
+                    PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                    {
+                        "reason": "active_repo_restoration_failed",
+                        "restoration_reason": "active_repo_restoration_io_error",
+                        "error_type": type(error).__name__,
+                        "errno": error.errno,
+                    },
+                )
+            if not active_repo.is_dir() or active_repo.is_symlink():
+                return PoolActivationResult(
+                    PoolActivationStatus.POST_CUTOVER_SYNC_PENDING,
+                    {
+                        "reason": "active_repo_restoration_unverified",
+                        "path": str(active_repo),
+                        "restoration": restoration,
+                    },
+                )
+        if layout.local_bridge != layout.legacy_local:
+            layout.local_bridge.parent.mkdir(parents=True, exist_ok=True)
+            if (
+                not layout.local_bridge.exists()
+                and not layout.local_bridge.is_symlink()
+            ):
+                layout.local_bridge.symlink_to(
+                    layout.legacy_local,
+                    target_is_directory=True,
+                )
+        layout.active_marker.unlink(missing_ok=True)
+        return None
+
     try:
         if layout.legacy_local.is_dir() and not layout.legacy_local.is_symlink():
             for name in normalized_names:
@@ -1604,6 +1893,9 @@ def _rollback_pool(
                         registered_name=name,
                         source=str(source),
                     )
+            structure_failure = finish_legacy_structure()
+            if structure_failure is not None:
+                return structure_failure
             return PoolActivationResult(
                 PoolActivationStatus.ALREADY_COMMITTED,
                 {
@@ -1653,23 +1945,9 @@ def _rollback_pool(
         # The displaced object is only the compatibility symlink. Pool content
         # itself remains intact for evidence and forward recovery.
         rebuild.unlink(missing_ok=True)
-        layout.repo_bridge.parent.mkdir(parents=True, exist_ok=True)
-        if not layout.repo_bridge.exists() and not layout.repo_bridge.is_symlink():
-            layout.repo_bridge.symlink_to(
-                layout.pool_repo,
-                target_is_directory=True,
-            )
-        if layout.local_bridge != layout.legacy_local:
-            layout.local_bridge.parent.mkdir(parents=True, exist_ok=True)
-            if (
-                not layout.local_bridge.exists()
-                and not layout.local_bridge.is_symlink()
-            ):
-                layout.local_bridge.symlink_to(
-                    layout.legacy_local,
-                    target_is_directory=True,
-                )
-        layout.active_marker.unlink(missing_ok=True)
+        structure_failure = finish_legacy_structure()
+        if structure_failure is not None:
+            return structure_failure
         return PoolActivationResult(
             PoolActivationStatus.COMMITTED,
             {
@@ -1711,12 +1989,18 @@ def rollback_openclaw_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="openclaw",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="openclaw",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1727,12 +2011,18 @@ def rollback_claude_code_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="claude_code",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="claude_code",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1742,13 +2032,21 @@ def rollback_aicoding_pool(
     registered_local_names: list[str],
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
+    restore_active_repo: Callable[[str, str], dict[str, object]] | None = None,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="aicoding",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+            restore_active_repo=restore_active_repo,
+        ),
         engine="aicoding",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1759,12 +2057,18 @@ def rollback_hermes_pool(
     home: str | Path = "/home/admin",
     exchange_paths: Callable[[Path, Path], bool] = atomic_exchange_paths,
 ) -> PoolActivationResult:
-    return _rollback_pool(
+    return _with_resolution_evidence(
+        lambda: _rollback_pool(
+            engine="hermes",
+            rollback_generation=rollback_generation,
+            registered_local_names=registered_local_names,
+            home=home,
+            exchange_paths=exchange_paths,
+        ),
         engine="hermes",
-        rollback_generation=rollback_generation,
+        source_layout=MappingSourceLayout.LEGACY,
         registered_local_names=registered_local_names,
         home=home,
-        exchange_paths=exchange_paths,
     )
 
 
@@ -1887,6 +2191,7 @@ def publish_pool_mappings(
 
 
 __all__ = [
+    "ActiveRepoRestorationError",
     "MappingPublishResult",
     "MappingSourceLayout",
     "MappingVerificationResult",

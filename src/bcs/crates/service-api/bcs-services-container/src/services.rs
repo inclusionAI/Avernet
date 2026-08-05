@@ -104,7 +104,7 @@ pub struct Services {
     pub session_management: Arc<dyn SessionManagementService>,
     /// Channel(IM bridge) application service.
     pub channel: Arc<dyn ChannelService>,
-    /// Secret access application service (mist in prod, in-memory/env in dev).
+    /// Secret access application service.
     pub secret: Arc<dyn SecretService>,
     /// Session file workspace application service.
     pub session_files: Arc<dyn SessionFileService>,

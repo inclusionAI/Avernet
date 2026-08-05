@@ -114,20 +114,11 @@ def test_skill_create_is_plain_insert_not_upsert(skills):
     assert len(skills.list_skills()) == 2
 
 
-def test_skill_create_hits_sqlite_only_unique_constraint(skills):
-    """DOCUMENTED pre-existing divergence: the SQLite ``Skill`` model
-    declares UniqueConstraint(skill_uuid,name,env,version) that prod
-    ``ac_skill`` DDL does NOT have. ``create`` is a plain INSERT (prod
-    parity) — so a duplicate (skill_uuid,name,env,version) raises
-    IntegrityError on SQLite, whereas prod OceanBase would accept it.
-    Asserting the plain-INSERT shape here (NOT an upsert that would
-    silently update). Flagged in the DDL-parity doc + Pre check."""
-    import pytest as _pytest
-    from sqlalchemy.exc import IntegrityError
-
-    skills.create({"name": "d", "skill_uuid": "x", "version": 1})
-    with _pytest.raises(IntegrityError):
-        skills.create({"name": "d", "skill_uuid": "x", "version": 1})
+def test_skill_create_matches_prod_without_a_source_only_unique_constraint(skills):
+    """Prod accepts duplicate legacy skill identity fields; SQLite must too."""
+    first = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
+    duplicate = skills.create({"name": "d", "skill_uuid": "x", "version": 1})
+    assert duplicate["id"] != first["id"]
 
 
 def test_skill_user_id_anonymous_coercion(skills):

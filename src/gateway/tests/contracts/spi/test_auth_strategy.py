@@ -7,14 +7,11 @@ from datetime import datetime
 import httpx
 
 from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrategy
-from gateway.community.plugins.authn.app_token import (
-    AppTokenStrategy,
-    StubAppTokenValidator,
-    StubTenantResolver,
-)
+from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
 from gateway.community.spi.access_key import RegisteredAccessKey
+from gateway.community.spi.app import RegisteredApp
 from gateway.community.spi.authn import CredentialBundle, PrincipalType
 from gateway.community.spi.bot import RegisteredBot
 
@@ -34,7 +31,9 @@ _GOOGLE_BODY = {"sub": "g-1", "email": "a@example.com", "name": "A"}
 class _FakeBotRegistry:
     """Resolves only ``bot-key``; else None (soft miss). No DB."""
 
-    _BOT = RegisteredBot(bot_uuid="bot-7", owner_id="owner-1", tenant="t")
+    _BOT = RegisteredBot(
+        bot_uuid="bot-7", owner_id="owner-1", app_id=1, agent_code="agent-1", tenant="t"
+    )
 
     async def find_bot_by_token(self, token: str) -> RegisteredBot | None:
         return self._BOT if token == "bot-key" else None
@@ -44,11 +43,26 @@ class _FakeAccessKeyRegistry:
     """Resolves only ``ak-token``; else None (soft miss). No DB."""
 
     _AK = RegisteredAccessKey(
-        access_key_id="ak-1", tenant="t", expire_at=datetime(2027, 1, 1, 0, 0, 0)
+        access_key="ak-1", tenant="t", expire_at=datetime(2027, 1, 1, 0, 0, 0)
     )
 
     async def find_access_key_by_token(self, token: str) -> RegisteredAccessKey | None:
         return self._AK if token == "ak-token" else None
+
+
+class _FakeAppRegistry:
+    """Resolves only ``app-key``; else None (soft miss). No DB."""
+
+    _APP = RegisteredApp(
+        id=1,
+        app_name="Demo App",
+        owners="org-1",
+        app_type="assistant",
+        tenant="t",
+    )
+
+    async def find_app_by_token(self, token: str) -> RegisteredApp | None:
+        return self._APP if token == "app-key" else None
 
 
 class AuthStrategyContract:
@@ -77,12 +91,12 @@ class AuthStrategyContract:
 class TestGoogleUserStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         self.strategy = GoogleUserStrategy(
-            token_header="x-google-token",
+            token_header="x-avernet-google-token",
             default_tenant="t-default",
             transport=_userinfo_handler(_GOOGLE_BODY),
         )
         self.applicable_creds = CredentialBundle(
-            headers={"x-google-token": "tok"}, cookies={}, query={}
+            headers={"x-avernet-google-token": "tok"}, cookies={}, query={}
         )
         self.inapplicable_creds = CredentialBundle(headers={}, cookies={}, query={})
 
@@ -97,7 +111,7 @@ class TestBotTokenStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         self.strategy = BotTokenStrategy(registry=_FakeBotRegistry())
         self.applicable_creds = CredentialBundle(
-            headers={"x-bot-token": "bot-key"}, cookies={}, query={}
+            headers={"x-avernet-bot-token": "bot-key"}, cookies={}, query={}
         )
         self.inapplicable_creds = CredentialBundle(headers={}, cookies={}, query={})
 
@@ -110,11 +124,9 @@ class TestBotTokenStrategy(AuthStrategyContract):
 
 class TestAppTokenStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
-        self.strategy = AppTokenStrategy(
-            keys=StubAppTokenValidator(), tenants=StubTenantResolver()
-        )
+        self.strategy = AppTokenStrategy(registry=_FakeAppRegistry())
         self.applicable_creds = CredentialBundle(
-            headers={"authorization": "Bearer stub-app-token", "x-tenant-token": "t"},
+            headers={"x-avernet-app-token": "app-key"},
             cookies={},
             query={},
         )
@@ -131,7 +143,7 @@ class TestAccessKeyTokenStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         self.strategy = AccessKeyTokenStrategy(registry=_FakeAccessKeyRegistry())
         self.applicable_creds = CredentialBundle(
-            headers={"x-access-key-token": "ak-token"}, cookies={}, query={}
+            headers={"x-avernet-access-key-token": "ak-token"}, cookies={}, query={}
         )
         self.inapplicable_creds = CredentialBundle(headers={}, cookies={}, query={})
 

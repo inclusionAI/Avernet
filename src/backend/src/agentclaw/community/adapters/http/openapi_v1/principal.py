@@ -2,13 +2,23 @@
 
 The single place that turns the ``require_principal`` dependency's value into the
 caller's owner id used to scope every service call. It's isolated here so that
-when the real gateway verifier replaces the ``require_principal`` stub, only this
-helper changes — not the handlers.
+the shape of a verified principal is one module's business, not every handler's.
 
 The owner id scopes reads/writes to the caller's own bots *within* the tenant
 (the tenant guard confines data to the tenant; this confines it to the caller).
-Until the verifier lands the principal is ``None``, so every real request raises
-:class:`MissingPrincipalError` (→ 401) — the correct pre-auth state.
+
+The gateway verifier now supplies a
+:class:`~agentclaw.community.core.gateway_principal.VerifiedCaller`, whose
+``user_id`` is the ``user`` principal's subject id. A caller that names no end
+user — ``app``, ``access_key``, ``bot`` — never reaches here at all: verification
+refuses the identity set outright, so the ``401`` is answered before any route
+runs rather than at this lookup. That is deliberate, and it is what makes the
+rule independent of whether a given handler remembers to call this function.
+
+The "carries no user_id" branch below is therefore unreachable for a verified
+caller, and stays only as the fail-closed answer for a hand-constructed
+principal. The tolerance of a bare string or a mapping is what let this helper
+survive the stub-to-real swap unchanged.
 """
 
 from __future__ import annotations

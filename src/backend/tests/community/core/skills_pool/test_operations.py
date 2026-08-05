@@ -225,33 +225,47 @@ def test_enabling_missing_rollout_creates_safe_exact_bot_configuration() -> None
     }
 
 
-def test_engine_promotion_is_manual_ordered_and_idempotent() -> None:
-    operations, configs, _, _ = build_operations(config=rollout_config())
-
-    with pytest.raises(RolloutOperationError, match="previous engine"):
-        operations.promote_engine(
-            env=ENV,
-            engine="claude_code",
-            operator="freddie",
-            reason="advance",
+def test_engine_promotion_is_independent_canonical_and_idempotent() -> None:
+    operations, configs, _, _ = build_operations(
+        config=rollout_config(
+            promoted_engines=["openclaw"],
+            whitelist=[
+                {
+                    "owner_id": OWNER,
+                    "bot_id": BOT_ID,
+                    "batch_id": "openclaw-unaccepted",
+                }
+            ],
         )
+    )
 
-    promoted = operations.promote_engine(
+    hermes_promoted = operations.promote_engine(
         env=ENV,
-        engine="openclaw",
+        engine="hermes",
         operator="freddie",
-        reason="start first engine",
+        reason="test Hermes in parallel",
+    )
+    aicoding_promoted = operations.promote_engine(
+        env=ENV,
+        engine="aicoding",
+        operator="freddie",
+        reason="test AICoding in parallel",
     )
     repeated = operations.promote_engine(
         env=ENV,
-        engine="openclaw",
+        engine="hermes",
         operator="freddie",
         reason="idempotent retry",
     )
 
-    assert promoted.promoted_engines == ("openclaw",)
-    assert repeated.promoted_engines == ("openclaw",)
-    assert len(configs.upserts) == 1
+    assert hermes_promoted.promoted_engines == ("openclaw", "hermes")
+    assert aicoding_promoted.promoted_engines == (
+        "openclaw",
+        "aicoding",
+        "hermes",
+    )
+    assert repeated.promoted_engines == ("openclaw", "aicoding", "hermes")
+    assert len(configs.upserts) == 2
 
 
 def test_full_rollout_requires_accepted_promoted_engine_then_admits_environment() -> (
@@ -294,6 +308,34 @@ def test_full_rollout_requires_accepted_promoted_engine_then_admits_environment(
     assert configs.config is not None
     assert configs.config["param_value"]["enable_all"] is True
     assert snapshot.audit_log[-1].action == "full_rollout:environment:enable"
+
+
+def test_environment_full_rollout_checks_every_non_prefix_promoted_engine() -> None:
+    operations, _, _, _ = build_operations(
+        config=rollout_config(promoted_engines=["openclaw", "aicoding"])
+    )
+    operations.accept_batch(
+        env=ENV,
+        operator="freddie",
+        reason="openclaw canary passed",
+        acceptance=BatchPromotionEvidence(
+            engine="openclaw",
+            batch_id="openclaw-canary-1",
+            promotion_ready=True,
+            report={
+                "rollout_config_version": "2026-07-25T09:00:00+00:00",
+                "promotion_ready": True,
+            },
+        ),
+    )
+
+    with pytest.raises(RolloutOperationError, match="accepted aicoding batch"):
+        operations.set_full_rollout(
+            env=ENV,
+            enabled=True,
+            operator="freddie",
+            reason="aicoding still needs acceptance",
+        )
 
 
 def test_engine_full_rollout_does_not_admit_other_promoted_engine() -> None:
@@ -429,51 +471,32 @@ def test_full_rollout_can_be_disabled_without_reverting_claimed_bots() -> None:
     assert snapshot.promoted_engines == ("openclaw",)
 
 
-def test_next_engine_requires_and_audits_a_passing_batch() -> None:
+def test_engine_promotion_audit_does_not_depend_on_another_engine_batch() -> None:
     operations, _, _, _ = build_operations(
-        config=rollout_config(promoted_engines=["openclaw"])
-    )
-
-    with pytest.raises(RolloutOperationError, match="accepted openclaw batch"):
-        operations.promote_engine(
-            env=ENV,
-            engine="claude_code",
-            operator="freddie",
-            reason="advance",
+        config=rollout_config(
+            promoted_engines=["openclaw"],
+            whitelist=[
+                {
+                    "owner_id": OWNER,
+                    "bot_id": BOT_ID,
+                    "batch_id": "openclaw-unaccepted",
+                }
+            ],
         )
-
-    operations.accept_batch(
-        env=ENV,
-        operator="freddie",
-        reason="freeze openclaw acceptance",
-        acceptance=BatchPromotionEvidence(
-            engine="openclaw",
-            batch_id="openclaw-canary-1",
-            promotion_ready=True,
-            report={
-                "rollout_config_version": "2026-07-25T09:00:00+00:00",
-                "success_rate": 1.0,
-                "promotion_ready": True,
-            },
-        ),
     )
+
     promoted = operations.promote_engine(
         env=ENV,
         engine="claude_code",
         operator="freddie",
-        reason="openclaw batch accepted",
-        acceptance_batch_id="openclaw-canary-1",
+        reason="test Claude Code independently",
     )
 
     assert promoted.promoted_engines == ("openclaw", "claude_code")
     event = promoted.audit_log[-1]
-    assert event.reason == "openclaw batch accepted"
-    assert event.batch_id == "openclaw-canary-1"
-    assert event.evidence == {
-        "rollout_config_version": "2026-07-25T09:00:00+00:00",
-        "success_rate": 1.0,
-        "promotion_ready": True,
-    }
+    assert event.reason == "test Claude Code independently"
+    assert event.batch_id is None
+    assert event.evidence is None
     assert event.effective_config_version == promoted.config_revision
 
 
@@ -600,7 +623,7 @@ def test_claimed_batch_stays_open_after_whitelist_removal() -> None:
         )
 
 
-def test_next_engine_cannot_promote_while_previous_engine_batch_is_open() -> None:
+def test_other_engine_can_promote_while_existing_engine_batch_is_open() -> None:
     operations, _, _, _ = build_operations(
         config=rollout_config(promoted_engines=["openclaw"])
     )
@@ -628,14 +651,18 @@ def test_next_engine_cannot_promote_while_previous_engine_batch_is_open() -> Non
         reason="open second batch",
     )
 
-    with pytest.raises(RolloutOperationError, match="unaccepted batch"):
-        operations.promote_engine(
-            env=ENV,
-            engine="claude_code",
-            acceptance_batch_id="batch-1",
-            operator="freddie",
-            reason="must finish current engine",
-        )
+    promoted = operations.promote_engine(
+        env=ENV,
+        engine="claude_code",
+        acceptance_batch_id="obsolete-cross-engine-acceptance",
+        operator="freddie",
+        reason="test engines in parallel",
+    )
+
+    assert promoted.promoted_engines == ("openclaw", "claude_code")
+    assert promoted.whitelist[0].batch_id == "batch-2"
+    assert promoted.audit_log[-1].batch_id is None
+    assert promoted.audit_log[-1].evidence is None
 
 
 def test_stale_batch_report_cannot_be_accepted() -> None:

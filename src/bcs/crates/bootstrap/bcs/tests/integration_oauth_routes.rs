@@ -47,7 +47,7 @@ fn config_with_oauth(bots_dir: &PathBuf, oauth: Value) -> BcsConfig {
 }
 
 async fn start(config: BcsConfig) -> (SocketAddr, tokio::task::JoinHandle<Result<(), BcsError>>) {
-    BcsServer::new(config)
+    BcsServer::new_allowing_private_outbound_for_tests(config)
         .run_on_random_port()
         .await
         .expect("Failed to start server")

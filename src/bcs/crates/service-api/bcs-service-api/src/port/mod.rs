@@ -5,6 +5,7 @@ pub mod channel_binding_cleanup;
 pub mod channel_delivery;
 pub mod delivery;
 pub mod group_context;
+pub mod group_session_token;
 pub mod judge;
 pub mod leader_election;
 pub mod metrics;
@@ -33,6 +34,10 @@ pub use delivery::{
     FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
 };
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
+pub use group_session_token::{
+    GroupSessionTokenClaims, GroupSessionTokenError, GroupSessionTokenPort,
+    GroupSessionTokenScope, IssuedGroupSessionToken, GROUP_SESSION_TOKEN_MAX_COMPACT_LEN,
+};
 pub use judge::{
     JudgeArtifact, JudgeCheckedCriterion, JudgeDecision, JudgeEvaluatorPort, JudgeRequest,
 };
@@ -48,7 +53,10 @@ pub use metrics::{
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
-    BotRepoPort, ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
+    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
+    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
+    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
+    ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
     ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,

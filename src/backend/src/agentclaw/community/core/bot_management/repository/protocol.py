@@ -25,8 +25,22 @@ class BotRepository(Protocol):
         """Create a new bot record."""
         ...
 
-    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
-        """Get bot by bot_id and owner_id."""
+    def get_by_id_and_owner(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        execution_options: dict | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get bot by bot_id and owner_id.
+
+        ``execution_options`` is forwarded to the SQLAlchemy query via
+        ``Query.execution_options`` so callers can opt out of cross-cutting
+        guards (e.g. ``{"skip_avernet_tenant_guard": True}`` for the
+        refresh-token callback, which is served under ``/api`` and thus runs
+        under the DEFAULT tenant but must resolve an external-tenant bot).
+        ``None`` means no override — preserves existing behavior.
+        """
         ...
 
     def get_live_by_id_owner_and_env(
@@ -67,7 +81,13 @@ class BotRepository(Protocol):
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
-        """List bots by owner_id with pagination."""
+        """List bots by owner_id with pagination.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard). Callers that key semantics off this — ``is_first_bot``,
+        ``delete_bot`` earliest-protection, ``create_bot_for_others`` owner
+        lookup — must be aware the result reflects only the current tenant.
+        """
         ...
 
     def list_by_owner_or_collaborator(
@@ -149,6 +169,9 @@ class BotRepository(Protocol):
 
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         """Count bots by owner_id.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard); see :meth:`list_by_owner`.
 
         Args:
             owner_id: Owner user ID.

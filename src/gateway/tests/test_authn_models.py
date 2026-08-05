@@ -37,9 +37,13 @@ def test_user_principal_defaults() -> None:
     assert p.subject.id == "u1"
 
 
-def test_user_principal_requires_tenant_and_subject() -> None:
-    with pytest.raises(ValidationError):
-        UserPrincipal(subject=_subject())  # type: ignore[call-arg]
+def test_user_principal_tenant_defaults_to_none() -> None:
+    """Tenant is optional — a user with no tenant is None, not a fabricated default."""
+    p = UserPrincipal(subject=_subject())
+    assert p.tenant is None
+
+
+def test_user_principal_requires_subject() -> None:
     with pytest.raises(ValidationError):
         UserPrincipal(tenant="t-1")  # type: ignore[call-arg]
 
@@ -82,21 +86,33 @@ def test_app_and_bot_principal_types() -> None:
     app = AppPrincipal(
         tenant="t-app",
         app=ThirdPartyApp(
-            app_id="cid", app_name="Cid App", owners="org-1", app_type="assistant"
+            app_id=1,
+            app_name="Cid App",
+            owners="org-1",
+            tenant="t-app",
+            app_type="assistant",
         ),
     )
     assert app.type == "app"
     assert app.tenant == "t-app"
-    assert app.app.app_id == "cid"
-    assert app.on_behalf_of_opaque is None
+    assert app.app.app_id == 1
+    assert app.app.tenant == "t-app"
 
     bot = BotPrincipal(
         tenant="t-bot",
-        bot=Bot(bot_uuid="b-1", owner_id="org-1", token="tok"),
+        bot=Bot(
+            bot_uuid="b-1",
+            owner_id="org-1",
+            token="tok",
+            app_id=1,
+            agent_code="agent-1",
+            tenant="t-bot",
+        ),
     )
     assert bot.type == "bot"
     assert bot.bot.bot_uuid == "b-1"
     assert bot.bot.token == "tok"
+    assert bot.bot.agent_code == "agent-1"
 
 
 def test_bot_requires_token() -> None:
@@ -108,20 +124,20 @@ def test_access_key_principal_type() -> None:
     ak = AccessKeyPrincipal(
         tenant="t-ak",
         access_key=AccessKey(
-            access_key_id="ak-1",
+            access_key="ak-1",
             access_key_token="tok",
             expire_at=datetime(2027, 1, 1, 0, 0, 0),
         ),
     )
     assert ak.type == "access_key"
     assert ak.tenant == "t-ak"
-    assert ak.access_key.access_key_id == "ak-1"
+    assert ak.access_key.access_key == "ak-1"
     assert ak.access_key.access_key_token == "tok"
     assert ak.access_key.expire_at == datetime(2027, 1, 1, 0, 0, 0)
 
 
 def test_access_key_requires_all_fields() -> None:
     with pytest.raises(ValidationError):
-        AccessKey(access_key_id="ak-1")  # type: ignore[call-arg]
+        AccessKey(access_key="ak-1")  # type: ignore[call-arg]
     with pytest.raises(ValidationError):
         AccessKey()  # type: ignore[call-arg]

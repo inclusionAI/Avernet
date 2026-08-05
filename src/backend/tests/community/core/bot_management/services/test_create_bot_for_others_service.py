@@ -6,6 +6,29 @@ import pytest
 
 TARGET_USER = "172168"
 AGENT_CODE = "agent-172168"
+# CREATE branch: the stubbed globally-unique id allocated by generate_bot_id.
+GENERATED_BOT_ID = "20260731_generated1234"
+# REPAIR branch: id of a pre-existing bot (could be a legacy "default" or any
+# allocated id). The repair branch must preserve it verbatim.
+EXISTING_BOT_ID = "20260601_legacyab12"
+
+
+@pytest.fixture(autouse=True)
+def _stub_generate_bot_id(monkeypatch):
+    """Stub generate_bot_id so CREATE-branch assertions are deterministic.
+
+    Individual tests may override with their own monkeypatch.setattr (the later
+    setattr wins). Repair-branch tests never invoke generate_bot_id.
+    """
+    from agentclaw.community.core.bot_management.services import (
+        create_bot_for_others_service as service_module,
+    )
+
+    monkeypatch.setattr(
+        service_module,
+        "generate_bot_id",
+        lambda owner, repo: GENERATED_BOT_ID,
+    )
 
 
 def _freeze_restart_wait_clock(monkeypatch):
@@ -25,7 +48,7 @@ def _freeze_restart_wait_clock(monkeypatch):
 
 def _bot(*, status="ACTIVE", ext=None, gmt_modified=None):
     return {
-        "bot_id": "default",
+        "bot_id": EXISTING_BOT_ID,
         "owner_id": TARGET_USER,
         "entity_id": TARGET_USER,
         "entity_type": "staff",
@@ -45,7 +68,11 @@ def _service(*, existing_bot=None):
     )
 
     repository = MagicMock()
-    repository.get_by_id_and_owner.return_value = existing_bot
+    # Owner-based lookup (no literal "default" id). CREATE when none exist.
+    if existing_bot is None:
+        repository.list_by_owner.return_value = (0, [])
+    else:
+        repository.list_by_owner.return_value = (1, [existing_bot])
 
     bot_service = MagicMock()
     bot_service.check_create_bot_preflight.return_value = None
@@ -133,7 +160,7 @@ def test_new_default_bot_gets_verified_passport_and_owner_before_create():
     )
     bot_service.create_bot.side_effect = lambda **_kwargs: (
         events.append("bot.create")
-        or {"bot_id": "default", "status": "PENDING"}
+        or {"bot_id": "20260731_mockaaaa", "status": "PENDING"}
     )
     bot_service.check_create_bot_preflight.side_effect = lambda **_kwargs: (
         events.append("bot.preflight") or None
@@ -155,7 +182,7 @@ def test_new_default_bot_gets_verified_passport_and_owner_before_create():
     assert events.index("relationship.create") < events.index("bot.create")
 
     apply_kwargs = passport.apply_first_agent_passport.call_args.kwargs
-    assert apply_kwargs["bot_id"] == "default"
+    assert apply_kwargs["bot_id"] == GENERATED_BOT_ID
     assert apply_kwargs["owner_workno"] == TARGET_USER
     assert apply_kwargs["mcp_codes"] == ["mcp.one"]
     assert apply_kwargs["engine_type"] == "openclaw"
@@ -166,7 +193,7 @@ def test_new_default_bot_gets_verified_passport_and_owner_before_create():
     assert factory_kwargs == {
         "user_id": TARGET_USER,
         "entity_id": TARGET_USER,
-        "bot_id": "default",
+        "bot_id": GENERATED_BOT_ID,
         "entity_type": "staff",
         "engine_type": "openclaw",
     }
@@ -180,7 +207,7 @@ def test_new_default_bot_gets_verified_passport_and_owner_before_create():
     )
     create_kwargs = bot_service.create_bot.call_args.kwargs
     assert create_kwargs["user_id"] == TARGET_USER
-    assert create_kwargs["bot_id"] == "default"
+    assert create_kwargs["bot_id"] == GENERATED_BOT_ID
     assert create_kwargs["bot_type"] == "personal"
     assert create_kwargs["cookie"] == "session-cookie"
     assert create_kwargs["ext"] == {"passport": {"agent_code": AGENT_CODE}}
@@ -412,7 +439,7 @@ def test_active_bot_with_missing_identity_is_repaired_but_not_restarted():
     passport.apply_first_agent_passport.assert_called_once()
     update_kwargs = repository.update_by_owner.call_args.kwargs
     assert update_kwargs == {
-        "bot_id": "default",
+        "bot_id": EXISTING_BOT_ID,
         "owner_id": TARGET_USER,
         "update_data": {
             "ext": {
@@ -481,7 +508,7 @@ def test_failed_bot_is_repaired_before_restart_after_wait_period():
     assert events.index("passport.token") < events.index("relationship.query")
     assert events.index("relationship.query") < events.index("bot.restart")
     bot_service.restart_bot.assert_called_once_with(
-        bot_id="default",
+        bot_id=EXISTING_BOT_ID,
         user_id=TARGET_USER,
         nick_name="Alice",
     )
@@ -531,3 +558,33 @@ def test_restart_wait_treats_naive_iso_string_as_utc(monkeypatch):
     )
 
     assert result == (10, 20)
+
+
+def test_target_user_gets_globally_unique_bot_id(monkeypatch):
+    """CREATE branch: bot_id comes from generate_bot_id, not the literal 'default'."""
+    from agentclaw.community.core.bot_management.services import (
+        create_bot_for_others_service as mod,
+    )
+
+    monkeypatch.setattr(
+        mod, "generate_bot_id", lambda owner, repo: "20260731_zzzz9999"
+    )
+    service, repository, bot_service, *_ = _service()
+
+    # Force the CREATE branch under both the old (get_by_id_and_owner) and new
+    # (list_by_owner) lookup contracts.
+    repository.get_by_id_and_owner.return_value = None
+    repository.list_by_owner.return_value = (0, [])
+
+    result = service.execute(
+        target_user_id=TARGET_USER,
+        target_nick_name="Alice",
+        bot_type=None,
+        operator_user_id="admin-1",
+        operator_name="Admin One",
+        cookie="session-cookie",
+    )
+
+    create_kwargs = bot_service.create_bot.call_args.kwargs
+    assert create_kwargs["bot_id"] == "20260731_zzzz9999"
+    assert result["bot_id"] == "20260731_zzzz9999"

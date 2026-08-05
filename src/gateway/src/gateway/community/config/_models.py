@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
@@ -40,6 +41,34 @@ class DatabasePluginConfig(BaseSettings):
     database_url: str = ""
 
 
+class SecretConfig(BaseModel):
+    """SecretResolver configuration (mirrors backend ``CommunitySecretConfig``).
+
+    ``env_prefix`` is the prefix the community (env-backed) SecretResolver
+    prepends to ``{NAME}_VALUE`` / ``{NAME}_USER`` lookups. Enterprise overlays
+    may swap the resolver implementation entirely via the plugin registry.
+    """
+
+    model_config = {"extra": "allow"}
+    env_prefix: str = "AVERNET_SECRET_"
+
+
+class PrincipalSignerPluginConfig(BaseModel):
+    """Non-secret PrincipalSigner config — read from ``user_config.principal_signer``.
+
+    The signing key (a secret) is resolved at runtime via the
+    :class:`~gateway.community.spi.secret_resolver.SecretResolver` using
+    ``secret_name``; ``kid`` / ``issuer`` / ``ttl_seconds`` are non-secret and
+    live in the config file.
+    """
+
+    model_config = {"extra": "allow"}
+    secret_name: str = "principal_signing_key"
+    kid: str = "bare"
+    issuer: str = "gateway"
+    ttl_seconds: int = 60
+
+
 class PluginConfig(BaseSettings):
     """Plugin selection config for gateway DI container.
 
@@ -57,6 +86,7 @@ class PluginConfig(BaseSettings):
     schema_catalog: str = Field(default="file", min_length=1)
     cache: str = Field(default="stub", min_length=1)
     auth: str = Field(default="stub", min_length=1)
+    secret: str = Field(default="community", min_length=1)
     authn: AuthnPluginConfig = Field(default_factory=AuthnPluginConfig)
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
 
@@ -64,6 +94,14 @@ class PluginConfig(BaseSettings):
 class UserConfig(BaseModel):
     model_config = {"extra": "allow"}
     plugins: PluginConfig = Field(default_factory=PluginConfig)
+    secret: SecretConfig = Field(default_factory=SecretConfig)
+    principal_signer: PrincipalSignerPluginConfig = Field(
+        default_factory=PrincipalSignerPluginConfig
+    )
+    upstream_vars: dict[str, str] = Field(default_factory=dict)
+    identity_strategies: dict[str, list[str]] = Field(default_factory=dict)
+    route_security: dict[str, dict[str, str]] = Field(default_factory=dict)
+    upstreams: dict[str, Any] = Field(default_factory=dict)
 
     def get(self, key: str, default: Any = None) -> Any:
         try:
@@ -87,3 +125,4 @@ class Config:
     module_config: ModuleConfig = field(default_factory=ModuleConfig)
     user_config: UserConfig = field(default_factory=UserConfig)
     raw: dict = field(default_factory=dict)
+    config_dir: Path | None = None

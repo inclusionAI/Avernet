@@ -22,7 +22,7 @@ def _request(**overrides) -> MaterializationRequest:
         "scope_key_hash": "scope_abc",
         "session_key_hash": "session_abc",
         "transfer_api_version": "session_v2",
-        "tenant": "tenant-1",
+        "tenant": "team_claw",
         "session_id": "session/value",
         "workspace_relative_path": (
             ".teamclaw/session-files/scope_abc/session_abc/sr_001/report.txt"
@@ -43,6 +43,7 @@ async def test_session_pull_uses_share_link_and_never_forwards_control_headers(
         requests.append(request)
         if request.url.host == "baas.example":
             assert request.headers["x-control-token"] == "control-secret"
+            assert "/sessions/team_claw/" in request.url.path
             assert request.url.path.endswith("/transfers/transfer-001/share-link")
             return httpx.Response(
                 200,

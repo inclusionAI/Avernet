@@ -2,19 +2,21 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedUser, BotFinalDelivery, DeleteGroup, DeleteResult,
+    AddGroupParticipant, ApplicationError, AuthenticatedCaller, AuthenticatedUser,
+    AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
-    GroupService, GroupStatus, GroupSummary, GroupVisibility, ListBotGroups, Membership,
-    MembershipFilter, Page, Principal, UpdateGroup,
+    GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
+    MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
+    UpdateGroupParticipant,
 };
 
 struct NoopGroupService;
 
 #[async_trait]
 impl GroupService for NoopGroupService {
-    async fn list_bot_groups(
+    async fn list_groups(
         &self,
-        _command: ListBotGroups,
+        _command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         Ok(Page::empty(0, 20))
     }
@@ -36,9 +38,44 @@ impl GroupService for NoopGroupService {
 
     async fn delete(&self, _command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
         Ok(DeleteResult {
-            group_id: "group-1".into(),
             deleted: false,
         })
+    }
+
+    async fn add_participant(
+        &self,
+        _command: AddGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn update_participant(
+        &self,
+        _command: UpdateGroupParticipant,
+    ) -> Result<Participant, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+
+    async fn delete_participant(
+        &self,
+        _command: DeleteGroupParticipant,
+    ) -> Result<DeleteResult, ApplicationError> {
+        Err(ApplicationError::internal("not implemented"))
+    }
+}
+
+fn human_caller() -> AuthenticatedCaller {
+    AuthenticatedCaller {
+        tenant: "tenant-a".into(),
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-1".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
     }
 }
 
@@ -69,10 +106,10 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
 }
 
 #[test]
-fn list_command_carries_principal_and_all_approved_filters() {
-    let command = ListBotGroups {
-        principal: Principal::bot("bot-1", "tenant-a", BTreeSet::new()),
-        bot_uuid: "bot-1".into(),
+fn list_command_carries_caller_view_actor_and_all_approved_filters() {
+    let command = ListGroups {
+        caller: human_caller(),
+        view_bot_id: Some("bot-1".into()),
         offset: 10,
         limit: 25,
         q: Some("planning".into()),
@@ -81,7 +118,8 @@ fn list_command_carries_principal_and_all_approved_filters() {
         strategy: Some(bcs_service_api::application::v1::GroupStrategy::StateMachine),
     };
 
-    assert_eq!(command.principal.actor_id(), "bot-1");
+    assert_eq!(command.caller.user.expect("User").id, "staff-1");
+    assert_eq!(command.view_bot_id.as_deref(), Some("bot-1"));
     assert_eq!(command.membership, MembershipFilter::SessionOnly);
     assert_eq!(command.kind, GroupKindFilter::All);
 }
@@ -125,4 +163,30 @@ fn delivery_policy_is_narrower_than_legacy_routing_policy() {
 fn group_service_is_object_safe() {
     fn accepts_service(_: &dyn GroupService) {}
     accepts_service(&NoopGroupService);
+}
+
+#[test]
+fn participant_commands_carry_caller_and_no_raw_credentials() {
+    let caller = human_caller();
+    let add = AddGroupParticipant {
+        caller: caller.clone(),
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+        role: ParticipantRole::Consultant,
+    };
+    let update = UpdateGroupParticipant {
+        caller: caller.clone(),
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+        mode: ParticipantMode::Muted,
+    };
+    let remove = DeleteGroupParticipant {
+        caller,
+        group_id: "g1".into(),
+        actor_id: "bot-2".into(),
+    };
+    for cmd in [&add.caller, &update.caller, &remove.caller] {
+        let s = format!("{cmd:?}");
+        assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
+    }
 }

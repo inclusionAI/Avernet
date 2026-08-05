@@ -156,6 +156,19 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// Filters by both `created_by` and current `env`.
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot>;
 
+    /// List active Bots by creator without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing core implementations.
+    /// Persistence-backed implementations should override this method for
+    /// authorization decisions where an empty result and an unavailable store
+    /// have different meanings.
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(self.list_bots_by_creator(created_by).await)
+    }
+
     /// Discover bots by capability keywords.
     async fn discover(&self, query: &str) -> Vec<RegisteredBot>;
 

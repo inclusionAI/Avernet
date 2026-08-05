@@ -423,6 +423,26 @@ impl Group {
         groups.sort_by(Self::cmp_by_updated_at_desc);
     }
 
+    /// Compare groups for V1 `list_bot_groups`: `created_at` descending, then
+    /// `group_id` ascending for deterministic pagination when timestamps tie.
+    ///
+    /// This is the contract-declared ordering for the V1
+    /// `list_bot_groups` endpoint (see
+    /// `api-contracts/v1/openapi/groups.yaml`) and intentionally differs from
+    /// [`Self::cmp_by_updated_at_desc`], which legacy HTTP endpoints keep
+    /// using because their contract is `updated_at`-based.
+    pub fn cmp_by_created_at_desc_group_id_asc(a: &Self, b: &Self) -> std::cmp::Ordering {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.id.cmp(&b.id))
+    }
+
+    /// Sort groups for V1 `list_bot_groups`: `created_at` descending,
+    /// `group_id` ascending as a stable tie-breaker.
+    pub fn sort_by_created_at_desc_group_id_asc(groups: &mut [Self]) {
+        groups.sort_by(Self::cmp_by_created_at_desc_group_id_asc);
+    }
+
     /// Create a new group.
     pub fn new(
         id: impl Into<String>,
@@ -573,6 +593,25 @@ mod tests {
     }
 
     #[test]
+    fn sorts_groups_by_created_at_desc_then_id_asc() {
+        // `group-a` is older by created_at but newer by updated_at; the
+        // contract declares created_at DESC so it must come last.
+        let mut groups = vec![
+            group_with_timestamps("group-a", 100, 500),
+            group_with_timestamps("group-b", 300, 200),
+            group_with_timestamps("group-c", 300, 50),
+        ];
+
+        Group::sort_by_created_at_desc_group_id_asc(&mut groups);
+
+        let ids = groups
+            .iter()
+            .map(|group| group.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec!["group-b", "group-c", "group-a"]);
+    }
+
+    #[test]
     fn state_machine_strategy_uses_driver_lead_and_chat_roles() {
         let strategy = GroupStrategy::StateMachine;
 
@@ -590,6 +629,17 @@ mod tests {
             "driver",
             vec![Participant::bot("driver", ParticipantRole::Driver)],
         );
+        group.updated_at = updated_at;
+        group
+    }
+
+    fn group_with_timestamps(id: &str, created_at: u64, updated_at: u64) -> Group {
+        let mut group = Group::new(
+            id,
+            "driver",
+            vec![Participant::bot("driver", ParticipantRole::Driver)],
+        );
+        group.created_at = created_at;
         group.updated_at = updated_at;
         group
     }

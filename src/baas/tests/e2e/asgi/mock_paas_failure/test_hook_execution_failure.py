@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 
 import pytest
@@ -40,14 +42,24 @@ class TestCreateHookFailure:
         status = await wait_for_publish_status(
             api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )
-        assert status == "FAILED", f"Expected FAILED, got {status}"
+        assert status == "FAILED", f"Expected publish FAILED, got {status}"
         devices = await get_devices_from_progress(api, publish_id)
         assert len(devices) >= 1
         for d in devices:
             assert d.get("result_status") == "FAILED"
-        resp = await api.client.get(api.bot_url(bot["bot_uuid"]), params=api.params())
-        if resp.status_code == 200:
-            assert resp.json()["data"]["status"] == "FAILED"
+        # Bot status transition ACTIVE → FAILED is async: poll with backoff.
+        bot_status = "ACTIVE"
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5.0:
+            resp = await api.client.get(
+                api.bot_url(bot["bot_uuid"]), params=api.params()
+            )
+            if resp.status_code == 200:
+                bot_status = resp.json()["data"]["status"]
+                if bot_status == "FAILED":
+                    break
+            await asyncio.sleep(0.1)
+        assert bot_status == "FAILED", f"Expected bot FAILED, got {bot_status}"
 
 
 class TestDestroyHookFailure:
@@ -101,6 +113,6 @@ class TestRestartHookFailure:
         code = await approve_publish(api, publish_id)
         assert code == 200
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=2.5
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
         )
         assert status == "FAILED", f"Expected FAILED, got {status}"

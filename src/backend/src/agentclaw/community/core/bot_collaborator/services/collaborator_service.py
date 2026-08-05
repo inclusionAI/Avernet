@@ -12,6 +12,9 @@ from agentclaw.community.core.bot_collaborator.models import (
     PermissionLevel,
 )
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -145,6 +148,7 @@ class CollaboratorService:
         passport_plugin: PassportPlugin,
         resolver_provider: "Callable[[], DeviceContextResolver]",
         device_fs_dispatcher_provider: "Callable[[], DeviceFilesystemDispatcher]",
+        member_management_capability_service: MemberManagementCapabilityService | None = None,
     ) -> None:
         """初始化服务。
 
@@ -157,12 +161,16 @@ class CollaboratorService:
                 （device 图反向依赖 ``BotService``）。
             device_fs_dispatcher_provider: 惰性 thunk，返回 ``DeviceFilesystemDispatcher``
                 （按 ``DeviceContext`` 派发 per-bot 文件读写插件）。
+            member_management_capability_service: 成员管理能力服务，用于协调通用能力与各引擎定制逻辑。
         """
         self._collaborator_repo = collaborator_repo
         self._bot_repo = bot_repo
         self._passport_plugin = passport_plugin
         self._resolver_provider = resolver_provider
         self._device_fs_dispatcher_provider = device_fs_dispatcher_provider
+        self._member_management_capability_service = (
+            member_management_capability_service or MemberManagementCapabilityService()
+        )
 
     # ========================================================================
     # 权限检查
@@ -271,16 +279,15 @@ class CollaboratorService:
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
-        # 2. 检查 Bot 类型
-        #    - service：Service Bot 协作者，走原逻辑。
-        #    - coding 应用（active_engine == "claude_code" 且 template_type ==
-        #      "applicationCoding"）：作为"应用成员"复用同一套协作者流程，放行。
-        is_coding_app = (
-            bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") == "applicationCoding"
-        )
-        if bot.get("bot_type") != "service" and not is_coding_app:
-            raise BotNotServiceTypeError(f"Bot 不是服务型且非 coding 应用: bot_id={bot_id}")
+        # 2. 检查 Bot 类型 / 成员管理能力
+        #    CollaboratorService 是 engine-agnostic 服务：
+        #    - service：Service Bot 协作者，走原逻辑；
+        #    - 非 service：通过 MemberManagementCapabilityService 协调模板开关和
+        #      各引擎自己的能力实现，避免在这里直接依赖某个 engine 的定制逻辑。
+        if not self._member_management_capability_service.can_manage_collaborators(bot, bot_id):
+            raise BotNotServiceTypeError(
+                f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
+            )
 
         bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]

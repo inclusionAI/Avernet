@@ -35,7 +35,7 @@ fn create_config_bcsfuse_enabled(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: bcs::MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,
@@ -94,7 +94,7 @@ async fn discover_with_fuse_unreachable_degrades_to_registry_only() {
     let bots_dir = tmp.path().to_path_buf();
 
     let config = create_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     // Register two bots with relevant domains
@@ -221,7 +221,7 @@ async fn leave_bot_does_not_trigger_offline() {
     let mut config = create_config_bcsfuse_enabled(&bots_dir);
     config.auth.mock_user_id = Some("alice".to_string());
     config.auth.mock_user_name = Some("Alice".to_string());
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     let mut bot = MockBot::connect(addr).await;
@@ -257,7 +257,7 @@ async fn set_visibility_succeeds_with_fuse_unreachable() {
     let bots_dir = tmp.path().to_path_buf();
 
     let config = create_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     let mut bot = MockBot::connect(addr).await;
@@ -293,7 +293,7 @@ async fn set_visibility_to_private_succeeds_and_triggers_sync() {
     let bots_dir = tmp.path().to_path_buf();
 
     let config = create_config_bcsfuse_enabled(&bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     let (addr, _handle) = server.run_on_random_port().await.expect("start server");
 
     let mut bot = MockBot::connect(addr).await;

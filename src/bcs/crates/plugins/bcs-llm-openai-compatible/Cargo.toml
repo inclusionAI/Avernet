@@ -21,4 +21,5 @@ serde_json = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+bcs-test-support = { workspace = true }
 tokio = { workspace = true }

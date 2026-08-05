@@ -304,8 +304,8 @@ SC 接入后，`skills-center` 作为 `skills-pool` 下与 `skills-repo`、`skil
                      │       Engine Runtime               │
                      │ EngineSkillLayoutDescriptor        │
                      │  - active / legacy / pool roots    │
-                     │  - mount targets / compatibility   │
-                     │  - prepare / verify rules          │
+                     │  - structural compatibility links  │
+                     │  - filesystem / artifact kind      │
                      │ EngineSkillLayoutResolver           │
                      └──────────────┬────────────────────┘
                                     │ 统一解析接口
@@ -318,18 +318,58 @@ SC 接入后，`skills-center` 作为 `skills-pool` 下与 `skills-repo`、`skil
                                     v
                        各引擎真实目录、挂载和激活入口
 
- Backend ── 仅下发逻辑布局意图与 Skill 激活意图 ──> Engine Runtime
+ Backend ── 仅下发逻辑状态与 Skill 激活意图 ──> Engine Runtime
 ```
 
-Descriptor 至少覆盖 active 入口、Legacy/Pool 的 local 和 repo 根目录、兼容桥、挂载目标、准备与校验规则，以及 Teclaw 的显式 no-op/artifact 行为。未知引擎或未知布局契约必须失败关闭，不能默认回退为 OpenClaw。
+Descriptor 至少覆盖 active 入口、Legacy/Pool 的 local 和 repo 根目录、兼容桥，以及 Teclaw 的显式 artifact 行为。未知引擎或未知布局契约必须失败关闭，不能默认回退为 OpenClaw。
 
-Backend 的布局相关输入仅包含 `engine_type`、`layout_state` 和 `layout_contract_version`；Skill 激活本身继续以逻辑来源表达，不携带物理路径：
+Resolver 使用 Engine 持久化的逻辑引擎身份和当前运行时 home 解析拓扑：
+
+```text
+LayoutIdentity {
+  engine_type
+  layout_contract_version
+}
+
+RuntimeLayoutContext {
+  home
+}
+
+ResolvedSkillLayout {
+  engine_type
+  layout_contract_version
+  capability
+  active_root
+  legacy_local
+  legacy_repo
+  pool_root
+  pool_local
+  pool_repo
+  ready_marker
+  active_marker
+  structural_bridges
+}
+```
+
+一次解析同时返回 Legacy 与 Pool 的完整拓扑。Resolver 不读取 marker、Backend
+状态或 rollout 配置，不执行文件操作，也不选择当前权威布局。preparation、
+probe、activate、mapping、rollback 和 cleanup 根据各自协议消费命名路径；
+Backend 状态机负责决定 CRUD、mapping 和 locator 当前使用 Legacy 还是 Pool。
+
+repo 的挂载或下载属于 provider 的交付方式，不改变引擎目录身份，也不进入
+Resolver 输入。Cloud 与 Desktop 对同一逻辑引擎解析得到相同 descriptor，差异
+只存在于内容如何到达这些路径以及文件操作由谁执行。
+
+`aicoding` 与 `claude_code` 是不同的逻辑布局身份。两者共用
+`~/.claude/skills` 作为 CLI active 入口，但分别使用 `~/.aicoding` 与
+`~/.claude_code` 存储 Legacy/Pool 内容。既有 Skills Service 继续负责 physical
+路径转换和 CLI 兼容桥；Resolver 不用实现别名归一化替代 Bot 的逻辑身份。
+
+Skill 激活本身继续以逻辑来源表达，不携带物理路径：
 
 ```text
 {
-  engine_type: "claude_code",
-  layout_state: "pool",
-  layout_contract_version: 1,
+  source_layout: "pool",
   desired_skills: [
     {
       link_name: "risk-review",

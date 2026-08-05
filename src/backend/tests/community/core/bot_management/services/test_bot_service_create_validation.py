@@ -18,6 +18,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
+    DefaultBotTeclawNotAllowedError,
     DeviceLimitError,
     validate_bot_name,
 )
@@ -42,6 +43,11 @@ def _make_service(max_bots: int = 5, current_bots: int = 0, policy_service=None)
     svc._cleanup_service = MagicMock()
     svc._bcn_service = MagicMock()
     svc._bot_publish_repo = MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: (
+        (engine or "").strip().lower() == "teclaw"
+    )
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     svc._policy_service = policy_service
     return svc
 
@@ -188,7 +194,40 @@ class TestCreateBotValidation:
     def test_preflight_uses_count_limit(self):
         svc = _make_service(max_bots=3, current_bots=3)
         with pytest.raises(BotLimitExceededError):
-            svc.check_create_bot_preflight("u1")
+            svc.check_create_bot_preflight("u1", "bot001", "openclaw")
+
+    def test_preflight_rejects_teclaw_for_default_bot(self):
+        svc = _make_service()
+
+        with pytest.raises(
+            DefaultBotTeclawNotAllowedError,
+            match="Teclaw Cloud Bot 不能作为 Default Bot，请先创建其他类型的 Bot。",
+        ):
+            svc.check_create_bot_preflight("u1", "default", "teclaw")
+
+    @pytest.mark.parametrize(
+        ("bot_id", "engine_type"),
+        [("default", "openclaw"), ("bot001", "teclaw")],
+    )
+    def test_preflight_allows_non_conflicting_bot_engine_pairs(
+        self, bot_id, engine_type
+    ):
+        svc = _make_service()
+
+        svc.check_create_bot_preflight("u1", bot_id, engine_type)
+
+    def test_create_bot_rejects_default_teclaw_before_persistence(self):
+        svc = _make_service()
+
+        with pytest.raises(DefaultBotTeclawNotAllowedError):
+            svc.create_bot(
+                user_id="u1",
+                nick_name="U1",
+                bot_id="default",
+                engine_type="teclaw",
+            )
+
+        svc._repository.create.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

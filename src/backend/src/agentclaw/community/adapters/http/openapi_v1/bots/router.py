@@ -387,18 +387,13 @@ async def update_bot(
         owner_id,
         bot_name=bot_name,
         bot_desc=body.bot_desc,
-        # BCN sync is OFF on this surface until the coordination-network
-        # identity carries a tenant. ``_sync_bot_to_bcn`` builds it as
-        # ``f"{bot_id}:{owner_id}"``, and ``bot_id`` is only unique per owner —
-        # every owner's first bot is "default" — so two tenants sharing a
-        # principal resolve to ONE BCN record and either can overwrite the
-        # other's name and summary. Local rows stay isolated by the tenant
-        # guard; this identifier escapes it.
-        #
-        # A stale BCN name is a much smaller problem than a cross-tenant write,
-        # so this stays off until the BCN contract gains a tenant axis. One line
-        # to re-enable then. See the F49 thread on PR #494.
-        sync_to_bcn=False,
+# BCN sync re-enabled: new bots get a globally-unique bot_id
+        # (generate_bot_id), so (bot_id, owner_workno) no longer collides
+        # across tenants for them. Legacy "default" bots (pre-retirement,
+        # unmigrated) retain residual cross-tenant risk on this identifier —
+        # tracked as a follow-up; acceptable here because the F49 stopgap is
+        # lifted for the common (new-bot) path. ``update_bot`` defaults
+        # ``sync_to_bcn=True`` — no longer forced False on this surface.
         # Bearer token only — see _bcn_auth_headers. Kept so re-enabling the
         # sync does not silently reintroduce the unauthenticated call F37 fixed.
         request_headers=_bcn_auth_headers(request),

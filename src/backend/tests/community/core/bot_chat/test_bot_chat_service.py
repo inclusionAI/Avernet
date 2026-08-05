@@ -1610,16 +1610,26 @@ class TestBotChatServiceGetSession:
                 await service.get_session(trace_id="trace-1", owner_id="user1", log_source="langfuse")
 
     @pytest.mark.asyncio
-    async def test_get_session_langfuse_default_bot_owner_match(self, service):
-        """Langfuse default-bot traces are accessible when userId matches owner_id."""
+    @pytest.mark.parametrize(
+        "owner_fields",
+        [
+            {"userId": "user1"},
+            {"metadata": {"attributes": {"identity.owner_id": "user1"}}},
+            {"metadata": {"attributes": {"user.id": "user1"}}},
+        ],
+    )
+    async def test_get_session_langfuse_default_bot_owner_match(
+        self, service, owner_fields
+    ):
+        """Default-bot traces accept every supported owner representation."""
         trace_response = AsyncMock()
         trace_response.status = 200
         trace_response.json = AsyncMock(return_value={
             "id": "trace-1",
             "name": "Session",
-            "userId": "user1",
             "timestamp": "2025-01-01T00:00:00Z",
             "success": True,
+            **owner_fields,
         })
         trace_response.__aenter__ = AsyncMock(return_value=trace_response)
         trace_response.__aexit__ = AsyncMock(return_value=False)
@@ -1887,3 +1897,31 @@ class TestBotChatServiceHealthCheck:
 
         assert result.status == "unhealthy"
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# _check_bot_access — no "default"/"{user_id}_default" shortcut (Task 6)
+# ---------------------------------------------------------------------------
+
+class TestCheckBotAccessNoDefaultShortcut:
+
+    @pytest.fixture
+    def service(self):
+        mock_db = MagicMock()
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+
+    def test_historical_default_still_goes_through_has_bot_access(self, service):
+        """The retired "default" literal must go through has_bot_access, not short-circuit."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = True
+
+        assert service._check_bot_access("user001", "default") is True
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "default")
+
+    def test_user_default_form_also_uses_has_bot_access(self, service):
+        """The retired "{user_id}_default" form must go through has_bot_access."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = False
+
+        assert service._check_bot_access("user001", "user001_default") is False
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "user001_default")

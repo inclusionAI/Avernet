@@ -8,22 +8,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import PurePosixPath
-
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import (
     BotRepository,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CUTOVER_EVIDENCE_CONTRACT_VERSION,
     RuntimeLayoutProbeStatus,
 )
+from agentclaw.community.core.skills_pool.aicoding_retirement import (
+    is_trusted_aicoding_repo_retirement_resume,
+)
 from agentclaw.community.core.skills_pool.models import (
-    PoolPaths,
+    FILESYSTEM_POOL_ENGINES,
     PoolCutoverStatus,
-    PoolSkillMapping,
-    RegisteredSkillAsset,
-    pool_paths_for_engine,
+)
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    build_logical_skill_mappings,
+    local_locators_from_evidence,
+    local_skill_name,
 )
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
@@ -38,6 +42,10 @@ from agentclaw.community.core.skills_pool.ports import (
     SkillsPoolRuntimeProtocol,
     SkillsPoolSkillRepositoryProtocol,
 )
+from agentclaw.community.log import get_logger
+
+
+logger = get_logger()
 
 
 class SkillsPoolReconcileOutcome(StrEnum):
@@ -110,22 +118,29 @@ class SkillsPoolReconcileService:
         if state.lease_owner != lease_owner:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.LEASE_NOT_HELD)
 
+        generation = state.migration_generation
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_NOT_FOUND)
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
-        try:
-            paths = pool_paths_for_engine(engine)
-        except ValueError:
+        engine_drift = self._handle_engine_drift(
+            scope=scope,
+            state=state,
+            current_engine=engine,
+            generation=generation,
+            lease_owner=lease_owner,
+        )
+        if engine_drift is not None:
+            return engine_drift
+        if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
 
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         user_id = str(owner_id)
-        generation = state.migration_generation
         if not self._layouts.holds_lease(
             scope=scope,
             migration_generation=generation,
@@ -138,8 +153,52 @@ class SkillsPoolReconcileService:
             user_id=user_id,
             engine=engine,
         )
-        if probe.status is not RuntimeLayoutProbeStatus.READY:
+        logger.info(
+            "[skills_pool.reconcile] runtime probe bot_id=%s generation=%s "
+            "phase=%s committed=%s status=%s",
+            scope.bot_id,
+            generation,
+            state.phase.value,
+            state.data_plane_cutover_committed,
+            probe.status.value,
+        )
+        finalizing_repo_retirement_resume = (
+            is_trusted_aicoding_repo_retirement_resume(
+                state=state,
+                engine=engine,
+                probe=probe,
+            )
+        )
+        if (
+            probe.status is not RuntimeLayoutProbeStatus.READY
+            and not finalizing_repo_retirement_resume
+        ):
             if probe.status is RuntimeLayoutProbeStatus.NOT_CAPABLE:
+                if state.data_plane_cutover_committed:
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=probe.status.value,
+                        failure_stage="runtime_probe",
+                        retryable=False,
+                        evidence=probe.evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            evidence={
+                                **probe.evidence,
+                                "state_race_stage": (
+                                    "record_committed_not_capable_probe"
+                                ),
+                            },
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.INVALID,
+                        evidence=probe.evidence,
+                        retryable=False,
+                    )
                 released = self._layouts.release_not_capable_claim(
                     scope=scope,
                     migration_generation=generation,
@@ -148,7 +207,11 @@ class SkillsPoolReconcileService:
                 )
                 if not released:
                     return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        evidence={
+                            **probe.evidence,
+                            "state_race_stage": "release_not_capable_claim",
+                        },
                     )
             elif probe.status in {
                 RuntimeLayoutProbeStatus.INVALID,
@@ -198,6 +261,66 @@ class SkillsPoolReconcileService:
                 evidence=probe.evidence,
                 retryable=False,
             )
+        if (
+            state.phase is SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER
+            and state.preparation_id != probe.preparation_id
+        ):
+            identity_evidence = {
+                **probe.evidence,
+                "reason": "preparation_identity_changed_during_cutover",
+                "persisted_preparation_id": state.preparation_id,
+                "observed_preparation_id": probe.preparation_id,
+            }
+            if not self._layouts.mark_repair_required(
+                scope=scope,
+                migration_generation=generation,
+                lease_owner=lease_owner,
+                failure_code="PREPARATION_IDENTITY_CHANGED",
+                failure_stage="runtime_probe",
+                evidence=identity_evidence,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                    preparation_id=probe.preparation_id,
+                )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED,
+                preparation_id=probe.preparation_id,
+                evidence=identity_evidence,
+                retryable=False,
+            )
+
+        if (
+            not state.data_plane_cutover_committed
+            and state.phase
+            in {
+                SkillLayoutPhase.POOL_PREPARING,
+                SkillLayoutPhase.POOL_READY,
+            }
+            and probe.evidence.get("cutover_evidence_contract_version")
+            != CUTOVER_EVIDENCE_CONTRACT_VERSION
+        ):
+            compatibility_evidence = {
+                **probe.evidence,
+                "reason": "cutover_evidence_contract_not_supported",
+                "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+            }
+            recorded = self._layouts.release_not_capable_claim(
+                scope=scope,
+                migration_generation=generation,
+                lease_owner=lease_owner,
+                evidence=compatibility_evidence,
+            )
+            if not recorded:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.NOT_CAPABLE,
+                preparation_id=probe.preparation_id,
+                evidence=compatibility_evidence,
+                retryable=False,
+            )
 
         local_assets = self._skills.list_bot_local_assets(
             env=scope.env,
@@ -210,8 +333,8 @@ class SkillsPoolReconcileService:
             engine=engine,
         )
         try:
-            local_names = [self._local_name(asset) for asset in local_assets]
-            mappings = self._build_pool_mappings(active_assets, paths=paths)
+            local_names = [local_skill_name(asset) for asset in local_assets]
+            mappings = build_logical_skill_mappings(active_assets)
         except ValueError as error:
             evidence = {"reason": str(error)}
             recorded = self._record_failure_for_boundary(
@@ -236,29 +359,48 @@ class SkillsPoolReconcileService:
 
         cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
+        locator_evidence = self._persisted_cutover_evidence(state)
+        logger.info(
+            "[skills_pool.reconcile] mapping intent ready bot_id=%s generation=%s "
+            "phase=%s committed=%s local_count=%s mapping_count=%s",
+            scope.bot_id,
+            generation,
+            state.phase.value,
+            state.data_plane_cutover_committed,
+            len(local_names),
+            len(mappings),
+        )
         if (
             not state.data_plane_cutover_committed
             or cutover_finalizing
             or repair_evidence_refresh
         ):
             if not state.data_plane_cutover_committed:
-                recorded = self._layouts.record_ready_probe(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    preparation_id=probe.preparation_id,
-                    evidence=probe.evidence,
-                )
-                if not recorded:
-                    return SkillsPoolReconcileResult(
-                        SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                if state.phase in {
+                    SkillLayoutPhase.POOL_PREPARING,
+                    SkillLayoutPhase.POOL_READY,
+                }:
+                    recorded = self._layouts.record_ready_probe(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        evidence=probe.evidence,
                     )
-                if not self._layouts.begin_cutover(
-                    scope=scope,
-                    migration_generation=generation,
-                    lease_owner=lease_owner,
-                    preparation_id=probe.preparation_id,
-                ):
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        )
+                    if not self._layouts.begin_cutover(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                    ):
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST
+                        )
+                elif state.phase is not SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER:
                     return SkillsPoolReconcileResult(
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST
                     )
@@ -273,6 +415,30 @@ class SkillsPoolReconcileService:
             )
             if not cutover.committed:
                 evidence = cutover.to_dict()
+                if state.data_plane_cutover_committed:
+                    outcome, stage, retryable = (
+                        self._post_commit_cutover_failure_profile(cutover.status)
+                    )
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code=cutover.status.value,
+                        failure_stage=stage,
+                        retryable=retryable,
+                        evidence=evidence,
+                    )
+                    if not recorded:
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        outcome,
+                        preparation_id=probe.preparation_id,
+                        evidence=evidence,
+                        retryable=retryable,
+                    )
                 if (
                     cutover.status is PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING
                     or cutover_finalizing
@@ -344,9 +510,116 @@ class SkillsPoolReconcileService:
                     preparation_id=probe.preparation_id,
                     evidence=cutover.to_dict(),
                 )
-            if not (
-                state.data_plane_cutover_committed and repair_evidence_refresh
+            quarantine_path = cutover.evidence.get("quarantine")
+            if (
+                isinstance(quarantine_path, str)
+                and quarantine_path
+                and self._layouts.quarantine_identity_conflicts(
+                    scope=scope,
+                    migration_generation=generation,
+                    engine=engine,
+                    path=quarantine_path,
+                )
             ):
+                conflict_evidence = {
+                    **cutover.to_dict(),
+                    "reason": "quarantine_identity_conflict",
+                }
+                if state.data_plane_cutover_committed:
+                    recorded = self._layouts.record_post_cutover_failure(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code="QUARANTINE_IDENTITY_CONFLICT",
+                        failure_stage="post_cutover_evidence",
+                        retryable=False,
+                        evidence=conflict_evidence,
+                    )
+                    outcome = SkillsPoolReconcileOutcome.INVALID
+                else:
+                    recorded = self._layouts.mark_repair_required(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        failure_code="QUARANTINE_IDENTITY_CONFLICT",
+                        failure_stage="cutover_identity",
+                        evidence=conflict_evidence,
+                    )
+                    outcome = SkillsPoolReconcileOutcome.MANUAL_REPAIR_REQUIRED
+                if not recorded:
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        preparation_id=probe.preparation_id,
+                    )
+                return SkillsPoolReconcileResult(
+                    outcome,
+                    preparation_id=probe.preparation_id,
+                    evidence=conflict_evidence,
+                    retryable=False,
+                )
+            if state.data_plane_cutover_committed:
+                if (
+                    not isinstance(quarantine_path, str) or not quarantine_path
+                ) and not self._layouts.has_quarantine_identity(
+                    scope=scope,
+                    migration_generation=generation,
+                ):
+                    return self._record_post_cutover_failure(
+                        scope=scope,
+                        generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        outcome=SkillsPoolReconcileOutcome.TRANSIENT_ERROR,
+                        failure_code="RUNTIME_CONTRACT_UPGRADE_REQUIRED",
+                        failure_stage="post_cutover_evidence",
+                        evidence={
+                            **cutover.to_dict(),
+                            "reason": (
+                                "quarantine_identity_missing_from_runtime_and_db"
+                            ),
+                            "required_version": (CUTOVER_EVIDENCE_CONTRACT_VERSION),
+                        },
+                    )
+                if not self._layouts.record_post_cutover_evidence(
+                    scope=scope,
+                    migration_generation=generation,
+                    lease_owner=lease_owner,
+                    preparation_id=probe.preparation_id,
+                    evidence=cutover.to_dict(),
+                ):
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                        preparation_id=probe.preparation_id,
+                    )
+            else:
+                if (
+                    not isinstance(quarantine_path, str) or not quarantine_path
+                ) and not self._layouts.has_quarantine_identity(
+                    scope=scope,
+                    migration_generation=generation,
+                ):
+                    contract_evidence = {
+                        **cutover.to_dict(),
+                        "reason": ("quarantine_identity_missing_from_runtime_and_db"),
+                        "required_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+                    }
+                    if not self._layouts.record_cutover_finalizing(
+                        scope=scope,
+                        migration_generation=generation,
+                        lease_owner=lease_owner,
+                        preparation_id=probe.preparation_id,
+                        evidence=contract_evidence,
+                    ):
+                        return SkillsPoolReconcileResult(
+                            SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                            preparation_id=probe.preparation_id,
+                        )
+                    return SkillsPoolReconcileResult(
+                        SkillsPoolReconcileOutcome.TRANSIENT_ERROR,
+                        preparation_id=probe.preparation_id,
+                        evidence=contract_evidence,
+                        retryable=True,
+                    )
                 if not self._layouts.record_cutover_committed(
                     scope=scope,
                     migration_generation=generation,
@@ -358,6 +631,7 @@ class SkillsPoolReconcileService:
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST,
                         preparation_id=probe.preparation_id,
                     )
+            locator_evidence = cutover.evidence
 
         if not self._layouts.holds_lease(
             scope=scope,
@@ -399,10 +673,23 @@ class SkillsPoolReconcileService:
                 evidence={"mapping_count": len(mappings)},
             )
 
-        local_locators = {
-            asset.skill_id: f"local://{paths.pool_local}/{name}"
-            for asset, name in zip(local_assets, local_names, strict=True)
-        }
+        try:
+            local_locators = local_locators_from_evidence(
+                local_assets,
+                local_names,
+                locator_evidence,
+            )
+        except ValueError as error:
+            return self._record_post_cutover_failure(
+                scope=scope,
+                generation=generation,
+                lease_owner=lease_owner,
+                preparation_id=probe.preparation_id,
+                outcome=SkillsPoolReconcileOutcome.DATABASE_COMMIT_FAILED,
+                failure_code="LOCATOR_EVIDENCE_INVALID",
+                failure_stage="control_plane_commit",
+                evidence={"reason": str(error)},
+            )
         if not self._layouts.commit_pool_active(
             scope=scope,
             migration_generation=generation,
@@ -499,9 +786,7 @@ class SkillsPoolReconcileService:
         engine = bot.get("active_engine")
         if bot.get("env") != scope.env or not isinstance(engine, str):
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
-        try:
-            pool_paths_for_engine(engine)
-        except ValueError:
+        if engine not in FILESYSTEM_POOL_ENGINES:
             return SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.BOT_CHANGED)
         owner_id = bot.get("owner_id")
         if not isinstance(owner_id, (str, int)) or isinstance(owner_id, bool):
@@ -531,6 +816,42 @@ class SkillsPoolReconcileService:
                 },
                 retryable=False,
             )
+        if bot.get("bot_type") == "desktop":
+            try:
+                mappings = build_logical_skill_mappings(
+                    self._skills.list_bot_active_assets(
+                        env=scope.env,
+                        bot_id=scope.bot_id,
+                        user_id=str(owner_id),
+                        engine=engine,
+                    )
+                )
+            except ValueError as error:
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.INVALID,
+                    evidence={"reason": str(error)},
+                    retryable=False,
+                )
+            if not await self._runtime.publish_mappings(
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                mappings=mappings,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                    evidence={"mapping_count": len(mappings)},
+                    retryable=True,
+                )
+            if not await self._runtime.verify_mappings(
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                mappings=mappings,
+            ):
+                return SkillsPoolReconcileResult(
+                    SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                    evidence={"mapping_count": len(mappings)},
+                    retryable=True,
+                )
         return SkillsPoolReconcileResult(
             SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
             preparation_id=probe.preparation_id,
@@ -583,44 +904,90 @@ class SkillsPoolReconcileService:
             ),
         }.get(status)
 
+    @classmethod
+    def _post_commit_cutover_failure_profile(
+        cls,
+        status: PoolCutoverStatus,
+    ) -> tuple[SkillsPoolReconcileOutcome, str, bool]:
+        """Classify refresh failures after the irreversible boundary is known."""
+
+        if status in {
+            PoolCutoverStatus.UNKNOWN,
+            PoolCutoverStatus.TRANSIENT_ERROR,
+            PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
+        }:
+            return (
+                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+                "post_cutover_refresh",
+                True,
+            )
+        profile = cls._cutover_failure_profile(status)
+        if profile is not None:
+            outcome, _, retryable = profile
+            return outcome, "post_cutover_refresh", retryable
+        return (
+            SkillsPoolReconcileOutcome.CUTOVER_FAILED,
+            "post_cutover_refresh",
+            False,
+        )
+
     @staticmethod
-    def _source_tail(git_path: str, prefix: str) -> PurePosixPath:
-        raw = git_path[len(prefix) :]
-        path = PurePosixPath(raw)
-        if not raw or path.name in {"", ".", ".."}:
-            raise ValueError(f"invalid skill locator: {git_path}")
-        return path
+    def _persisted_cutover_evidence(
+        state: BotSkillLayoutState,
+    ) -> dict[str, object] | None:
+        probe_evidence = state.last_probe_evidence
+        if not isinstance(probe_evidence, dict):
+            return None
+        cutover = probe_evidence.get("cutover")
+        if not isinstance(cutover, dict):
+            return None
+        evidence = cutover.get("evidence")
+        return evidence if isinstance(evidence, dict) else None
 
-    def _local_name(self, asset: RegisteredSkillAsset) -> str:
-        if not asset.git_path.startswith("local://"):
-            raise ValueError(f"skill {asset.skill_id} is not local")
-        return self._source_tail(asset.git_path, "local://").name
-
-    def _build_pool_mappings(
+    def _handle_engine_drift(
         self,
-        assets: list[RegisteredSkillAsset],
         *,
-        paths: PoolPaths,
-    ) -> list[PoolSkillMapping]:
-        mappings: list[PoolSkillMapping] = []
-        targets: dict[str, str] = {}
-        for asset in assets:
-            if asset.git_path.startswith("local://"):
-                relative = PurePosixPath(self._local_name(asset))
-                source = PurePosixPath(paths.pool_local) / relative
-            elif asset.git_path.startswith("git://"):
-                relative = self._source_tail(asset.git_path, "git://")
-                source = PurePosixPath(paths.pool_repo) / relative
-            else:
-                continue
-            target = str(PurePosixPath(paths.active) / relative.name)
-            if targets.get(target) == str(source):
-                continue
-            if target in targets:
-                raise ValueError(f"duplicate managed target: {target}")
-            targets[target] = str(source)
-            mappings.append(PoolSkillMapping(source=str(source), target=target))
-        return mappings
+        scope: BotSkillLayoutScope,
+        state: BotSkillLayoutState,
+        current_engine: str,
+        generation: str,
+        lease_owner: str,
+    ) -> SkillsPoolReconcileResult | None:
+        claimed_engine = (
+            state.rollout_evidence.engine_type
+            if state.rollout_evidence is not None
+            else None
+        )
+        if claimed_engine is None or claimed_engine == current_engine:
+            return None
+
+        evidence = {
+            "reason": "bot_engine_changed",
+            "claimed_engine": claimed_engine,
+            "current_engine": current_engine,
+        }
+        claim_is_releasable = (
+            state.phase
+            in {
+                SkillLayoutPhase.POOL_PREPARING,
+                SkillLayoutPhase.POOL_READY,
+            }
+            and not state.data_plane_cutover_committed
+        )
+        if claim_is_releasable and not self._layouts.release_changed_engine_claim(
+            scope=scope,
+            migration_generation=generation,
+            lease_owner=lease_owner,
+            evidence=evidence,
+        ):
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.STATE_RACE_LOST,
+                evidence=evidence,
+            )
+        return SkillsPoolReconcileResult(
+            SkillsPoolReconcileOutcome.BOT_CHANGED,
+            evidence=evidence,
+        )
 
 
 __all__ = [

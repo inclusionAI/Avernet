@@ -81,6 +81,38 @@ fn overlay_forced_inject(overlay: &RouteParticipantOverlay) -> bool {
         || overlay.status == ActorStatus::Hidden
 }
 
+fn is_display_name_mention_boundary(remainder: &str) -> bool {
+    let Some(next) = remainder.chars().next() else {
+        return true;
+    };
+    next.is_whitespace()
+        || matches!(
+            next,
+            ',' | '，'
+                | '.'
+                | '。'
+                | '!'
+                | '！'
+                | '?'
+                | '？'
+                | ';'
+                | '；'
+                | '、'
+                | '：'
+                | '@'
+                | '*'
+                | '`'
+                | '"'
+                | '\''
+                | ')'
+                | '）'
+                | ']'
+                | '】'
+                | '}'
+                | '》'
+        )
+}
+
 // ---------------------------------------------------------------------------
 // Structured Routing Types
 // ---------------------------------------------------------------------------
@@ -196,9 +228,60 @@ impl MessageRouter {
     /// Create a new message router.
     pub fn new() -> Self {
         Self {
-            mention_regex: Regex::new(r"@([\w\p{Unified_Ideograph}:]+)")
+            mention_regex: Regex::new(r"@([-\w\p{Unified_Ideograph}:]+)")
                 .expect("Invalid mention regex"),
         }
+    }
+
+    fn resolve_mentions(&self, session: &Group, message: &str) -> Vec<String> {
+        let mut resolved_mentions = Vec::new();
+        for (at_index, _) in message.match_indices('@') {
+            let after_at = &message[at_index + 1..];
+            let matched_participant = session
+                .participants
+                .iter()
+                .filter_map(|participant| {
+                    let name = participant.bot_name.as_deref()?;
+                    if name.is_empty() || !after_at.starts_with(name) {
+                        return None;
+                    }
+                    let remainder = &after_at[name.len()..];
+                    if is_display_name_mention_boundary(remainder) {
+                        Some((participant, name))
+                    } else {
+                        None
+                    }
+                })
+                .max_by_key(|(_, name)| name.len());
+
+            if let Some((participant, name)) = matched_participant {
+                if !resolved_mentions.contains(&participant.bot_uuid) {
+                    debug!(target: MSG_LOG_TARGET, mention = %name, resolved_to = %participant.bot_uuid, "routing full display-name mention match");
+                    resolved_mentions.push(participant.bot_uuid.clone());
+                }
+                continue;
+            }
+
+            let at_mention = &message[at_index..];
+            let Some(captures) = self.mention_regex.captures(at_mention) else {
+                continue;
+            };
+            if captures.get(0).map_or(true, |value| value.start() != 0) {
+                continue;
+            }
+            let Some(mention) = captures.get(1).map(|value| value.as_str()) else {
+                continue;
+            };
+            let result = session.get_participant(mention).map(|p| p.bot_uuid.clone());
+            debug!(target: MSG_LOG_TARGET, mention = %mention, matched = result.is_some(), resolved_to = ?result, "routing mention match");
+            if let Some(bot_uuid) = result {
+                if !resolved_mentions.contains(&bot_uuid) {
+                    resolved_mentions.push(bot_uuid);
+                }
+            }
+        }
+
+        resolved_mentions
     }
 
     /// Check if message contains @ALL mention.
@@ -260,34 +343,7 @@ impl RoutingCoreService for MessageRouter {
 
         // Validate mentions against session participants (match by bot_uuid OR bot_name)
         // Resolve to bot_uuid so downstream logic is consistent
-        let mut valid_mentions: Vec<String> = mentions
-            .into_iter()
-            .filter_map(|m| {
-                let result = session.get_participant(m).map(|p| p.bot_uuid.clone());
-                debug!(target: MSG_LOG_TARGET, mention = %m, matched = result.is_some(), resolved_to = ?result, "routing mention match");
-                result
-            })
-            .collect();
-
-        // The single-token mention regex cannot capture multi-word display
-        // names (e.g. "@Developer Bot" — it stops at the space, capturing only
-        // "Developer"). Resolve those by scanning for the full "@{name}" token.
-        // Restricting to names containing a space avoids false positives on
-        // short single-token names that the regex already handles precisely.
-        for participant in &session.participants {
-            let Some(name) = participant.bot_name.as_deref() else {
-                continue;
-            };
-            if !name.contains(' ') {
-                continue;
-            }
-            if message.contains(&format!("@{name}"))
-                && !valid_mentions.contains(&participant.bot_uuid)
-            {
-                debug!(target: MSG_LOG_TARGET, mention = %name, resolved_to = %participant.bot_uuid, "routing multi-word mention match");
-                valid_mentions.push(participant.bot_uuid.clone());
-            }
-        }
+        let valid_mentions = self.resolve_mentions(session, message);
 
         // Build routing targets with delivery type
         // Rule: Exclude sender from targets, only route to Bot participants
@@ -649,10 +705,7 @@ impl RoutingCoreService for MessageRouter {
 
         // Step 1: resolve mentions to bot_uuids using session participants
         // (matches by bot_uuid OR bot_name, identical to legacy `route()`).
-        let resolved_mentions: Vec<String> = raw_mentions
-            .into_iter()
-            .filter_map(|m| session.get_participant(m).map(|p| p.bot_uuid.clone()))
-            .collect();
+        let resolved_mentions = self.resolve_mentions(session, message);
 
         // Step 2: classify mentions into Bot vs Human, dropping absent Humans.
         // We need both:
@@ -1113,6 +1166,43 @@ mod tests {
         assert_eq!(decision.targets.len(), 2);
 
         // Both mentioned, both get Send
+        for target in &decision.targets {
+            assert_eq!(target.delivery_type, DeliveryType::Send);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_repeated_full_display_name_mentions_all_get_send() {
+        let router = MessageRouter::new();
+        let mut session = create_overlay_test_session();
+        session.participants[0].bot_name = Some("alpha-甲".to_string());
+        session.participants[1].bot_name = Some("beta (乙)".to_string());
+        session.participants[2].bot_name = Some("beta".to_string());
+        let overlay = vec![
+            ov_bot("driver", None, ActorStatus::Online),
+            ov_bot("bot_x", None, ActorStatus::Online),
+            ov_human("human_alice", ParticipantMode::Present, ActorStatus::Online),
+            ov_bot("sender", None, ActorStatus::Online),
+        ];
+
+        let decision = router
+            .route_with_overlay(
+                &session,
+                "@alpha-甲 @beta (乙) coordinate; @alpha-甲 and @beta (乙) confirm",
+                Some("sender"),
+                &overlay,
+            )
+            .await;
+
+        assert_eq!(
+            decision.mentions,
+            vec!["driver".to_string(), "bot_x".to_string()]
+        );
+        assert_eq!(
+            decision.cleaned_message,
+            "alpha-甲 beta (乙) coordinate; alpha-甲 and beta (乙) confirm"
+        );
+        assert_eq!(decision.targets.len(), 2);
         for target in &decision.targets {
             assert_eq!(target.delivery_type, DeliveryType::Send);
         }

@@ -77,6 +77,8 @@ def _log_container_components(container: containers.DeclarativeContainer) -> Non
 
 class ApplicationContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
+    loaded_config = providers.Dependency()
+    user_config = providers.Dependency()
     plugins = providers.Container(PluginContainer, config=config)
 
     authenticator = providers.Dependency()
@@ -116,17 +118,30 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
     logger.info("Building authenticator …")
     plugins = container.plugins()
     from ._authn import build_authenticator
+    from ._configs import DatabaseConfig
+    from ._database import initialize_database
+
+    # Initialise the DI-selected database plugin so DB-backed auth strategies
+    # and credential issuer/registrar share one ready DataSourcePlugin.
+    initialize_database(
+        plugins.database(),
+        DatabaseConfig(
+            plugin_type=container.config.plugins.database.plugin_database(),
+            db_url=container.config.plugins.database.database_url(),
+        ),
+    )
 
     container.authenticator.override(
         providers.Singleton(
             build_authenticator,
-            db=plugins.providers["database"],
-            app_token_validator=plugins.providers["app_token_validator"],
-            tenant_resolver=plugins.providers["tenant_resolver"],
+            strategies=plugins.providers["authn_strategies"],
+            user_config=container.user_config,
         )
     )
 
     logger.info("Building forwarding …")
+    from gateway.community.adapters.web import WebsocketsForwarder
+
     from ._forwarding import build_forwarding
 
     container.forwarding.override(
@@ -134,6 +149,12 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
             build_forwarding,
             forwarder=plugins.providers["forwarder"],
             catalog=plugins.providers["schema_catalog"],
+            # Constructed here rather than selected from the plugin container:
+            # the outbound socket transport has one implementation and no
+            # edition-specific flavor, so a selector would be a config knob with
+            # a single legal value. Still injected rather than built inside
+            # ``build_forwarding`` so the subsystem keeps one composition root.
+            ws_forwarder=providers.Singleton(WebsocketsForwarder),
         )
     )
 

@@ -1,7 +1,7 @@
 """Forwarding subsystem orchestration — transport-agnostic domain class.
 
-``Forwarding`` composes the domain map, forwarder, and schema catalog, and
-owns the catalog's background refresh lifecycle. It is a domain object, not
+``Forwarding`` composes the domain map, both forwarders, and the schema catalog,
+and owns the catalog's background refresh lifecycle. It is a domain object, not
 bootstrap wiring — adapters receive it via ``app.state`` and never import
 plugins or core.
 """
@@ -15,6 +15,7 @@ from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, build_served_openapi
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
+from gateway.community.spi.ws_forwarder import WebSocketForwarder
 
 _DEFAULT_REFRESH_SECONDS = 300.0
 
@@ -26,6 +27,7 @@ class Forwarding:
     domain_map: DomainMap
     forwarder: Forwarder
     catalog: SchemaCatalog
+    ws_forwarder: WebSocketForwarder
     refresh_seconds: float = _DEFAULT_REFRESH_SECONDS
     _stop: asyncio.Event = field(default_factory=asyncio.Event)
     _task: asyncio.Task[None] | None = field(default=None)

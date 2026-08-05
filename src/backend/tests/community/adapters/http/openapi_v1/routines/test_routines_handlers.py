@@ -745,20 +745,21 @@ async def test_delete_routine_returns_envelope_deleted_true():
 
 
 @pytest.mark.asyncio
-async def test_delete_routine_returns_deleted_false_when_success_false():
-    # Engine signals failure without raising → surface as Deleted(deleted=False).
+async def test_delete_routine_returns_404_when_success_false():
+    # Engine signals failure without raising → map to 404 (not 200
+    # {deleted:false}, per totalfrank #5: clients must distinguish failure from
+    # success by status code).
     service = _StubCronDeleteService(success=False, payload={})
 
-    env = await delete_routine(
-        routine_id="t1",
-        principal={"user_id": "u1"},
-        bot_id="bot-x",
-        factory=service,
-        request=_request_without_trace(),
-    )
-
-    assert env.code == CODE_OK
-    assert env.data.deleted is False
+    with pytest.raises(HTTPException) as exc:
+        await delete_routine(
+            routine_id="t1",
+            principal={"user_id": "u1"},
+            bot_id="bot-x",
+            factory=service,
+            request=_request_without_trace(),
+        )
+    assert exc.value.status_code == 404
 
 
 @pytest.mark.asyncio

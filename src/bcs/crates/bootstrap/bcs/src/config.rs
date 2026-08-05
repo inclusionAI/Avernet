@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export storage config contract types for convenience.
 pub use bcs_config_api::{
-    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, MistConfig, RedisCacheConfig,
+    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, RedisCacheConfig,
 };
 
 // Re-export config contract types from bcs-config-api.
@@ -18,7 +18,7 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig,
     FusionProviderConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
+    LoggingConfig, ManifestConfig, LeaderElectionConfig, SecretConfig, StructuredOutputMode, SecurityConfig,
     UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
@@ -256,6 +256,113 @@ fn default_collaboration_templates_default_language() -> String {
     "zh-CN".to_string()
 }
 
+/// Gateway Principal verification trust and signing-key lookup configuration.
+///
+/// The signing key itself is intentionally not configuration: bootstrap resolves
+/// it from `signing_key_secret` through the configured SecretAccessPort, or
+/// falls back to `signing_key_env` at process startup for compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayPrincipalConfig {
+    #[serde(default = "default_gateway_principal_issuer")]
+    pub issuer: String,
+
+    #[serde(default = "default_gateway_principal_audience")]
+    pub audience: String,
+
+    #[serde(default = "default_gateway_principal_key_id")]
+    pub key_id: String,
+
+    #[serde(default = "default_gateway_principal_signing_key_env")]
+    pub signing_key_env: String,
+
+    #[serde(default)]
+    pub signing_key_secret: Option<String>,
+}
+
+impl Default for GatewayPrincipalConfig {
+    fn default() -> Self {
+        Self {
+            issuer: default_gateway_principal_issuer(),
+            audience: default_gateway_principal_audience(),
+            key_id: default_gateway_principal_key_id(),
+            signing_key_env: default_gateway_principal_signing_key_env(),
+            signing_key_secret: None,
+        }
+    }
+}
+
+impl GatewayPrincipalConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("issuer", &self.issuer),
+            ("audience", &self.audience),
+            ("key_id", &self.key_id),
+            ("signing_key_env", &self.signing_key_env),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("gateway_principal.{field} must not be blank"));
+            }
+        }
+        if self
+            .signing_key_secret
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err("gateway_principal.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_gateway_principal_issuer() -> String {
+    "gateway".to_string()
+}
+
+fn default_gateway_principal_audience() -> String {
+    "bcs".to_string()
+}
+
+fn default_gateway_principal_key_id() -> String {
+    "bare".to_string()
+}
+
+fn default_gateway_principal_signing_key_env() -> String {
+    "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
+}
+
+/// Group-session WebSocket JWT signing-key lookup configuration.
+///
+/// The signing key material is resolved through the configured SecretAccessPort
+/// using `signing_key_secret` as the logical secret name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSessionWsConfig {
+    #[serde(default = "default_group_session_ws_signing_key_secret")]
+    pub signing_key_secret: String,
+}
+
+impl Default for GroupSessionWsConfig {
+    fn default() -> Self {
+        Self {
+            signing_key_secret: default_group_session_ws_signing_key_secret(),
+        }
+    }
+}
+
+impl GroupSessionWsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.signing_key_secret.trim().is_empty() {
+            return Err("group_session_ws.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_group_session_ws_signing_key_secret() -> String {
+    "bcn-group-session-ws-jwt".to_string()
+}
+
 /// BCS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -304,6 +411,14 @@ pub struct BcsConfig {
     )]
     pub auth_token: Option<Secret<String>>,
 
+    /// Gateway-signed Principal verification trust configuration.
+    #[serde(default)]
+    pub gateway_principal: GatewayPrincipalConfig,
+
+    /// Group-session WebSocket JWT signing-key lookup configuration.
+    #[serde(default)]
+    pub group_session_ws: GroupSessionWsConfig,
+
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
     #[serde(default)]
@@ -317,13 +432,12 @@ pub struct BcsConfig {
     #[serde(default)]
     pub database: DatabaseConfig,
 
-    /// Mist (secret management) configuration. Disabled by default; when
-    /// enabled the BCS process talks to the configured local secret sidecar to
-    /// fetch secrets via the SecretService/SecretAccessPort stack. Use the
-    /// `GET /admin/secret/:name` route for end-to-end verification on dev
-    /// machines.
+    /// Provider-neutral secret backend selector.
+    ///
+    /// Defaults to `noop` for public/local builds. Product binaries can select
+    /// additional providers registered by linked crates.
     #[serde(default)]
-    pub mist: MistConfig,
+    pub secret: SecretConfig,
 
     /// Channel(IM bridge) configuration.
     #[serde(default)]
@@ -741,10 +855,12 @@ impl Default for BcsConfig {
             store_messages: false,
             dingtalk_accounts: Vec::new(),
             auth_token: None,
+            gateway_principal: GatewayPrincipalConfig::default(),
+            group_session_ws: GroupSessionWsConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
-            mist: MistConfig::default(),
+            secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
@@ -1163,6 +1279,14 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    config.gateway_principal.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
+    config.group_session_ws.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.telemetry.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1215,6 +1339,48 @@ mod tests {
         assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "bcn-group-session-ws-jwt"
+        );
+    }
+
+    #[test]
+    fn group_session_ws_signing_key_secret_can_be_configured() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = "other_manual_teamclawgw_principal_signing_key"
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml)
+            .expect("parse configurable group-session WebSocket secret name");
+
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "other_manual_teamclawgw_principal_signing_key"
+        );
+    }
+
+    #[test]
+    fn blank_group_session_ws_signing_key_secret_is_rejected() {
+        let tmp = tempfile::TempDir::new().expect("temp config dir");
+        std::fs::write(
+            tmp.path().join("bcs-config.toml"),
+            r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = " "
+            "#,
+        )
+        .expect("write config");
+
+        let err = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
+            .expect_err("blank group-session WebSocket secret name rejected");
+
+        assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
     }
 
     #[test]
@@ -1555,6 +1721,18 @@ x-collector-route = "collector-local"
         }"#;
 
         let err = serde_json::from_str::<BcsConfig>(json).expect_err("unknown key rejected");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_config_rejects_mist_section() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            [mist]
+            enabled = true
+        "#;
+
+        let err = toml::from_str::<BcsConfig>(toml).expect_err("public BCS rejects Ant-only mist config");
         assert!(err.to_string().contains("unknown field"));
     }
 

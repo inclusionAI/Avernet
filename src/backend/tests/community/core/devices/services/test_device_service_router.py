@@ -10,6 +10,7 @@ import pytest
 
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
+    AllocatedDevice,
     DeviceBindingInfo,
     DeviceBindingStatus,
     DeviceConnectionInfo,
@@ -309,6 +310,31 @@ class TestGetProviderForDeviceId:
 
         provider = router._get_provider_for_device_id("nonexistent")
         assert provider is router._default_service
+
+
+class TestUpdateDeviceHeadersRouting:
+    def test_forwards_active_only_to_provider(self):
+        router, _, _, _ = _make_router(is_local=False)
+        provider = router._providers[BAAS_DEVICE_PROVIDER]
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={},
+        )
+
+        router.update_device_headers(
+            device=device,
+            agent_pass_token="fake-passport-token",
+            agent_code="agent-code",
+            active_only=True,
+        )
+
+        provider.update_device_headers.assert_called_once_with(
+            device=device,
+            agent_pass_token="fake-passport-token",
+            agent_code="agent-code",
+            active_only=True,
+        )
 
 
 # ---------------------------------------------------------------------------

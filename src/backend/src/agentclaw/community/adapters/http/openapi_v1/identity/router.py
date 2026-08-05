@@ -1,7 +1,10 @@
-"""Identity group — ``/openapi/v1/identity`` bot identity files (definition only).
+"""Identity group — ``/openapi/v1/bots/identity`` bot identity files.
 
 Read/write a bot's identity markdown files (RULES, SOUL, …), addressed by bot.
-Handlers are stubs; every route requires an authenticated user principal.
+Every route requires an authenticated user principal. ``entity_type`` is
+hardcoded to ``staff`` for the personal-bot surface — ``proj``/``team``
+identity files (both valid entity types) are intentionally out of scope for
+openapi_v1 and not reachable through this API.
 """
 
 from __future__ import annotations

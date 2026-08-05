@@ -8,7 +8,7 @@ use bcs_http::state::{
     HttpAppState, VisibilitySyncPort, VisibilitySyncRequest,
 };
 use bcs_secret::DefaultSecretService;
-use bcs_secret_local::NoopSecretAccess;
+use bcs_secret_local::{EnvSecretAccess, NoopSecretAccess};
 use bcs_service_api::port::secret::SecretAccessPort;
 use bcs_service_api::{ChatRunCleanupPort, ChatRunEventPort, SecretService};
 use bcs_services_container::Services;
@@ -18,6 +18,7 @@ use opentelemetry::trace::TraceContextExt;
 use tokio::sync::mpsc;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::plugins::build_registered_secret_plugin;
 use crate::server::BcsServerState;
 
 pub struct BotRuntimeTokenResolverBuildContext {
@@ -57,12 +58,15 @@ pub fn build_bot_runtime_token_resolver(
 
 pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppState {
     let config = state.config.clone();
+    let invite_token_secret = state.invite_token_secret.clone();
     let max_group_messages = if config.max_group_messages > 0 {
         config.max_group_messages as u64
     } else {
         0
     };
-    let secret_service = build_secret_service(&config.mist).await;
+    let secret_service = build_secret_service(&config)
+        .await
+        .unwrap_or_else(|err| panic!("failed to initialize secret provider: {}", err));
     let services_with_secret = Services {
         secret: secret_service,
         ..state.services.clone()
@@ -125,14 +129,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
             config.async_chat_run_timeout_ms,
         )
         .with_invite_config(
-            config.invite.token_secret
-                .as_deref()
-                .map(|s| s.as_bytes().to_vec())
-                .unwrap_or_else(|| {
-                    tracing::warn!("invite.token_secret not configured — generating random secret (tokens will not survive restart)");
-                    let key: Vec<u8> = (0..32).map(|_| fastrand::u8(..)).collect();
-                    key
-                }),
+            invite_token_secret,
             config.invite.default_ttl_seconds,
             config.invite.base_url.clone(),
             config.invite.group_link_url.clone(),
@@ -150,14 +147,54 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         ))
 }
 
-async fn build_secret_service(cfg: &bcs_config_api::MistConfig) -> Arc<dyn SecretService> {
-    if cfg.enabled {
-        tracing::warn!("mist config is ignored in the public build; using NoopSecretAccess");
-    } else {
-        tracing::info!("mist disabled in config; using NoopSecretAccess");
+async fn build_secret_service(config: &crate::config::BcsConfig) -> crate::Result<Arc<dyn SecretService>> {
+    let access = build_secret_access(config).await?;
+    Ok(Arc::new(DefaultSecretService::new(access)))
+}
+
+pub(crate) async fn build_secret_access(
+    config: &crate::config::BcsConfig,
+) -> crate::Result<Arc<dyn SecretAccessPort>> {
+    let provider = resolve_secret_provider(config);
+    let provider_config = config
+        .secret
+        .providers
+        .get(provider)
+        .cloned()
+        .unwrap_or_default();
+
+    match provider {
+        "noop" => {
+            tracing::info!("secret.provider=noop; using NoopSecretAccess");
+            Ok(Arc::new(NoopSecretAccess))
+        }
+        "env" => {
+            let prefix = provider_config
+                .get("prefix")
+                .and_then(|value| value.as_str())
+                .unwrap_or("BCS_SECRET_");
+            tracing::info!(provider = "env", "secret backend enabled");
+            Ok(Arc::new(EnvSecretAccess::new(prefix)))
+        }
+        other => match build_registered_secret_plugin(other, provider_config).await? {
+            Some(registration) => {
+                tracing::info!(provider = %registration.provider, "registered secret backend enabled");
+                Ok(registration.access)
+            }
+            None => Err(crate::BcsError::InvalidConfig(format!(
+                "secret provider '{other}' is not available in this binary"
+            ))),
+        },
     }
-    let access: Arc<dyn SecretAccessPort> = Arc::new(NoopSecretAccess);
-    Arc::new(DefaultSecretService::new(access))
+}
+
+fn resolve_secret_provider(config: &crate::config::BcsConfig) -> &str {
+    let configured = config.secret.provider.trim();
+    if configured.is_empty() {
+        "noop"
+    } else {
+        configured
+    }
 }
 
 struct BootstrapHealthPort {
@@ -367,6 +404,8 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
 mod tests {
     use super::*;
     use bcs_bot_store::MemoryProviderStore;
+    use bcs_secret_local::InMemorySecretAccess;
+    use futures::future::BoxFuture;
     use bcs_leader_election::StandaloneLeaderElection;
     use bcs_route_security::OutboundUrlGuard;
     use bcs_service_api::ProviderStreamGrayList;
@@ -382,6 +421,86 @@ mod tests {
     use tokio::sync::Mutex;
     use tracing::{Instrument, info_span, instrument::WithSubscriber};
     use tracing_subscriber::prelude::*;
+
+    fn test_secret_factory(
+        provider_config: bcs_config_api::SecretProviderConfig,
+    ) -> BoxFuture<'static, Result<bcs_secret_api::SecretPluginRegistration, bcs_secret_api::SecretPluginError>> {
+        Box::pin(async move {
+            let user = provider_config
+                .get("user")
+                .and_then(|value| value.as_str())
+                .unwrap_or("svc")
+                .to_string();
+            Ok(bcs_secret_api::SecretPluginRegistration {
+                provider: "test-secret".to_string(),
+                access: Arc::new(InMemorySecretAccess::with_entries([(
+                    "unit_secret",
+                    user,
+                    "unit-value".to_string(),
+                )])),
+            })
+        })
+    }
+
+    inventory::submit! {
+        bcs_secret_api::SecretPluginFactory {
+            name: "test-secret",
+            build: test_secret_factory,
+        }
+    }
+
+    #[tokio::test]
+    async fn default_secret_service_uses_noop_backend() {
+        let service = build_secret_service(&crate::config::BcsConfig::default())
+            .await
+            .expect("default noop secret service builds");
+
+        let err = service
+            .get_secret("unit_secret")
+            .await
+            .expect_err("noop backend should not resolve secrets");
+
+        assert!(matches!(err, bcs_service_api::application::SecretServiceError::Unavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn configured_unknown_secret_provider_fails_initialization() {
+        let mut config = crate::config::BcsConfig::default();
+        config.secret.provider = "missing-secret".to_string();
+
+        let err = match build_secret_service(&config).await {
+            Ok(_) => panic!("explicit unavailable provider should fail startup"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, crate::BcsError::InvalidConfig(_)));
+    }
+
+    #[tokio::test]
+    async fn configured_registered_secret_provider_backs_secret_service() {
+        let mut config = crate::config::BcsConfig::default();
+        config.secret.provider = "test-secret".to_string();
+        config.secret.providers.insert(
+            "test-secret".to_string(),
+            [(
+                "user".to_string(),
+                serde_json::Value::String("configured-user".to_string()),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let service = build_secret_service(&config)
+            .await
+            .expect("registered provider should build");
+
+        let secret = service
+            .get_secret("unit_secret")
+            .await
+            .expect("registered provider should resolve secret");
+        assert_eq!(secret.user, "configured-user");
+        assert_eq!(secret.value, "unit-value");
+    }
 
     #[test]
     fn health_version_uses_runtime_override_when_set() {
@@ -520,6 +639,7 @@ mod tests {
     fn test_server_state(port: u16) -> Arc<BcsServerState> {
         let mut config = crate::BcsConfig::default();
         config.port = port;
+        let v1_state = BcsServerState::default_for_test();
         let credentials: Arc<dyn ProviderCredentialRepoPort> =
             Arc::new(MemoryProviderStore::new());
         Arc::new(BcsServerState {
@@ -543,10 +663,25 @@ mod tests {
             metrics: None,
             auth_chain: Arc::new(bcs_auth_api::AuthPluginChain::new(Vec::new())),
             auth_config: bcs_auth_api::AuthConfig::default(),
+            gateway_principal_verifier: crate::server::gateway_principal_verifier_for_tests(),
+            invite_token_secret: v1_state.invite_token_secret.clone(),
+            group_session_secret_access: v1_state.group_session_secret_access.clone(),
+            openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
         })
+    }
+
+    #[tokio::test]
+    async fn unset_invite_config_uses_the_bootstrap_shared_invite_secret() {
+        let state = test_server_state(21000);
+        assert!(state.config.invite.token_secret.is_none());
+        let expected = state.invite_token_secret.clone();
+
+        let http_state = build_http_app_state(state).await;
+
+        assert_eq!(http_state.invite_token_secret, expected);
     }
 
     #[tokio::test]

@@ -1,6 +1,10 @@
 # Gateway community default config (open-source, no internal middlewares).
 # The enterprise edition overlays this with ZCache/ZDAS/DDSOSS/etc. via
 # application.yaml in the gateway-enterprise package.
+#
+# This is the only runtime configuration file the gateway reads. Keep
+# gateway-specific sections under user_config so startup has a single source of
+# truth for user-selectable Gateway behavior.
 
 app_name: "gateway"
 enable_sidecar: false
@@ -19,19 +23,213 @@ module_config:
     start: "gateway.community.adapters.web.app:app"
     enable_api_docs: true
 
-# Plugin selection — community-safe defaults (all stub/descriptive).
-# Enterprise overrides specific selectors via config overlay.
+# User-level Gateway config — plugin selectors, authn chains, route security,
+# upstream variable values, and routing all live here.
 user_config:
+  # Plugin selection — community-safe defaults (all stub/descriptive).
+  # Enterprise overrides specific selectors via config overlay.
   plugins:
     forwarder: "httpx"
     schema_catalog: "file"
     cache: "stub"
+    auth: "stub"
+    # SecretResolver flavor. Community reads creds from env; enterprise overlays
+    # this with a corp/KMS-backed selector registered via the plugin_registry.
+    secret: "community"
     authn:
       app_token: "stub"
       tenant: "stub"
     database:
       plugin_database: "SQLITE_ORM"
       database_url: ""
+
+  # SecretResolver configuration. The community (env-backed) resolver reads
+  # ``{env_prefix}{NAME}_VALUE`` / ``_USER`` from the process environment.
+  # Enterprise overlays may swap the resolver implementation via the plugin
+  # registry (e.g. a corp secret store / KMS).
+  secret:
+    env_prefix: "AVERNET_SECRET_"
+
+  # PrincipalSigner (JWT client) config. The signing key is a secret and is
+  # resolved at runtime via the SecretResolver using ``secret_name``; the
+  # remaining fields are non-secret and live here. A missing/empty key falls
+  # back to a dev key (single-box/tests only — NOT for production).
+  principal_signer:
+    secret_name: "principal_signing_key"
+    kid: "bare"
+    issuer: "gateway"
+    ttl_seconds: 60
+
+  # Values used to expand ${...} placeholders in upstreams.servers.*.base_url.
+  #
+  # Every value carries a SCHEME — http, https, ws or wss — and startup refuses
+  # one that does not, naming the server. This is not style: the forwarder
+  # concatenates the base url with the request path, and `backend.example/x`
+  # parses as a *relative* URL with an empty host, so a scheme-less value fails
+  # at the first call rather than at boot.
+  #
+  # The scheme says the origin and whether the connection is TLS; it does not
+  # decide which planes the upstream serves. The router re-spells it per plane
+  # (https ⇄ wss, http ⇄ ws), so one configured value works for both and no
+  # operator has to know which planes a given upstream is used for.
+  upstream_vars:
+    backend_server_url: https://backend.sample.com
+    baas_server_url: https://baas.sample.com
+    bcs_server_url: https://bcs.sample.com
+    engine_proxy_server_url: https://engineproxy.sample.com
+
+  # Per-identity strategy chain (system-level config).
+  # Each identity type runs its strategies in order; the first to recognise the
+  # credential wins (design §5). Flavor-specific verification backends are wired
+  # by PluginAccessor in the composition root.
+  identity_strategies:
+    user: [google]
+    bot: [bot_token]
+    app: [app_token]
+    access_key: [access_key_token]
+
+  # Route → identity-requirement table for the gateway (auth design §8, reshaped).
+  #
+  # Each value is ``{<identity-type>: required|optional}`` — the identities a
+  # route accepts and whether each is mandatory. More specific rules override
+  # more general ones; "/**" is the top-level default. The authoritative
+  # per-operation source is each route's ``x-avernet-security`` marker; this
+  # section stores the aggregated table the gateway resolves at request time.
+  route_security:
+    # Top-level default: every route requires an authenticated user.
+    "/**":
+      user: required
+
+    # Sample group — the bots endpoints (explicit, more-specific rule).
+    "/openapi/v1/bots/**":
+      user: required
+
+    "/openapi/v1/collaboration/**":
+      user: required
+
+    # BCN verifies the short-lived session credential carried by this exact
+    # WebSocket handshake. Keep every other collaboration operation, including
+    # session-token issuance, on the required User Principal boundary above.
+    "GET /openapi/v1/collaboration/messages/ws": {}
+
+    # The tenant engine socket, and the FIRST rule under /openapi/v1 that
+    # requires no identity at all. Deliberate: the credential is already in the
+    # handshake's query string and is checked by the proxypass hop behind the
+    # gateway, and a browser's WebSocket API can attach nothing else — it takes
+    # a URL and a subprotocol, no headers.
+    #
+    # Written down as an explicit empty requirement rather than left out — an
+    # omitted rule falls through to "/**" above and fails closed, so silence
+    # here would refuse every socket. Stating it keeps this table an honest
+    # description of what the gateway requires, and makes tightening the prefix
+    # a config edit rather than a code change.
+    "/openapi/v1/engine/**": {}
+
+  # Domain → upstream-server map for the gateway.
+  #
+  # The leading path segment after `base_path` is the DOMAIN; it selects the
+  # target server. A request whose leading segment is not a configured domain is
+  # denied (the gateway forwards only into known domains — never an open proxy).
+  #
+  # `schema` tells the gateway where to read that domain's published OpenAPI
+  # description for doc generation:
+  #   source: file          → `path` (single-box; committed / local artifact)
+  #   source: object_store  → `url`  (any deployed edition — corp or community;
+  #                                    each upstream publishes its dumped doc to an
+  #                                    object store on deploy, gateway auto-adopts
+  #                                    the latest via background refresh)
+  # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
+  # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
+  # routing/auth/forwarding never read it.
   upstreams:
-    backend_server_url: backend.sample.com
-    baas_server_url: baas.sample.com
+    base_path: /openapi/v1
+
+    # Each domain may also declare:
+    #
+    #   protocols: [http] | [websocket] | [http, websocket]
+    #     Which plane serves it. Unset means `[http]`, so every domain below
+    #     behaves exactly as it always has. The two planes have different
+    #     handling and different forwarders, and the entrypoint for a plane a
+    #     domain does not declare refuses it — a socket domain must not become
+    #     an HTTP proxy into its upstream just because both read this map.
+    #
+    #   rewrite: {from: <gateway prefix>, to: <upstream prefix>}
+    #     Unset means the path forwards VERBATIM and only the origin changes,
+    #     which is the property this whole design rests on. Declare one prefix
+    #     substitution when the upstream serves the same resources under a
+    #     different prefix. `from` must start at the domain's own prefix, or the
+    #     rule could never match and startup refuses it.
+
+    domains:
+      bots:
+        server: backend
+        # Single-box default. A deployed edition overrides this with an object store:
+        #   schema:
+        #     source: object_store
+        #     url: "${BOTS_OPENAPI_URL}"   # e.g. https://<bucket>/bots/openapi-latest.json
+        #     refresh_seconds: 300
+        schema:
+          source: file
+          path: schemas/bots.openapi.json
+          refresh_seconds: 300
+      collaboration:
+        server: bcs
+        protocols: [http, websocket]
+        schema:
+          source: file
+          path: schemas/bcn.openapi.json
+          refresh_seconds: 300
+      sessions:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+      messages:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+      runs:
+        server: baas
+        schema:
+          source: file
+          path: schemas/baas.openapi.json
+          refresh_seconds: 300
+
+      # The tenant engine socket. The backend's connection endpoint publishes
+      # `wss://<gateway>/openapi/v1/engine/<target><engine-path>?x-proxypass-token=…`
+      # and this is what serves it.
+      #
+      # Socket-only: an HTTP request here is an unknown route, because the one
+      # thing this domain publishes is a relayed socket.
+      #
+      # The engine proxy serves the same targets under `/proxypass/`, so the
+      # prefix is substituted; everything past it — the routing target, the
+      # engine path, the credential in the query — travels byte for byte.
+      #
+      # No `schema:` — a WebSocket has no OpenAPI representation, so this domain
+      # contributes nothing to the served document.
+      #
+      # Operational note for any L7 hop a deployment puts in front of the
+      # gateway: it must pass the Upgrade through and impose NO read timeout on
+      # this path. The credential is checked once, at the handshake, and the
+      # connection is designed to outlive its expiry — an idle deadline tears
+      # down healthy sockets.
+      engine:
+        server: engine_proxy
+        protocols: [websocket]
+        rewrite:
+          from: /openapi/v1/engine
+          to: /proxypass
+
+    servers:
+      backend:
+        base_url: "${backend_server_url}"
+      baas:
+        base_url: "${baas_server_url}"
+      bcs:
+        base_url: "${bcs_server_url}"
+      engine_proxy:
+        base_url: "${engine_proxy_server_url}"

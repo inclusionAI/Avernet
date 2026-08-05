@@ -128,6 +128,7 @@ def mock_baas():
     m.get_http_info.return_value = HttpConnectionInfo(
         http_url="http://10.0.0.1:20010",
         token="http-token-001",
+        target="LOCAL_bot-test-001--machine--user@2:20010",
     )
     return m
 
@@ -431,7 +432,9 @@ def test_do_release_approve_failure_does_not_block(local_device_service, mock_ba
 # ---------------------------------------------------------------------------
 
 
-def test_compose_conn_info_uses_baas_ws_info(local_device_service, mock_baas):
+def test_compose_conn_info_uses_http_info_when_available(
+    local_device_service, mock_baas
+):
     device = AllocatedDevice(
         device_id="bot-test-001",
         device_provider="local",
@@ -439,8 +442,11 @@ def test_compose_conn_info_uses_baas_ws_info(local_device_service, mock_baas):
     )
 
     conn = local_device_service._compose_device_conn_info(device=device)
-    assert conn.target == "127.0.0.1:18789"
-    # T07: http-info 成功时 token 由 http-info 覆盖（业务主走 HTTP）
+    # http-info 可用时，target/token/url 都来自 HTTP 链路（3 段 target），
+    # 与 JWT token 中的 target claim 对齐，proxy jwt_auth 才能校验通过。
+    assert conn.target == "LOCAL_bot-test-001--machine--user@2:20010"
+    assert conn.ws_target == "127.0.0.1:18789"
+    # http-info 成功时 token 由 http-info 覆盖（业务主走 HTTP）
     assert conn.token == "http-token-001"
     assert conn.bot_uuid == "bot-test-001"
     mock_baas.get_ws_info.assert_called_once_with(
@@ -826,6 +832,13 @@ def test_compose_conn_info_fills_url_and_token_from_http_info(
     assert conn.url == "http://10.0.0.1:20010"
     # http-info 提供的 token 应覆盖 ws-info 的（业务调用主要走 http）
     assert conn.token == "http-token-001"
+    # ws-info 的 expires_at 描述的是 ws token，不是这里返回的 http token——
+    # 填上就是给 caller 一个对不上的过期时间，所以留空表示"签发方没说"。
+    assert conn.expires_at == ""
+    # socket 侧使用 WS-info 自己签发的 target/token/expiry 组合。
+    assert conn.ws_target == "127.0.0.1:18789"
+    assert conn.ws_token == "fake-token"
+    assert conn.ws_expires_at == "2099-01-01T00:00:00"
     mock_baas.get_http_info.assert_called_once()
     call_kwargs = mock_baas.get_http_info.call_args.kwargs
     assert call_kwargs["bind_id"] == 99
@@ -895,8 +908,11 @@ def test_compose_conn_info_http_info_failure_falls_back_to_ws_only(
     assert conn.url == ""
     # token 用 ws 的（fake-token，见 fixture）
     assert conn.token == "fake-token"
+    # 回落到 ws token 后，ws-info 的过期时间才是对的那个
+    assert conn.expires_at == "2099-01-01T00:00:00"
     # target 仍是 ws 的
     assert conn.target == "127.0.0.1:18789"
+    assert conn.ws_target == "127.0.0.1:18789"
 
 
 def test_compose_conn_info_ws_info_failure_already_returns_unavailable(

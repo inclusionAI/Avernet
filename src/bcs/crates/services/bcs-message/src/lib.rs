@@ -37,7 +37,7 @@ pub struct MessageService {
     max_page_limit: u32,
 }
 
-enum ManagerWorkerHistoryView {
+pub enum ManagerWorkerHistoryView {
     Public,
     Worker(String),
 }
@@ -96,13 +96,13 @@ impl MessageService {
     /// - If the participant has a recorded join_seq, base_seq = join_seq.
     /// - Otherwise (NULL join_seq), base_seq = current_msg_seq.
     /// - N = new_participant_visible_limit.
-    fn compute_visible_from_seq(
-        &self,
+    pub fn compute_visible_from_seq(
         participant_join_seq: Option<&serde_json::Value>,
         current_msg_seq: i64,
         view_bot_id: &str,
+        new_participant_visible_limit: u64,
     ) -> Option<i64> {
-        let n = self.new_participant_visible_limit as i64;
+        let n = new_participant_visible_limit as i64;
         let join_seq = participant_join_seq
             .and_then(|jm| jm.get(view_bot_id))
             .and_then(|v: &serde_json::Value| v.as_i64());
@@ -119,8 +119,7 @@ impl MessageService {
         Some((base_seq - n + 1).max(1))
     }
 
-    fn manager_worker_history_view(
-        &self,
+    pub fn manager_worker_history_view(
         group: &Group,
         session: &Session,
         view_bot_id: Option<&str>,
@@ -149,6 +148,47 @@ impl MessageService {
             Ok(ManagerWorkerHistoryView::Worker(view_bot_id.to_string()))
         } else {
             Ok(ManagerWorkerHistoryView::Public)
+        }
+    }
+
+    /// Compute the message-history visibility predicates for a viewer, mirroring
+    /// the new-message path of `MessageService::get_session_history`. This is
+    /// the single source of truth shared by the legacy group-history facade and
+    /// the V1 `bcs-app-session` message-history facade so the two cannot drift.
+    ///
+    /// Returns:
+    /// - `ManagerWorker` strategy + worker viewer → `(Eq(worker_id), None)`
+    ///   (owner isolation: a worker only reads its own messages).
+    /// - `ManagerWorker` strategy + non-worker/manager viewer →
+    ///   `(IsNull, None)` (public-only: hide worker-owned messages, VUlai).
+    /// - Chat / other strategies → `(Any, visible_from_seq)` where
+    ///   `visible_from_seq` is the spec §5.2 new-participant cutoff for the
+    ///   viewer's `bot_uuid`, or `None` when no viewer / no recorded messages.
+    pub fn compute_session_history_query(
+        group: &Group,
+        session: &Session,
+        view_bot_id: Option<&str>,
+        new_participant_visible_limit: u64,
+    ) -> Result<(MessageOwnerFilter, Option<i64>), GroupUseCaseError> {
+        let is_manager_worker = group.group_strategy == GroupStrategy::ManagerWorker;
+        if is_manager_worker {
+            let view = Self::manager_worker_history_view(group, session, view_bot_id)?;
+            let owner_filter = match view {
+                ManagerWorkerHistoryView::Public => MessageOwnerFilter::IsNull,
+                ManagerWorkerHistoryView::Worker(worker_id) => MessageOwnerFilter::Eq(worker_id),
+            };
+            Ok((owner_filter, None))
+        } else {
+            let visible_from_seq = match view_bot_id {
+                Some(view_bot_id) => Self::compute_visible_from_seq(
+                    session.participant_join_seq.as_ref(),
+                    session.current_msg_seq,
+                    view_bot_id,
+                    new_participant_visible_limit,
+                ),
+                None => None,
+            };
+            Ok((MessageOwnerFilter::Any, visible_from_seq))
         }
     }
 }
@@ -340,7 +380,7 @@ impl GroupMessageHistoryService for MessageService {
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor,
+                next_before: page.next_cursor.map(|c| c.0),
             })
         } else {
             info!(
@@ -368,33 +408,12 @@ impl GroupMessageHistoryService for MessageService {
         if use_new_path {
             let sess = session.as_ref().unwrap();
             let limit = self.effective_limit(cmd.limit);
-            let is_manager_worker = group_opt
-                .as_ref()
-                .map(|group| group.group_strategy == GroupStrategy::ManagerWorker)
-                .unwrap_or(false);
-            let (owner_filter, visible_from_seq) = if is_manager_worker {
-                let view = self.manager_worker_history_view(
-                    group_opt.as_ref().unwrap(),
-                    sess,
-                    cmd.view_bot_id.as_deref(),
-                )?;
-                let owner_filter = match view {
-                    ManagerWorkerHistoryView::Public => MessageOwnerFilter::IsNull,
-                    ManagerWorkerHistoryView::Worker(worker_id) => MessageOwnerFilter::Eq(worker_id),
-                };
-                (owner_filter, None)
-            } else {
-                let visible_from_seq = if let Some(ref view_bot_id) = cmd.view_bot_id {
-                    self.compute_visible_from_seq(
-                        sess.participant_join_seq.as_ref(),
-                        sess.current_msg_seq,
-                        view_bot_id,
-                    )
-                } else {
-                    None
-                };
-                (MessageOwnerFilter::Any, visible_from_seq)
-            };
+            let (owner_filter, visible_from_seq) = Self::compute_session_history_query(
+                group_opt.as_ref().unwrap(),
+                sess,
+                cmd.view_bot_id.as_deref(),
+                self.new_participant_visible_limit,
+            )?;
 
             info!(
                 session_id = %session_id,
@@ -448,7 +467,7 @@ impl GroupMessageHistoryService for MessageService {
                 messages,
                 limit: cmd.limit,
                 before: cmd.before,
-                next_before: page.next_cursor,
+                next_before: page.next_cursor.map(|c| c.0),
             })
         } else {
             info!(
@@ -462,7 +481,7 @@ impl GroupMessageHistoryService for MessageService {
             let owner_filter = match group.group_strategy {
                 GroupStrategy::Chat => MessageOwnerFilter::Any,
                 GroupStrategy::ManagerWorker => {
-                    let Ok(view) = self.manager_worker_history_view(
+                    let Ok(view) = Self::manager_worker_history_view(
                         group,
                         session,
                         cmd.view_bot_id.as_deref(),

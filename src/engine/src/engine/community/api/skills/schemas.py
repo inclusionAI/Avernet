@@ -1,9 +1,9 @@
 """Skills router HTTP schemas."""
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from engine.community.api.response import ApiResponse
 
@@ -13,8 +13,27 @@ class SymlinkItem(BaseModel):
     target: str
 
 
+class PoolPhysicalMapping(BaseModel):
+    """Strict legacy physical mapping shape for Pool endpoints."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    target: str
+
+
+class PoolSkillMappingIntent(BaseModel):
+    """Strict mapping-v2 logical shape."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    corpus: Literal["local", "repo"]
+    relative_path: str
+    link_name: str
+
+
 class SyncSymlinkRequest(BaseModel):
-    symlinks: Optional[list[SymlinkItem]] = None
+    symlinks: list[SymlinkItem] | None = None
 
 
 class CleanSymlinkRequest(BaseModel):
@@ -72,7 +91,8 @@ class PoolLayoutActivateRequest(BaseModel):
     migration_generation: str
     preparation_id: str
     registered_local_names: list[str]
-    mappings: list[SymlinkItem]
+    mapping_contract_version: str | None = None
+    mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping]
 
 
 class PoolLayoutRollbackRequest(BaseModel):
@@ -105,7 +125,8 @@ class PoolLayoutActivateApiResponse(ApiResponse):
 
 
 class PoolMappingVerifyRequest(BaseModel):
-    mappings: list[SymlinkItem]
+    mapping_contract_version: str | None = None
+    mappings: list[PoolSkillMappingIntent | PoolPhysicalMapping]
     source_layout: Literal["pool", "legacy"] = "pool"
 
 
@@ -122,10 +143,12 @@ __all__ = [
     "PoolLayoutActivateResponse",
     "PoolLayoutRollbackRequest",
     "PoolMappingVerifyRequest",
+    "PoolPhysicalMapping",
+    "PoolQuarantineCleanupRequest",
+    "PoolSkillMappingIntent",
     "RuntimeLayoutProbeApiResponse",
     "RuntimeLayoutProbeRequest",
     "RuntimeLayoutProbeResponse",
-    "PoolQuarantineCleanupRequest",
     "SymlinkItem",
     "SyncSymlinkRequest",
 ]

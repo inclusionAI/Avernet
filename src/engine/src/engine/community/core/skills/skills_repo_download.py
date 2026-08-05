@@ -42,7 +42,16 @@ from pathlib import Path
 
 import requests
 
+from engine.community.config import (
+    AGENTBOX_ENV_VAR,
+    is_agentbox_runtime,
+    load_engine_config,
+)
+from engine.community.core.engine.naming import normalize
 from engine.community.plugin_api.workspace_root import workspace_root
+from engine.community.plugins.skills_pool.desktop_preparation import (
+    prepare_desktop_pool,
+)
 
 log = logging.getLogger("skills-repo-download")
 
@@ -119,10 +128,6 @@ MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 2
 SYNC_INTERVAL_SECONDS = 300  # 5 分钟同步一次
 
-# agentbox 容器内置该环境变量；ARCA / 云端 bot 容器没有。
-AGENTBOX_ENV_VAR = "MAC_CONTAINER"
-
-
 def _is_agentbox_env() -> bool:
     """识别当前是否运行在 agentbox（桌面版）容器内。
 
@@ -130,7 +135,7 @@ def _is_agentbox_env() -> bool:
     该环境变量。只在 agentbox 内才需要拉取 skills-repo，避免线上容器产
     生临时目录与备份目录的小文件污染。
     """
-    return os.getenv(AGENTBOX_ENV_VAR, "").strip().lower() in ("true", "1")
+    return is_agentbox_runtime()
 
 
 def _cleanup_stale_extract_dirs() -> None:
@@ -456,7 +461,34 @@ def _download_and_save(url: str, etag: str | None) -> bool:
     if ok and etag:
         _save_last_etag(etag)
         log.info("Saved ETag: %s", etag)
+    if ok:
+        prepare_pool_layout()
     return ok
+
+
+def prepare_pool_layout(*, home: Path | None = None) -> None:
+    """Best-effort Desktop Pool preparation over the existing repo delivery."""
+
+    if not _is_agentbox_env():
+        return
+    try:
+        engine = normalize(load_engine_config().default_engine)
+        result = prepare_desktop_pool(
+            engine=engine,
+            repo_source=TARGET_DIR,
+            home=home or Path.home(),
+        )
+        log.info(
+            "Desktop skills Pool preparation: status=%s preparation_id=%s "
+            "reason=%s",
+            result.status.value,
+            result.preparation_id,
+            result.reason,
+        )
+    except Exception:
+        log.exception(
+            "Desktop skills Pool preparation failed; preserving Legacy layout"
+        )
 
 
 def bootstrap_on_startup() -> None:
@@ -486,10 +518,12 @@ def bootstrap_on_startup() -> None:
     url, etag = _get_download_info()
     if not url:
         log.info("No skills-repo URL available — skipping bootstrap download")
+        prepare_pool_layout()
         return
 
     if not _should_download(url, etag):
         log.info("Skills-repo unchanged on startup, skipping download")
+        prepare_pool_layout()
         return
 
     log.info("Skills-repo bootstrap: starting download")
@@ -501,6 +535,26 @@ def bootstrap_on_startup() -> None:
             "Skills-repo bootstrap failed. "
             "Engine will start without pre-populated skills."
         )
+
+
+def _sync_once() -> None:
+    """Run one periodic repo refresh and keep Pool preparation in sync."""
+
+    url, etag = _get_download_info()
+    if not url:
+        log.info("Background sync: no URL available, skipping")
+        prepare_pool_layout()
+        return
+    if not _should_download(url, etag):
+        log.info("Background sync: no changes (ETag match), skipping")
+        prepare_pool_layout()
+        return
+    log.info("Background sync: downloading latest skills-repo...")
+    ok = _download_and_save(url, etag)
+    if ok:
+        log.info("Background sync: completed successfully")
+    else:
+        log.warning("Background sync: download failed, will retry next cycle")
 
 
 def start_background_sync(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> None:
@@ -527,19 +581,7 @@ def start_background_sync(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> None
             log.info("Background sync: sleeping %d seconds", interval_seconds)
             time.sleep(interval_seconds)
             log.info("Background sync: wake up, checking for updates")
-            url, etag = _get_download_info()
-            if not url:
-                log.info("Background sync: no URL available, skipping")
-                continue
-            if not _should_download(url, etag):
-                log.info("Background sync: no changes (ETag match), skipping")
-                continue
-            log.info("Background sync: downloading latest skills-repo...")
-            ok = _download_and_save(url, etag)
-            if ok:
-                log.info("Background sync: completed successfully")
-            else:
-                log.warning("Background sync: download failed, will retry next cycle")
+            _sync_once()
 
     t = threading.Thread(target=_sync_loop, daemon=True)
     t.start()

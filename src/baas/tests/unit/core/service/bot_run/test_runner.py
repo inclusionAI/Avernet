@@ -1642,7 +1642,139 @@ class TestSelectDispatcherConfig:
         assert result is task_d
 
 
-# ==================== Tests: with_sse_heartbeat ====================
+# ==================== Tests: BCN queue dispatcher switch ====================
+
+
+def _bcn_metadata():
+    """Metadata with from_bcn=true, matching BCN service's _build_bcn_metadata."""
+    return {"bot_options": {"from_bcn": "true", "lifecycle_stage": "all"}}
+
+
+class TestSelectDispatcherBcnSwitch:
+    """Tests for bot_run.bcn_queue_dispatcher_enabled switch."""
+
+    def test_bcn_switch_on_selects_queue(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + switch='true' → QueueTaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("true")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is queue_d
+
+    def test_bcn_switch_off_keeps_task(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + switch='false' → still TaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("false")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_bcn_switch_get_config_exception_falls_through(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + get_config raises → exception swallowed, defaults to Task."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                raise RuntimeError("db error")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_bcn_metadata_no_config_service_keeps_task(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata but no system_config_service → cannot read switch, defaults to Task."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        runner = BotRunner(
+            bot_service_selector=mock_selector,
+            run_repository=mock_run_repo,
+            bot_service_plugin=mock_bot_service_plugin,
+            dispatchers=[queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_non_bcn_metadata_ignores_switch(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """Non-BCN metadata + switch='true' → still TaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("true")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher(
+            "bot-1", metadata={"bot_options": {"lifecycle_stage": "online"}}
+        )
+        assert result is task_d
 
 
 class TestWithSseHeartbeat:

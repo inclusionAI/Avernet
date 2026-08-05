@@ -48,6 +48,8 @@ from engine.community.openclaw.config import OpenClawConfig, get_config
 log = logging.getLogger("openclaw-client")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
 _DEFAULT_EARLY_FINAL_GRACE_SECONDS = 3.0
+# Long-running subagent workflows can be quiet while work continues upstream.
+_DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS = 20 * 60
 
 
 def _summarize_attachments(attachments: Any) -> dict[str, Any]:
@@ -888,7 +890,11 @@ class OpenClawGatewayClient:
             if not run_id:
                 log.warning("chat.send response missing runId, falling back to unfiltered mode")
 
-            timeout = (timeout_ms / 1000) if timeout_ms else 300
+            timeout = (
+                timeout_ms / 1000
+                if timeout_ms
+                else _DEFAULT_CHAT_STREAM_TIMEOUT_SECONDS
+            )
             while True:
                 try:
                     wait_timeout = (

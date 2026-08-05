@@ -15,6 +15,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolQuarantineCleanupRequest,
+    PoolSkillMappingIntent,
     SymlinkItem,
 )
 
@@ -154,6 +155,54 @@ async def test_claude_code_adapter_exposes_complete_pool_runtime_contract() -> N
             "source_layout": "pool",
         }
     )
+
+
+@pytest.mark.asyncio
+async def test_claude_code_adapter_propagates_logical_mapping_version() -> None:
+    port = _port()
+    adapter = ClaudeCodeSkillsAdapter(port)
+    mapping = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="business/reviewer",
+        link_name="reviewer",
+    )
+    version = "skills-pool-mapping-v2"
+
+    await adapter.activate_pool_layout(
+        PoolLayoutActivateRequest(
+            migration_generation="generation-1",
+            preparation_id="prep-1",
+            mappings=[mapping],
+            mapping_contract_version=version,
+        )
+    )
+    await adapter.publish_pool_mappings(
+        [mapping],
+        mapping_contract_version=version,
+    )
+    await adapter.verify_pool_mappings(
+        [mapping],
+        mapping_contract_version=version,
+    )
+
+    expected_mapping = {
+        "corpus": "repo",
+        "relative_path": "business/reviewer",
+        "link_name": "reviewer",
+    }
+    activation = port.activate_pool_layout.await_args.args[0]
+    assert activation["mapping_contract_version"] == version
+    assert activation["mappings"] == [expected_mapping]
+    assert port.publish_pool_mappings.await_args.args[0] == {
+        "mapping_contract_version": version,
+        "mappings": [expected_mapping],
+        "source_layout": "pool",
+    }
+    assert port.verify_pool_mappings.await_args.args[0] == {
+        "mapping_contract_version": version,
+        "mappings": [expected_mapping],
+        "source_layout": "pool",
+    }
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,22 @@ def test_user_only_without_value_returns_none(resolver, monkeypatch):
     assert resolver.get_secret("half") is None
 
 
+def test_registered_name_must_be_prefix_free(resolver, monkeypatch):
+    """The name is the bare key — the resolver adds the prefix itself.
+
+    Registering a name that already carries the prefix double-prefixes the
+    lookup and the secret never resolves, which for the principal signing key
+    means every /openapi/v1 request answers 401. The commented example in
+    application-community.yaml is the thing this guards.
+    """
+    monkeypatch.setenv(f"{_PREFIX}GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE", "shared-hmac")
+
+    assert resolver.get_secret("gateway_principal_signing_key").secret_value == (
+        "shared-hmac"
+    )
+    assert resolver.get_secret(f"{_PREFIX}gateway_principal_signing_key") is None
+
+
 def test_prefix_isolates_lookup(monkeypatch):
     # A different prefix does not see another prefix's vars.
     monkeypatch.setenv("OTHER_PREFIX_FOO_VALUE", "x")
