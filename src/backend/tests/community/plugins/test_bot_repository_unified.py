@@ -186,6 +186,7 @@ def test_get_env_scoped(repo, db):
     assert repo.get_by_id_and_owner("bot-1", "emp1") is None
     assert repo.count_by_owner("emp1") == 0
     assert repo.exists_by_owner_and_bot_id("emp1", "bot-1") is False
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
 
 
 def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
@@ -287,6 +288,19 @@ def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b3", bot_type="desktop"))
     assert repo.count_by_owner("emp1") == 3
     assert repo.count_by_owner("emp1", exclude_bot_type="desktop") == 1
+
+
+def test_exists_by_owner_and_bot_type_only_matches_live_requested_type(repo):
+    repo.insert(_data(bot_id="service", bot_type="service"))
+    repo.insert(_data(bot_id="deleted-personal", bot_type="personal", is_delete=1))
+
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
+    assert repo.exists_by_owner_and_bot_type("emp1", "service") is True
+
+    repo.insert(_data(bot_id="live-personal", bot_type="personal"))
+
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is True
+    assert repo.exists_by_owner_and_bot_type("other-owner", "personal") is False
 
 
 # ── update_by_owner allowlist (adopt prod) ──────────────────────────
