@@ -184,6 +184,10 @@ class BotRepository(Protocol):
         """Check if a bot with specific bot_id exists for the owner."""
         ...
 
+    def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
+        """Check if the owner has a live Bot of the requested type."""
+        ...
+
     def exists_by_bot_name(self, bot_name: str) -> bool:
         """Check if a bot with specific bot_name exists globally."""
         ...

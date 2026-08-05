@@ -947,6 +947,12 @@ class BotService:
         """First bot iff the owner has zero bots (current env; tenant enforced by guard)."""
         return self._repository.count_by_owner(user_id) == 0
 
+    def is_first_personal_bot(self, user_id: str) -> bool:
+        """Return whether the owner has no live personal Bot in the current scope."""
+        return not self._repository.exists_by_owner_and_bot_type(
+            user_id, "personal"
+        )
+
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
 

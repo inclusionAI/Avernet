@@ -35,6 +35,8 @@ def _run(apply_result):
     passport = MagicMock()
     passport.apply_first_agent_passport.return_value = apply_result
     bot_service = MagicMock()
+    bot_service.is_first_bot.return_value = True
+    bot_service.is_first_personal_bot.return_value = True
     skill_set_factory = MagicMock()
     skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
     return create_bot_with_authorization(
