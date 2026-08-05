@@ -4295,16 +4295,24 @@ class BotService:
                 ) from e
 
         try:
-            self._repository.update_by_owner(bot_id, user_id, update_data)
+            # Binding is the poll handler's source of truth. Move it away from
+            # the previous runtime's ACTIVE state before scheduling this
+            # publish, otherwise a worker could mistake old ACTIVE for success
+            # of the newly accepted BaaS publish.
             self._device_binding_repo.update_status(
                 binding_id=binding_id, status=DeviceBindingStatus.PENDING
             )
+            self._repository.update_by_owner(bot_id, user_id, update_data)
         except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] failed to mark PENDING "
-                "for bot_id=%s binding_id=%s: %s",
-                bot_id, binding_id, e,
+            logger.exception(
+                "[bot_service._restart_bot_baas] failed to mark restart "
+                "PENDING for bot_id=%s binding_id=%s publish_id=%s",
+                bot_id, binding_id, publish_id,
             )
+            raise BotServiceError(
+                "BaaS restart was accepted but its PENDING state could not "
+                f"be persisted: publish_id={publish_id}"
+            ) from e
 
         task_queue_service = self._task_queue_service
         if publish_id is not None and task_queue_service is not None:

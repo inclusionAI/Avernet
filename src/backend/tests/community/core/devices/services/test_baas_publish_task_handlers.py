@@ -1628,6 +1628,12 @@ def test_restart_replay_after_active_reemits_reconciliation_wakeup():
         )
         bot_repository = MagicMock()
         baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
         handler, _ = _make_restart_handler(
             repo=repo,
             bot_repository=bot_repository,
@@ -1646,7 +1652,7 @@ def test_restart_replay_after_active_reemits_reconciliation_wakeup():
         )
 
         assert outcome == Complete()
-        baas_device_service.poll_publish_once.assert_not_called()
+        baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1002)
         assert received == [
             BaasPublishCompletedEvent(
                 binding_id=42,
@@ -1783,11 +1789,18 @@ def test_restart_default_policy_persistence_failure_retries_without_completion()
                 "restart_image_policy_on_success": "default",
             },
         )
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
         handler, _ = _make_restart_handler(
             repo=repo,
             bot_repository=MagicMock(),
             publish_repository=MagicMock(),
-            baas_device_service=MagicMock(),
+            baas_device_service=baas_device_service,
         )
 
         with patch(
@@ -1822,11 +1835,16 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
             "restart_image_policy_on_success": "default",
         },
     )
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.ACTIVE.value
+    )
+    baas_device_service.refresh_codefuse_token_on_publish_success.return_value = None
     handler, _ = _make_restart_handler(
         repo=repo,
         bot_repository=MagicMock(),
         publish_repository=MagicMock(),
-        baas_device_service=MagicMock(),
+        baas_device_service=baas_device_service,
     )
 
     with patch(
@@ -1850,3 +1868,48 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
         binding_id=42,
         props={"restart_image_policy_on_success": None},
     )
+
+
+def test_restart_old_active_does_not_finalize_while_current_publish_is_pending():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props={
+            "restart_publish_id": 1002,
+            "restart_image_policy_on_success": "default",
+        },
+    )
+    bot_repository = MagicMock()
+    bot_repository.get_by_binding_id.return_value = {
+        "status": DeviceBindingStatus.ACTIVE.value
+    }
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.PENDING.value
+    )
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        publish_repository=MagicMock(),
+        baas_device_service=baas_device_service,
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services."
+        "baas_publish_task_handlers.persist_default_image_policy"
+    ) as persist:
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+            )
+        )
+
+    assert outcome == Reschedule(10.0)
+    baas_device_service.poll_publish_once.assert_called_once_with(publish_id=1002)
+    persist.assert_not_called()
+    repo.update_status.assert_not_called()
