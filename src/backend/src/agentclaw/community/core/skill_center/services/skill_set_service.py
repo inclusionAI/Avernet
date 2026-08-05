@@ -591,6 +591,33 @@ class SkillSetService:
                     results["failed"].append({"skill_id": skill_id, "error": "Skill not found"})
                     continue
 
+            # Local skills are stored in a per-Bot workspace and must never be
+            # associated with another Bot's skill set. Numeric skill IDs are
+            # globally resolvable, so a stale caller bot_id could otherwise
+            # create a cross-Bot association here.
+            skill_git_path = skill.get("git_path", "")
+            target_bot_id = skill_set.get("bolt_id") or self.bot_id
+            if (
+                skill_git_path.startswith("local://")
+                and skill.get("bolt_id") != target_bot_id
+            ):
+                results["failed"].append(
+                    {
+                        "skill_id": skill_id,
+                        "error": "Skill belongs to another bot",
+                    }
+                )
+                logger.warning(
+                    "[add_skills_to_set] Rejected cross-Bot local skill: "
+                    "skill_id=%s, skill_bot_id=%s, skill_set_id=%s, "
+                    "skill_set_bot_id=%s",
+                    skill_id,
+                    skill.get("bolt_id"),
+                    skill_set_id,
+                    target_bot_id,
+                )
+                continue
+
             # Check if already associated in the same skill set
             existing_skills = self.skill_set_repo.get_skills_in_set(skill_set_id)
             already_exists = any(s.get('id') == skill.get('id') for s in existing_skills)
