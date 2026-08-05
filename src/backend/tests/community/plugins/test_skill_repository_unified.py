@@ -509,6 +509,40 @@ def test_explicit_env_active_skill_sets_and_mcps_are_isolated(sets, db):
     assert sets.get_mcp_servers_in_set_for_env(pre["id"], env="prod") == []
 
 
+def test_env_scoped_active_skill_sets_preserve_bot_and_global_defaults(sets, db):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    with db.orm_session() as session:
+        session.query(SkillSet).filter(SkillSet.id.in_([
+            int(bot_default["id"]), int(global_default["id"])
+        ])).update({SkillSet.env: "prod"}, synchronize_session=False)
+
+    active = sets.get_all_active_skill_sets_for_env(
+        user_id="owner-x", bolt_id="bot-x", engine_type="openclaw", env="prod"
+    )
+
+    assert [row["id"] for row in active] == [
+        bot_default["id"],
+        global_default["id"],
+    ]
+
+
 def test_add_default_mcp_exclusion_upsert_idempotent(sets, db):
     ok = sets.add_default_mcp_exclusion("u1", "bot1", 7, "mcp.z")
     assert ok is True
