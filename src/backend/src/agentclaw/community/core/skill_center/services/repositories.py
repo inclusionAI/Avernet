@@ -21,6 +21,10 @@ class SkillRepository(Protocol):
     def get_by_id(self, skill_id: str) -> dict | None:
         ...
 
+    def get_raw_bolt_id(self, skill_id: str) -> str | None:
+        """Return the stored nullable Bot owner for an existing Skill."""
+        ...
+
     def get_by_uuid(self, skill_uuid: str, env: str | None = None) -> dict | None:
         """根据 skill_uuid（UUID 字符串）查询技能记录。"""
         ...

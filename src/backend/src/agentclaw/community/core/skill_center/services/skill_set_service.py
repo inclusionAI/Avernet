@@ -597,10 +597,15 @@ class SkillSetService:
             # create a cross-Bot association here.
             skill_git_path = skill.get("git_path", "")
             target_bot_id = skill_set.get("bolt_id") or self.bot_id
+            raw_skill_bot_id = self.skill_repo.get_raw_bolt_id(
+                str(skill.get("id"))
+            )
+            if raw_skill_bot_id is not None and not isinstance(raw_skill_bot_id, str):
+                raw_skill_bot_id = skill.get("bolt_id")
             if (
                 skill_git_path.startswith("local://")
-                and skill.get("bolt_id") is not None
-                and skill.get("bolt_id") != target_bot_id
+                and raw_skill_bot_id is not None
+                and raw_skill_bot_id != target_bot_id
             ):
                 results["failed"].append(
                     {
@@ -613,7 +618,7 @@ class SkillSetService:
                     "skill_id=%s, skill_bot_id=%s, skill_set_id=%s, "
                     "skill_set_bot_id=%s",
                     skill_id,
-                    skill.get("bolt_id"),
+                    raw_skill_bot_id,
                     skill_set_id,
                     target_bot_id,
                 )

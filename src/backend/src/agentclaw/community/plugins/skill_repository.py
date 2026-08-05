@@ -179,6 +179,19 @@ class SkillRepository:
             )
             return _skill_to_dict(s) if s else None
 
+    def get_raw_bolt_id(self, skill_id: str) -> Optional[str]:
+        """Return the stored owner without legacy ``NULL`` normalization."""
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Skill.bolt_id)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                )
+                .first()
+            )
+            return row[0] if row is not None else None
+
     def get_by_uuid(
         self, skill_uuid: str, env: str | None = None
     ) -> Optional[dict]:

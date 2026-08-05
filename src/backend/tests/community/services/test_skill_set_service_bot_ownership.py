@@ -63,3 +63,42 @@ async def test_add_skills_to_set_rejects_skill_owned_by_another_bot(skill_set_se
         }
     ]
     skill_set_service.skill_set_repo.add_skill_to_set.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_skills_to_set_allows_legacy_unowned_local_skill(
+    skill_set_service,
+):
+    """A legacy NULL owner stays available despite its public default alias."""
+    skill_set_service.skill_set_repo.get_by_id.return_value = {
+        "id": "10",
+        "bolt_id": "target-bot",
+        "is_default": False,
+        "is_active": False,
+    }
+    skill_set_service.skill_set_repo.get_skills_in_set.return_value = []
+    skill_set_service.skill_set_repo.list_all.return_value = []
+    skill_set_service.skill_set_repo.add_skill_to_set.return_value = True
+    skill_set_service.skill_repo.get_by_id.return_value = {
+        "id": "20",
+        "name": "legacy-local-skill",
+        "bolt_id": "default",
+        "git_path": "local:///skills-local/legacy-local-skill",
+    }
+    skill_set_service.skill_repo.get_raw_bolt_id.return_value = None
+
+    with patch(
+        "agentclaw.community.core.skill_center.services.skill_set_service"
+        ".SkillSetMetadataWriter.write_metadata"
+    ):
+        result = await skill_set_service.add_skills_to_set(
+            "10", ["20"], user_id="owner"
+        )
+
+    assert result["failed"] == []
+    assert result["success"] == [
+        {"skill_id": "20", "name": "legacy-local-skill"},
+    ]
+    skill_set_service.skill_set_repo.add_skill_to_set.assert_called_once_with(
+        "10", "20"
+    )
