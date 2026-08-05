@@ -112,6 +112,9 @@ class LocalSkillDeleteService:
                     owner_id=owner_id,
                     bot_id=bot_id,
                     engine_type=bot.get("active_engine"),
+                    entity_type=str(bot.get("entity_type") or "staff"),
+                    is_desktop=bot.get("bot_type") == "desktop",
+                    is_teclaw=bot.get("device_provider") == "teclaw",
                     locator=locator,
                 )
             )

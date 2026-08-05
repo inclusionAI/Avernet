@@ -139,8 +139,16 @@ class _Collaborators:
 class _Factory:
     def __init__(self, files):
         self.files = files
+        self.locator_kwargs = None
 
-    def local_skill_package_storage_for_locator(self, *, locator, **_kwargs):
+    def local_skill_package_storage_for_locator(
+        self, *, locator, entity_type, is_desktop, is_teclaw, **_kwargs
+    ):
+        self.locator_kwargs = {
+            "entity_type": entity_type,
+            "is_desktop": is_desktop,
+            "is_teclaw": is_teclaw,
+        }
         return LocalSkillPackageStorage(self.files, locator)
 
     def local_skill_package_storage(self, *, directory_name, **_kwargs):
