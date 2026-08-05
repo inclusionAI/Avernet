@@ -1,4 +1,4 @@
-"""Persist a draft restart's default-image policy after Device activation."""
+"""Persist a draft restart's default-image policy before Device activation."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from agentclaw.community.core.bot_management.services.teclaw_provision_service i
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository,
 )
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import DeviceAliveEvent
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
@@ -28,7 +28,7 @@ DEFAULT_IMAGE_POLICY_VALUE = "default"
 
 
 class DefaultImagePolicyActivationListener(LifecycleBase):
-    """Finalize DEFAULT only for recreate allocations carrying the intent."""
+    """Finalize DEFAULT before activating recreate allocations carrying the intent."""
 
     @inject
     def __init__(
@@ -45,12 +45,17 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
         from agentclaw.community.core.events.bus import get_event_bus
 
         bus = get_event_bus()
-        existing = bus._handlers.get(DeviceActivatedEvent, [])  # type: ignore[attr-defined]
+        existing = bus._handlers.get(DeviceAliveEvent, [])  # type: ignore[attr-defined]
         if self.handle in existing:
             return
-        bus.subscribe(DeviceActivatedEvent, self.handle)
+        bus.subscribe(DeviceAliveEvent, self.handle, required=True)
 
-    def handle(self, event: DeviceActivatedEvent) -> None:
+    def handle(self, event: DeviceAliveEvent) -> None:
+        # This policy belongs only to the ARCA destroy/recreate path. BaaS
+        # in-place restart is finalized by its publish poll handler.
+        if event.device_provider != "arca":
+            return
+
         binding = self._binding_repository.get_by_id(event.binding_id)
         if binding is None:
             return
@@ -59,7 +64,15 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
             return
 
         bot = self._bot_repository.get_by_binding_id(event.binding_id)
-        if not isinstance(bot, dict) or bot.get("bot_type") != "service":
+        if not isinstance(bot, dict):
+            # apply_device() starts the runtime before BotService writes the new
+            # binding_id back to ac_bots. Keep the Binding PENDING so the next
+            # Alive callback retries after that mapping becomes visible.
+            raise RuntimeError(
+                "service Bot mapping is not ready for default-image intent: "
+                f"binding_id={event.binding_id}"
+            )
+        if bot.get("bot_type") != "service":
             return
         active_engine = str(bot.get("active_engine") or "").strip().lower()
         if active_engine in DEFAULT_TECLAW_ENGINE_TYPES:
@@ -84,7 +97,7 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
             props={IMAGE_POLICY_ON_ACTIVE_KEY: None},
         )
         logger.info(
-            "[default_image_policy_listener] persisted DEFAULT after activation: "
+            "[default_image_policy_listener] persisted DEFAULT before activation: "
             "bot_id=%s binding_id=%s",
             bot_id,
             event.binding_id,

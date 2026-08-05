@@ -9,11 +9,11 @@ from agentclaw.community.core.bot_management.services.default_image_policy_liste
     DefaultImagePolicyActivationListener,
 )
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import DeviceAliveEvent
 
 
-def _event() -> DeviceActivatedEvent:
-    return DeviceActivatedEvent(
+def _event() -> DeviceAliveEvent:
+    return DeviceAliveEvent(
         device_id="device-7",
         binding_id=7,
         entity_id="staff-u1",
@@ -57,7 +57,9 @@ async def test_startup_subscribes_once():
     await listener.startup()
     await listener.startup()
 
-    assert get_event_bus()._handlers[DeviceActivatedEvent] == [listener.handle]
+    bus = get_event_bus()
+    assert bus._handlers[DeviceAliveEvent] == [listener.handle]
+    assert (DeviceAliveEvent, listener.handle) in bus._required_handlers
     reset_event_bus()
 
 
@@ -104,6 +106,16 @@ def test_persistence_failure_keeps_restart_intent():
         "default_image_policy_listener.persist_default_image_policy",
         side_effect=RuntimeError("db unavailable"),
     ), pytest.raises(RuntimeError, match="db unavailable"):
+        listener.handle(_event())
+
+    binding_repo.update_device_props.assert_not_called()
+
+
+def test_mapping_not_ready_keeps_restart_intent_for_alive_retry():
+    listener, bot_repo, _publish_repo, binding_repo = _listener()
+    bot_repo.get_by_binding_id.return_value = None
+
+    with pytest.raises(RuntimeError, match="mapping is not ready"):
         listener.handle(_event())
 
     binding_repo.update_device_props.assert_not_called()
