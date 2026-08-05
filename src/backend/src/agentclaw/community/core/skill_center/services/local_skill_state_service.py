@@ -117,6 +117,10 @@ class LocalSkillStateService:
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
+                    if not self._sync_runtime(
+                        bot=bot, owner_id=owner_id, bot_id=bot_id
+                    ):
+                        raise LocalSkillRuntimeSyncError()
                 raise LocalSkillRuntimeSyncError()
             return {**skill, "active": active, "changed": changed}
         finally:
