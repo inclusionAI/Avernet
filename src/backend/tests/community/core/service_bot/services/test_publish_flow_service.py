@@ -13,7 +13,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
     resolve_publish_image_pin as resolve_publish_image_pin_policy,
@@ -107,7 +107,7 @@ def _real_ledger():
 
 def _pf(*args, **kw):
     """Construct PublishFlowService for tests, defaulting the DI-required teclaw
-    promotion deps to Mocks (the arca/verify flow tests don't exercise them)."""
+    promotion deps to Mocks (the ARCA/verify flow tests don't exercise them)."""
     if "common_config_service" not in kw:
         common_config = Mock()
         common_config.get_value.return_value = None
@@ -152,7 +152,9 @@ def _pf(*args, **kw):
         def _resolve_runtime_kind(record):
             ext = record.ext or {}
             explicit = ext.get("sbot_runtime_kind")
-            if explicit in {"arka", "teclaw"}:
+            if explicit == "arka":
+                return "arca"
+            if explicit in {"arca", "teclaw"}:
                 return explicit
             artifact = ext.get("config_artifact")
             if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
@@ -164,7 +166,7 @@ def _pf(*args, **kw):
                 if isinstance(baas, Mock)
                 else None
             )
-            return "teclaw" if provider == "teclaw" else "arka"
+            return "teclaw" if provider == "teclaw" else "arca"
 
         publish_service.resolve_publish_runtime_kind.side_effect = _resolve_runtime_kind
     if "channel_overrides_reader" not in kw:
@@ -1091,7 +1093,7 @@ async def test_restart_sets_restarting_flag_in_ext():
             "binding": {"online": 1},
             "migration_path": "/path/to/artifact",
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     _setup_restart(svc, record)
@@ -1159,7 +1161,7 @@ async def test_restart_recreate_threads_config_artifact():
             "binding": {"online": 1},
             "config_artifact": artifact,
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     _setup_restart(svc, record)
@@ -1167,7 +1169,7 @@ async def test_restart_recreate_threads_config_artifact():
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
-    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
+    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
     # BOT_NOT_FOUND = the record is already gone → nothing to retire.
@@ -1256,7 +1258,7 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
             "binding": {"online": 1},
             "migration_path": "/m/1",
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     _setup_restart(svc, record, bot_uuid="BOT-old")
@@ -1265,7 +1267,7 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
 
     assert result["success"] is True
     build_service.upgrade_async.assert_awaited_once()
-    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arca:v2"
     build_service.release_async.assert_not_awaited()
     build_service.retire_superseded_bot.assert_not_called()
 
@@ -1706,7 +1708,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
         ext={
             **_artifact_ext("draft"),
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     await svc._execute_verify_first_release(
@@ -1721,7 +1723,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     # identity keys stable across the promotion
     assert delivered["engine_ext"]["bot_id"] == "b2"
     assert delivered["engine_ext"]["owner_id"] == "u1"
-    # TeClaw does not consume ARKA image Pin fields even if a historical row
+    # TeClaw does not consume ARCA image Pin fields even if a historical row
     # happens to contain them.
     assert build_service.release_async.await_args.kwargs["docker_image"] is None
 
@@ -1751,7 +1753,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
         ext={
             **_artifact_ext("draft"),
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     await svc._execute_verify_upgrade(
@@ -2300,7 +2302,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         source_bot_id="bot-123",
         ext={
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry.example.com/arka/openclaw:v3",
+            "sbot_docker_image": "registry.example.com/arca/openclaw:v3",
         },
     )
 
@@ -2313,7 +2315,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
             "migration_path": "/tmp/build/v2",
             "binding": {"online": 100},  # binding_id
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry.example.com/arka/openclaw:v2",
+            "sbot_docker_image": "registry.example.com/arca/openclaw:v2",
             "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
@@ -2354,7 +2356,7 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     assert upgrade_call.kwargs["device_count"] == 1
     assert (
         upgrade_call.kwargs["docker_image"]
-        == "registry.example.com/arka/openclaw:v2"
+        == "registry.example.com/arca/openclaw:v2"
     )
     assert upgrade_call.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
@@ -2629,9 +2631,9 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         ext={
             "binding": {"online": 123},
             "skills_manifest": frozen_skills,
-            "sbot_runtime_kind": "arka",
+            "sbot_runtime_kind": "arca",
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         },
     )
     binding = Mock()
@@ -2640,7 +2642,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     publish_service.get_publish_by_id = Mock(return_value=record)
     publish_service.get_device_binding_by_id = Mock(return_value=binding)
     # The mutable Draft has already switched to TeClaw, but this historical
-    # Publish remains ARKA-owned and must still execute BaaS scale.
+    # Publish remains ARCA-owned and must still execute BaaS scale.
     bot_service.get_bot = Mock(return_value={
         "bot_id": "bot-source",
         "active_engine": "teclaw",
@@ -2661,7 +2663,7 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["target_count"] == 3
     assert kwargs["auto_approve_publish"] is True
     assert kwargs["config"] == {
-        "deploy_config": {"docker_image": "registry/arka:v2"}
+        "deploy_config": {"docker_image": "registry/arca:v2"}
     }
     # (#197) request_id is now the runner's deterministic op id (wall-clock id gone).
     assert kwargs["request_id"] == operation_request_id(10, "scale", "online", 1)
@@ -2742,7 +2744,7 @@ async def test_scale_bot_teclaw_returns_supported_message_without_baas_call():
     bot_service.get_bot = Mock(
         return_value={"bot_id": "bot-source", "active_engine": "openclaw", "ext": {}}
     )
-    # The current Draft is ARKA, but the immutable Publish is TeClaw-owned.
+    # The current Draft is ARCA, but the immutable Publish is TeClaw-owned.
     baas_service.resolve_container_provider.return_value = "baas"
 
     result = await svc.scale_bot(publish_id=15, operator="u1")

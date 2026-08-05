@@ -171,7 +171,7 @@ def _seed_published_service_bot(world) -> None:
         "ext": {
             "migration_path": "/nas/migration/path",
             "sbot_use_default_image": True,
-            "sbot_runtime_kind": "arka",
+            "sbot_runtime_kind": "arca",
         },
     })
 

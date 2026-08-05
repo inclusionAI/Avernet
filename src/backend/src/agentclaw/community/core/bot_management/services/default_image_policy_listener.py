@@ -15,7 +15,7 @@ from agentclaw.community.core.events.types import DeviceAliveEvent
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
     BotPublishRepositoryProtocol,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     persist_default_image_policy,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase

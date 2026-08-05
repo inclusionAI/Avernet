@@ -26,14 +26,14 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_image_pin_to_ext,
     copy_image_policy_to_ext,
     has_explicit_image_policy,
-    resolve_current_arka_image,
+    resolve_current_arca_image,
     apply_runtime_kind_to_ext,
     runtime_kind_from_provider,
-    RUNTIME_KIND_ARKA,
+    RUNTIME_KIND_ARCA,
     RUNTIME_KIND_TECLAW,
     PublishImagePolicyResolver,
     ServiceBotImagePin,
@@ -249,22 +249,22 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 runtime_kind = (
                     RUNTIME_KIND_TECLAW
                     if self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
-                    else RUNTIME_KIND_ARKA
+                    else RUNTIME_KIND_ARCA
                 )
             ext = apply_runtime_kind_to_ext(ext, runtime_kind)
 
         # A new/default Bot carries an explicit marker and never consumes the
-        # legacy Pin switch. A pre-feature ARKA Bot has no policy marker; when
+        # legacy Pin switch. A pre-feature ARCA Bot has no policy marker; when
         # protection is enabled, freeze the configured image on the new publish
         # record so all published operations remain reproducible.
-        is_legacy_arka_service = (
+        is_legacy_arca_service = (
             isinstance(source_bot, dict)
             and source_bot.get("bot_type") == "service"
             and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
             and not has_explicit_image_policy(source_bot_ext)
         )
-        if is_legacy_arka_service:
-            legacy_image = resolve_current_arka_image(
+        if is_legacy_arca_service:
+            legacy_image = resolve_current_arca_image(
                 self._common_config_service, env=self._env
             )
             if legacy_image:

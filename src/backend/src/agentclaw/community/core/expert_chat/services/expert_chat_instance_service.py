@@ -57,7 +57,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     PublishImagePolicyResolver,
 )
 from agentclaw.community.core.service_bot.types import PublishStage

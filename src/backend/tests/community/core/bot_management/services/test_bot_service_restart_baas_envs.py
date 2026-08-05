@@ -128,7 +128,7 @@ def _make_bot(
 
 class TestRestartBaasImagePolicy:
     def test_low_level_restart_uses_explicit_pin_without_mutating_template_snapshot(self):
-        template_config = {"image": "registry/arka:v1", "envs": {"A": "1"}}
+        template_config = {"image": "registry/arca:v1", "envs": {"A": "1"}}
         svc, baas, _ = _make_service(
             template_config=template_config,
             bot_type="service",
@@ -138,7 +138,7 @@ class TestRestartBaasImagePolicy:
             **_make_bot(bot_type="service", active_engine="openclaw"),
             "ext": {
                 "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_docker_image": "registry/arca:v2",
             },
         }
 
@@ -147,10 +147,10 @@ class TestRestartBaasImagePolicy:
         )
 
         assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
-            "image": "registry/arka:v2",
+            "image": "registry/arca:v2",
             "envs": {"A": "1"},
         }
-        assert template_config["image"] == "registry/arka:v1"
+        assert template_config["image"] == "registry/arca:v1"
 
     def test_restart_failure_does_not_persist_default_marker(self):
         svc, baas, _ = _make_service(
@@ -163,7 +163,7 @@ class TestRestartBaasImagePolicy:
             **_make_bot(bot_type="service", active_engine="openclaw"),
             "ext": {
                 "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_docker_image": "registry/arca:v2",
             },
         }
 
@@ -182,7 +182,7 @@ class TestRestartBaasImagePolicy:
         ("bot_type", "active_engine"),
         [("personal", "openclaw"), ("service", "teclaw")],
     )
-    def test_default_persistence_skips_non_arka_service_bot(
+    def test_default_persistence_skips_non_arca_service_bot(
         self,
         bot_type: str,
         active_engine: str,
@@ -196,7 +196,7 @@ class TestRestartBaasImagePolicy:
             **_make_bot(bot_type=bot_type, active_engine=active_engine),
             "ext": {
                 "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_docker_image": "registry/arca:v2",
             },
         }
 
