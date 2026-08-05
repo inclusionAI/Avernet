@@ -97,10 +97,15 @@ class TestRestartHookFailure:
     async def test_restart_with_hook_failure(
         self, api: APITestHelper, monkeypatch: pytest.MonkeyPatch, unique_id: str
     ) -> None:
-        _set_mock(monkeypatch)
+        # Enable PAAS_MOCK_MODE so the factory returns MockPaasService,
+        # but do NOT enable PAAS_MOCK_HOOK_FAILURE yet — otherwise the
+        # create hook also fails and the bot never reaches ACTIVE status.
+        monkeypatch.setenv("PAAS_MOCK_MODE", "true")
         bot = await create_and_activate_bot(
             api, f"restart-hook-fail-{unique_id}", device_count=1
         )
+        # Now enable hook failure for the restart phase.
+        monkeypatch.setenv("PAAS_MOCK_HOOK_FAILURE", "true")
         resp = await api.client.post(
             api.bot_url(bot["bot_uuid"]) + "/restart",
             params=api.params(),
