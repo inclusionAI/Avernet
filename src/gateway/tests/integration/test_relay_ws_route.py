@@ -326,8 +326,14 @@ def test_the_handshake_log_line_names_the_caller_and_no_credential(
     Everything it could print here is a credential: the query carries this
     plane's token *by design* (a browser's WebSocket API can set no headers),
     and the header map holds the forwarded Cookie/Authorization plus the signed
-    principal the gateway just minted. So it names the caller and the header
-    *names*, and nothing that can be replayed.
+    principal the gateway just minted. So the line names the caller, and touches
+    the header map not at all.
+
+    The header assertions below are deliberately about a header the client chose
+    the name of. A future change that forwards a new credential must not be able
+    to make it appear in this log, and the only property that holds under such a
+    change is that the map is never enumerated — checking a fixed list of known
+    credential headers would pass right up until the day it mattered.
     """
     app, auth, forwarder = _build()
     auth.identities = {
@@ -339,7 +345,11 @@ def test_the_handshake_log_line_names_the_caller_and_no_credential(
     with caplog.at_level(logging.INFO):
         with TestClient(app) as client:
             with client.websocket_connect(
-                _PATH, headers={"cookie": "session=super-secret"}
+                _PATH,
+                headers={
+                    "cookie": "session=super-secret",
+                    "x-some-future-credential": "tomorrows-secret",
+                },
             ) as ws:
                 ws.close(1000)
                 _settled(forwarder)
@@ -353,11 +363,17 @@ def test_the_handshake_log_line_names_the_caller_and_no_credential(
     assert "caller=user:u-42" in line
     assert "x-proxypass-token=<redacted>" in line
     assert "t.o.k" not in line
-    # The header names survive — enough to see what was forwarded — while the
-    # values, every one of them a live credential, do not.
-    assert "cookie" in line
+    # No header reaches the line — not a value, and not a name. The forwarded
+    # ones, the gateway's own signed principal, and a header nobody has thought
+    # of yet are all covered by the same property.
     assert "super-secret" not in line
+    assert "tomorrows-secret" not in line
+    assert "cookie" not in line
+    assert "x-some-future-credential" not in line
     assert "signed-for-engine_proxy" not in line
+    # The forwarding itself is unchanged: what the log stops showing, the
+    # upstream still receives.
+    assert forwarder.opened[0].request.headers["cookie"] == "session=super-secret"
 
 
 def test_the_upstream_subprotocol_is_echoed_to_the_client() -> None:

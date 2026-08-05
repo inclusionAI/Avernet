@@ -170,7 +170,16 @@ def _kv(key: str, value: object) -> str:
 
 
 def _header(scope: Scope, name: str) -> str:
-    """A request header by (lowercase) name, or ``""``."""
+    """A request header by (lowercase) name, or ``""``.
+
+    **Takes a name, and never returns the map.** Only a header chosen here by
+    hand reaches a log line, and the two that are — ``user-agent`` and
+    ``x-request-id`` — are neither credentials nor able to become one. Logging
+    the header map instead would mean this line's contents grow whenever
+    something upstream starts forwarding a new header, so a credential added
+    anywhere else would appear in the log with no edit here and no reason for
+    anyone to look. That holds for the *names* as much as the values.
+    """
     target = name.encode("latin-1")
     for key, value in scope.get("headers", ()):
         if key.lower() == target:
