@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import jwt
 
@@ -180,6 +181,9 @@ def _seed_delete(world, *, active: bool) -> None:
             storage_factory,
             _Guard(),
             world.get(LocalSkillCleanupRepository),
+            lambda: SimpleNamespace(
+                resolve_for_bot=lambda *_args: SimpleNamespace(provider="local")
+            ),
         ),
         scope=None,
     )
