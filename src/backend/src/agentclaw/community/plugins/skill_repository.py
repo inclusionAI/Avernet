@@ -1979,6 +1979,16 @@ class SkillSetRepository:
             )
             if enabled is None or enabled == 1:
                 active_sets.append(default_set)
+        global_default = self.get_default(
+            user_id=None,
+            bolt_id=None,
+            engine_type=engine_type,
+        )
+        if global_default and all(
+            skill_set["id"] != global_default["id"]
+            for skill_set in active_sets
+        ):
+            active_sets.append(global_default)
         return active_sets
 
     def get_all_active_skill_sets_for_env(
