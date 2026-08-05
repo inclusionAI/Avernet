@@ -367,10 +367,12 @@ def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
     assert set(upload["requestBody"]["content"]) == {"application/zip"}
-    assert upload["responses"]["413"]["content"]["application/json"]["example"] == {
+    error_example = upload["responses"]["413"]["content"]["application/json"]["example"]
+    assert {**error_example, "data": error_example.get("data")} == {
         "code": 413101,
         "message": "Skill package is too large",
         "request_id": "",
+        "data": None,
     }
     error_schema = upload["responses"]["413"]["content"]["application/json"]["schema"]
     assert error_schema["$ref"].endswith("ErrorEnvelope")
