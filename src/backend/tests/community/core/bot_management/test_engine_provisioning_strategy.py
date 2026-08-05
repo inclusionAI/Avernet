@@ -315,7 +315,11 @@ def test_claude_code_other_template_type_ignores_incomplete_template_identity():
     for template_config in (
         {"model": "custom-model", "runtime": "codefuse-antcc", "token": "tok-custom"},
         {"template_key": "customCC", "model": "custom-model", "token": "tok-custom"},
-        {"template_uid": "tpl-custom-cc", "model": "custom-model", "token": "tok-custom"},
+        {
+            "template_uid": "tpl-custom-cc",
+            "model": "custom-model",
+            "token": "tok-custom",
+        },
     ):
         ctx = BotProvisioningContext(
             active_engine="claude_code",
@@ -436,3 +440,39 @@ def test_default_strategy_does_not_build_agent_coding_bot_params():
     strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
 
     assert strategy.build_agent_coding_bot_params(ctx) is None
+
+
+def test_agent_coding_params_guard_falls_back_without_logging_exception_message():
+    from unittest.mock import MagicMock, patch
+
+    from agentclaw.community.core.bot_management.engines import (
+        build_agent_coding_bot_params_fail_open,
+    )
+
+    registry = MagicMock()
+    registry.resolve_for_context.side_effect = RuntimeError(
+        "must-not-log-encrypted-theta"
+    )
+    with (
+        patch(
+            "agentclaw.community.core.bot_management.engines.registry.get_engine_provisioning_registry",
+            return_value=registry,
+        ),
+        patch(
+            "agentclaw.community.core.bot_management.engines.registry.logger.warning"
+        ) as warning,
+    ):
+        result = build_agent_coding_bot_params_fail_open(
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            active_engine="aicoding",
+            template_type="personalCoding",
+            template_config={},
+            log_context="test",
+        )
+
+    assert result is None
+    logged = " ".join(str(call) for call in warning.call_args_list)
+    assert "must-not-log-encrypted-theta" not in logged
+    assert "RuntimeError" in logged

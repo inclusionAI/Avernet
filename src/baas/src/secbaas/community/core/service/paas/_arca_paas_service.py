@@ -42,6 +42,53 @@ if TYPE_CHECKING:
     from secbaas.community.spi.sandbox.arca import ArcaSandbox
 
 
+_SENSITIVE_LOG_KEYS = frozenset(
+    {
+        "agentcodingbotparams",
+        "apikey",
+        "authorization",
+        "thetakey",
+        "token",
+    }
+)
+
+
+def _redact_sensitive_log_value(value: Any) -> Any:
+    """Return a recursively redacted copy suitable only for logging."""
+    if isinstance(value, dict):
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).replace("_", "").replace("-", "").lower()
+            redacted[key] = (
+                "<redacted>"
+                if normalized_key in _SENSITIVE_LOG_KEYS
+                else _redact_sensitive_log_value(item)
+            )
+        return redacted
+    if isinstance(value, (list, tuple)):
+        return [_redact_sensitive_log_value(item) for item in value]
+    return value
+
+
+def _log_safe_model(value: Any) -> Any:
+    """Convert a model/object to a log-safe structure without affecting runtime data."""
+    try:
+        if hasattr(value, "model_dump"):
+            raw = value.model_dump(exclude_none=True)
+        elif isinstance(value, dict):
+            raw = value
+        elif hasattr(value, "__dict__"):
+            raw = vars(value)
+        else:
+            raw = _safe_repr(value)
+        return _redact_sensitive_log_value(raw)
+    except Exception as exc:
+        return {
+            "value_type": type(value).__name__,
+            "dump_error_type": type(exc).__name__,
+        }
+
+
 def _safe_repr(obj: object, max_len: int = 4096) -> str:
     """Safely repr() an object, truncating to max_len characters.
 
@@ -265,9 +312,7 @@ class ArcaPaasService(PaasService):
             )
         return mount_points
 
-    def _resolve_agent_coding_api_key(
-        self, config: ArcaCreateConfig
-    ) -> str | None:
+    def _resolve_agent_coding_api_key(self, config: ArcaCreateConfig) -> str | None:
         """Resolve a request-scoped Arca API key; None keeps fixed credentials."""
         params = config.agent_coding_bot_params
         theta_key = params.theta_key if params is not None else None
@@ -337,11 +382,9 @@ class ArcaPaasService(PaasService):
         """Synchronous implementation of create_device for use in to_thread()."""
         sandbox = None
         template_id = None
+        log_config = _log_safe_model(config)
         try:
-            # Log detailed config parameters at info level
-            log_config = config.model_dump(exclude_none=True)
-            if "agent_coding_bot_params" in log_config:
-                log_config["agent_coding_bot_params"] = "<redacted>"
+            # Log detailed config parameters at info level using a redacted copy.
             self._logger.info(
                 "[create_device] ArcaCreateConfig: %s",
                 json.dumps(log_config, default=str),
@@ -398,12 +441,12 @@ class ArcaPaasService(PaasService):
             # Get final sandbox info (after ready)
             info = sandbox.get_info()
 
-            # Log raw sandbox info returned by Arca platform
-            if hasattr(info, "model_dump_json"):
-                raw_info_str = info.model_dump_json()
-            else:
-                raw_info_str = json.dumps(vars(info), default=str)
-            self._logger.info(f"[create_device] Arca sandbox raw info: {raw_info_str}")
+            # Log a redacted copy; never emit raw SDK responses because future
+            # versions may add credential-bearing fields.
+            self._logger.info(
+                "[create_device] Arca sandbox info: %s",
+                json.dumps(_log_safe_model(info), default=str),
+            )
 
             result_outbound_rule = None
             if info.outbound_operation_rule is not None:
@@ -427,23 +470,28 @@ class ArcaPaasService(PaasService):
                 outbound_operation_rule=result_outbound_rule,
             )
 
-        except PaasError as e:
+        except PaasError as exc:
             sandbox_id = sandbox.sandbox_id if sandbox is not None else None
             self._logger.error(
-                f"[create_device] PaasError template_id={template_id}"
-                f"{f' sandbox_id={sandbox_id}' if sandbox_id else ''}: {e}",
-                exc_info=True,
+                "[create_device] PaasError template_id=%s sandbox_id=%s "
+                "error_type=%s config=%s",
+                template_id,
+                sandbox_id,
+                type(exc).__name__,
+                json.dumps(log_config, default=str),
             )
             raise
-        except Exception as e:
+        except Exception as exc:
             sandbox_id = sandbox.sandbox_id if sandbox is not None else None
             self._logger.error(
-                f"[create_device] failed template_id={template_id}"
-                f"{f' sandbox_id={sandbox_id}' if sandbox_id else ''} "
-                f"config={config.model_dump_json()}: {e}",
-                exc_info=True,
+                "[create_device] failed template_id=%s sandbox_id=%s "
+                "error_type=%s config=%s",
+                template_id,
+                sandbox_id,
+                type(exc).__name__,
+                json.dumps(log_config, default=str),
             )
-            raise self._translate_error(e, ErrorCode.DEVICE_CREATION_FAILED)
+            raise self._translate_error(exc, ErrorCode.DEVICE_CREATION_FAILED)
 
     async def destroy_device(self, paas_device_id: str) -> bool:
         """Destroy Arca sandbox using SDK directly.

@@ -9,6 +9,7 @@
 * extra_sync_* 配置 + 源目录存在：执行额外 rsync，命令格式正确
 * extra_sync_* 配置 + 源目录缺失：raise BotBuildMigrationError
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -197,7 +198,8 @@ def test_mcp_config_skipped_when_device_returns_non_json_stdout():
     service = BotBuildService.__new__(BotBuildService)
     service._device_service = MagicMock()
     service._device_service.exec_shell_new.return_value = MagicMock(
-        stdout="Command executed on dev-1: cat mcporter.json", exit_code=0,
+        stdout="Command executed on dev-1: cat mcporter.json",
+        exit_code=0,
     )
     ok = service._generate_mcp_config(device_id="dev-1", target_dir="/tmp/x")
     assert ok is False
@@ -220,3 +222,26 @@ def test_service_publish_builds_agent_coding_bot_params_from_template_snapshot()
     assert BotBuildService._build_agent_coding_bot_params(
         bot=bot, user_id="owner-1"
     ) == {"theta_key": "encrypted-service-theta"}
+
+
+def test_service_publish_provisioning_failure_keeps_historical_fixed_key_path():
+    from unittest.mock import patch
+
+    registry = MagicMock()
+    registry.resolve_for_context.side_effect = RuntimeError("extension unavailable")
+    with patch(
+        "agentclaw.community.core.bot_management.engines.registry.get_engine_provisioning_registry",
+        return_value=registry,
+    ):
+        result = BotBuildService._build_agent_coding_bot_params(
+            bot={
+                "bot_id": "service-bot-1",
+                "bot_type": "service",
+                "active_engine": "aicoding",
+                "template_type": "applicationCoding",
+                "template_config": {},
+            },
+            user_id="owner-1",
+        )
+
+    assert result is None

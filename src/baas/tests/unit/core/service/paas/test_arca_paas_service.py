@@ -610,3 +610,78 @@ class TestAgentCodingArcaCredential:
         logged_text = " ".join(str(call) for call in log_info.call_args_list)
         assert encrypted_theta_key not in logged_text
         assert "<redacted>" in logged_text
+
+    def test_create_device_failure_log_redacts_config_and_exception_credentials(
+        self, arca_credentials, mock_plugin
+    ):
+        from secbaas.community.api.device_manage import (
+            AgentCodingBotParams,
+            ArcaCreateConfig,
+        )
+
+        encrypted_theta_key = "encrypted-theta-key"
+        dynamic_api_key = "dynamic-arca-api-key"
+        secret_plugin = MagicMock()
+        secret_plugin.get_kv_secret.return_value = ("unused", "decrypt-key")
+        service = ArcaPaasService(
+            credentials=arca_credentials,
+            arca_sandbox_plugin=mock_plugin,
+            secret_plugin=secret_plugin,
+        )
+        mock_plugin.create_sync_sandbox.side_effect = RuntimeError(
+            f"Authorization: Bearer {dynamic_api_key}; theta={encrypted_theta_key}"
+        )
+        config = ArcaCreateConfig(
+            template_id="tpl-test-001",
+            agent_coding_bot_params=AgentCodingBotParams(theta_key=encrypted_theta_key),
+        )
+
+        with (
+            patch(
+                "secbaas.community.core.service.paas._arca_paas_service.symmetric_decrypt",
+                return_value=dynamic_api_key,
+            ),
+            patch.object(service._logger, "error") as log_error,
+            pytest.raises(PaasError),
+        ):
+            service._create_device_sync(config)
+
+        logged_text = " ".join(str(call) for call in log_error.call_args_list)
+        assert encrypted_theta_key not in logged_text
+        assert dynamic_api_key not in logged_text
+        assert "agent_coding_bot_params': {'theta_key'" not in logged_text
+        assert "<redacted>" in logged_text
+        assert "RuntimeError" in logged_text
+
+    def test_create_device_redacts_sensitive_fields_from_sandbox_info(
+        self, arca_credentials, mock_plugin, mock_sandbox
+    ):
+        from secbaas.community.api.device_manage import ArcaCreateConfig
+
+        service = ArcaPaasService(
+            credentials=arca_credentials, arca_sandbox_plugin=mock_plugin
+        )
+        info = MagicMock()
+        info.model_dump.return_value = {
+            "sandbox_id": "sandbox-001",
+            "api_key": "response-api-key",
+            "authorization": "Bearer response-api-key",
+        }
+        info.status = MagicMock(value="READY")
+        info.template_id = "tpl-test-001"
+        info.sandbox_id = "sandbox-001"
+        info.resources = None
+        info.ttl_in_minutes = 60
+        info.envs = {}
+        info.snapshot_id = None
+        info.metadata = {}
+        info.outbound_operation_rule = None
+        mock_sandbox.get_info.return_value = info
+        mock_plugin.create_sync_sandbox.return_value = mock_sandbox
+
+        with patch.object(service._logger, "info") as log_info:
+            service._create_device_sync(ArcaCreateConfig(template_id="tpl-test-001"))
+
+        logged_text = " ".join(str(call) for call in log_info.call_args_list)
+        assert "response-api-key" not in logged_text
+        assert "<redacted>" in logged_text

@@ -709,6 +709,34 @@ class TestDoAllocate:
         baas.post_bots_api.assert_called_once()
         baas.approve_publish.assert_not_called()
 
+    def test_agent_coding_provisioning_failure_keeps_legacy_create_payload(self):
+        baas = self._setup_baas()
+        svc = _make_service(baas_service=baas)
+        registry = MagicMock()
+        registry.resolve_for_context.side_effect = RuntimeError("extension unavailable")
+
+        with patch(
+            "agentclaw.community.core.bot_management.engines.registry.get_engine_provisioning_registry",
+            return_value=registry,
+        ):
+            allocated = svc._do_allocate(
+                entity_id="staff_u001",
+                entity_type="staff",
+                bolt_id="default",
+                device_id="staff_u001_default_abc",
+                storage_mappings=[],
+                env="pre",
+                engine="aicoding",
+                bot_type="personal",
+                extra_envs=None,
+                template_type="personalCoding",
+                template_config={"template_uid": "aicoding_personal_default"},
+            )
+
+        assert allocated.device_id == "BAAS-CTR-xxx"
+        builder_kwargs = baas._build_create_bot_payload.call_args.kwargs
+        assert builder_kwargs["agent_coding_bot_params"] is None
+
     def test_personal_create_requires_upstream_template_uid_and_resolves_uuid(self):
         baas = self._setup_baas()
         template_resolver = MagicMock()

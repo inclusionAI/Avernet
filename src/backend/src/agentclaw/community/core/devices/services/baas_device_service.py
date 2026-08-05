@@ -7,7 +7,10 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
-from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.core.bot_management.engines import (
+    build_agent_coding_bot_params_fail_open,
+    resolve_provisioning,
+)
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -328,18 +331,14 @@ class BaasDeviceService(DeviceService):
                 "active_engine": engine,
                 "bot_type": effective_bot_type,
             }
-            provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            agent_coding_params = build_agent_coding_bot_params_fail_open(
                 bot_id=bolt_id,
                 owner_id=effective_owner_id,
                 active_engine=engine,
                 bot_type=effective_bot_type,
                 template_type=template_type,
                 template_config=template_config,
-            )
-            agent_coding_params = (
-                provisioning_strategy.build_agent_coding_bot_params(
-                    provisioning_ctx
-                )
+                log_context="baas_device_service._allocate_via_baas",
             )
             # 个人 Bot 不向启动脚本传 stage；服务 Bot 草稿才显式传 draft。
             payload_kwargs = {

@@ -468,29 +468,20 @@ class BotService:
         log_context: str,
     ) -> "Optional[Dict[str, Any]]":
         """Build optional AgentCoding sandbox parameters via the engine strategy."""
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                resolve_provisioning,
-            )
+        from agentclaw.community.core.bot_management.engines import (
+            build_agent_coding_bot_params_fail_open,
+        )
 
-            ctx, strategy = resolve_provisioning(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                active_engine=active_engine,
-                bot_type=bot_type,
-                template_type=template_type,
-                template_config=template_config,
-            )
-            params = strategy.build_agent_coding_bot_params(ctx)
-            return params.to_dict() if params is not None else None
-        except Exception as e:
-            logger.warning(
-                "[%s] Failed to build AgentCoding bot params for bot %s: %s",
-                log_context,
-                bot_id,
-                e,
-            )
-            return None
+        params = build_agent_coding_bot_params_fail_open(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            active_engine=active_engine,
+            bot_type=bot_type,
+            template_type=template_type,
+            template_config=template_config,
+            log_context=log_context,
+        )
+        return params.to_dict() if params is not None else None
 
     def _extract_engine_runtime_token(
         self,

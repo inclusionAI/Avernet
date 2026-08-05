@@ -1,11 +1,20 @@
 """Composition root for engine provisioning strategies."""
+
 from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.log import get_logger
+
 from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
 from .default import DefaultProvisioningStrategy
-from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from .provisioning import (
+    AgentCodingBotParams,
+    BotProvisioningContext,
+    EngineProvisioningStrategy,
+)
+
+logger = get_logger()
 
 
 class EngineProvisioningRegistry:
@@ -112,9 +121,47 @@ def resolve_provisioning(
     return ctx, strategy
 
 
+def build_agent_coding_bot_params_fail_open(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_type: str,
+    active_engine: str | None = None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
+    log_context: str = "engine_provisioning",
+) -> AgentCodingBotParams | None:
+    """Build optional AgentCoding params without letting an extension block provisioning.
+
+    Strategy resolution and execution are extension hooks.  Any failure therefore
+    falls back to ``None``, which preserves the historical fixed Arca credential
+    path at every create/restart/release/upgrade entrypoint.
+    """
+    try:
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        return strategy.build_agent_coding_bot_params(ctx)
+    except Exception as exc:
+        logger.warning(
+            "[%s] AgentCoding provisioning fallback=fixed bot_id=%s error_type=%s",
+            log_context,
+            bot_id,
+            type(exc).__name__,
+        )
+        return None
+
+
 __all__ = [
+    "AgentCodingBotParams",
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
+    "build_agent_coding_bot_params_fail_open",
     "get_engine_provisioning_registry",
     "resolve_provisioning",
 ]

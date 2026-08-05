@@ -394,21 +394,23 @@ class BotBuildService:
     def _build_agent_coding_bot_params(
         *, bot: Dict[str, Any], user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Resolve AgentCoding sandbox parameters through provisioning strategy."""
-        from agentclaw.community.core.bot_management.engines import resolve_provisioning
+        """Resolve optional AgentCoding parameters through the guarded extension seam."""
+        from agentclaw.community.core.bot_management.engines import (
+            build_agent_coding_bot_params_fail_open,
+        )
 
         template_config = bot.get("template_config")
         if not isinstance(template_config, dict):
             template_config = None
-        ctx, strategy = resolve_provisioning(
+        params = build_agent_coding_bot_params_fail_open(
             bot_id=str(bot.get("bot_id") or ""),
             owner_id=user_id,
             bot_type=str(bot.get("bot_type") or "service"),
             active_engine=bot.get("active_engine"),
             template_type=bot.get("template_type"),
             template_config=template_config,
+            log_context="bot_build_service",
         )
-        params = strategy.build_agent_coding_bot_params(ctx)
         return params.to_dict() if params is not None else None
 
     def _resolve_baas_template_uuid(
