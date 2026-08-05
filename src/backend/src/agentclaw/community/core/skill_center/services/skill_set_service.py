@@ -604,6 +604,7 @@ class SkillSetService:
             target_bot_id = skill_set.get("bolt_id") or self.bot_id
             if (
                 skill_git_path.startswith("local://")
+                and skill.get("bolt_id") is not None
                 and skill.get("bolt_id") != target_bot_id
             ):
                 results["failed"].append(
