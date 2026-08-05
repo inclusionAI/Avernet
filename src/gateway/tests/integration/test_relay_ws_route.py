@@ -9,6 +9,7 @@ entrypoint itself names no domain.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -25,7 +26,8 @@ from gateway.community.adapters.web._relay_ws import (
     relay_routes,
 )
 from gateway.community.core.forwarding import DomainMap
-from gateway.community.spi.auth import AuthError
+from gateway.community.spi.auth import AuthenticatedUser, AuthError
+from gateway.community.spi.authn import PrincipalType, UserPrincipal
 from gateway.community.spi.ws_forwarder import (
     WebSocketClosedError,
     WebSocketForwardRequest,
@@ -299,13 +301,79 @@ def test_handshake_headers_are_stripped_before_forwarding() -> None:
 
 def test_a_resolved_identity_is_signed_onto_the_upstream_handshake() -> None:
     app, auth, forwarder = _build()
-    auth.identities = {"user": object()}
+    # A real Principal, not a placeholder: the handshake path both signs the
+    # identity set and names it in the relay's log line, so a stand-in that is
+    # not of the declared type would not exercise what a handshake does.
+    auth.identities = {
+        PrincipalType.USER: UserPrincipal(
+            tenant="acme",
+            subject=AuthenticatedUser(id="u-42", username="alice@example.com"),
+        )
+    }
     with TestClient(app) as client:
         with client.websocket_connect(_PATH) as ws:
             ws.close(1000)
             _settled(forwarder)
     headers = forwarder.opened[0].request.headers
     assert headers["X-Avernet-Principal"] == "signed-for-engine_proxy"
+
+
+def test_the_handshake_log_line_names_the_caller_and_no_credential(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The relay's own log line is the socket plane's access log.
+
+    Everything it could print here is a credential: the query carries this
+    plane's token *by design* (a browser's WebSocket API can set no headers),
+    and the header map holds the forwarded Cookie/Authorization plus the signed
+    principal the gateway just minted. So the line names the caller, and touches
+    the header map not at all.
+
+    The header assertions below are deliberately about a header the client chose
+    the name of. A future change that forwards a new credential must not be able
+    to make it appear in this log, and the only property that holds under such a
+    change is that the map is never enumerated — checking a fixed list of known
+    credential headers would pass right up until the day it mattered.
+    """
+    app, auth, forwarder = _build()
+    auth.identities = {
+        PrincipalType.USER: UserPrincipal(
+            tenant="acme",
+            subject=AuthenticatedUser(id="u-42", username="alice@example.com"),
+        )
+    }
+    with caplog.at_level(logging.INFO):
+        with TestClient(app) as client:
+            with client.websocket_connect(
+                _PATH,
+                headers={
+                    "cookie": "session=super-secret",
+                    "x-some-future-credential": "tomorrows-secret",
+                },
+            ) as ws:
+                ws.close(1000)
+                _settled(forwarder)
+
+    line = next(
+        message
+        for message in (record.getMessage() for record in caplog.records)
+        if message.startswith("ws forwarding request")
+    )
+    assert "tenant=acme" in line
+    assert "caller=user:u-42" in line
+    assert "x-proxypass-token=<redacted>" in line
+    assert "t.o.k" not in line
+    # No header reaches the line — not a value, and not a name. The forwarded
+    # ones, the gateway's own signed principal, and a header nobody has thought
+    # of yet are all covered by the same property.
+    assert "super-secret" not in line
+    assert "tomorrows-secret" not in line
+    assert "cookie" not in line
+    assert "x-some-future-credential" not in line
+    assert "signed-for-engine_proxy" not in line
+    # The forwarding itself is unchanged: what the log stops showing, the
+    # upstream still receives.
+    assert forwarder.opened[0].request.headers["cookie"] == "session=super-secret"
 
 
 def test_the_upstream_subprotocol_is_echoed_to_the_client() -> None:
