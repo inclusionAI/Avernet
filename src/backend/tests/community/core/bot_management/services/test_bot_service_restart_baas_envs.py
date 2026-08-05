@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.bot_service import BotService, BotServiceError
 from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
     BAAS_RESTART_PUBLISH_POLL_TASK,
 )
@@ -223,8 +223,59 @@ class TestRestartBaasImagePolicy:
         svc._bot_publish_repo.update_status_with_ext.assert_not_called()
         payload = svc._task_queue_service.enqueue.call_args.args[1]
         assert payload["image_policy_on_success"] == "default"
+        binding_props = svc._device_binding_repo.update_device_props.call_args.kwargs["props"]
+        assert binding_props["restart_publish_id"] == "100"
+        assert binding_props["restart_image_policy_on_success"] == "default"
         pending_update = svc._repository.update_by_owner.call_args.args[2]
         assert "sbot_use_default_image" not in pending_update.get("ext", {})
+
+    def test_enqueue_failure_keeps_durable_default_intent_and_fails_explicitly(self):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        svc._task_queue_service.enqueue.side_effect = RuntimeError("queue unavailable")
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {"sbot_use_default_image": True},
+        }
+
+        with pytest.raises(
+            BotServiceError,
+            match="recovery state was persisted.*publish_id=100",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        props = svc._device_binding_repo.update_device_props.call_args.kwargs["props"]
+        assert props["restart_publish_id"] == "100"
+        assert props["restart_image_policy_on_success"] == "default"
+
+    def test_binding_intent_persistence_failure_does_not_enqueue(self):
+        svc, _, _ = _make_service(
+            template_config={},
+            bot_type="service",
+            active_engine="openclaw",
+        )
+        svc._device_binding_repo.update_device_props.side_effect = RuntimeError(
+            "database unavailable"
+        )
+        bot = {
+            **_make_bot(bot_type="service", active_engine="openclaw"),
+            "ext": {"sbot_use_default_image": True},
+        }
+
+        with pytest.raises(
+            BotServiceError,
+            match="recovery state could not be persisted.*publish_id=100",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._task_queue_service.enqueue.assert_not_called()
 
 
 class TestRestartBaasEnvInjection:
@@ -251,6 +302,7 @@ class TestRestartBaasEnvInjection:
                 "publish_id": "12372",
                 "restart_publish_id": "12372",
                 "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
+                "restart_image_policy_on_success": None,
             },
         )
         svc._repository.update_by_owner.assert_called_with(
@@ -283,6 +335,7 @@ class TestRestartBaasEnvInjection:
                 "publish_id": "12372",
                 "restart_publish_id": "12372",
                 "restart_request_id": request_id,
+                "restart_image_policy_on_success": None,
             },
         )
         started_at_epoch_s = svc._task_queue_service.enqueue.call_args.args[1][

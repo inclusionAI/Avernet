@@ -1858,6 +1858,7 @@ class TestRestartBaasPendingAndQueue:
                 "publish_id": "9377",
                 "restart_publish_id": "9377",
                 "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
+                "restart_image_policy_on_success": None,
             },
         )
         task_queue_service.enqueue.assert_called_once()
