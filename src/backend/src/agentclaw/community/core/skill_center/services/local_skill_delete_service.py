@@ -105,6 +105,7 @@ class LocalSkillDeleteService:
             locator = str(skill["git_path"])[len("local://") :]
             package = (
                 self._skill_service_factory.local_skill_package_storage_for_locator(
+                    entity_id=str(bot["entity_id"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
                     engine_type=bot.get("active_engine"),
@@ -113,9 +114,13 @@ class LocalSkillDeleteService:
             )
             quarantine_locator, quarantine = (
                 self._skill_service_factory.local_skill_package_storage(
+                    entity_id=str(bot["entity_id"]),
                     owner_id=owner_id,
                     bot_id=bot_id,
                     engine_type=bot.get("active_engine"),
+                    entity_type=str(bot.get("entity_type") or "staff"),
+                    is_desktop=bot.get("bot_type") == "desktop",
+                    is_teclaw=bot.get("device_provider") == "teclaw",
                     name=Path(locator).name,
                     directory_name=f".{Path(locator).name}.delete-{uuid4().hex}",
                 )
