@@ -546,6 +546,30 @@ rebuild it. Everything below is category-agnostic and lives in
   - Add *your* category's errors to `ENVELOPE_ERRORS`. Anything unmapped escapes
     to the app 500 handler — which now envelopes it too, but with a generic
     message.
+  - **Every converted failure is logged, with its traceback and the handler's
+    arguments** — see the next bullet. You inherit this; do not add per-handler
+    `try/except: logger.error(...)` around a mapped error.
+- **`error_logging.py`** (`adapters/http/`) — the diagnostics half of the fixed
+  message rule. Because the response says only "Not found", the log line is the
+  *only* record of what actually happened, so `@envelope_errors` emits one per
+  failure: exception type, the internal message, the concrete path plus the route
+  template, and the arguments the handler was called with. Level follows status
+  (`4xx` → warning, `5xx` → error); both carry the traceback, because an error
+  reaching this path was raised inside a handler and the trace is a short chain
+  of our own frames pointing at the check that refused the request. What you need
+  to know when adding a category:
+  - **Capture is lazy** — a successful request pays nothing.
+  - **Values are summarized, not dumped**: strings truncated, collections capped,
+    bytes reduced to a size, request bodies rendered from `model_dump()`, and
+    injected services dropped rather than rendered.
+  - **Names that look like credentials are redacted** (`token`, `password`,
+    `secret`, `authorization`, `api_key`, `signature`, `cookie`, …), at any
+    nesting depth. `Request` and `Headers` are opaque by type — `Request` is a
+    `Mapping` over its ASGI scope, so walking it would put the raw header list
+    in the log. **If your category adds a body field holding a credential whose
+    name is not on that list, add the substring to `_SENSITIVE_NAME_PARTS`.**
+  - An **unmapped** error is re-raised, and the arguments are stashed on the
+    request scope so `app.py`'s handler logs the same detail from further out.
 - **`contracts.py`** — `Envelope[T]` / `Page[T]` / `Deleted` / `NameCheck` plus
   `ErrorEnvelope` and `ERROR_RESPONSES`. `ERROR_RESPONSES` is attached **once**
   in `openapi_v1/__init__.py::build_public_router()`, so every route on every
@@ -1246,3 +1270,27 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   and DI wiring are gone), and a dated amendment in
   `src/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
   `tenant` mandatory on every principal.
+- **2026-08-05** — **Every error this surface converts now leaves a log record.**
+  `@envelope_errors` mapped a domain error to its status and fixed message and
+  logged *nothing*, so a caller's report of a 404 or a 409 could not be traced to
+  a raise site: the fixed-message rule keeps the diagnosis out of the response,
+  and there was nowhere else it went. The decorator now emits one line per
+  failure — exception type and its internal message, method, concrete path, route
+  template, and the handler's own arguments — with the traceback attached.
+  4xx logs at warning, 5xx at error; both carry the trace, because these errors
+  are raised *inside* a handler, so the trace is a short chain of our own frames,
+  not an ASGI stack. Routine unauthenticated traffic is unaffected: the auth
+  seam raises in a dependency, which `app.py` still answers and logs without one.
+  New `adapters/http/error_logging.py` owns the capture — lazy (a successful
+  request pays nothing), bounded (strings, collections and nesting all capped;
+  bytes reduced to a size), and redacting by *name* at any depth, with `Request`
+  and `Headers` opaque by type since `Request` is a `Mapping` over its ASGI scope
+  and walking it would log the raw `Authorization` header. Unmapped errors are
+  still re-raised, with the arguments stashed on the request scope so `app.py`
+  logs the same detail from further out; the `DomainError` handler additionally
+  logs 4xx (one compact line, no traceback) where it previously logged nothing,
+  and the public 422 handler now records which field failed validation — `loc` /
+  `type` / `msg` only, never the caller's `input` value. **If your category adds
+  a body field holding a credential, add its name substring to
+  `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
+  changed.

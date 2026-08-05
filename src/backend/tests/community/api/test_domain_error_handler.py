@@ -151,6 +151,117 @@ def test_5xx_domain_error_logs_traceback_but_4xx_does_not(client, monkeypatch):
     assert sum(1 for s in fmt_strings if "DomainError 5xx" in s) == 1
 
 
+def test_4xx_domain_error_logs_one_compact_warning(client, monkeypatch):
+    """A refused request used to leave no trace at all. It now logs one line —
+    without a traceback, so a per-401 stack does not bury the real 5xx ones."""
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    client.get("/raise/notfound")
+    assert any("[DomainError %s]" in str(a[0]) for a, _ in calls), \
+        f"expected a 4xx DomainError warning, got: {calls}"
+    assert all("exc_info" not in k for _, k in calls), \
+        "4xx must not carry a traceback"
+
+    # 3xx stays silent: LoginRedirectRequired is a step in the login flow, not
+    # a failure anyone debugs.
+    calls.clear()
+    client.get("/raise/redirect")
+    assert calls == [], f"302 must not log, got: {calls}"
+
+
+def test_handler_logs_the_params_stashed_by_the_public_decorator(monkeypatch):
+    """The arguments captured inside the route survive to the app-level handler.
+
+    ``@envelope_errors`` re-raises anything it does not map; by the time this
+    handler answers, the frame that knew the arguments is gone, so the decorator
+    leaves them on the request scope for exactly this reason.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.error_logging import remember_call_params
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "exception",
+        lambda *a, **k: calls.append((a, k)),
+    )
+
+    app = FastAPI()
+    app.add_exception_handler(DomainError, app_mod._domain_error_handler)
+
+    @app.get("/boom")
+    async def boom(request: Request):
+        remember_call_params(request, {"bot_id": "b-77"})
+        raise InternalError("kaboom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/boom").status_code == 500
+    rendered = [str(a) for a, _ in calls]
+    assert any("b-77" in line for line in rendered), \
+        f"expected the stashed params in the log args, got: {rendered}"
+
+
+# ============================================================
+# Public HTTPException — 5xx keeps the traceback, 4xx does not
+# ============================================================
+
+def _public_http_exception_client():
+    """Mount the real ``_http_exception_handler`` on public-prefixed routes."""
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+
+    app = FastAPI()
+    app.add_exception_handler(
+        StarletteHTTPException, app_mod._http_exception_handler
+    )
+
+    @app.get(f"{PUBLIC_API_PREFIX}/boom/{{status}}")
+    async def boom(status: int):
+        raise StarletteHTTPException(status_code=status, detail=f"boom-{status}")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize(
+    "status,level,wants_traceback",
+    [
+        # Handler-raised: the raise site is the diagnosis. Both of these are live
+        # on the public surface (routines 500, resources upload 502) and neither
+        # is in ENVELOPE_ERRORS, so they land in this handler.
+        (502, "error", True),
+        (500, "error", True),
+        # Starlette's own routing failures dominate 4xx here; their stack is
+        # framework internals, so the message alone is the useful part.
+        (404, "warning", False),
+    ],
+)
+def test_public_http_exception_logging(monkeypatch, status, level, wants_traceback):
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, level, lambda *a, **k: calls.append((a, k)),
+    )
+    resp = _public_http_exception_client().get(f"{PUBLIC_API_PREFIX}/boom/{status}")
+    assert resp.status_code == status
+
+    assert calls, f"expected a {level} log for {status}"
+    args, kwargs = calls[-1]
+    assert f"boom-{status}" in args, "the raised detail must survive in the log"
+    if wants_traceback:
+        assert kwargs.get("exc_info") is not None, \
+            "a 5xx HTTPException must carry its raise site"
+    else:
+        assert kwargs.get("exc_info") is None
+
+
 # ============================================================
 # Trace-ID propagation — every response carries X-Trace-ID
 # ============================================================
