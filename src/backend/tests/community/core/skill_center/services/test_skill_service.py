@@ -615,6 +615,143 @@ class TestSkillServiceGetActiveSkills:
         assert skills[0].name == "demo"
         assert skills[0].is_active is True
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "active_root",
+        [
+            "/home/admin/.openclaw/workspace/skills",
+            "/home/admin/.claude/skills",
+            "/home/admin/.hermes/skills",
+        ],
+    )
+    async def test_reads_desktop_active_skills_from_device_runtime(
+        self, skill_dirs, mock_skill_repo, active_root
+    ):
+        device_fs = MagicMock()
+        device_fs.list_dir = AsyncMock(
+            return_value=[
+                {
+                    "name": "skills-repo",
+                    "path": f"{active_root}/skills-repo",
+                    "is_dir": True,
+                },
+                {
+                    "name": "mcporter",
+                    "path": f"{active_root}/mcporter",
+                    "is_dir": True,
+                },
+                {
+                    "name": "../escape",
+                    "path": f"{active_root}/../escape",
+                    "is_dir": True,
+                },
+                {
+                    "name": "sp455-r2-oc-probe",
+                    "path": f"{active_root}/sp455-r2-oc-probe",
+                    "is_dir": True,
+                },
+                {
+                    "name": "empty-metadata",
+                    "path": f"{active_root}/empty-metadata",
+                    "is_dir": True,
+                },
+            ]
+        )
+
+        async def _read_file(path, **_kwargs):
+            if path.endswith("sp455-r2-oc-probe/SKILL.md"):
+                return (
+                    "---\nname: 运行时探针\n"
+                    "description: visible on the Desktop device\n---\n"
+                ).encode("gbk")
+            if path.endswith("empty-metadata/SKILL.md"):
+                return b""
+            return None
+
+        mock_skill_repo.get_by_link_name.return_value = {
+            "git_path": (
+                "local:///home/admin/runtime-pool/"
+                "skills-local/sp455-r2-oc-probe"
+            )
+        }
+
+        device_fs.read_file = AsyncMock(side_effect=_read_file)
+        device_fs_factory = MagicMock(return_value=device_fs)
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=Path(active_root),
+            repo_dir=skill_dirs["repo_dir"],
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=device_fs_factory,
+            git_sync_service_factory=MagicMock(),
+        )
+
+        skills = await svc.get_active_skills_from_device(
+            bot_id="desktop_bot_1", owner_id="405935"
+        )
+
+        assert [skill.id for skill in skills] == ["sp455-r2-oc-probe"]
+        assert skills[0].name == "运行时探针"
+        assert skills[0].description == "visible on the Desktop device"
+        assert skills[0].path == f"{active_root}/sp455-r2-oc-probe"
+        assert skills[0].source_path == (
+            "/home/admin/runtime-pool/skills-local/sp455-r2-oc-probe"
+        )
+        assert skills[0].is_active is True
+        device_fs_factory.assert_called_once_with("desktop_bot_1", "405935")
+        device_fs.list_dir.assert_awaited_once_with(
+            active_root, recursive=False
+        )
+        assert all("escape" not in call.args[0] for call in device_fs.read_file.await_args_list)
+
+    @pytest.mark.asyncio
+    async def test_device_active_list_propagates_runtime_listing_failure(
+        self, skill_dirs, mock_skill_repo
+    ):
+        device_fs = MagicMock()
+        device_fs.list_dir = AsyncMock(side_effect=RuntimeError("device offline"))
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=Path("/runtime/skills"),
+            repo_dir=skill_dirs["repo_dir"],
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=MagicMock(return_value=device_fs),
+            git_sync_service_factory=MagicMock(),
+        )
+
+        with pytest.raises(RuntimeError, match="device offline"):
+            await svc.get_active_skills_from_device(
+                bot_id="desktop_bot_1", owner_id="405935"
+            )
+
+    @pytest.mark.asyncio
+    async def test_missing_device_active_root_is_empty(
+        self, skill_dirs, mock_skill_repo
+    ):
+        device_fs = MagicMock()
+        device_fs.list_dir = AsyncMock(return_value=None)
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=Path("/runtime/skills"),
+            repo_dir=skill_dirs["repo_dir"],
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=MagicMock(return_value=device_fs),
+            git_sync_service_factory=MagicMock(),
+        )
+
+        assert await svc.get_active_skills_from_device(
+            bot_id="desktop_bot_1", owner_id="405935"
+        ) == []
+
 
 # ── TestSkillServiceMarketTree ───────────────────────────────────────
 
