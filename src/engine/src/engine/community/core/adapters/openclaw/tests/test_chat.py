@@ -82,6 +82,7 @@ class _FakeChatPort:
 
         self.stream_calls: list[dict] = []
         self.abort_calls: list[dict] = []
+        self.inject_calls: list[dict] = []
 
     async def chat_stream(
         self,
@@ -112,6 +113,21 @@ class _FakeChatPort:
             "token": token,
         })
         return self._abort_result
+
+    async def chat_inject(
+        self,
+        session_key: str,
+        message: str,
+        label: str | None = None,
+        token: str | None = None,
+    ) -> dict:
+        self.inject_calls.append({
+            "session_key": session_key,
+            "message": message,
+            "label": label,
+            "token": token,
+        })
+        return {"success": True, "payload": {"ok": True, "messageId": "m1"}}
 
 
 # ── observer mock ─────────────────────────────────────────────────────────────
@@ -330,3 +346,21 @@ async def test_abort_passes_none_token_when_no_auth():
     adapter = OpenClawChatAdapter(port)
     await adapter.abort(ChatAbortRequest(session_key="sk", run_id="r1"), auth=None)
     assert port.abort_calls[0]["token"] is None
+
+
+@pytest.mark.asyncio
+async def test_inject_calls_port_and_returns_payload():
+    port = _FakeChatPort()
+    adapter = OpenClawChatAdapter(port)
+
+    result = await adapter.inject("sk", "hello", label="BCS", auth=_auth("tok"))
+
+    assert result == {"ok": True, "payload": {"ok": True, "messageId": "m1"}}
+    assert port.inject_calls == [
+        {
+            "session_key": "sk",
+            "message": "hello",
+            "label": "BCS",
+            "token": "tok",
+        }
+    ]
