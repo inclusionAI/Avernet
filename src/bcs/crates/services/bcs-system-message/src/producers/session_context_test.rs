@@ -261,6 +261,7 @@ async fn manager_worker_session_context_messages_with_ledger(
         reason: "协作任务".to_string(),
         session_input: None,
         task_ledger,
+        driver_delivery: None,
     };
 
     let (messages, _) = SessionContextMessageProducer
@@ -366,6 +367,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         reason: "协作任务".to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
 
     let (messages, _) = SessionContextMessageProducer
@@ -453,6 +455,7 @@ async fn session_context_produces_no_user_message() {
         reason: "普通协作".to_string(),
         session_input: Some(serde_json::json!("任务X")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let (chat_messages, chat_user_message) = SessionContextMessageProducer
         .produce(&chat_event, &chat_group, &NamedRegistry::new(&[]), &chat_group.participants)
@@ -480,10 +483,123 @@ async fn session_context_produces_no_user_message() {
             failed: Vec::new(),
             timed_out: Vec::new(),
         }),
+        driver_delivery: None,
     };
     let (mw_messages, mw_user_message) = SessionContextMessageProducer
         .produce(&mw_event, &mw_group, &NamedRegistry::new(&[]), &mw_group.participants)
         .await;
     assert!(!mw_messages.is_empty(), "MW bot context messages still produced");
     assert!(mw_user_message.is_none(), "MW SessionContext user_message must be None");
+}
+
+#[tokio::test]
+async fn driver_delivery_defaults_to_send_for_driver() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut peer = Participant::bot("bot-peer", ParticipantRole::Consultant);
+    peer.bot_name = Some("Peer".to_string());
+    let mut group = Group::new("group-chat-default", "bot-driver", vec![driver, peer]);
+    group.group_strategy = GroupStrategy::Chat;
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+        driver_delivery: None,
+    };
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
+        .await;
+
+    let driver_message = messages
+        .iter()
+        .find(|m| m.recipients == vec!["bot-driver".to_string()])
+        .expect("driver receives context");
+    assert_eq!(driver_message.delivery_type, DeliveryType::Send);
+
+    let peer_message = messages
+        .iter()
+        .find(|m| m.recipients == vec!["bot-peer".to_string()])
+        .expect("peer receives context");
+    assert_eq!(peer_message.delivery_type, DeliveryType::Inject);
+}
+
+#[tokio::test]
+async fn driver_delivery_override_injects_to_driver_in_chat_group() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut peer = Participant::bot("bot-peer", ParticipantRole::Consultant);
+    peer.bot_name = Some("Peer".to_string());
+    let mut group = Group::new("group-chat-override", "bot-driver", vec![driver, peer]);
+    group.group_strategy = GroupStrategy::Chat;
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+        driver_delivery: Some(DeliveryType::Inject),
+    };
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
+        .await;
+
+    let driver_message = messages
+        .iter()
+        .find(|m| m.recipients == vec!["bot-driver".to_string()])
+        .expect("driver receives context");
+    assert_eq!(
+        driver_message.delivery_type,
+        DeliveryType::Inject,
+        "driver_delivery=inject must override the driver's default chat.send"
+    );
+
+    let peer_message = messages
+        .iter()
+        .find(|m| m.recipients == vec!["bot-peer".to_string()])
+        .expect("peer receives context");
+    assert_eq!(peer_message.delivery_type, DeliveryType::Inject);
+}
+
+#[tokio::test]
+async fn manager_worker_ignores_driver_delivery_override() {
+    // ManagerWorker groups intentionally ignore driver_delivery: the manager
+    // must actively pick up and dispatch the task, so its context is always
+    // delivered via chat.send even when the override asks for inject.
+    let manager_id = "20260416_a5clr6ig:12345678";
+    let worker_id = "20260528_vobmrqo6:12345678";
+    let mut manager = Participant::bot(manager_id, ParticipantRole::Manager);
+    manager.bot_name = Some(manager_id.to_string());
+    let mut worker = Participant::bot(worker_id, ParticipantRole::Worker);
+    worker.bot_name = Some(worker_id.to_string());
+    let mut group = Group::new("group-mw-override", manager_id, vec![manager, worker]);
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "协作任务".to_string(),
+        session_input: Some(serde_json::json!("执行慢查询审计")),
+        task_ledger: None,
+        driver_delivery: Some(DeliveryType::Inject),
+    };
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
+        .await;
+
+    let manager_message = messages
+        .iter()
+        .find(|m| m.recipients == vec![manager_id.to_string()])
+        .expect("manager receives context");
+    assert_eq!(
+        manager_message.delivery_type,
+        DeliveryType::Send,
+        "ManagerWorker manager always receives chat.send regardless of driver_delivery"
+    );
+
+    let worker_message = messages
+        .iter()
+        .find(|m| m.recipients == vec![worker_id.to_string()])
+        .expect("worker receives context");
+    assert_eq!(worker_message.delivery_type, DeliveryType::Inject);
 }

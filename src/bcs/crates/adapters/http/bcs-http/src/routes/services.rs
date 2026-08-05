@@ -182,6 +182,7 @@ pub async fn post_invocation(
                                 reason,
                                 session_input,
                                 task_ledger: None,
+                                driver_delivery: None,
                             },
                             &sid,
                             &session_participants,

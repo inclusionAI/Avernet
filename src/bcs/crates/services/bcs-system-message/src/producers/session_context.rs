@@ -3,7 +3,10 @@
 //! When a session is created this producer generates the initial
 //! `[GROUP CONTEXT]` or `[SERVICE GROUP CONTEXT]` message delivered
 //! to all bot participants, with `chat.send` for the driver/manager
-//! and `chat.inject` for other participants.
+//! and `chat.inject` for other participants. The driver's delivery
+//! can be overridden to `chat.inject` via the event's
+//! `driver_delivery` field (except in ManagerWorker groups, which
+//! always deliver to the manager via `chat.send`).
 
 use std::collections::HashMap;
 
@@ -36,6 +39,7 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
             reason,
             session_input,
             task_ledger,
+            driver_delivery,
             ..
         } = event
         else {
@@ -64,13 +68,22 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
         let mut messages = Vec::new();
         for participant in bot_participants {
             let is_driver = is_lead_participant(&render_group, participant);
+            let is_manager_worker = render_group.group_strategy == GroupStrategy::ManagerWorker;
             let delivery_type = if is_driver {
-                DeliveryType::Send
+                // ManagerWorker groups intentionally ignore the
+                // `driver_delivery` (group_context_delivery) override: the
+                // manager is expected to actively pick up and dispatch the
+                // task, so its context is always delivered via `chat.send`.
+                if is_manager_worker {
+                    DeliveryType::Send
+                } else {
+                    driver_delivery.unwrap_or(DeliveryType::Send)
+                }
             } else {
                 DeliveryType::Inject
             };
 
-            let context_message = if render_group.group_strategy == GroupStrategy::ManagerWorker {
+            let context_message = if is_manager_worker {
                 let coordination_surface = registry
                     .resolve_coordination_surface(&participant.bot_uuid)
                     .await

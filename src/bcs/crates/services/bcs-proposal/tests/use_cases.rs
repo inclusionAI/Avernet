@@ -357,6 +357,7 @@ async fn confirm_proposal_creates_initial_session_and_dispatches_session_context
             reason,
             session_input,
             task_ledger,
+            ..
         } => {
             assert_eq!(group_id, &confirmed.group_id);
             assert_eq!(session_id, &format!("{}:initial", confirmed.group_id));

@@ -364,6 +364,7 @@ impl BcsChannelService {
                         reason,
                         session_input: session.input.clone(),
                         task_ledger: None,
+                        driver_delivery: None,
                     },
                     &session.id,
                     &session.participants,
@@ -3846,6 +3847,7 @@ mod tests {
             reason,
             session_input,
             task_ledger,
+            ..
         } = &notification.event
         else {
             return Err("expected session context notification".into());
