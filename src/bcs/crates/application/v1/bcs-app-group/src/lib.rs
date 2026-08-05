@@ -674,7 +674,7 @@ impl GroupServiceImpl {
             .map_err(map_group_error)?;
 
         if let Some(state_machine) = state_machine {
-            let response_state_machine = state_machine.clone();
+            let mut response_state_machine = state_machine.clone();
             let runtime = self
                 .collaboration_runtime
                 .as_ref()
@@ -730,6 +730,14 @@ impl GroupServiceImpl {
                     ));
                 }
             };
+            if let Some(definition) = configured.default_definition.clone() {
+                response_state_machine.definition = StateMachineDefinition::Reference(
+                    StateMachineDefinitionReference {
+                        definition_id: definition.id,
+                        version: definition.version,
+                    },
+                );
+            }
             if configured.requires_human_input_channel {
                 let group = self
                     .groups

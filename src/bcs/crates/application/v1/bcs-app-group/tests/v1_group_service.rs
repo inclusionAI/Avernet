@@ -24,7 +24,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
-    ChannelBindingCleanupPort, CollaborationRuntimeError, CollaborationRuntimeService,
+    CollaborationDefinitionRef, ChannelBindingCleanupPort, CollaborationRuntimeError,
+    CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
     DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
     GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
@@ -488,7 +489,12 @@ impl CollaborationRuntimeService for RecordingRuntime {
         }
         let outcome = ConfigureGroupRuntimeOutcome {
             group_id: cmd.group_id.clone(),
-            default_definition: cmd.definition_ref.clone(),
+            default_definition: cmd.definition_ref.clone().or_else(|| {
+                cmd.definition_yaml.as_ref().map(|_| CollaborationDefinitionRef {
+                    id: "generated-definition".into(),
+                    version: 1,
+                })
+            }),
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
             requires_human_input_channel: self.requires_human_input_channel,
         };
@@ -1641,6 +1647,60 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     assert_eq!(started[0].group_id, detail.group_id);
     assert!(started[0].session_id.is_some());
     assert_eq!(started[0].caller_id.as_deref(), Some("human_driver"));
+}
+
+#[tokio::test]
+async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_public_bot("worker").await;
+
+    let detail = fixture
+        .service
+        .create(CreateGroup {
+            caller: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("State machine".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "worker".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Content(bcs_service_api::application::v1::StateMachineDefinitionContent {
+                                content_yaml: "version: 1\n".into(),
+                            }),
+                        participant_bindings: Vec::new(),
+                    },
+                ),
+            }),
+        })
+        .await
+        .expect("create state-machine Group from inline YAML");
+
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration detail");
+    };
+    let CollaborationConfiguration::StateMachine(collaboration) = detail.collaboration else {
+        panic!("expected state-machine collaboration");
+    };
+    match collaboration.definition {
+        bcs_service_api::application::v1::StateMachineDefinition::Reference(reference) => {
+            assert_eq!(reference.definition_id, "generated-definition");
+            assert_eq!(reference.version, 1);
+        }
+        other => panic!("expected persisted definition reference, got {other:?}"),
+    }
+
+    let configured = runtime.configured.lock().expect("runtime lock");
+    let configured = configured.as_ref().expect("configured runtime");
+    assert_eq!(configured.definition_yaml.as_deref(), Some("version: 1\n"));
+    assert!(configured.definition_ref.is_none());
 }
 
 #[tokio::test]
