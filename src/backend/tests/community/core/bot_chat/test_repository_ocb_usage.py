@@ -6,7 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_chat.models import AcOtelLogObservation, AcOtelLogTrace, AwLangfuseTrace
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository, _decimal_for_column_or_none
+from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.bot_chat.repository.product import _decimal_for_column_or_none
 from agentclaw.community.plugin_api.models import Base
 
 

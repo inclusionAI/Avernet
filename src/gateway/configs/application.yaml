@@ -116,6 +116,13 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
+    # Bot Logs can query explicit user/Bot and trace identifiers. Require both
+    # the end-user identity and the registered calling application so a user
+    # credential alone cannot access this tenant-level observability surface.
+    "/openapi/v1/bots/logs/**":
+      user: required
+      app: required
+
     "/openapi/v1/collaboration/**":
       user: required
 
@@ -229,7 +236,6 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
-
       chat:
         server: baas
         schema:

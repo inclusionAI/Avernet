@@ -35,10 +35,13 @@ on the environment, and this seam only ever sees one of the two cases:
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
+    PrincipalType,
     PrincipalVerificationError,
     VerifiedCaller,
     verify_principal_token,
@@ -137,6 +140,15 @@ async def require_principal(request: Request) -> Principal:
     caller = _resolve_caller(request)
     if caller is None:
         raise MissingPrincipalError("no verified caller for this request")
+    return caller
+
+
+async def require_user_and_app_principal(
+    caller: Annotated[Principal, Depends(require_principal)],
+) -> Principal:
+    """Require the signed caller to contain both User and App identities."""
+    if not any(principal.type == PrincipalType.APP for principal in caller.principals):
+        raise MissingPrincipalError("no verified user-and-app caller for this request")
     return caller
 
 

@@ -356,6 +356,487 @@
         "title": "Connection",
         "type": "object"
       },
+      "ConversationDetail": {
+        "description": "Full conversation session detail including observation tree.",
+        "properties": {
+          "biz_scene": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biz Scene"
+          },
+          "biz_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biz Task Id"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Id"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bot Name"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "observations": {
+            "description": "Root-level observations with nested children",
+            "items": {
+              "$ref": "#/components/schemas/ConversationObservation"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "output": {
+            "title": "Output"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "session_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Key"
+          },
+          "session_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Kind"
+          },
+          "status": {
+            "default": "SUCCESS",
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "ISO 8601 timestamp",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "total_cost": {
+            "default": 0.0,
+            "title": "Total Cost",
+            "type": "number"
+          },
+          "total_tokens": {
+            "default": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "timestamp"
+        ],
+        "title": "ConversationDetail",
+        "type": "object"
+      },
+      "ConversationObservation": {
+        "description": "A single observation within a trace (span or generation).",
+        "properties": {
+          "biz_scene": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biz Scene"
+          },
+          "biz_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Biz Task Id"
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationObservation"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw observation metadata",
+            "title": "Metadata"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model name from metadata.attributes['gen_ai.request.model']",
+            "title": "Model Name"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "output": {
+            "title": "Output"
+          },
+          "parent_observation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Observation Id"
+          },
+          "total_cost": {
+            "default": 0.0,
+            "title": "Total Cost",
+            "type": "number"
+          },
+          "total_tokens": {
+            "default": 0,
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "type": {
+            "description": "GENERATION or SPAN",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "ConversationObservation",
+        "type": "object"
+      },
+      "ConversationSession": {
+        "description": "A single conversation session (mapped from a Langfuse trace).",
+        "properties": {
+          "biz_scene": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business scene",
+            "title": "Biz Scene"
+          },
+          "biz_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Business task ID",
+            "title": "Biz Task Id"
+          },
+          "bot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot ID",
+            "title": "Bot Id"
+          },
+          "bot_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bot display name",
+            "title": "Bot Name"
+          },
+          "group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "BCS group ID",
+            "title": "Group Id"
+          },
+          "id": {
+            "description": "Trace ID",
+            "title": "Id",
+            "type": "string"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last user message extracted from trace input",
+            "title": "Input"
+          },
+          "latency_ms": {
+            "default": 0.0,
+            "description": "Total latency in milliseconds",
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "match_sources": {
+            "description": "Sources that matched the business task, such as direct or biz_ref",
+            "items": {
+              "type": "string"
+            },
+            "title": "Match Sources",
+            "type": "array"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Trace metadata with attributes"
+          },
+          "name": {
+            "default": "",
+            "description": "Session / trace name",
+            "title": "Name",
+            "type": "string"
+          },
+          "output_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Short trace output preview",
+            "title": "Output Preview"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Canonical session ID",
+            "title": "Session Id"
+          },
+          "session_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Engine session key",
+            "title": "Session Key"
+          },
+          "session_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional group-session label",
+            "title": "Session Kind"
+          },
+          "status": {
+            "default": "SUCCESS",
+            "description": "SUCCESS or FAILED",
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "description": "ISO 8601 timestamp",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "total_cost": {
+            "default": 0.0,
+            "description": "Total cost in USD",
+            "title": "Total Cost",
+            "type": "number"
+          },
+          "total_tokens": {
+            "default": 0,
+            "description": "Total tokens used",
+            "title": "Total Tokens",
+            "type": "integer"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Langfuse userId (owner_id)",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "timestamp"
+        ],
+        "title": "ConversationSession",
+        "type": "object"
+      },
       "Deleted": {
         "description": "Payload returned by delete operations.",
         "properties": {
@@ -745,6 +1226,44 @@
           "request_id"
         ],
         "title": "Envelope[Connection]",
+        "type": "object"
+      },
+      "Envelope_ConversationDetail_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversationDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[ConversationDetail]",
         "type": "object"
       },
       "Envelope_Deleted_": {
@@ -1657,6 +2176,44 @@
           "request_id"
         ],
         "title": "Envelope[Routine]",
+        "type": "object"
+      },
+      "Envelope_SessionListResponse_": {
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SessionListResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[SessionListResponse]",
         "type": "object"
       },
       "Envelope_SessionPage_": {
@@ -3320,6 +3877,54 @@
         "title": "SessionCreate",
         "type": "object"
       },
+      "SessionListResponse": {
+        "description": "Paginated list of conversation sessions.",
+        "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 20,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "default": 1,
+            "title": "Page",
+            "type": "integer"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "total": {
+            "default": 0,
+            "description": "Total number of matching sessions",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "title": "SessionListResponse",
+        "type": "object"
+      },
+      "SessionMetadata": {
+        "description": "Metadata from Langfuse trace, including identity attributes.",
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "description": "Trace metadata attributes (e.g. identity.bot_id, identity.owner_id, session_id)",
+            "title": "Attributes",
+            "type": "object"
+          }
+        },
+        "title": "SessionMetadata",
+        "type": "object"
+      },
       "SessionPage": {
         "description": "A page of sessions whose total is a lower bound, not an exact count.",
         "properties": {
@@ -3478,7 +4083,7 @@
         "type": "object"
       },
       "SkillUpload": {
-        "description": "Response for a Skill create or same-name package replacement.",
+        "description": "Response for a first-time Skill upload.",
         "properties": {
           "operation": {
             "enum": [
@@ -5232,6 +5837,645 @@
         "summary": "Update Bot Identity File",
         "tags": [
           "identity"
+        ]
+      }
+    },
+    "/openapi/v1/bots/logs/groups/{group_id}/traces": {
+      "get": {
+        "description": "List traces for one exact BCS Group.",
+        "operationId": "list_group_traces_openapi_v1_bots_logs_groups__group_id__traces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Group Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SessionListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Group Traces",
+        "tags": [
+          "bot-logs"
+        ]
+      }
+    },
+    "/openapi/v1/bots/logs/sessions/{session_key}/traces": {
+      "get": {
+        "description": "List traces for one exact Session key.",
+        "operationId": "list_session_traces_openapi_v1_bots_logs_sessions__session_key__traces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_key",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "title": "Session Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SessionListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Session Traces",
+        "tags": [
+          "bot-logs"
+        ]
+      }
+    },
+    "/openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces": {
+      "get": {
+        "description": "List traces for one exact business Task.",
+        "operationId": "list_task_traces_openapi_v1_bots_logs_tasks__biz_scene___biz_task_id__traces_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "biz_scene",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Biz Scene",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "biz_task_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Biz Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SessionListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Task Traces",
+        "tags": [
+          "bot-logs"
+        ]
+      }
+    },
+    "/openapi/v1/bots/logs/traces": {
+      "get": {
+        "description": "List recent traces for one explicit user-and-Bot pair.",
+        "operationId": "list_user_bot_traces_openapi_v1_bots_logs_traces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SessionListResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List User Bot Traces",
+        "tags": [
+          "bot-logs"
+        ]
+      }
+    },
+    "/openapi/v1/bots/logs/traces/{trace_id}": {
+      "get": {
+        "description": "Return one Trace with its observation tree.",
+        "operationId": "get_trace_openapi_v1_bots_logs_traces__trace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ConversationDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "Get Trace",
+        "tags": [
+          "bot-logs"
         ]
       }
     },
@@ -9107,7 +10351,7 @@
     },
     "/openapi/v1/bots/skills": {
       "get": {
-        "description": "List one Bot's Local Skills from persisted desired state.",
+        "description": "List exact Bot-owned Local Skills from database desired state.",
         "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
@@ -9140,7 +10384,6 @@
             }
           },
           {
-            "description": "Filter by desired Active state.",
             "in": "query",
             "name": "active",
             "required": false,
@@ -9153,12 +10396,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by desired Active state.",
               "title": "Active"
             }
           },
           {
-            "description": "Case-insensitive name or description filter.",
             "in": "query",
             "name": "keyword",
             "required": false,
@@ -9171,7 +10412,6 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive name or description filter.",
               "title": "Keyword"
             }
           },
@@ -9293,16 +10533,16 @@
     },
     "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Create or safely replace one Local Skill from a raw ZIP body.",
+        "description": "Create one inactive Local Skill from a complete raw ZIP package.",
         "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
-            "description": "Bot that owns and stores the Local Skill.",
+            "description": "Ready Bot that owns the Local Skill.",
             "in": "query",
             "name": "bot_id",
             "required": true,
             "schema": {
-              "description": "Bot that owns and stores the Local Skill.",
+              "description": "Ready Bot that owns the Local Skill.",
               "title": "Bot Id",
               "type": "string"
             }
@@ -9331,7 +10571,7 @@
             "application/zip": {
               "schema": {
                 "contentMediaType": "application/octet-stream",
-                "title": "Content",
+                "title": "Package",
                 "type": "string"
               }
             }
@@ -9347,7 +10587,7 @@
                 }
               }
             },
-            "description": "Same-name Local Skill replaced successfully."
+            "description": "Existing Local Skill safely replaced."
           },
           "201": {
             "content": {
@@ -9402,6 +10642,11 @@
           "413": {
             "content": {
               "application/json": {
+                "example": {
+                  "code": 413101,
+                  "message": "Skill package is too large",
+                  "request_id": ""
+                },
                 "schema": {
                   "$ref": "#/components/schemas/ErrorEnvelope"
                 }
@@ -9549,7 +10794,7 @@
         ]
       },
       "get": {
-        "description": "Get public metadata for one Local Skill selected by its Skill ID.",
+        "description": "Get public metadata for one Local Skill; the Skill ID selects its Bot.",
         "operationId": "get_skill_openapi_v1_bots_skills__skill_id__get",
         "parameters": [
           {
@@ -9652,7 +10897,7 @@
     },
     "/openapi/v1/bots/skills/{skill_id}/activate": {
       "post": {
-        "description": "Set one Local Skill's desired state to Active.",
+        "description": "Activate one Bot-owned Local Skill and synchronously reconcile runtime.",
         "operationId": "activate_skill_openapi_v1_bots_skills__skill_id__activate_post",
         "parameters": [
           {
@@ -9755,7 +11000,7 @@
     },
     "/openapi/v1/bots/skills/{skill_id}/deactivate": {
       "post": {
-        "description": "Set one Local Skill's desired state to Inactive.",
+        "description": "Deactivate one Bot-owned Local Skill and synchronously reconcile runtime.",
         "operationId": "deactivate_skill_openapi_v1_bots_skills__skill_id__deactivate_post",
         "parameters": [
           {

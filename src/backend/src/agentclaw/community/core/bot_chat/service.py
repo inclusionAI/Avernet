@@ -6,7 +6,6 @@ import aiohttp
 from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import LangfuseAPIError, SessionNotFoundError
-from agentclaw.community.core.bot_chat.open_service import OpenBotChatServiceMixin
 from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import (
@@ -315,7 +314,7 @@ def _apply_client_side_filters(
 # BotChatService
 # ---------------------------------------------------------------------------
 
-class BotChatService(OpenBotChatServiceMixin):
+class BotChatService:
     """Service for querying bot conversation sessions."""
 
     @inject

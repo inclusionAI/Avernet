@@ -1,4 +1,4 @@
-"""DB repository for bot-chat queries."""
+"""DB repository for product-facing bot-chat queries."""
 
 import json
 from datetime import timezone

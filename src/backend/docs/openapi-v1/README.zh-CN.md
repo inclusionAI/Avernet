@@ -506,7 +506,7 @@ id 恰好等于某个组件名，它在该地址上就不可达。这个集合�
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity
+approvals  ceiling  check-name  connection  engine  identity  logs
 mcp  models  resources  routines  sessions  skills
 ```
 
