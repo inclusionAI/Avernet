@@ -644,6 +644,47 @@ async def test_bot_skill_set_activation_holds_the_layout_edit_lease(test_injecto
 
 
 @pytest.mark.asyncio
+async def test_bot_skill_set_activation_uses_entity_id_for_the_layout_edit_lease(
+    test_injector,
+):
+    from unittest.mock import AsyncMock
+
+    activator = test_injector.get(SkillSetActivatorFactory).create()
+    activator.skill_set_service.user_id = None
+    activator.skill_set_service.entity_id = "owner"
+    activator.skill_set_service.bot_id = "bot"
+
+    class _Guard:
+        def __init__(self):
+            self.events = []
+
+        async def acquire_for_edit_wait(self, *, scope):
+            self.events.append(("acquire", scope))
+            return "lease"
+
+        def release(self, lease):
+            self.events.append(("release", lease))
+
+    guard = _Guard()
+    activator._edit_guard = guard
+    activator.skill_set_service._bot_repo.get_by_id_and_owner = lambda *_: {
+        "env": "dev", "entity_id": "owner",
+    }
+    unlocked = AsyncMock(return_value=ActivateResult(success=True, message="ok"))
+    activator._activate_skill_set_unlocked = unlocked
+
+    result = await activator.activate_skill_set("7")
+
+    assert result.success is True
+    assert guard.events[0][0] == "acquire"
+    assert guard.events[0][1].env == "dev"
+    assert guard.events[0][1].entity_id == "owner"
+    assert guard.events[0][1].bot_id == "bot"
+    assert guard.events[1] == ("release", "lease")
+    unlocked.assert_awaited_once_with("7", user_id=None, proxy_token=None)
+
+
+@pytest.mark.asyncio
 async def test_bot_skill_set_switch_and_sync_hold_the_layout_edit_lease(test_injector):
     from unittest.mock import AsyncMock
 
