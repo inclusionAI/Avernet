@@ -188,6 +188,7 @@ class SkillSetService:
         self._bot_repo = bot_repo
 
         self.bot_id = bot_id or "default"
+        self.user_id = user_id
         self.entity_id = entity_id
         self.entity_type = entity_type or "staff"
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
@@ -206,7 +207,7 @@ class SkillSetService:
         self.is_desktop = False
         if user_id or entity_id:
             try:
-                owner_id = entity_id if entity_id else user_id
+                owner_id = user_id or entity_id
                 bot = self._bot_repo.get_by_id_and_owner(self.bot_id, owner_id)
                 if bot and bot.get("bot_type") == "desktop":
                     self.is_desktop = True
@@ -260,7 +261,7 @@ class SkillSetService:
         try:
             # 优先从数据库查询
             active_set = self.skill_set_repo.get_active_skill_set(
-                user_id=self.entity_id,
+                user_id=self.user_id or self.entity_id,
                 bolt_id=self.bot_id,
                 engine_type=self.engine_type
             )
@@ -317,7 +318,7 @@ class SkillSetService:
 
     def sync_runtime(self) -> bool:
         """Reconcile this Bot's desired Skill mapping to its runtime."""
-        return self._sync_symlinks_to_device_if_needed(self.entity_id or self.user_id)
+        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
 
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
@@ -1022,7 +1023,7 @@ class SkillSetService:
             ]
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        effective_user_id = user_id if user_id else self.entity_id
+        effective_user_id = user_id if user_id else self.user_id or self.entity_id
 
         logger.info(f"[get_all_skill_sets_with_skills] user_id={effective_user_id}, bolt_id={effective_bolt_id}")
 
