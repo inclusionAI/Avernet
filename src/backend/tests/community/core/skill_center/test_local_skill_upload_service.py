@@ -99,6 +99,13 @@ class _Sets:
         self.associations.append(args)
         return True
 
+    def get_skills_in_set(self, skill_set_id):
+        return [
+            {"id": skill_id}
+            for set_id, skill_id, *_rest in self.associations
+            if str(set_id) == str(skill_set_id)
+        ]
+
     def remove_skill_from_set(self, *args):
         self.associations.remove(args)
         return True
@@ -452,13 +459,13 @@ class _DeviceResolver:
 
 
 def _replacement_service(
-    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local"
+    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local", sets=None
 ):
     cleanup = cleanup or _Cleanup()
     repo.cleanup = cleanup
     return LocalSkillUploadService(
         repo,
-        _Sets(),
+        sets or _Sets(),
         _Bot(),
         _Collaborators(),
         _ReplacementFactory(filesystem),
@@ -905,6 +912,27 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
     )
 
     assert result["operation"] == "updated"
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_repairs_missing_default_set_membership_before_sync():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=True)])
+    sets = _Sets()
+    runtime = _ReplacementRuntime([True])
+
+    await _replacement_service(filesystem, repo, runtime, sets=sets).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+
+    assert sets.associations == [("4", "9")]
     assert runtime.calls == 1
 
 

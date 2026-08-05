@@ -2848,6 +2848,32 @@ class SkillSetActivator(_DeviceSyncMixin):
         user_id: str | None = None,
         proxy_token: str | None = None
     ) -> DeactivateResult:
+        """Serialize Bot-scoped deactivation with Local Skill mutations."""
+        scope = self._bot_layout_scope(user_id)
+        if scope is None:
+            return await self._deactivate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError:
+            return DeactivateResult(
+                success=False,
+                message="Skills are temporarily read-only while layout work is running",
+            )
+        try:
+            return await self._deactivate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _deactivate_skill_set_unlocked(
+        self,
+        skill_set_id: str,
+        user_id: str | None = None,
+        proxy_token: str | None = None,
+    ) -> DeactivateResult:
         """取消激活单个能力集
 
         默认能力集通过关联表 ac_user_default_skill_set 控制启用状态

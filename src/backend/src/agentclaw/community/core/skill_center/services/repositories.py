@@ -123,6 +123,12 @@ class SkillRepository(Protocol):
     ) -> bool:
         ...
 
+    def remove_all_default_skill_exclusions(
+        self, user_id: str, bot_id: str, skill_id: int
+    ) -> bool:
+        """Clear every default-set exclusion for one Bot-owned Skill."""
+        ...
+
     def delete_bot_local_skill(
         self,
         *,
@@ -246,6 +252,12 @@ class SkillSetRepository(Protocol):
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:
+        ...
+
+    def remove_all_default_skill_exclusions(
+        self, user_id: str, bot_id: str, skill_id: int
+    ) -> bool:
+        """Clear every default-set exclusion for one Bot-owned Skill."""
         ...
 
     def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,

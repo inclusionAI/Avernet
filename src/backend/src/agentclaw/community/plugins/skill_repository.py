@@ -1924,6 +1924,26 @@ class SkillSetRepository:
             )
             return rowcount > 0
 
+    def remove_all_default_skill_exclusions(
+        self, user_id: str, bot_id: str, skill_id: int
+    ) -> bool:
+        """Clear stale exclusions left behind by a former default SkillSet."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(DefaultSkillsetSkillExclusion)
+                .filter(
+                    DefaultSkillsetSkillExclusion.user_id == user_id,
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_id == skill_id,
+                )
+                .delete(synchronize_session=False)
+            )
+            return rowcount > 0
+
     def get_excluded_skills(
         self, user_id: str, bot_id: str, skill_set_id: int
     ) -> list:
