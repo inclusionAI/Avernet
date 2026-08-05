@@ -477,6 +477,91 @@ class SkillService:
         skills.sort(key=lambda s: s.name)
         return skills
 
+    async def get_active_skills_from_device(
+        self, *, bot_id: str, owner_id: str
+    ) -> list[SkillInfo]:
+        """Read active Skill entries from a Bot's live device filesystem.
+
+        Desktop active roots are local to the user's device and therefore cannot
+        be observed through ``Path.iterdir()`` on the Backend host.  The runtime
+        entry itself remains authoritative: list its direct children, then read
+        ``SKILL.md`` through each entry so dangling links and unrelated folders
+        are not reported as active Skills.
+
+        Device I/O errors deliberately propagate.  Returning an empty list for
+        an unavailable runtime would make a transport failure indistinguishable
+        from a Bot with no active Skills.
+        """
+        device_fs = self._device_fs_factory(bot_id, owner_id)
+        entries = await device_fs.list_dir(str(self.active_dir), recursive=False)
+        if entries is None:
+            return []
+
+        skills: list[SkillInfo] = []
+        for entry in entries:
+            name = entry.get("name")
+            if (
+                not isinstance(name, str)
+                or not name
+                or name in {".", ".."}
+                or Path(name).name != name
+                or name in self.RESERVED_SKILL_NAMES
+            ):
+                continue
+
+            active_path = self.active_dir / name
+            content = await device_fs.read_file(str(active_path / "SKILL.md"))
+            if content is None:
+                content = await device_fs.read_file(str(active_path / "README.md"))
+            if content is None:
+                continue
+
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("gbk", errors="replace")
+            skill_info = SkillParser.parse_content(text)
+            if not skill_info:
+                continue
+
+            source_path = str(active_path)
+            skill_record = self.get_skill_by_link_name(name, bolt_id=bot_id)
+            locator = skill_record.get("git_path") if skill_record else None
+            if locator and locator.startswith(("git://", "local://")):
+                try:
+                    _, resolved_source = self.parse_skill_path(locator)
+                    source_path = str(resolved_source)
+                except ValueError:
+                    logger.warning(
+                        "[get_active_skills_from_device] Invalid locator for %s: %s",
+                        name,
+                        locator,
+                    )
+
+            skills.append(
+                SkillInfo(
+                    id=name,
+                    name=skill_info.get("name") or name,
+                    description=skill_info.get("description", ""),
+                    version=skill_info.get("version", "1.0.0"),
+                    category=skill_info.get("category", "general"),
+                    icon=self._get_icon_for_category(
+                        skill_info.get("category", "general")
+                    ),
+                    path=str(active_path),
+                    source_path=source_path,
+                    is_active=True,
+                    is_installed=True,
+                    capabilities=skill_info.get("capabilities", []),
+                    author=skill_info.get("author", ""),
+                    created_at=skill_info.get("created_at", ""),
+                    updated_at=skill_info.get("updated_at", ""),
+                )
+            )
+
+        skills.sort(key=lambda skill: skill.name)
+        return skills
+
     def get_active_skill(self, skill_id: str) -> SkillInfo | None:
         """获取单个已激活技能"""
         active_path = self.active_dir / skill_id

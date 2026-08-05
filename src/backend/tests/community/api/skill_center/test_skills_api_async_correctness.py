@@ -27,6 +27,7 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
+from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -42,6 +43,7 @@ def _skill_service_di_app(
     *,
     device_sync_result=None,
     runtime_uses_pool_paths=False,
+    bot_type="personal",
 ):
     """Build a TestClient whose SkillService has AsyncMock methods.
 
@@ -62,6 +64,7 @@ def _skill_service_di_app(
         }
     )
     mock_skill_service.get_link_name = MagicMock(return_value="link_name")
+    mock_skill_service.get_active_skills_from_device = AsyncMock(return_value=[])
     mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
 
     # Factory that returns the mock service from create()
@@ -98,6 +101,7 @@ def _skill_service_di_app(
         "bot_id": "default",
         "owner_id": "user_001",
         "active_engine": "openclaw",
+        "bot_type": bot_type,
     }
     mock_bot_repo.list_by_owner.return_value = (0, [])
 
@@ -141,6 +145,63 @@ def _skill_service_di_app(
     attach_injector(app, injector)
     client = TestClient(app, raise_server_exceptions=False)
     yield client, mock_skill_service, mock_skill_set_service
+
+
+class TestActiveSkillsRuntimeRead:
+    def test_desktop_active_list_reads_the_live_device(self, mock_ctx):
+        with _skill_service_di_app(
+            mock_ctx, bot_type="desktop"
+        ) as (client, mock_svc, _):
+            mock_svc.get_active_skills_from_device.return_value = [
+                SkillInfo(
+                    id="sp455-r2-oc-probe",
+                    name="sp455-r2-oc-probe",
+                    path=(
+                        "/home/admin/.openclaw/workspace/skills/"
+                        "sp455-r2-oc-probe"
+                    ),
+                    is_active=True,
+                    is_installed=True,
+                )
+            ]
+
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 200, response.text
+            assert response.json()["count"] == 1
+            assert response.json()["data"][0]["id"] == "sp455-r2-oc-probe"
+            mock_svc.get_active_skills_from_device.assert_awaited_once_with(
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+            )
+            mock_svc.get_active_skills.assert_not_called()
+
+    def test_non_desktop_active_list_keeps_management_filesystem_scan(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
+            mock_svc.get_active_skills.return_value = []
+
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 200, response.text
+            mock_svc.get_active_skills.assert_called_once_with()
+            mock_svc.get_active_skills_from_device.assert_not_awaited()
+
+    def test_desktop_active_list_does_not_mask_device_failure_as_empty(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(
+            mock_ctx, bot_type="desktop"
+        ) as (client, mock_svc, _):
+            mock_svc.get_active_skills_from_device.side_effect = RuntimeError(
+                "device offline"
+            )
+
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 500
+            mock_svc.get_active_skills.assert_not_called()
 
 
 @contextmanager
