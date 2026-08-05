@@ -614,6 +614,7 @@ class LocalDeviceService(DeviceService):
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ):
         """Apply for a device — singlebox mode backed by BaaS.
 
@@ -669,6 +670,7 @@ class LocalDeviceService(DeviceService):
             **allocated.device_props,
             "nas_mappings": json.dumps([], ensure_ascii=False),
             "symbol": json.dumps([s.to_dict() for s in symbol]) if symbol else "[]",
+            **(device_props_extra or {}),
         }
 
         # Start as PENDING — transitions to ACTIVE when BaasPublishPoller

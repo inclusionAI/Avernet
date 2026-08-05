@@ -57,6 +57,10 @@ from agentclaw.community.core.bot_management.repository.protocol import (
     BotRepository,
     BotRestartLockRepositoryProtocol,
 )
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DEFAULT_IMAGE_POLICY_VALUE,
+    IMAGE_POLICY_ON_ACTIVE_KEY,
+)
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
@@ -1814,6 +1818,10 @@ class BotService:
                 # can still apply the create-time rollout policy.
                 if device_provider is not None:
                     apply_kwargs["device_provider"] = device_provider
+                if bot_ext_override is not None:
+                    apply_kwargs["device_props_extra"] = {
+                        IMAGE_POLICY_ON_ACTIVE_KEY: DEFAULT_IMAGE_POLICY_VALUE
+                    }
 
                 device_result = service.apply_device(**apply_kwargs)
 
@@ -1847,13 +1855,14 @@ class BotService:
                     "device_id": device_id,
                     "status": final_status,
                 }
-                if bot_ext_override is not None:
-                    bot_update["ext"] = bot_ext_override
                 updated = self._repository.update_by_owner(bot_id, user_id, bot_update)
                 if not updated:
                     logger.error(f"[bot_service._allocate_device_async] Failed to update bot {bot_id} for user {user_id}: bot not found or not owner")
                     return
-                if bot_ext_override is not None:
+                if (
+                    bot_ext_override is not None
+                    and device_status == DeviceBindingStatus.ACTIVE.value
+                ):
                     self._persist_service_bot_default_image(
                         {**(bot_record or {}), "bot_id": bot_id, "ext": bot_ext_override},
                         user_id=user_id,

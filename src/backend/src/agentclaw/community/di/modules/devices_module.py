@@ -43,6 +43,9 @@ from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServ
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DefaultImagePolicyActivationListener,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
@@ -156,6 +159,11 @@ class DevicesModule(Module):
         binder.bind(
             DeviceFileSystemResolver,
             to=DefaultDeviceFileSystemResolver,
+            scope=singleton,
+        )
+        binder.bind(
+            DefaultImagePolicyActivationListener,
+            to=DefaultImagePolicyActivationListener,
             scope=singleton,
         )
         # NOTE: the ``DeviceSyncDispatcher`` seam is a Protocol bound per-profile
