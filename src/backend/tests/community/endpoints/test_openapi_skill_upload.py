@@ -87,6 +87,11 @@ class _RuntimeFactory:
         return True
 
 
+class _DeviceContextResolverStub:
+    def resolve_for_bot(self, _bot_id, _owner_id):
+        return type("DeviceContextStub", (), {"provider": "local"})()
+
+
 class _Cleanup:
     def record_pending(self, **_kwargs):
         return True
@@ -193,6 +198,7 @@ def _seed_uploadable_bot(world) -> None:
             world.get(BotCollabLogRepositoryProtocol),
             world.get(SkillsPoolEditGuard),
             _Cleanup(),
+            lambda: _DeviceContextResolverStub(),
         ),
         scope=None,
     )

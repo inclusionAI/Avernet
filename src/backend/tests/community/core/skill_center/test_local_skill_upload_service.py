@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import zipfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -361,11 +362,12 @@ class _ConcurrentRepo(_ReplacementRepo):
 
 
 class _ReplacementFactory(_Factory):
-    def local_skill_package_storage(self, *, name, directory_name=None, **_kwargs):
-        directory = str(self.local_dir / (directory_name or name))
-        return directory, _Storage(self._filesystem, directory)
+    def __init__(self, filesystem):
+        super().__init__(filesystem)
+        self.locator_calls: list[dict] = []
 
-    def local_skill_package_storage_for_locator(self, *, locator, **_kwargs):
+    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
+        self.locator_calls.append({"locator": locator, **kwargs})
         return _Storage(self._filesystem, locator)
 
 
@@ -382,7 +384,17 @@ class _ReplacementRuntime:
         return next(self.results)
 
 
-def _replacement_service(filesystem, repo, runtime, cleanup=None, guard=None):
+class _DeviceResolver:
+    def __init__(self, provider="local"):
+        self.provider = provider
+
+    def resolve_for_bot(self, _bot_id, _owner_id):
+        return SimpleNamespace(provider=self.provider)
+
+
+def _replacement_service(
+    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local"
+):
     return LocalSkillUploadService(
         repo,
         _Sets(),
@@ -393,6 +405,7 @@ def _replacement_service(filesystem, repo, runtime, cleanup=None, guard=None):
         _Audit(),
         guard or _Guard(),
         cleanup or _Cleanup(),
+        lambda: _DeviceResolver(provider),
     )
 
 
@@ -406,6 +419,7 @@ def _service(
     audit=None,
     bot=None,
     factory=None,
+    provider="local",
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
@@ -417,6 +431,7 @@ def _service(
         audit or _Audit(),
         _Guard(),
         _Cleanup(),
+        lambda: _DeviceResolver(provider),
     )
 
 
@@ -830,6 +845,33 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
 
     assert result["operation"] == "updated"
     assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_teclaw_replacement_resolves_provider_before_staging():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    service = _replacement_service(
+        filesystem,
+        repo,
+        _ReplacementRuntime([True]),
+        provider="teclaw",
+    )
+
+    result = await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+
+    factory = service._skill_service_factory
+    assert result["operation"] == "updated"
+    assert factory.storage_calls[0]["is_teclaw"] is True
+    assert factory.locator_calls[0]["is_teclaw"] is True
 
 
 @pytest.mark.asyncio
