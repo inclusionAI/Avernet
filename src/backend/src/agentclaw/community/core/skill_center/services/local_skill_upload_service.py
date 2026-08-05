@@ -24,6 +24,7 @@ from agentclaw.community.core.bot_collaborator.repository.protocol import (
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
+    LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
@@ -35,6 +36,11 @@ from agentclaw.community.core.skill_center.services.repositories import (
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditGuard,
+    SkillsPoolEditPausedError,
+)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
 _MAX_COMPRESSED = 10 * 1024 * 1024
 _MAX_EXPANDED = 50 * 1024 * 1024
@@ -55,6 +61,7 @@ class LocalSkillUploadService:
         collaborator_service: CollaboratorServiceProtocol,
         skill_service_factory: SkillServiceFactory,
         audit_log_repo: BotCollabLogRepositoryProtocol,
+        edit_guard: SkillsPoolEditGuard,
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -62,11 +69,44 @@ class LocalSkillUploadService:
         self._collaborators = collaborator_service
         self._skill_service_factory = skill_service_factory
         self._audit_log_repo = audit_log_repo
+        self._edit_guard = edit_guard
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]:
-        bot = self._authorize(bot_id, owner_id, actor_id)
+        initial_bot = self._authorize(bot_id, owner_id, actor_id)
+        scope = self._scope_for(initial_bot, bot_id)
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
+        try:
+            bot = self._authorize(bot_id, owner_id, actor_id)
+            if self._scope_for(bot, bot_id) != scope:
+                from agentclaw.community.core.skill_center.errors import (
+                    LocalSkillNotFoundError,
+                )
+
+                raise LocalSkillNotFoundError()
+            return await self._upload_locked(
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                actor_id=actor_id,
+                package=package,
+            )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _upload_locked(
+        self,
+        *,
+        bot: dict[str, Any],
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+    ) -> dict[str, Any]:
         if not is_bot_ready(bot):
             raise LocalSkillNotReadyError()
         name, description, files = self._unpack(package)
@@ -165,6 +205,14 @@ class LocalSkillUploadService:
             except Exception:
                 pass
             raise LocalSkillStorageError() from exc
+
+    @staticmethod
+    def _scope_for(bot: dict[str, Any], bot_id: str) -> BotSkillLayoutScope:
+        return BotSkillLayoutScope(
+            env=str(bot["env"]),
+            entity_id=str(bot["entity_id"]),
+            bot_id=bot_id,
+        )
 
     def _ensure_default_set(
         self, *, owner_id: str, bot_id: str, engine_type: str | None
@@ -273,7 +321,7 @@ class LocalSkillUploadService:
             not name
             or not description
             or not _NAME.fullmatch(name)
-            or name.lower() in {"skills-local", "skills-repo"}
+            or name.lower() in {"skills-center", "skills-local", "skills-repo"}
         ):
             raise LocalSkillInvalidPackageError()
         if wrapper and wrapper != name:

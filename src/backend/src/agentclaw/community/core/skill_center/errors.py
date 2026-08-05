@@ -20,6 +20,7 @@ class LocalSkillNotFoundError(Exception):
 class LocalSkillOwnerAmbiguousError(Exception):
     """Legacy Local Skill ownership cannot be resolved without guessing."""
 
+
 class LocalSkillInvalidPackageError(Exception):
     """A ZIP package is malformed or violates the Local Skill layout."""
 
@@ -38,3 +39,7 @@ class LocalSkillDuplicateError(Exception):
 
 class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
+
+
+class LocalSkillEditPausedError(Exception):
+    """A Bot Skill layout operation currently owns the edit lock."""

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import time
 
 from injector import inject
 
@@ -47,10 +49,7 @@ class SkillsPoolEditGuard:
 
     @staticmethod
     def _key(*, scope: BotSkillLayoutScope) -> str:
-        return (
-            "skills-pool:local-edit:"
-            f"{scope.env}:{scope.entity_id}:{scope.bot_id}"
-        )
+        return f"skills-pool:local-edit:{scope.env}:{scope.entity_id}:{scope.bot_id}"
 
     def acquire_for_edit(
         self,
@@ -68,6 +67,21 @@ class SkillsPoolEditGuard:
                 "Skills are temporarily read-only during layout rollback"
             )
         return lease
+
+    async def acquire_for_edit_wait(
+        self, *, scope: BotSkillLayoutScope, timeout_seconds: float = 30.0
+    ) -> SkillsPoolEditLease:
+        """Wait for an ordinary edit while still failing closed for rollback."""
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                return self.acquire_for_edit(scope=scope)
+            except SkillsPoolEditPausedError:
+                if self._layouts.get(scope).phase in self._ROLLBACK_PHASES:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                await asyncio.sleep(0.01)
 
     def acquire_for_rollback(
         self,
