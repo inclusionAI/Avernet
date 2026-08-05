@@ -310,6 +310,7 @@ def deactivate_repushes_remaining_symlinks():
 def _seed_deactivate_missing(world) -> None:
     _seed_bot_with_active_git_skill(world, bot_id="bot_skill_deact_err", engine="openclaw")
     _clean_workspace_skills_dir(world, bot_id="bot_skill_deact_err", engine="openclaw")
+    _record_for_bot(world)
     # Deliberately do NOT create the on-disk 'foo' link.
 
 
