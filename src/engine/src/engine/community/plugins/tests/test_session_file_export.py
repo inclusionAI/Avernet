@@ -6,9 +6,15 @@ from pathlib import Path
 import httpx
 import pytest
 
-from engine.community.core.session_files.models import SessionFileTransferRequest
+from engine.community.core.session_files.models import (
+    SessionFileTransferRequest,
+    SessionFileUploadGrant,
+)
 from engine.community.plugin_api.session_file_export import BaasFileExportError
-from engine.community.plugins.session_file_export import BaasSessionFileClient
+from engine.community.plugins.session_file_export import (
+    BaasSessionFileClient,
+    NotConfiguredBaasSessionFileClient,
+)
 
 
 def _request(transfer_id: str = "source-001") -> SessionFileTransferRequest:
@@ -183,3 +189,62 @@ async def test_share_link_source_missing_and_untrusted_host_are_rejected():
     )
     with pytest.raises(BaasFileExportError, match="file_export_failed"):
         await untrusted.create_share_link(_request(), expire_seconds=7200)
+
+
+@pytest.mark.asyncio
+async def test_not_configured_client_fails_closed_for_every_operation():
+    client = NotConfiguredBaasSessionFileClient()
+    grant = SessionFileUploadGrant(
+        transfer_id="replacement-001",
+        upload_type="SINGLE",
+    )
+
+    with pytest.raises(BaasFileExportError, match="file_export_unavailable"):
+        await client.create_share_link(_request(), expire_seconds=7200)
+    with pytest.raises(BaasFileExportError, match="file_export_unavailable"):
+        await client.create_upload_grant(
+            _request(), filename="report.txt", size_bytes=7
+        )
+    with pytest.raises(BaasFileExportError, match="file_export_unavailable"):
+        await client.upload_file(grant, "report.txt", resource_id="sr_001")
+    with pytest.raises(BaasFileExportError, match="file_export_unavailable"):
+        await client.complete_upload(_request())
+
+
+@pytest.mark.parametrize(
+    ("base_url", "allowed_hosts", "message"),
+    [
+        ("not-a-url", frozenset({"oss.example"}), "invalid BaaS base URL"),
+        ("https://baas.example", frozenset(), "allowed_share_hosts is required"),
+    ],
+)
+def test_client_rejects_invalid_configuration(base_url, allowed_hosts, message):
+    with pytest.raises(ValueError, match=message):
+        BaasSessionFileClient(
+            baas_base_url=base_url,
+            control_headers={},
+            allowed_share_hosts=allowed_hosts,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "error_code"),
+    [
+        (httpx.Response(503), "file_export_unavailable"),
+        (httpx.Response(504), "file_export_timeout"),
+        (httpx.Response(500), "file_export_failed"),
+        (httpx.Response(200, text="not-json"), "file_export_failed"),
+        (httpx.Response(200, json={"code": 1, "data": {}}), "file_export_failed"),
+    ],
+)
+async def test_share_link_normalizes_control_plane_failures(response, error_code):
+    client = BaasSessionFileClient(
+        baas_base_url="https://baas.example",
+        control_headers={},
+        allowed_share_hosts=frozenset({"oss.example"}),
+        transport=httpx.MockTransport(lambda request: response),
+    )
+
+    with pytest.raises(BaasFileExportError, match=error_code):
+        await client.create_share_link(_request(), expire_seconds=7200)
