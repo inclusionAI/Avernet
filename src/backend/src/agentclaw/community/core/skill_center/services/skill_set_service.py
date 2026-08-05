@@ -237,7 +237,7 @@ class SkillSetService:
         self._pool_layout_paths = pool_layout_paths or (
             lambda _owner_id, _bot_id, _engine: None
         )
-        effective_owner = entity_id or user_id
+        effective_owner = user_id or entity_id
         if effective_owner is not None:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),

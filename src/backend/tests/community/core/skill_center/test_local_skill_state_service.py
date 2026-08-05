@@ -204,6 +204,20 @@ async def test_deactivate_removes_stale_runtime_link_before_sync():
 
 
 @pytest.mark.asyncio
+async def test_deactivate_treats_false_stale_link_cleanup_as_storage_failure():
+    service, _skills, _sets, _guard, runtime, _factory = _service(active=True)
+    runtime.skill_service.deactivate_skill.return_value = False
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+
+    runtime.skill_service.deactivate_skill.assert_awaited_once_with(
+        "one", bolt_id="bot", user_id="owner"
+    )
+    assert runtime.calls == 0
+
+
+@pytest.mark.asyncio
 async def test_lock_rereads_desired_state_changed_while_waiting_before_calculating_changed():
     service, skills, sets, _guard, runtime, _factory = _service(
         active=False,
