@@ -1295,7 +1295,7 @@ class SkillSetService:
                 # 从路径中提取技能名称（最后一个目录名）
                 if path_part.startswith('/'):
                     # 绝对路径格式: /aidesktop/.../skills-local/skill-name
-                    skill_name = path_part.rstrip('/').split('/')[-1]
+                    link_name = skill_name or path_part.rstrip('/').split('/')[-1]
                     source = (
                         canonical_pool_local_path(path_part, skills_local_dir)
                         if pool_layout_paths is not None
@@ -1303,9 +1303,9 @@ class SkillSetService:
                     )
                 else:
                     # 相对名称格式: skill-name
-                    skill_name = path_part.split('/')[-1] if '/' in path_part else path_part
-                    source = str(skills_local_dir / skill_name)
-                target = str(base_skills_dir / skill_name)
+                    link_name = path_part.split('/')[-1] if '/' in path_part else path_part
+                    source = str(skills_local_dir / link_name)
+                target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
         logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(symlinks)}")
