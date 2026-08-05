@@ -421,6 +421,37 @@ async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
 
 
 @pytest.mark.asyncio
+async def test_next_delete_cancels_pre_copy_repair_work_when_source_verifies(monkeypatch):
+    service, files, skills, _guard, cleanup = _service()
+    original_quarantine = LocalSkillPackageStorage.quarantine_to
+
+    class _ProcessCrash(BaseException):
+        pass
+
+    async def crash_before_quarantine_copy(_package, _quarantine):
+        raise _ProcessCrash()
+
+    monkeypatch.setattr(
+        LocalSkillPackageStorage, "quarantine_to", crash_before_quarantine_copy
+    )
+    with pytest.raises(_ProcessCrash):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+    retained_work_id = cleanup.list_repair_required(
+        env="dev", owner_id="owner", bot_id="bot", skill_id="9"
+    )[0]["id"]
+    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+    monkeypatch.setattr(
+        LocalSkillPackageStorage, "quarantine_to", original_quarantine
+    )
+    await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is True
+    assert files.files == {}
+    assert cleanup._records[retained_work_id]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
 async def test_retry_repairs_an_incomplete_existing_source_before_purging_quarantine():
     service, files, skills, _guard, cleanup = _service()
     files.files["/skills/one/scripts/main.py"] = b"print('verified')\n"
