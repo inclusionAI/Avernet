@@ -90,6 +90,9 @@ class _Skills:
         self.deleted = True
         return 1
 
+    def list_skill_set_references(self, _skill_id):
+        return []
+
 
 class _Sets:
     def __init__(self, skills):
@@ -100,6 +103,9 @@ class _Sets:
 
     def get_excluded_skills(self, *_args):
         return [] if self.skills.active else [9]
+
+    def get_all_active_skill_sets_for_env(self, **_kwargs):
+        return []
 
 
 class _Bots:
