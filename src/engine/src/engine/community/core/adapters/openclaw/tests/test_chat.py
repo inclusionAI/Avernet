@@ -83,6 +83,10 @@ class _FakeChatPort:
         self.stream_calls: list[dict] = []
         self.abort_calls: list[dict] = []
         self.inject_calls: list[dict] = []
+        self.inject_result: dict[str, Any] = {
+            "success": True,
+            "payload": {"ok": True, "messageId": "m1"},
+        }
 
     async def chat_stream(
         self,
@@ -127,7 +131,7 @@ class _FakeChatPort:
             "label": label,
             "token": token,
         })
-        return {"success": True, "payload": {"ok": True, "messageId": "m1"}}
+        return self.inject_result
 
 
 # ── observer mock ─────────────────────────────────────────────────────────────
@@ -364,3 +368,28 @@ async def test_inject_calls_port_and_returns_payload():
             "token": "tok",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_inject_returns_error_when_port_fails():
+    port = _FakeChatPort()
+    port.inject_result = {"success": False, "error": {"code": "E", "message": "nope"}}
+    adapter = OpenClawChatAdapter(port)
+
+    result = await adapter.inject("sk", "hello")
+
+    assert result == {"ok": False, "error": {"code": "E", "message": "nope"}}
+
+
+@pytest.mark.asyncio
+async def test_inject_failure_without_error_uses_fallback():
+    port = _FakeChatPort()
+    port.inject_result = {"success": False}
+    adapter = OpenClawChatAdapter(port)
+
+    result = await adapter.inject("sk", "hello")
+
+    assert result == {
+        "ok": False,
+        "error": {"code": "UNKNOWN", "message": "chat.inject failed"},
+    }
