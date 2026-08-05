@@ -231,13 +231,21 @@ impl GroupServiceImpl {
         {
             return Ok(true);
         }
+        let management_actor_ids = Self::group_management_actor_ids(group);
+        if management_actor_ids
+            .iter()
+            .any(|actor_id| actor_id == &principal_actor_id)
+        {
+            return Ok(true);
+        }
         if let Principal::Human(human) = principal {
-            let participant_actor_ids = group
+            let mut actor_ids = group
                 .participants
                 .iter()
                 .map(|participant| participant.bot_uuid.clone())
                 .collect::<Vec<_>>();
-            if self.human_can_act_as_any(human, participant_actor_ids).await? {
+            actor_ids.extend(management_actor_ids);
+            if self.human_can_act_as_any(human, actor_ids).await? {
                 return Ok(true);
             }
         }
