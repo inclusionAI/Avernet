@@ -1934,9 +1934,9 @@ class _DeviceSyncMixin:
 
     def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
         owner_id = (
-            user_id
+            self.skill_set_service.entity_id
+            or user_id
             or self.skill_set_service.user_id
-            or self.skill_set_service.entity_id
         )
         bot_id = self.skill_set_service.bot_id
         if not owner_id or not bot_id:
