@@ -105,6 +105,11 @@ class LocalSkillPackageStorage:
         """Whether this storage currently has an authoritative package."""
         return await self._filesystem.exists(self._device_directory)
 
+    async def verify(self) -> bool:
+        """Read and validate every package file without changing storage."""
+        await self._read_package_files()
+        return True
+
     async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
         """Copy, verify, then remove this authoritative package.
 

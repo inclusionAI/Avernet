@@ -318,6 +318,15 @@ class LocalSkillDeleteService:
                 locator=quarantine_locator,
             )
             try:
+                if not await quarantine.exists():
+                    await package.verify()
+                    self._cancel_cleanup(
+                        work_id=work_id,
+                        bot=bot,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                    )
+                    continue
                 restored, quarantine_purged = await package.restore_from(quarantine)
             except Exception as exc:
                 raise LocalSkillStorageError() from exc
