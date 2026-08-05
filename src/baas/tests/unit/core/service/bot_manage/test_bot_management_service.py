@@ -1300,7 +1300,9 @@ class TestScaleBot:
 
         call_kwargs = mock_publish_service.create_publish.call_args.kwargs
         publish_config = call_kwargs["config"]
-        assert publish_config.callback_timeout_seconds == 300
+        assert (
+            publish_config.callback_timeout_seconds == DEFAULT_CALLBACK_TIMEOUT_SECONDS
+        )
         assert publish_config.auto_approve is False
 
     @pytest.mark.asyncio
@@ -1375,7 +1377,9 @@ class TestScaleBot:
 
         call_kwargs = mock_publish_service.create_publish.call_args.kwargs
         publish_config = call_kwargs["config"]
-        assert publish_config.callback_timeout_seconds == 300  # from DB, not overridden
+        assert (
+            publish_config.callback_timeout_seconds == DEFAULT_CALLBACK_TIMEOUT_SECONDS
+        )
 
 
 class TestUpdateBot:
@@ -4514,7 +4518,7 @@ class TestUpdateBotConfigMerges:
 
     @pytest.mark.asyncio
     async def test_update_bot_preserves_existing_callback_timeout_when_none(self):
-        """Test update_bot preserves existing callback_timeout when incoming is None."""
+        """Test update_bot uses default 1800s when incoming callback_timeout is None."""
         mock_record = MagicMock()
         mock_record.id = 1
         mock_record.bot_uuid = "BOT-001"
@@ -4586,6 +4590,13 @@ class TestUpdateBotConfigMerges:
             )
 
             assert result.publish_id == 892
+            # Verify that None input → default 1800s (not old 1200)
+            create_publish_call = mock_publish_service.create_publish.call_args
+            publish_config = create_publish_call.kwargs["config"]
+            assert (
+                publish_config.callback_timeout_seconds
+                == DEFAULT_CALLBACK_TIMEOUT_SECONDS
+            )
 
 
 class TestAutoApprovePublish:
