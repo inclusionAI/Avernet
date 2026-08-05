@@ -149,6 +149,30 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                 for row in rows
             ]
 
+    def list_repair_required(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+    ) -> list[dict]:
+        with self._db.orm_session() as db:
+            rows = db.query(LocalSkillCleanupWorkModel).filter(
+                LocalSkillCleanupWorkModel.env == env,
+                LocalSkillCleanupWorkModel.owner_id == owner_id,
+                LocalSkillCleanupWorkModel.bot_id == bot_id,
+                LocalSkillCleanupWorkModel.skill_id == int(skill_id),
+                LocalSkillCleanupWorkModel.status == "repair_required",
+            ).order_by(LocalSkillCleanupWorkModel.id.asc()).all()
+            return [
+                {
+                    "id": row.id,
+                    "package_locator": row.package_locator,
+                }
+                for row in rows
+            ]
+
     def mark_cleaned(self, *, work_id: int, env: str, owner_id: str, bot_id: str) -> bool:
         with self._db.orm_session() as db:
             return db.query(LocalSkillCleanupWorkModel).filter(
