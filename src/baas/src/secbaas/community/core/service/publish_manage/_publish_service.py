@@ -306,6 +306,19 @@ class DefaultPublishService(PublishService):
             )
             raise BotNotFoundError(str(bot_id))
 
+        if publish_type == PublishType.UPDATE and config and config.template_uuid:
+            # COSEC: Resolve the requested template within the current tenant before
+            # persisting publish state, preventing cross-tenant template reuse.
+            target_template = self._template_service.get_online_template_by_uuid(
+                tenant=tenant,
+                template_uuid=config.template_uuid,
+            )
+            if target_template is None:
+                raise ValueError(
+                    f"Template not found or not online: uuid={config.template_uuid}, "
+                    f"tenant={tenant}"
+                )
+
         # Step 2: Check for concurrent active publish (SVC-PUB-15)
         publish_repo = self._publish_repo
         active_publish = publish_repo.get_active_by_bot_id(
@@ -592,6 +605,7 @@ class DefaultPublishService(PublishService):
                 tenant=tenant,
                 source_bot_id=bot_id,
                 new_config=new_bot_config,
+                new_template_uuid=config.template_uuid if config else None,
                 operator=operator,
             )
             # Store target_bot_id via PublishConfig field for use at completion

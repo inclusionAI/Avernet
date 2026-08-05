@@ -3297,6 +3297,100 @@ class TestUpdateBotConfigUpdate:
                 )
 
     @pytest.mark.asyncio
+    async def test_update_bot_template_only_triggers_publish(self):
+        """A template-only change creates UPDATE while preserving stored config."""
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.name = "Test Bot"
+        mock_record.extra_config = {"entity_type": "staff"}
+        mock_publish = MagicMock()
+        mock_publish.id = 778
+        mock_updated_bot = MagicMock()
+        mock_updated_bot.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": "ACTIVE",
+            "name": "Test Bot",
+            "description": None,
+            "template_uuid": "TEMPLATE-old",
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot = AsyncMock(return_value=mock_updated_bot)
+        mock_system_config_repo = MagicMock()
+        mock_system_config_repo.get_by_env_and_key.return_value = None
+        service = _make_service(
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+            bot_service=mock_bot_service,
+            system_config_repo=mock_system_config_repo,
+        )
+
+        with patch.object(
+            service,
+            "_get_operational_bot_record_by_uuid_for_update",
+            return_value=mock_record,
+        ):
+            result = await service.update_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="template-update-request",
+                template_uuid="TEMPLATE-new",
+            )
+
+        assert result.publish_id == 778
+        publish_config = mock_publish_service.create_publish.call_args.kwargs["config"]
+        assert publish_config.template_uuid == "TEMPLATE-new"
+        assert publish_config.deploy_config is None
+
+    @pytest.mark.asyncio
+    async def test_update_bot_template_without_request_id(self):
+        """A template change requires a correlated UPDATE request."""
+        mock_record = MagicMock(
+            id=1,
+            bot_uuid="BOT-001",
+            status="ACTIVE",
+            name="Test Bot",
+            extra_config={},
+        )
+        service = _make_service()
+
+        with patch.object(
+            service,
+            "_get_operational_bot_record_by_uuid_for_update",
+            return_value=mock_record,
+        ):
+            with pytest.raises(
+                ValueError, match="request_id is required when updating template_uuid"
+            ):
+                await service.update_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    template_uuid="TEMPLATE-new",
+                )
+
+    @pytest.mark.asyncio
     async def test_update_bot_destroying_name_only(self):
         """Test update_bot allows name update for DESTROYING bot"""
         mock_record = MagicMock()
@@ -3383,6 +3477,34 @@ class TestUpdateBotConfigUpdate:
                     operator="user1",
                     bot_config=bot_config,
                     request_id="test-request-id-12345678901234567890",
+                )
+
+    @pytest.mark.asyncio
+    async def test_update_bot_destroying_rejects_template(self):
+        """A DESTROYING bot cannot start a template migration."""
+        mock_record = MagicMock(
+            id=1,
+            bot_uuid="BOT-001",
+            status="DESTROYING",
+            extra_config={},
+        )
+        service = _make_service()
+
+        with patch.object(
+            service,
+            "_get_operational_bot_record_by_uuid_for_update",
+            return_value=mock_record,
+        ):
+            with pytest.raises(
+                ValueError,
+                match="Cannot update bot template while bot is in DESTROYING",
+            ):
+                await service.update_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    request_id="template-update-request",
+                    template_uuid="TEMPLATE-new",
                 )
 
     @pytest.mark.asyncio

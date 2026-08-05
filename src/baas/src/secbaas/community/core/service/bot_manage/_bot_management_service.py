@@ -875,6 +875,7 @@ class DefaultBotManagementService(BotManageService):
         bot_desc: str | None = None,
         bot_config: BotConfig | None = None,
         request_id: str | None = None,
+        template_uuid: str | None = None,
     ) -> UpdateBotResponse:
         """Update Bot metadata and config.
 
@@ -890,6 +891,7 @@ class DefaultBotManagementService(BotManageService):
             bot_desc: New bot description
             bot_config: Bot configuration update (triggers UPDATE publish)
             request_id: Request ID for publish correlation (required if bot_config provided)
+            template_uuid: Optional template UUID for the target UPDATE record
 
         Returns:
             UpdateBotResponse with publish_id if UPDATE publish was created
@@ -911,7 +913,8 @@ class DefaultBotManagementService(BotManageService):
         bot_repo = self._bot_repo
         logger.info(
             f"[update_bot] bot_uuid={bot_uuid} bot_id={bot_id} bot_status={record.status} "
-            f"has_config={bot_config is not None} has_name={bot_name is not None}"
+            f"has_config={bot_config is not None} has_name={bot_name is not None} "
+            f"has_template={template_uuid is not None}"
         )
 
         # Check if bot is being destroyed - only allow name/description updates
@@ -919,6 +922,11 @@ class DefaultBotManagementService(BotManageService):
             if bot_config is not None:
                 raise ValueError(
                     "Cannot update bot config while bot is in DESTROYING status. "
+                    "Only name and description updates are allowed."
+                )
+            if template_uuid is not None:
+                raise ValueError(
+                    "Cannot update bot template while bot is in DESTROYING status. "
                     "Only name and description updates are allowed."
                 )
 
@@ -932,12 +940,18 @@ class DefaultBotManagementService(BotManageService):
         if len(update_kwargs) > 1:  # More than just modifier
             bot_repo.update_bot(bot_id=bot_id, tenant=tenant, env=env, **update_kwargs)
 
-        # Config change: create UPDATE publish
+        # Config or template change: create UPDATE publish
         publish_id: int | None = None
-        if bot_config is not None:
+        if bot_config is not None or template_uuid is not None:
             if not request_id:
+                if bot_config is not None:
+                    raise ValueError(
+                        "request_id is required when updating bot_config "
+                        "(triggers UPDATE publish)"
+                    )
                 raise ValueError(
-                    "request_id is required when updating bot_config (triggers UPDATE publish)"
+                    "request_id is required when updating template_uuid "
+                    "(triggers UPDATE publish)"
                 )
 
             # Merge config with existing
@@ -946,25 +960,26 @@ class DefaultBotManagementService(BotManageService):
                 if record and record.extra_config
                 else BotConfig()
             )
-            if bot_config.share_policy is not None:
-                stored_config.share_policy = bot_config.share_policy
-            if bot_config.deploy_config is not None:
-                stored_config.deploy_config = merge_deploy_config(
-                    stored_config.deploy_config,
-                    bot_config.deploy_config,
-                )
-            if bot_config.entity_id:
-                stored_config.entity_id = bot_config.entity_id
-            if bot_config.entity_type:
-                stored_config.entity_type = bot_config.entity_type
-            if bot_config.sla_grade:
-                stored_config.sla_grade = bot_config.sla_grade
-            if bot_config.auto_approve_publish is not None:
-                stored_config.auto_approve_publish = bot_config.auto_approve_publish
-            if bot_config.callback_timeout_seconds is not None:
-                stored_config.callback_timeout_seconds = (
-                    bot_config.callback_timeout_seconds
-                )
+            if bot_config is not None:
+                if bot_config.share_policy is not None:
+                    stored_config.share_policy = bot_config.share_policy
+                if bot_config.deploy_config is not None:
+                    stored_config.deploy_config = merge_deploy_config(
+                        stored_config.deploy_config,
+                        bot_config.deploy_config,
+                    )
+                if bot_config.entity_id:
+                    stored_config.entity_id = bot_config.entity_id
+                if bot_config.entity_type:
+                    stored_config.entity_type = bot_config.entity_type
+                if bot_config.sla_grade:
+                    stored_config.sla_grade = bot_config.sla_grade
+                if bot_config.auto_approve_publish is not None:
+                    stored_config.auto_approve_publish = bot_config.auto_approve_publish
+                if bot_config.callback_timeout_seconds is not None:
+                    stored_config.callback_timeout_seconds = (
+                        bot_config.callback_timeout_seconds
+                    )
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
@@ -992,6 +1007,7 @@ class DefaultBotManagementService(BotManageService):
                     stored_config.callback_timeout_seconds, self._system_config_repo
                 ),
                 auto_approve=stored_config.auto_approve_publish,
+                template_uuid=template_uuid,
             )
 
             publish = await self._publish_service.create_publish(
