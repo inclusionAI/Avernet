@@ -238,6 +238,11 @@ class CreateBotForOthersService:
                 error_code=500,
             )
         engine_type = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+        if self._bot_service.is_teclaw_bot(engine_type):
+            raise CreateBotForOthersError(
+                "teclaw 类型的 Bot 不支持重启",
+                error_code=400,
+            )
         existing_ext = self._mapping_copy(bot.get("ext"))
         readiness = self._ensure_passport(
             bot_id=bot_id,

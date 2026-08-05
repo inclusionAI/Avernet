@@ -46,7 +46,7 @@ def _freeze_restart_wait_clock(monkeypatch):
     return service_module, FrozenDateTime
 
 
-def _bot(*, status="ACTIVE", ext=None, gmt_modified=None):
+def _bot(*, status="ACTIVE", ext=None, gmt_modified=None, active_engine="openclaw"):
     return {
         "bot_id": EXISTING_BOT_ID,
         "owner_id": TARGET_USER,
@@ -55,7 +55,7 @@ def _bot(*, status="ACTIVE", ext=None, gmt_modified=None):
         "bot_name": "Default Bot",
         "bot_desc": "default vault",
         "status": status,
-        "active_engine": "openclaw",
+        "active_engine": active_engine,
         "template_type": None,
         "ext": ext or {},
         "gmt_modified": gmt_modified,
@@ -84,6 +84,7 @@ def _service(*, existing_bot=None):
         "bot_id": "default",
         "status": "PENDING",
     }
+    bot_service.is_teclaw_bot.return_value = False
 
     passport = MagicMock()
     passport.apply_first_agent_passport.return_value = {
@@ -409,6 +410,28 @@ def test_active_bot_with_complete_identity_is_verified_without_restart():
     relationship.create_relationship.assert_not_called()
     repository.update_by_owner.assert_not_called()
     bot_service.create_bot.assert_not_called()
+    bot_service.restart_bot.assert_not_called()
+
+
+def test_teclaw_bot_rejects_create_for_others_before_repair_or_restart():
+    from agentclaw.community.core.bot_management.errors import (
+        CreateBotForOthersError,
+    )
+
+    stored = _bot(active_engine="teclaw")
+    service, _, bot_service, passport, relationship, _ = _service(
+        existing_bot=stored
+    )
+    bot_service.is_teclaw_bot.return_value = True
+
+    with pytest.raises(CreateBotForOthersError) as exc_info:
+        _execute(service)
+
+    assert exc_info.value.error_code == 400
+    assert str(exc_info.value) == "teclaw 类型的 Bot 不支持重启"
+    bot_service.is_teclaw_bot.assert_called_once_with("teclaw")
+    passport.apply_first_agent_passport.assert_not_called()
+    relationship.create_relationship.assert_not_called()
     bot_service.restart_bot.assert_not_called()
 
 
