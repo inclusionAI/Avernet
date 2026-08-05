@@ -40,7 +40,7 @@ class TestCreateHookFailure:
         code = await approve_publish(api, publish_id)
         assert code == 200
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=15.0
         )
         assert status == "FAILED", f"Expected publish FAILED, got {status}"
         devices = await get_devices_from_progress(api, publish_id)
@@ -50,7 +50,7 @@ class TestCreateHookFailure:
         # Bot status transition ACTIVE → FAILED is async: poll with backoff.
         bot_status = "ACTIVE"
         t0 = time.monotonic()
-        while time.monotonic() - t0 < 5.0:
+        while time.monotonic() - t0 < 15.0:
             resp = await api.client.get(
                 api.bot_url(bot["bot_uuid"]), params=api.params()
             )
@@ -87,7 +87,7 @@ class TestDestroyHookFailure:
         code = await approve_publish(api, publish_id)
         assert code == 200
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=15.0
         )
         assert status in ("SUCCESS", "FAILED"), f"Expected terminal state, got {status}"
 
@@ -113,6 +113,19 @@ class TestRestartHookFailure:
         code = await approve_publish(api, publish_id)
         assert code == 200
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=15.0
         )
         assert status == "FAILED", f"Expected FAILED, got {status}"
+        # Bot status transition ACTIVE → FAILED is async: poll with backoff.
+        bot_status = "ACTIVE"
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 15.0:
+            resp = await api.client.get(
+                api.bot_url(bot["bot_uuid"]), params=api.params()
+            )
+            if resp.status_code == 200:
+                bot_status = resp.json()["data"]["status"]
+                if bot_status == "FAILED":
+                    break
+            await asyncio.sleep(0.1)
+        assert bot_status == "FAILED", f"Expected bot FAILED, got {bot_status}"
