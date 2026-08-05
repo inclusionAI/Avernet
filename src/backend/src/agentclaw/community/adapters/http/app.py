@@ -478,11 +478,19 @@ async def _http_exception_handler(
         # detail survives. It also covers an ``HTTPException`` raised *inside* a
         # public handler: ``@envelope_errors`` does not map that type, so it
         # arrives here with the handler's arguments already stashed.
-        log = logger.error if exc.status_code >= 500 else logger.warning
+        #
+        # 5xx carries the traceback like every other 5xx path here, because a
+        # handler-raised one ("Upload storage failed", "cron service returned no
+        # data") is diagnosed by its raise site. 4xx does not: the common case is
+        # Starlette's own routing 404/405, raised before any handler, whose stack
+        # is framework internals rather than anything we would read.
+        is_server_error = exc.status_code >= 500
+        log = logger.error if is_server_error else logger.warning
         log(
             "[Public %s] HTTPException on %s %s: %s%s",
             exc.status_code, request.method, request.url.path, exc.detail,
             params_suffix(request),
+            exc_info=exc if is_server_error else None,
         )
         return _public_error_envelope(exc.status_code, request, exc.headers)
     return await http_exception_handler(request, exc)

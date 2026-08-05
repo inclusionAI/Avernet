@@ -206,6 +206,63 @@ def test_handler_logs_the_params_stashed_by_the_public_decorator(monkeypatch):
 
 
 # ============================================================
+# Public HTTPException — 5xx keeps the traceback, 4xx does not
+# ============================================================
+
+def _public_http_exception_client():
+    """Mount the real ``_http_exception_handler`` on public-prefixed routes."""
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+
+    app = FastAPI()
+    app.add_exception_handler(
+        StarletteHTTPException, app_mod._http_exception_handler
+    )
+
+    @app.get(f"{PUBLIC_API_PREFIX}/boom/{{status}}")
+    async def boom(status: int):
+        raise StarletteHTTPException(status_code=status, detail=f"boom-{status}")
+
+    return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.mark.parametrize(
+    "status,level,wants_traceback",
+    [
+        # Handler-raised: the raise site is the diagnosis. Both of these are live
+        # on the public surface (routines 500, resources upload 502) and neither
+        # is in ENVELOPE_ERRORS, so they land in this handler.
+        (502, "error", True),
+        (500, "error", True),
+        # Starlette's own routing failures dominate 4xx here; their stack is
+        # framework internals, so the message alone is the useful part.
+        (404, "warning", False),
+    ],
+)
+def test_public_http_exception_logging(monkeypatch, status, level, wants_traceback):
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, level, lambda *a, **k: calls.append((a, k)),
+    )
+    resp = _public_http_exception_client().get(f"{PUBLIC_API_PREFIX}/boom/{status}")
+    assert resp.status_code == status
+
+    assert calls, f"expected a {level} log for {status}"
+    args, kwargs = calls[-1]
+    assert f"boom-{status}" in args, "the raised detail must survive in the log"
+    if wants_traceback:
+        assert kwargs.get("exc_info") is not None, \
+            "a 5xx HTTPException must carry its raise site"
+    else:
+        assert kwargs.get("exc_info") is None
+
+
+# ============================================================
 # Trace-ID propagation — every response carries X-Trace-ID
 # ============================================================
 
