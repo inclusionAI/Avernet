@@ -228,7 +228,7 @@ def test_compare_and_set_ext_rejects_stale_snapshot(repo):
     updated = repo.compare_and_set_ext(
         publish_id=rec.id,
         expected_ext={"concurrent": "old"},
-        ext={"sbot_pin_image": True, "sbot_docker_image": "arka:v2"},
+        ext={"sbot_pin_image": True, "sbot_docker_image": "arca:v2"},
     )
 
     assert updated is None
@@ -241,11 +241,11 @@ def test_compare_and_set_ext_supports_null_expected_ext(repo):
     updated = repo.compare_and_set_ext(
         publish_id=rec.id,
         expected_ext=None,
-        ext={"sbot_runtime_kind": "arka"},
+        ext={"sbot_runtime_kind": "arca"},
     )
 
     assert updated is not None
-    assert updated.ext == {"sbot_runtime_kind": "arka"}
+    assert updated.ext == {"sbot_runtime_kind": "arca"}
 
 
 def test_compare_and_set_status_with_ext_guards_both_snapshots(repo):

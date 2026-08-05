@@ -256,7 +256,7 @@ def test_compare_and_set_ext_preserves_concurrent_bot_metadata(repo):
         bot_id="bot-1",
         owner_id="emp1",
         expected_ext={"owner": "first", "中文": "值"},
-        ext={"sbot_pin_image": True, "sbot_docker_image": "arka:v1"},
+        ext={"sbot_pin_image": True, "sbot_docker_image": "arca:v1"},
     )
     assert stale is None
     assert repo.get_by_id_and_owner("bot-1", "emp1")["ext"] == updated["ext"]
@@ -269,11 +269,11 @@ def test_compare_and_set_ext_supports_null_bot_ext(repo):
         bot_id="bot-1",
         owner_id="emp1",
         expected_ext=None,
-        ext={"sbot_runtime_kind": "arka"},
+        ext={"sbot_runtime_kind": "arca"},
     )
 
     assert updated is not None
-    assert updated["ext"] == {"sbot_runtime_kind": "arka"}
+    assert updated["ext"] == {"sbot_runtime_kind": "arca"}
 
 
 def test_list_and_count(repo):

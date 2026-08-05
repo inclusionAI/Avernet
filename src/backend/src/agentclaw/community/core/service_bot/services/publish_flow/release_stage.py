@@ -26,7 +26,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     RUNTIME_KIND_TECLAW,
     ServiceBotImagePin,
 )

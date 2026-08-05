@@ -1,6 +1,6 @@
-"""ARKA service-bot image policy helpers.
+"""ARCA service-bot image policy helpers.
 
-New bots and successful draft restarts explicitly opt into the BaaS/ARKA
+New bots and successful draft restarts explicitly opt into the BaaS/ARCA
 default image. Published operations are reproducible: they read only the target
 publish record. Records created before the policy existed are lazily protected
 by the environment common-config and snapshot the configured image once.
@@ -28,9 +28,10 @@ IMAGE_POLICY_KEYS = (
     IMAGE_PIN_VALUE_KEY,
 )
 SERVICE_BOT_RUNTIME_KIND_KEY = "sbot_runtime_kind"
-RUNTIME_KIND_ARKA = "arka"
+RUNTIME_KIND_ARCA = "arca"
 RUNTIME_KIND_TECLAW = "teclaw"
-_RUNTIME_KINDS = {RUNTIME_KIND_ARKA, RUNTIME_KIND_TECLAW}
+_RUNTIME_KINDS = {RUNTIME_KIND_ARCA, RUNTIME_KIND_TECLAW}
+_LEGACY_RUNTIME_KIND_TYPO = "arka"
 
 
 
@@ -64,7 +65,7 @@ class ServiceBotImagePin:
 PublishExtWriter = Callable[[dict[str, Any]], None]
 
 
-def resolve_current_arka_image(
+def resolve_current_arca_image(
     common_config_service: CommonConfigService | None,
     *,
     env: str,
@@ -97,7 +98,7 @@ def runtime_kind_from_provider(device_provider: str | None) -> str | None:
     if device_provider == RUNTIME_KIND_TECLAW:
         return RUNTIME_KIND_TECLAW
     if device_provider in {"arca", "baas"}:
-        return RUNTIME_KIND_ARKA
+        return RUNTIME_KIND_ARCA
     return None
 
 
@@ -119,10 +120,12 @@ def resolve_publish_runtime_kind(
 
     New records carry ``sbot_runtime_kind``. Historical TeClaw records are
     recognized from their config artifact or stage bindings; the final fallback
-    is ARKA because ARKA predates the external-runtime publish format.
+    is ARCA because ARCA predates the external-runtime publish format.
     """
     ext = publish_record.ext or {}
     explicit = ext.get(SERVICE_BOT_RUNTIME_KIND_KEY)
+    if explicit == _LEGACY_RUNTIME_KIND_TYPO:
+        return RUNTIME_KIND_ARCA
     if explicit in _RUNTIME_KINDS:
         return explicit
 
@@ -143,10 +146,10 @@ def resolve_publish_runtime_kind(
                 return kind
 
     logger.warning(
-        "[arka_image_pin] publish runtime kind missing; using legacy ARKA fallback: publish_id=%s",
+        "[arca_image_pin] publish runtime kind missing; using legacy ARCA fallback: publish_id=%s",
         publish_record.id,
     )
-    return RUNTIME_KIND_ARKA
+    return RUNTIME_KIND_ARCA
 
 
 def has_explicit_image_policy(ext: dict[str, Any] | None) -> bool:
@@ -235,7 +238,7 @@ def resolve_publish_image_pin(
             f"Publish {publish_record.id} has an inconsistent image policy snapshot"
         )
 
-    image = resolve_current_arka_image(
+    image = resolve_current_arca_image(
         common_config_service,
         env=env or publish_record.env,
     )
@@ -247,7 +250,7 @@ def resolve_publish_image_pin(
         persist_ext(pinned_ext)
     publish_record.ext = pinned_ext
     logger.info(
-        "[arka_image_pin] snapshotted legacy publish image: publish_id=%s env=%s image=%s",
+        "[arca_image_pin] snapshotted legacy publish image: publish_id=%s env=%s image=%s",
         publish_record.id,
         env or publish_record.env,
         image,
@@ -344,7 +347,7 @@ class PublishImagePolicyResolver:
                 publish_record.ext = latest.ext
                 return resolve_publish_image_pin(latest)
 
-            image = resolve_current_arka_image(
+            image = resolve_current_arca_image(
                 self._common_config_service, env=latest.env
             )
             if image is None:
@@ -360,7 +363,7 @@ class PublishImagePolicyResolver:
             if updated is not None:
                 publish_record.ext = updated.ext
                 logger.info(
-                    "[arka_image_pin] snapshotted legacy publish image: "
+                    "[arca_image_pin] snapshotted legacy publish image: "
                     "publish_id=%s env=%s image=%s",
                     updated.id,
                     updated.env,

@@ -139,35 +139,35 @@ class TestCreatePublishImagePolicy:
                 "active_engine": "openclaw",
                 "ext": {"sbot_use_default_image": True},
             },
-            common_config_value={"image": "registry/arka:v2"},
+            common_config_value={"image": "registry/arca:v2"},
         )
 
         assert ext == {
             "migration_path": "/build/v1",
             "sbot_use_default_image": True,
-            "sbot_runtime_kind": "arka",
+            "sbot_runtime_kind": "arca",
         }
         common_config.get_value.assert_not_called()
 
-    def test_legacy_arka_bot_snapshots_enabled_common_config_image(self):
+    def test_legacy_arca_bot_snapshots_enabled_common_config_image(self):
         ext, common_config = self._create(
             source_bot={
                 "bot_type": "service",
                 "active_engine": "openclaw",
                 "ext": {"service_bot_config": {"device_count": 2}},
             },
-            common_config_value={"image": "registry/arka:v2"},
+            common_config_value={"image": "registry/arca:v2"},
         )
 
         assert ext == {
             "migration_path": "/build/v1",
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
-            "sbot_runtime_kind": "arka",
+            "sbot_docker_image": "registry/arca:v2",
+            "sbot_runtime_kind": "arca",
         }
         common_config.get_value.assert_called_once()
 
-    def test_legacy_arka_bot_stays_policyless_when_switch_disabled(self):
+    def test_legacy_arca_bot_stays_policyless_when_switch_disabled(self):
         ext, common_config = self._create(
             source_bot={
                 "bot_type": "service",
@@ -179,18 +179,18 @@ class TestCreatePublishImagePolicy:
 
         assert ext == {
             "migration_path": "/build/v1",
-            "sbot_runtime_kind": "arka",
+            "sbot_runtime_kind": "arca",
         }
         common_config.get_value.assert_called_once()
 
-    def test_teclaw_publish_does_not_consume_arka_common_config(self):
+    def test_teclaw_publish_does_not_consume_arca_common_config(self):
         ext, common_config = self._create(
             source_bot={
                 "bot_type": "service",
                 "active_engine": "teclaw",
                 "ext": None,
             },
-            common_config_value={"image": "registry/arka:v2"},
+            common_config_value={"image": "registry/arca:v2"},
             is_teclaw=True,
         )
 
@@ -303,7 +303,7 @@ class TestUpgradePublish:
             "ext": {
                 "service_bot_config": {"device_count": 3},
                 "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_docker_image": "registry/arca:v2",
             }
         }
 
@@ -312,7 +312,7 @@ class TestUpgradePublish:
 
         assert mock_repo.insert.call_args.args[0]["ext"] == {
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         }
 
     def test_upgrade_publish_not_found(self):
