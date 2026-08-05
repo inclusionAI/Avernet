@@ -69,7 +69,12 @@ jobs:
       - name: Export the candidate patch
         id: diff
         run: |
-          git diff --binary > codex-autofix.patch
+          # Stage only permitted candidate files before exporting.  This makes
+          # the patch include both changes Codex staged itself and newly added
+          # files, while leaving workflow and instruction-file edits out.
+          git add --all -- ':!.github/**' ':!AGENTS.md' ':!**/AGENTS.md' \
+            ':!codex-autofix-output.md' ':!.codex-autofix-prompt.md'
+          git diff --cached --binary > codex-autofix.patch
           if [ -s codex-autofix.patch ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -113,7 +118,7 @@ jobs:
         run: |
           git apply --check codex-autofix.patch
           git apply --whitespace=error codex-autofix.patch
-          git add --all -- ':!.github/**' ':!**/AGENTS.md' \
+          git add --all -- ':!.github/**' ':!AGENTS.md' ':!**/AGENTS.md' \
             ':!codex-autofix-output.md' ':!.codex-autofix-prompt.md' \
             ':!codex-autofix.patch'
 
