@@ -31,7 +31,7 @@ use bcs_service_api::application::v1::{
         SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus,
         SessionSummary, UpdateSession, UpdateSessionParticipant,
     },
-    ApplicationError, AuthenticatedCaller, DeleteResult, Page, Principal,
+    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
     require_authenticated_user, require_human,
 };
 use bcs_service_api::application::session::{
@@ -96,28 +96,104 @@ impl SessionServiceImpl {
 
     // ── authorization helpers ──────────────────────────────────────────
 
-    /// Manager of the parent group (driver / originator / ManagerWorker
-    /// manager). Mirrors `bcs-app-group`'s `can_manage_group`.
-    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
+    /// Manager of the parent group (driver / originator / manager participant).
+    /// Mirrors `bcs-app-group`'s targeted Human-to-actor authority semantics.
+    fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
+        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
+        actor_ids.extend(
+            group
+                .participants
+                .iter()
+                .filter(|participant| participant.role == ParticipantRole::Manager)
+                .map(|participant| participant.bot_uuid.clone()),
+        );
+        actor_ids
+    }
+
+    async fn human_can_act_as_any(
+        &self,
+        human: &HumanPrincipal,
+        actor_ids: Vec<String>,
+    ) -> Result<bool, ApplicationError> {
+        let human_actor_id = format!("human_{}", human.subject.id);
+        let mut seen = HashSet::new();
+        for actor_id in actor_ids {
+            if !seen.insert(actor_id.clone()) {
+                continue;
+            }
+            if actor_id == human_actor_id {
+                return Ok(true);
+            }
+            if actor_id.starts_with("human_") {
+                continue;
+            }
+            let Some(bot) = self
+                .registry
+                .try_get(&actor_id)
+                .await
+                .map_err(map_service_error)?
+            else {
+                continue;
+            };
+            if bot.actor_kind != ActorKind::Bot {
+                continue;
+            }
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(true);
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    async fn can_manage_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
         let actor_id = principal.actor_id();
-        actor_id == group.driver_bot
-            || actor_id == group.originator()
-            || (group.group_strategy == GroupStrategy::ManagerWorker
-                && group
-                    .participants
-                    .iter()
-                    .any(|p| p.bot_uuid == actor_id && p.role == ParticipantRole::Manager))
+        let candidates = Self::group_management_actor_ids(group);
+        if candidates.iter().any(|candidate| candidate == &actor_id) {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => self.human_can_act_as_any(human, candidates).await,
+            Principal::Bot(_) => Ok(false),
+        }
     }
 
     /// Manage a specific session: group manager OR the session's creator
-    /// (`session.created_by`). The creator qualifier covers the V1 design's
-    /// "creator" authorization for update / delete / complete.
-    fn can_manage_session(principal: &Principal, session: &Session, group: &DomainGroup) -> bool {
-        Self::can_manage_group(principal, group)
-            || session
-                .created_by
-                .as_deref()
-                .is_some_and(|creator| creator == principal.actor_id())
+    /// (`session.created_by`). Human callers may also act as any of those
+    /// target actors through direct Human identity, Bot ownership, or creator
+    /// relation edges.
+    async fn can_manage_session(
+        &self,
+        principal: &Principal,
+        session: &Session,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        if self.can_manage_group(principal, group).await? {
+            return Ok(true);
+        }
+        let Some(created_by) = session.created_by.as_deref() else {
+            return Ok(false);
+        };
+        if created_by == principal.actor_id() {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => {
+                self.human_can_act_as_any(human, vec![created_by.to_string()]).await
+            }
+            Principal::Bot(_) => Ok(false),
+        }
     }
 
     async fn load_group(&self, group_id: &str) -> Result<DomainGroup, ApplicationError> {
@@ -139,7 +215,7 @@ impl SessionServiceImpl {
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
         let group = self.load_group(group_id).await?;
-        if !Self::can_manage_group(principal, &group) {
+        if !self.can_manage_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage Sessions",
             ));
@@ -165,7 +241,7 @@ impl SessionServiceImpl {
                 )
             })?;
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_manage_session(principal, &session, &group) {
+        if !self.can_manage_session(principal, &session, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal may not manage this Session",
             ));
@@ -610,7 +686,7 @@ impl SessionService for SessionServiceImpl {
             None => return Ok(DeleteResult { deleted: false }),
         };
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_manage_session(&principal, &session, &group) {
+        if !self.can_manage_session(&principal, &session, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal may not delete this Session",
             ));

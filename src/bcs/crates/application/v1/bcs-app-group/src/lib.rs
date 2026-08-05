@@ -231,6 +231,16 @@ impl GroupServiceImpl {
         {
             return Ok(true);
         }
+        if let Principal::Human(human) = principal {
+            let participant_actor_ids = group
+                .participants
+                .iter()
+                .map(|participant| participant.bot_uuid.clone())
+                .collect::<Vec<_>>();
+            if self.human_can_act_as_any(human, participant_actor_ids).await? {
+                return Ok(true);
+            }
+        }
         let session_group_ids = self
             .sessions
             .list_group_ids_by_session_participant(&principal_actor_id)
@@ -239,15 +249,110 @@ impl GroupServiceImpl {
         Ok(session_group_ids.iter().any(|id| id == &group.id))
     }
 
-    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
+    fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
+        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
+        actor_ids.extend(
+            group
+                .participants
+                .iter()
+                .filter(|participant| participant.role == bcs_service_api::ParticipantRole::Manager)
+                .map(|participant| participant.bot_uuid.clone()),
+        );
+        actor_ids
+    }
+
+    async fn human_actable_actor_id(
+        &self,
+        human: &HumanPrincipal,
+        actor_ids: Vec<String>,
+    ) -> Result<Option<String>, ApplicationError> {
+        let human_actor_id = format!("human_{}", human.subject.id);
+        let mut seen = HashSet::new();
+        for actor_id in actor_ids {
+            if !seen.insert(actor_id.clone()) {
+                continue;
+            }
+            if actor_id == human_actor_id {
+                return Ok(Some(actor_id));
+            }
+            if actor_id.starts_with("human_") {
+                continue;
+            }
+            let Some(bot) = self
+                .registry
+                .try_get(&actor_id)
+                .await
+                .map_err(map_service_error)?
+            else {
+                continue;
+            };
+            if bot.actor_kind != ActorKind::Bot {
+                continue;
+            }
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(Some(actor_id));
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(Some(actor_id));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn human_can_act_as_any(
+        &self,
+        human: &HumanPrincipal,
+        actor_ids: Vec<String>,
+    ) -> Result<bool, ApplicationError> {
+        Ok(self.human_actable_actor_id(human, actor_ids).await?.is_some())
+    }
+
+    async fn principal_can_act_as(
+        &self,
+        principal: &Principal,
+        actor_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        if principal.actor_id() == actor_id {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => {
+                self.human_can_act_as_any(human, vec![actor_id.to_string()]).await
+            }
+            Principal::Bot(_) => Ok(false),
+        }
+    }
+
+    async fn resolve_group_manage_actor(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<Option<String>, ApplicationError> {
         let principal_actor_id = principal.actor_id();
-        principal_actor_id == group.driver_bot
-            || principal_actor_id == group.originator()
-            || (group.group_strategy == GroupStrategy::ManagerWorker
-                && group.participants.iter().any(|participant| {
-                    participant.bot_uuid == principal_actor_id
-                        && participant.role == bcs_service_api::ParticipantRole::Manager
-                }))
+        let candidates = Self::group_management_actor_ids(group);
+        if candidates.iter().any(|actor_id| actor_id == &principal_actor_id) {
+            return Ok(Some(principal_actor_id));
+        }
+        if let Principal::Human(human) = principal {
+            return self.human_actable_actor_id(human, candidates).await;
+        }
+        Ok(None)
+    }
+
+    async fn can_manage_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        Ok(self
+            .resolve_group_manage_actor(principal, group)
+            .await?
+            .is_some())
     }
 
     async fn load_readable_group(
@@ -314,7 +419,7 @@ impl GroupServiceImpl {
                     format!("Group '{group_id}' was not found"),
                 )
             })?;
-        if !Self::can_manage_group(principal, &group) {
+        if !self.can_manage_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator or driver may manage this Group",
             ));
@@ -1174,11 +1279,11 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         };
-        if !Self::can_manage_group(&principal, &group) {
+        let Some(manage_actor_id) = self.resolve_group_manage_actor(&principal, &group).await? else {
             return Err(ApplicationError::forbidden(
                 "Principal cannot delete the group",
             ));
-        }
+        };
         let state_machine_runtime = if group.group_strategy == GroupStrategy::StateMachine {
             Some(self.collaboration_runtime.as_ref().ok_or_else(|| {
                 ApplicationError::internal(
@@ -1191,7 +1296,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
-                caller_actor_id: principal.actor_id(),
+                caller_actor_id: manage_actor_id,
                 group_id: command.group_id,
             })
             .await
@@ -1219,11 +1324,11 @@ impl GroupService for GroupServiceImpl {
         let group = self
             .load_readable_group(&principal, &command.group_id)
             .await?;
-        if !Self::can_manage_group(&principal, &group) {
+        let Some(manage_actor_id) = self.resolve_group_manage_actor(&principal, &group).await? else {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
-        }
+        };
         // `AddGroupParticipant` carries no `actor_kind`; resolve it from the
         // registry so legacy `add_member` gets the right Bot/Human split.
         let actor_kind = if self
@@ -1244,7 +1349,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .add_member(GroupAddMemberCommand {
-                caller_actor_id: Some(principal.actor_id()),
+                caller_actor_id: Some(manage_actor_id),
                 human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
@@ -1265,8 +1370,8 @@ impl GroupService for GroupServiceImpl {
             .await?;
         // Design §8.7: the target Actor may update its own participant mode
         // (self-service) in addition to the driver/originator/manager path.
-        let is_self = principal.actor_id() == command.actor_id;
-        if !is_self && !Self::can_manage_group(&principal, &group) {
+        let is_self = self.principal_can_act_as(&principal, &command.actor_id).await?;
+        if !is_self && self.resolve_group_manage_actor(&principal, &group).await?.is_none() {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
@@ -1323,12 +1428,16 @@ impl GroupService for GroupServiceImpl {
         // delete) in addition to the driver/originator/manager path. The legacy
         // `remove_member` still rejects driver/originator removal, preserving
         // the role invariant; non-driver self-leave proceeds.
-        let is_self = principal.actor_id() == command.actor_id;
-        if !is_self && !Self::can_manage_group(&principal, &group) {
+        let is_self = self.principal_can_act_as(&principal, &command.actor_id).await?;
+        let effective_caller_actor_id = if is_self {
+            command.actor_id.clone()
+        } else if let Some(manage_actor_id) = self.resolve_group_manage_actor(&principal, &group).await? {
+            manage_actor_id
+        } else {
             return Err(ApplicationError::forbidden(
                 "Principal cannot manage the group",
             ));
-        }
+        };
         // Phase one: target is a Bot actor (legacy `remove_member` uses bot_id).
         // The V1 contract treats an already-removed/missing participant as
         // idempotent success, so swallow `ParticipantNotFound` into
@@ -1337,7 +1446,7 @@ impl GroupService for GroupServiceImpl {
         match self
             .management
             .remove_member(GroupRemoveMemberCommand {
-                caller_actor_id: Some(principal.actor_id()),
+                caller_actor_id: Some(effective_caller_actor_id),
                 group_id: command.group_id.clone(),
                 bot_id: command.actor_id.clone(),
             })
