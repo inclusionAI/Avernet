@@ -24,6 +24,7 @@ from agentclaw.community.core.mcp.services.passport_scope import (
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.core.bot_management.services.bot_service import (
+    BotOperationNotAllowedError,
     generate_bot_id,
 )
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
@@ -294,11 +295,14 @@ class CreateBotForOthersService:
                 "runtime": {"restart_required": True},
             }
 
-        result = self._bot_service.restart_bot(
-            bot_id=bot_id,
-            user_id=target_user_id,
-            nick_name=target_nick_name,
-        )
+        try:
+            result = self._bot_service.restart_bot(
+                bot_id=bot_id,
+                user_id=target_user_id,
+                nick_name=target_nick_name,
+            )
+        except BotOperationNotAllowedError as exc:
+            raise CreateBotForOthersError(str(exc), error_code=400) from exc
         return {
             **base_result,
             "action": "restarted",

@@ -514,6 +514,36 @@ def test_failed_bot_is_repaired_before_restart_after_wait_period():
     )
 
 
+def test_failed_teclaw_bot_restart_rejection_is_client_error_after_wait_period():
+    from agentclaw.community.core.bot_management.errors import (
+        CreateBotForOthersError,
+    )
+    from agentclaw.community.core.bot_management.services.bot_service import (
+        BotOperationNotAllowedError,
+    )
+
+    stored = _bot(
+        status="FAILED",
+        ext={"passport": {"agent_code": AGENT_CODE}},
+        gmt_modified=datetime.now(timezone.utc) - timedelta(minutes=31),
+    )
+    service, _, bot_service, _, _, _ = _service(existing_bot=stored)
+    bot_service.restart_bot.side_effect = BotOperationNotAllowedError(
+        "teclaw 类型的 Bot 不支持重启"
+    )
+
+    with pytest.raises(CreateBotForOthersError) as exc_info:
+        _execute(service)
+
+    assert exc_info.value.error_code == 400
+    assert str(exc_info.value) == "teclaw 类型的 Bot 不支持重启"
+    bot_service.restart_bot.assert_called_once_with(
+        bot_id=EXISTING_BOT_ID,
+        user_id=TARGET_USER,
+        nick_name="Alice",
+    )
+
+
 def test_recent_failed_bot_is_repaired_but_still_observes_restart_wait():
     stored = _bot(
         status="FAILED",
