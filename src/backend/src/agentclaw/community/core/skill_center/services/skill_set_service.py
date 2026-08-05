@@ -1285,9 +1285,10 @@ class SkillSetService:
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
         pool_layout_paths = None
-        if self.entity_id is not None:
+        pool_owner_id = self.user_id or self.entity_id
+        if pool_owner_id is not None:
             pool_layout_paths = self._pool_layout_paths(
-                str(self.entity_id),
+                str(pool_owner_id),
                 str(self.bot_id),
                 self.engine_type,
             )
@@ -2701,6 +2702,25 @@ class SkillSetActivator(_DeviceSyncMixin):
             self.skills_dir = self.skill_set_service.skills_dir
             self.repo_dir = self.skill_set_service.repo_dir
             self.local_dir = self.skill_set_service.local_dir
+
+    def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
+        """Resolve a Bot lock by owner, while retaining its entity as scope."""
+        owner_id = (
+            user_id
+            or self.skill_set_service.user_id
+            or self.skill_set_service.entity_id
+        )
+        bot_id = self.skill_set_service.bot_id
+        if not owner_id or not bot_id:
+            return None
+        bot = self.skill_set_service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None or bot.get("entity_id") is None or bot.get("env") is None:
+            return None
+        return BotSkillLayoutScope(
+            env=str(bot["env"]),
+            entity_id=str(bot["entity_id"]),
+            bot_id=str(bot_id),
+        )
 
     async def activate_skill_set(
         self,
