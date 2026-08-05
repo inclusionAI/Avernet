@@ -815,6 +815,72 @@ class TestToolsMcpFormatDiagnostic:
         compact = _compact_tool_for_prompt({"name": "bare_tool", "description": "no schema"})
         assert compact == {"name": "bare_tool", "desc": "no schema", "params": []}
 
+    def test_compact_tool_skips_malformed_param_defs(self):
+        """A schema property whose value is not a dict is skipped (the
+        `not isinstance(pdef, dict)` guard) rather than crashing the prompt
+        build; well-formed siblings still come through."""
+        tool = {
+            "name": "weird",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "good": {"type": "string", "description": "ok"},
+                    "bad": "not-a-dict",
+                    "also_bad": None,
+                },
+                "required": ["good"],
+            },
+        }
+        compact = _compact_tool_for_prompt(tool)
+        assert compact["params"] == [
+            {"name": "good", "type": "string", "required": True, "desc": "ok"},
+        ]
+
+    def test_compact_mcp_tools_non_list_returns_empty(self):
+        """A non-list `tools` value (None, a string, a dict) hits the early
+        return and yields no tools and no omitted count."""
+        from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
+            _compact_mcp_tools_for_prompt,
+        )
+        assert _compact_mcp_tools_for_prompt({"tools": None}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({"tools": "not-a-list"}) == ([], 0)
+        assert _compact_mcp_tools_for_prompt({}) == ([], 0)
+
+    @pytest.mark.asyncio
+    async def test_verified_guide_tools_also_capped_with_omitted(self):
+        """The verified bucket also caps tools and surfaces tools_omitted
+        (the verified-guide path shares _compact_mcp_tools_for_prompt); this
+        covers the `if omitted` branch in the verified_mcps append."""
+        diag = ToolsMcpFormatDiagnostic()
+        code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
+        mcps = [{"server_code": code, "name": "skylark"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        total = _MAX_TOOLS_PER_MCP_IN_PROMPT + 3
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "语雀MCP",
+            "description": "语雀",
+            "tools": [
+                {"name": f"t{i}", "description": "d", "inputSchema": {"type": "object"}}
+                for i in range(total)
+            ],
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "无问题"
+
+        ctx.llm.chat = capture_chat
+        await diag.analyze(ctx)
+
+        assert '"tools_omitted": 3' in captured_user
+        assert "t0" in captured_user
+        assert f"t{total - 1}" not in captured_user
+
     @pytest.mark.asyncio
     async def test_tools_capped_per_mcp_with_omitted(self):
         """An MCP exposing more tools than the per-MCP cap only forwards the
