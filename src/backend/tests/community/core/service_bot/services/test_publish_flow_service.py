@@ -12,6 +12,11 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService, BotBuildServiceError
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    ImagePolicyState,
+    ServiceBotImagePin,
+    resolve_publish_image_pin as resolve_publish_image_pin_policy,
+)
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
     PublishFlowServiceError,
@@ -118,6 +123,19 @@ def _pf(*args, **kw):
     baas = args[2] if len(args) >= 3 else kw.get("baas_service")
     if isinstance(baas, Mock):
         baas.list_bot_publishes.return_value = []
+    publish_service = args[0] if args else kw.get("bot_publish_service")
+    if isinstance(publish_service, Mock):
+        def _resolve_image_policy(record):
+            artifact = (record.ext or {}).get("config_artifact")
+            if isinstance(artifact, dict) and artifact.get("engine_type") == "teclaw":
+                return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
+            return resolve_publish_image_pin_policy(
+                record,
+                common_config_service=kw["common_config_service"],
+                env=record.env,
+            )
+
+        publish_service.resolve_publish_image_pin.side_effect = _resolve_image_policy
     if "channel_overrides_reader" not in kw:
         # Default to "no channels for this stage" ({}), so promotion delivers the
         # base artifact with channels cleared — tests that care about channels pass

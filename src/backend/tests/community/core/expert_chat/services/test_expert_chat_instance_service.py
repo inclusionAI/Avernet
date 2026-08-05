@@ -47,6 +47,7 @@ class MockPublishRecord:
     owner_id: str = OWNER_ID
     status: str = "success"
     version: int = 1
+    env: str = "pre"
     ext: dict = None
 
     def __post_init__(self):
@@ -145,9 +146,11 @@ def _wire_bot_build_service_async(bot_build_service, create_result=None, upgrade
 class TestResolvePublishImagePin:
     def test_teclaw_skips_arka_policy_resolution(self):
         svc, _, baas, _, bot_repo, *_ = _make_service()
-        record = MockPublishRecord(ext={"migration_path": "/nas/path"})
-        bot_repo.get_by_id_and_owner.return_value = {"active_engine": "teclaw"}
-        baas.resolve_container_provider.return_value = "teclaw"
+        record = MockPublishRecord(
+            ext={"migration_path": "/nas/path", "sbot_runtime_kind": "teclaw"}
+        )
+        publish_repo = svc._publish_repo
+        publish_repo.get_by_id.return_value = record
 
         resolved = svc._resolve_publish_image_pin(
             record,
@@ -169,15 +172,13 @@ class TestResolvePublishImagePin:
         latest = MockPublishRecord(
             ext={"migration_path": "/nas/path", "unrelated": "preserved"}
         )
-        bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
-        baas.resolve_container_provider.return_value = "baas"
         publish_repo.get_by_id.return_value = latest
 
-        def update_status_with_ext(**kwargs):
+        def compare_and_set_ext(**kwargs):
             latest.ext = kwargs["ext"]
             return latest
 
-        publish_repo.update_status_with_ext.side_effect = update_status_with_ext
+        publish_repo.compare_and_set_ext.side_effect = compare_and_set_ext
 
         resolved = svc._resolve_publish_image_pin(
             record,
@@ -202,8 +203,6 @@ class TestResolvePublishImagePin:
         latest = MockPublishRecord(
             ext={"migration_path": "/nas/path", "sbot_use_default_image": True}
         )
-        bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
-        baas.resolve_container_provider.return_value = "baas"
         publish_repo.get_by_id.return_value = latest
 
         resolved = svc._resolve_publish_image_pin(
@@ -213,7 +212,7 @@ class TestResolvePublishImagePin:
         )
 
         assert resolved.state == ImagePolicyState.DEFAULT
-        publish_repo.update_status_with_ext.assert_not_called()
+        publish_repo.compare_and_set_ext.assert_not_called()
         assert record.ext == latest.ext
 
     def test_failed_policy_persistence_raises_connection_error(self):
@@ -224,12 +223,10 @@ class TestResolvePublishImagePin:
         common_config.get_value.return_value = {"image": "registry/arka:v2"}
         record = MockPublishRecord(ext={"migration_path": "/nas/path"})
         latest = MockPublishRecord(ext={"migration_path": "/nas/path"})
-        bot_repo.get_by_id_and_owner.return_value = {"active_engine": "openclaw"}
-        baas.resolve_container_provider.return_value = "baas"
         publish_repo.get_by_id.return_value = latest
-        publish_repo.update_status_with_ext.return_value = None
+        publish_repo.compare_and_set_ext.return_value = None
 
-        with pytest.raises(ConnectionError, match="changed concurrently"):
+        with pytest.raises(RuntimeError, match="CAS conflicted repeatedly"):
             svc._resolve_publish_image_pin(
                 record,
                 bot_id=BOT_ID,

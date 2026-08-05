@@ -303,7 +303,7 @@ class RestartMixin:
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = self.resolve_publish_image_pin(publish_record, bot)
+        image_pin = self.resolve_publish_image_pin(publish_record)
 
         # A prior recreate that crashed between its ext write and its
         # complete_operation left a dangling op. That crashed leg IS this restart

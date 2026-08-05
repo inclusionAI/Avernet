@@ -9,6 +9,9 @@ from agentclaw.community.core.bot_management.utils import clear_baas_publish_fai
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.events.bus import get_event_bus
 from agentclaw.community.core.events.types import BaasPublishCompletedEvent
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    persist_default_image_policy,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import (
     Complete,
@@ -18,6 +21,7 @@ from agentclaw.community.core.task_queue.types import (
     TaskOutcome,
 )
 from agentclaw.community.kernel.lifecycle import LifecycleBase
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 BAAS_CREATE_PUBLISH_POLL_TASK = "baas.create.publish_poll"
@@ -92,8 +96,9 @@ def build_restart_publish_poll_payload(
     publish_id: int,
     started_at_epoch_s: float,
     bot_uuid: str | None,
+    image_policy_on_success: str | None = None,
 ) -> dict:
-    return {
+    payload = {
         "binding_id": binding_id,
         "bot_id": bot_id,
         "owner_id": owner_id,
@@ -101,6 +106,9 @@ def build_restart_publish_poll_payload(
         "started_at_epoch_s": started_at_epoch_s,
         "bot_uuid": bot_uuid,
     }
+    if image_policy_on_success is not None:
+        payload["image_policy_on_success"] = image_policy_on_success
+    return payload
 
 
 def _require_int(payload: Optional[dict], key: str) -> int:
@@ -134,6 +142,15 @@ def _require_optional_str(payload: Optional[dict], key: str) -> str | None:
     if not isinstance(payload, dict) or key not in payload:
         raise ValueError(f"missing required field: {key}")
     value = payload[key]
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"field {key} must be str or None")
+    return value
+
+
+def _optional_str(payload: Optional[dict], key: str) -> str | None:
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be dict")
+    value = payload.get(key)
     if value is not None and not isinstance(value, str):
         raise ValueError(f"field {key} must be str or None")
     return value
@@ -309,6 +326,7 @@ class BaasRestartPublishPollHandler:
         baas_service: Any | None = None,
         baas_device_service: Any | None = None,
         bot_repository: Any | None = None,
+        publish_repository: Any | None = None,
         template_service: Any | None = None,
         poll_delay_seconds: float = 10.0,
         clock: Callable[[], float] = time.time,
@@ -316,6 +334,7 @@ class BaasRestartPublishPollHandler:
         self._binding_repository = binding_repository
         self._baas_device_service = baas_device_service or baas_service
         self._bot_repository = bot_repository
+        self._publish_repository = publish_repository
         self._template_service = template_service
         self._poll_delay_seconds = poll_delay_seconds
         self._clock = clock
@@ -328,7 +347,15 @@ class BaasRestartPublishPollHandler:
         parsed = self._parse_payload(payload)
         if isinstance(parsed, Fail):
             return parsed
-        binding_id, bot_id, owner_id, publish_id, started_at_epoch_s, bot_uuid = parsed
+        (
+            binding_id,
+            bot_id,
+            owner_id,
+            publish_id,
+            started_at_epoch_s,
+            bot_uuid,
+            image_policy_on_success,
+        ) = parsed
 
         binding = self._binding_repository.get_by_id(binding_id)
         if (
@@ -341,14 +368,13 @@ class BaasRestartPublishPollHandler:
                 "restart_publish_id",
             )
         ):
-            _publish_baas_completed(
+            return self._finalize_success(
                 binding_id=binding_id,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
-                publish_kind="restart",
+                image_policy_on_success=image_policy_on_success,
             )
-            return Complete()
         preflight = self._preflight(binding=binding, publish_id=publish_id)
         if preflight is not None:
             return preflight
@@ -392,12 +418,13 @@ class BaasRestartPublishPollHandler:
             publish_id=publish_id,
             bot_uuid=bot_uuid,
             bot=bot,
+            image_policy_on_success=image_policy_on_success,
         )
 
     def _parse_payload(
         self,
         payload: Optional[dict],
-    ) -> tuple[int, str, str, int, int | float, str | None] | Fail:
+    ) -> tuple[int, str, str, int, int | float, str | None, str | None] | Fail:
         try:
             return (
                 _require_int(payload, "binding_id"),
@@ -406,6 +433,7 @@ class BaasRestartPublishPollHandler:
                 _require_int(payload, "publish_id"),
                 _require_number(payload, "started_at_epoch_s"),
                 _require_optional_str(payload, "bot_uuid"),
+                _optional_str(payload, "image_policy_on_success"),
             )
         except (KeyError, ValueError) as exc:
             return Fail(f"invalid payload: {exc}")
@@ -430,6 +458,7 @@ class BaasRestartPublishPollHandler:
         publish_id: int,
         bot_uuid: str | None,
         bot: Any,
+        image_policy_on_success: str | None = None,
     ) -> TaskOutcome:
         if status == DeviceBindingStatus.ACTIVE.value:
             codefuse_token = self._read_codefuse_token(bot_id=bot_id, bot=bot)
@@ -461,14 +490,13 @@ class BaasRestartPublishPollHandler:
                 status=DeviceBindingStatus.ACTIVE.value,
                 publish_id=publish_id,
             )
-            _publish_baas_completed(
+            return self._finalize_success(
                 binding_id=binding_id,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
-                publish_kind="restart",
+                image_policy_on_success=image_policy_on_success,
             )
-            return Complete()
         if status == DeviceBindingStatus.FAILED.value:
             self._persist_failed(
                 bot_id=bot_id,
@@ -478,6 +506,44 @@ class BaasRestartPublishPollHandler:
             )
             return Complete()
         return Retry(f"unexpected publish status: {status}")
+
+    def _finalize_success(
+        self,
+        *,
+        binding_id: int,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int,
+        image_policy_on_success: str | None,
+    ) -> TaskOutcome:
+        if image_policy_on_success == "default":
+            if self._bot_repository is None or self._publish_repository is None:
+                return Retry("default-image persistence service unavailable")
+            try:
+                persist_default_image_policy(
+                    bot_repository=self._bot_repository,
+                    publish_repository=self._publish_repository,
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    env=get_current_env(),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[BaasRestartPublishPollHandler] default-image persistence "
+                    "failed for bot_id=%s publish_id=%s: %s",
+                    bot_id,
+                    publish_id,
+                    exc,
+                )
+                return Retry(str(exc))
+        _publish_baas_completed(
+            binding_id=binding_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            publish_id=publish_id,
+            publish_kind="restart",
+        )
+        return Complete()
 
     def _persist_failed(
         self,
@@ -614,7 +680,8 @@ class BaasPublishTaskLifecycle(LifecycleBase):
         task_queue_service: Any,
         baas_device_service: Any,
         bot_repository: Any,
-        template_service: Any,
+        publish_repository: Any | None = None,
+        template_service: Any = None,
     ) -> None:
         self._registry = registry
         self._binding_repository = binding_repository
@@ -622,6 +689,7 @@ class BaasPublishTaskLifecycle(LifecycleBase):
         self._task_queue_service = task_queue_service
         self._baas_device_service = baas_device_service
         self._bot_repository = bot_repository
+        self._publish_repository = publish_repository
         self._template_service = template_service
 
     async def bootstrap(self) -> None:
@@ -644,6 +712,7 @@ class BaasPublishTaskLifecycle(LifecycleBase):
                 binding_repository=self._binding_repository,
                 baas_device_service=self._baas_device_service,
                 bot_repository=self._bot_repository,
+                publish_repository=self._publish_repository,
                 template_service=self._template_service,
             )
         )

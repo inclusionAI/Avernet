@@ -202,23 +202,17 @@ class TestRestartBaasImagePolicy:
         svc._bot_publish_repo.get_draft_by_publish_bot_id.assert_not_called()
         svc._bot_publish_repo.update_status_with_ext.assert_not_called()
 
-    def test_restart_success_persists_bot_and_current_draft_default_marker(self):
+    def test_restart_submit_defers_default_marker_until_poll_success(self):
         svc, _, _ = _make_service(
             template_config={},
             bot_type="service",
             active_engine="openclaw",
         )
-        svc._bot_publish_repo.get_draft_by_publish_bot_id.return_value = SimpleNamespace(
-            id=6643,
-            status="draft",
-            ext={"migration_path": "/old"},
-        )
         bot = {
             **_make_bot(bot_type="service", active_engine="openclaw"),
             "ext": {
                 "service_bot_config": {"device_count": 1},
-                "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_use_default_image": True,
             },
         }
 
@@ -226,25 +220,11 @@ class TestRestartBaasImagePolicy:
             bot_id="bot001", user_id="user001", binding_id=42, bot=bot
         )
 
-        svc._repository.update_by_owner.assert_any_call(
-            "bot001",
-            "user001",
-            {
-                "ext": {
-                    "service_bot_config": {"device_count": 1},
-                    "sbot_use_default_image": True,
-                }
-            },
-        )
-        svc._bot_publish_repo.update_status_with_ext.assert_called_once_with(
-            publish_id=6643,
-            target_status="draft",
-            ext={
-                "migration_path": "/old",
-                "sbot_use_default_image": True,
-            },
-            source_status="draft",
-        )
+        svc._bot_publish_repo.update_status_with_ext.assert_not_called()
+        payload = svc._task_queue_service.enqueue.call_args.args[1]
+        assert payload["image_policy_on_success"] == "default"
+        pending_update = svc._repository.update_by_owner.call_args.args[2]
+        assert "sbot_use_default_image" not in pending_update.get("ext", {})
 
 
 class TestRestartBaasEnvInjection:
@@ -261,6 +241,7 @@ class TestRestartBaasEnvInjection:
                 "service_bot_config": {"device_count": 1},
             },
         }
+        svc._repository.get_by_id_and_owner.return_value = bot
 
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 

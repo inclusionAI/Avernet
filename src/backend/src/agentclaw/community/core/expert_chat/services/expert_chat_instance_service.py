@@ -58,14 +58,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    IMAGE_POLICY_KEYS,
-    ImagePolicyState,
-    ServiceBotImagePin,
-    has_explicit_image_policy,
-    resolve_publish_image_pin,
-)
-from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
-    TECLAW_DEVICE_PROVIDER,
+    PublishImagePolicyResolver,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -111,56 +104,17 @@ class ExpertChatInstanceService:
         self._token_provider = token_provider
         self._runtime_updater = runtime_updater
         self._common_config_service = common_config_service
+        self._image_policy_resolver = PublishImagePolicyResolver(
+            publish_repository=bot_publish_repo,
+            binding_repository=binding_repo,
+            common_config_service=common_config_service,
+        )
 
     def _resolve_publish_image_pin(
-        self,
-        publish_record,
-        *,
-        bot_id: str,
-        owner_id: str,
+        self, publish_record, *, bot_id: str | None = None, owner_id: str | None = None
     ):
-        """Resolve a caller container from its SUCCESS publish snapshot."""
-        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
-        if (
-            isinstance(bot, dict)
-            and self._baas.resolve_container_provider(bot)
-            == TECLAW_DEVICE_PROVIDER
-        ):
-            return ServiceBotImagePin(ImagePolicyState.LEGACY, None)
-
-        was_legacy = not has_explicit_image_policy(publish_record.ext)
-
-        def _persist(snapshot: dict) -> None:
-            latest = self._publish_repo.get_by_id(publish_record.id)
-            if latest is None or has_explicit_image_policy(latest.ext):
-                return
-            latest_ext = dict(latest.ext or {})
-            for key in IMAGE_POLICY_KEYS:
-                if key in snapshot:
-                    latest_ext[key] = snapshot[key]
-            updated = self._publish_repo.update_status_with_ext(
-                publish_id=latest.id,
-                target_status=latest.status,
-                ext=latest_ext,
-                source_status=latest.status,
-            )
-            if updated is None:
-                raise ConnectionError(
-                    f"Publish image policy changed concurrently: publish_id={latest.id}"
-                )
-
-        resolved = resolve_publish_image_pin(
-            publish_record,
-            common_config_service=self._common_config_service,
-            env=get_current_env(),
-            persist_ext=_persist,
-        )
-        if was_legacy and resolved.enabled:
-            latest = self._publish_repo.get_by_id(publish_record.id)
-            if latest is not None:
-                publish_record.ext = latest.ext
-                return resolve_publish_image_pin(latest)
-        return resolved
+        """Resolve through the shared seam; legacy caller args are ignored."""
+        return self._image_policy_resolver.resolve(publish_record)
 
     # ------------------------------------------------------------------
     # Public entry
@@ -200,11 +154,7 @@ class ExpertChatInstanceService:
             bot_id, owner_id
         )
         version = publish_record.version or 1
-        image_pin = self._resolve_publish_image_pin(
-            publish_record,
-            bot_id=bot_id,
-            owner_id=owner_id,
-        )
+        image_pin = self._resolve_publish_image_pin(publish_record)
 
         # --- Step 1: look up / create instance row ---
         instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)

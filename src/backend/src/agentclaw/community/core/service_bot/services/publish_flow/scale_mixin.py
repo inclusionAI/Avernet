@@ -90,7 +90,7 @@ class ScaleMixin:
 
         bot_uuid = binding.device_id
         target_count = self._resolve_scale_target_count(publish_record)
-        image_pin = self.resolve_publish_image_pin(publish_record, bot)
+        image_pin = self.resolve_publish_image_pin(publish_record)
         pinned_image = image_pin.docker_image
         scale_config = (
             {"deploy_config": {"docker_image": pinned_image}}
