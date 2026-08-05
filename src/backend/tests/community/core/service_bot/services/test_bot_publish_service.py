@@ -25,9 +25,6 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    ImagePinConfigError,
-)
 
 
 def _make_service(
@@ -170,14 +167,21 @@ class TestCreatePublishImagePolicy:
         }
         common_config.get_value.assert_called_once()
 
-    def test_legacy_arka_bot_fails_closed_when_switch_config_missing(self):
-        source_bot = {
-            "bot_type": "service",
-            "active_engine": "openclaw",
-            "ext": {"service_bot_config": {"device_count": 2}},
+    def test_legacy_arka_bot_stays_policyless_when_switch_disabled(self):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "openclaw",
+                "ext": {"service_bot_config": {"device_count": 2}},
+            },
+            common_config_value=None,
+        )
+
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_runtime_kind": "arka",
         }
-        with pytest.raises(ImagePinConfigError, match="missing or disabled"):
-            self._create(source_bot=source_bot, common_config_value=None)
+        common_config.get_value.assert_called_once()
 
     def test_teclaw_publish_does_not_consume_arka_common_config(self):
         ext, common_config = self._create(
