@@ -538,6 +538,27 @@ async def test_failed_source_cleanup_restores_authoritative_bytes_and_removes_qu
 
 
 @pytest.mark.asyncio
+async def test_source_cleanup_exception_restores_authoritative_bytes_and_removes_quarantine():
+    service, files, skills, _guard, cleanup = _service()
+    original_delete = files.delete_tree
+
+    async def partially_delete_then_raise(path):
+        if path == "/skills/one":
+            del files.files["/skills/one/SKILL.md"]
+            raise OSError("injected cleanup exception")
+        return await original_delete(path)
+
+    files.delete_tree = partially_delete_then_raise
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is False
+    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+    assert cleanup.work == []
+
+
+@pytest.mark.asyncio
 async def test_partial_source_cleanup_failure_repairs_authoritative_bytes_before_quarantine_purge():
     service, files, skills, _guard, cleanup = _service()
     files.files["/skills/one/scripts/main.py"] = b"print('restored')\n"
