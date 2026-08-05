@@ -67,9 +67,6 @@ class PluginContainer(containers.DeclarativeContainer):
         token_header=providers.Callable(
             _default, config.authn.google.token_header, "x-google-token"
         ),
-        default_tenant=providers.Callable(
-            _default, config.authn.google.default_tenant, None
-        ),
         userinfo_url=providers.Callable(
             _default,
             config.authn.google.userinfo_url,

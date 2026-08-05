@@ -82,20 +82,40 @@ def signing_key():
     reset_principal_verifier_config_cache()
 
 
-def mint(*, tenant: str = TENANT, user_id: str = "u-1", **overrides) -> str:
+def mint(*, tenant: str | None = TENANT, user_id: str = "u-1", **overrides) -> str:
+    """A signed token for a caller, optionally belonging to a tenant.
+
+    ``tenant=None`` mints the **user-only** set: a first-party caller, which
+    asserts no tenant and so scopes to the internal default. Any other value
+    mints the user alongside an ``app`` principal registered to that tenant,
+    because a user principal cannot carry one — see ``gateway_principal/models``.
+    """
     now = int(time.time())
+    principals: list[dict] = [
+        {
+            "type": "user",
+            "subject": {"id": user_id, "username": "alice@example.com"},
+        }
+    ]
+    if tenant is not None:
+        principals.append(
+            {
+                "type": "app",
+                "tenant": tenant,
+                "app": {
+                    "app_id": 42,
+                    "app_name": "Partner App",
+                    "owners": "partner-org",
+                    "tenant": tenant,
+                },
+            }
+        )
     claims = {
         "iss": overrides.get("issuer", "gateway"),
         "aud": overrides.get("audience", "backend"),
         "iat": now,
         "exp": now + 60,
-        "principals": [
-            {
-                "type": "user",
-                "tenant": tenant,
-                "subject": {"id": user_id, "username": "alice@example.com"},
-            }
-        ],
+        "principals": principals,
     }
     return jwt.encode(claims, overrides.get("key", KEY), algorithm="HS256")
 
@@ -152,6 +172,25 @@ def test_verified_caller_scopes_owner_and_tenant(client):
 
     assert response.status_code == 200
     assert response.json()["data"] == {"owner_id": "u-1", "tenant": TENANT}
+
+
+def test_a_first_party_user_scopes_to_the_internal_tenant(client):
+    """A caller naming only a user asserts no tenant, so the internal one applies.
+
+    This is the shape the google chain produces, and the shape ``route_security``
+    asks for on the whole public surface today: ``user: required`` and nothing
+    else. Until an identity that carries a registered tenant is required
+    alongside it, every request through this seam lands here.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe", headers={PRINCIPAL_HEADER: mint(tenant=None)}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
 
 
 def test_each_caller_gets_their_own_tenant(client):

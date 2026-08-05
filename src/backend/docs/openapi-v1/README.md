@@ -442,6 +442,31 @@ wrong half of the system.
 - The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
   So a real external tenant reads an empty dataset until it has data; that is
   isolation working, not a bug.
+- **Only the machine principals carry a tenant.** _Changed 2026-08-05._ A
+  `user` principal has no `tenant` field: nothing in a user credential proves
+  which tenant a person acts for, and the gateway's google chain used to fill it
+  from a config default — which, left unset as it shipped, sent `null` and 401'd
+  every request. `app`, `bot` and `access_key` are each registered to a tenant,
+  and that registration is what their principal asserts.
+  - An identity set that asserts **no** tenant — a user and nothing else —
+    resolves to `DEFAULT_AVERNET_TENANT`. A first-party caller on our own
+    frontend *is* an internal caller, which is the scope `teamclaw` names, and
+    it is the same tenant every other path in this component resolves to.
+  - That fallback is **ours**, decided from the absence of a claim; it is not a
+    value the token supplied. So the `teamclaw` guard above keeps its teeth: a
+    token that *names* the internal tenant is still refused, and a `tenant`
+    smuggled onto a `user` entry is ignored (unknown fields are dropped, not
+    honoured) rather than becoming a scope.
+  - ⚠️ **Consequence for the public surface.** `route_security` declares
+    `user: required` and nothing else for every `/openapi/v1` path, so the
+    gateway resolves a user-only set and **every public request now scopes to
+    `teamclaw`** — the internal tenant. Nothing gates *which* Google account
+    that is (`AuthPlugin.is_allowed` exists in the gateway SPI but no authn
+    strategy calls it), so serving real data on this surface needs either that
+    whitelist wired up or a route requiring an identity that carries a
+    registered tenant. Until then the surface reads internal data for any
+    authenticated Google user, which is a widening of what the 401 used to
+    prevent by accident.
 
 **Two things you inherit if you own a Track B category:**
 
@@ -1172,3 +1197,42 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   owner-versus-collaborator semantics, offline reads, ready-Bot mutation gating,
   and compensation on runtime synchronization failure. Skill Center publication
   and reusable tenant-level Skills remain a later contract.
+- **2026-08-05** — **`tenant` removed from the `user` principal; a user-only
+  caller is an internal caller.** The public surface was answering `401` on every
+  request: the gateway declared `UserPrincipal.tenant` as `str | None` and filled
+  it from `authn.google.default_tenant`, a config key that appears nowhere in
+  `configs/application.yaml`, so it signed `tenant: null` — and this side
+  declared the field required, so the payload never parsed. The fix removes the
+  field on both halves rather than making it required, because the field was
+  asserting something no user credential proves.
+  1. **A tenant is a property of the calling program, not of a person.** `app`,
+     `bot` and `access_key` are each *registered* to a tenant, and their
+     principals assert that registration. A Google token proves a `sub` and an
+     email; the tenant that used to ride alongside it was a deployment default
+     dressed up as an authenticated fact.
+  2. **A set that asserts no tenant resolves to `DEFAULT_AVERNET_TENANT`.**
+     `VerifiedCaller.tenant` reads only the machine principals, so a user-only
+     caller — a first-party human on our own frontend — scopes to `teamclaw`,
+     the same tenant every non-public path in this component already resolves
+     to. `_reject_contradictory_tenant` likewise vets only what was claimed.
+  3. **The internal-tenant guard got sharper, not weaker.** The fallback is
+     decided *here*, from the absence of a claim; it is never a value the token
+     supplied. A token that names `teamclaw` is still refused, and a `tenant`
+     smuggled onto a `user` entry is dropped by the DTO rather than honoured —
+     both pinned by tests. Nobody can talk their way into the internal tenant.
+  4. ⚠️ **What this leaves open.** `route_security` declares `user: required`
+     and nothing else for the whole public surface, so *every* public request is
+     now a user-only set and scopes to `teamclaw`. Nothing gates which Google
+     account that is — `AuthPlugin.is_allowed` exists in the gateway SPI and no
+     authn strategy calls it. Before this surface serves real data, either wire
+     that whitelist up or have a route require an identity carrying a registered
+     tenant. Tests that meant to exercise external-tenant isolation now mint
+     `user` + `app` so they keep testing isolation instead of the internal
+     default.
+
+  Backend suite 10535 passed / 3 skipped; gateway suite green except the
+  pre-existing markdown-formatting and live-server failures. Gateway half:
+  `spi/authn/_models.py`, the `google` strategy (its `default_tenant` argument
+  and DI wiring are gone), and a dated amendment in
+  `src/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
+  `tenant` mandatory on every principal.

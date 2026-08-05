@@ -247,9 +247,7 @@ def _test_authenticator(db):
 
     return build_authenticator(
         strategies={
-            "google": GoogleUserStrategy(
-                token_header="x-avernet-google-token", default_tenant="default"
-            ),
+            "google": GoogleUserStrategy(token_header="x-avernet-google-token"),
             "bot_token": BotTokenStrategy(registry=BotRepository(db)),
             "app_token": AppTokenStrategy(registry=AppRepository(db)),
             "access_key_token": AccessKeyTokenStrategy(
@@ -283,7 +281,6 @@ def test_real_authenticator_admits_google_token_then_forwards() -> None:
         (
             GoogleUserStrategy(
                 token_header="x-avernet-google-token",
-                default_tenant="default",
                 transport=httpx.MockTransport(_userinfo_handler),
             ),
         ),

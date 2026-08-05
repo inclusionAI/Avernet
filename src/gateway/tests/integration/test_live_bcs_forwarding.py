@@ -52,7 +52,6 @@ class _ShippedRouteAuthenticator:
             return {}
         return {
             PrincipalType.USER: UserPrincipal(
-                tenant="gateway-live-test",
                 subject=AuthenticatedUser(
                     id=LIVE_USER_ID,
                     username=LIVE_USER_ID,
