@@ -84,9 +84,23 @@ class FakeWorkspaceService:
             raise self.list_file_tree_raise
         return self.list_file_tree_return or []
 
-    async def preview_file(self, session_id: str, path: str, cwd: str | None = None):
+    async def preview_file(
+        self,
+        session_id: str,
+        path: str,
+        cwd: str | None = None,
+        encoding: str | None = None,
+    ):
         self.calls.append(
-            ("preview_file", {"session_id": session_id, "path": path, "cwd": cwd})
+            (
+                "preview_file",
+                {
+                    "session_id": session_id,
+                    "path": path,
+                    "cwd": cwd,
+                    "encoding": encoding,
+                },
+            )
         )
         if self.preview_file_raise:
             raise self.preview_file_raise
@@ -428,6 +442,29 @@ def test_files_preview_success(client, workspace_svc):
     assert resp.status_code == 200
     body = resp.json()
     assert body["data"] == {"content": "hi", "size": 2}
+    assert workspace_svc.calls[-1][1] == {
+        "session_id": "s1",
+        "path": "a.txt",
+        "cwd": None,
+        "encoding": None,
+    }
+
+
+@pytest.mark.parametrize("encoding", ["gbk", ""])
+def test_files_preview_forwards_encoding(client, workspace_svc, encoding):
+    workspace_svc.preview_file_return = FileContent(content="中文", size=4)
+
+    resp = client.get(
+        "/api/aicoding/sessions/files/preview",
+        params={
+            "session_id": "s1",
+            "path": "a.txt",
+            "encoding": encoding,
+        },
+    )
+
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["encoding"] == encoding
 
 
 @pytest.mark.parametrize(

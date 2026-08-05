@@ -195,12 +195,22 @@ async def preview_file(
         description="可选：前端直传工作目录绝对路径，"
         "缺省回退 base/{session_id}",
     ),
+    encoding: str | None = Query(
+        None,
+        description="可选文件编码；支持 utf-8、gb18030、gbk；"
+        "为空时按 utf-8、gb18030、gbk 顺序尝试",
+    ),
 ) -> FilePreviewResponse:
     """Read a single workspace file (size-bounded, traversal-safe)."""
     check_capability(Capability.FILE_READ)
     service = _workspace_service()
     try:
-        content = await service.preview_file(session_id, path, cwd)
+        content = await service.preview_file(
+            session_id=session_id,
+            path=path,
+            cwd=cwd,
+            encoding=encoding,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except NotADirectoryError as e:
