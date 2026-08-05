@@ -258,8 +258,10 @@ class SkillServiceFactory:
         bot_owner_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
+        runtime_uses_pool_paths: bool = False,
+        device_owner_id: str | None = None,
     ) -> SkillService:
-        uses_pool_paths = False
+        uses_pool_paths = runtime_uses_pool_paths
         if entity_id is not None and bot_id is not None:
             # Paths are scoped by the Bot entity, while Bot lookup and device
             # binding are owned by ac_bots.owner_id.  They differ for project
@@ -294,7 +296,7 @@ class SkillServiceFactory:
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
-            device_owner_id=bot_owner_id or entity_id,
+            device_owner_id=device_owner_id or bot_owner_id or entity_id,
         )
 
     def local_skill_package_storage(
@@ -511,6 +513,11 @@ class SkillSetServiceFactory:
             repo_dir=resolved_repo,
             local_dir=resolved_local,
             local_skill_path_adapter=local_skill_path_adapter,
+            # The resolved directories alone are insufficient: SkillService
+            # needs this flag to retain Pool-specific activation and cleanup
+            # semantics without resolving the same layout a second time.
+            runtime_uses_pool_paths=local_skill_path_adapter is not None,
+            device_owner_id=effective_owner,
         )
 
         return SkillSetService(

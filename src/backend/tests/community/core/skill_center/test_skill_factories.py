@@ -363,6 +363,7 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
 
     assert str(svc.skill_service.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.skill_service.repo_dir).endswith("/skills-pool/skills-repo")
+    assert svc.skill_service.runtime_uses_pool_paths is True
     assert str(svc.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
     assert svc.skill_service._local_skill_path_adapter(

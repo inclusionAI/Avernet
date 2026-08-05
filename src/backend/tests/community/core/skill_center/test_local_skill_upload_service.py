@@ -898,8 +898,10 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=False)])
+    sets = _Sets()
+    runtime = _ReplacementRuntime([True])
     result = await _replacement_service(
-        filesystem, repo, _ReplacementRuntime([True])
+        filesystem, repo, runtime, sets=sets
     ).upload_local_skill(
         bot_id="bot",
         owner_id="owner",
@@ -913,6 +915,8 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
+    assert sets.exclusions == [("owner", "bot", 4, 9)]
+    assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
 
@@ -1138,7 +1142,7 @@ async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_
             "bot_id": "bot",
             "skill_id": "9",
             "package_locator": "/private/skills-local/upload-skill",
-            "requires_runtime_restore": False,
+            "requires_runtime_restore": True,
         }
     ]
 
@@ -1252,7 +1256,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"
     cleanup = _RuntimeRestoreCleanup()
-    runtime = _ReplacementRuntime([True])
+    runtime = _ReplacementRuntime([True, True])
     await _replacement_service(
         filesystem,
         _ReplacementRepo([_existing_skill(active=False)]),
@@ -1266,7 +1270,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
             {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
         ),
     )
-    assert runtime.calls == 1
+    assert runtime.calls == 2
     assert 12 in cleanup.completed
     assert "/private/skills-local/staged/SKILL.md" not in filesystem.files
 
