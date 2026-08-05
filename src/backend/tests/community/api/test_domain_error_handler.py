@@ -151,6 +151,60 @@ def test_5xx_domain_error_logs_traceback_but_4xx_does_not(client, monkeypatch):
     assert sum(1 for s in fmt_strings if "DomainError 5xx" in s) == 1
 
 
+def test_4xx_domain_error_logs_one_compact_warning(client, monkeypatch):
+    """A refused request used to leave no trace at all. It now logs one line —
+    without a traceback, so a per-401 stack does not bury the real 5xx ones."""
+    from agentclaw.community.adapters.http import app as app_mod
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "warning",
+        lambda *a, **k: calls.append((a, k)),
+    )
+    client.get("/raise/notfound")
+    assert any("[DomainError %s]" in str(a[0]) for a, _ in calls), \
+        f"expected a 4xx DomainError warning, got: {calls}"
+    assert all("exc_info" not in k for _, k in calls), \
+        "4xx must not carry a traceback"
+
+    # 3xx stays silent: LoginRedirectRequired is a step in the login flow, not
+    # a failure anyone debugs.
+    calls.clear()
+    client.get("/raise/redirect")
+    assert calls == [], f"302 must not log, got: {calls}"
+
+
+def test_handler_logs_the_params_stashed_by_the_public_decorator(monkeypatch):
+    """The arguments captured inside the route survive to the app-level handler.
+
+    ``@envelope_errors`` re-raises anything it does not map; by the time this
+    handler answers, the frame that knew the arguments is gone, so the decorator
+    leaves them on the request scope for exactly this reason.
+    """
+    from agentclaw.community.adapters.http import app as app_mod
+    from agentclaw.community.adapters.http.error_logging import remember_call_params
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        app_mod.logger, "exception",
+        lambda *a, **k: calls.append((a, k)),
+    )
+
+    app = FastAPI()
+    app.add_exception_handler(DomainError, app_mod._domain_error_handler)
+
+    @app.get("/boom")
+    async def boom(request: Request):
+        remember_call_params(request, {"bot_id": "b-77"})
+        raise InternalError("kaboom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/boom").status_code == 500
+    rendered = [str(a) for a, _ in calls]
+    assert any("b-77" in line for line in rendered), \
+        f"expected the stashed params in the log args, got: {rendered}"
+
+
 # ============================================================
 # Trace-ID propagation — every response carries X-Trace-ID
 # ============================================================
