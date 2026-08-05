@@ -120,7 +120,7 @@ class LocalSkillUploadService:
             raise LocalSkillDuplicateError()
 
         directory, storage = self._skill_service_factory.local_skill_package_storage(
-            owner_id=owner_id,
+            owner_id=str(bot["entity_id"]),
             bot_id=bot_id,
             engine_type=bot.get("active_engine"),
             name=name,

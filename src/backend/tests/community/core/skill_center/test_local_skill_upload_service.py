@@ -93,15 +93,16 @@ class _Sets:
 
 
 class _Bot:
-    def __init__(self, status="ACTIVE"):
+    def __init__(self, status="ACTIVE", entity_id="owner"):
         self.status = status
+        self.entity_id = entity_id
 
     def get_by_id_and_owner(self, *_):
         return {
             "status": self.status,
             "active_engine": "moltis",
             "env": "test",
-            "entity_id": "owner",
+            "entity_id": self.entity_id,
         }
 
 
@@ -132,11 +133,20 @@ class _Factory:
     def __init__(self, filesystem):
         self.local_dir = __import__("pathlib").Path("/private/skills-local")
         self._filesystem = filesystem
+        self.storage_calls: list[dict] = []
 
     def create(self, **kwargs):
         return self
 
     def local_skill_package_storage(self, *, owner_id, bot_id, engine_type, name):
+        self.storage_calls.append(
+            {
+                "owner_id": owner_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "name": name,
+            }
+        )
         return str(self.local_dir / name), _Storage(
             self._filesystem, str(self.local_dir / name)
         )
@@ -204,14 +214,22 @@ class _Guard:
 
 
 def _service(
-    filesystem, *, status="ACTIVE", collaborators=None, repo=None, sets=None, audit=None
+    filesystem,
+    *,
+    status="ACTIVE",
+    collaborators=None,
+    repo=None,
+    sets=None,
+    audit=None,
+    bot=None,
+    factory=None,
 ):
     return LocalSkillUploadService(
         repo or _Repo(),
         sets or _Sets(),
-        _Bot(status),
+        bot or _Bot(status),
         collaborators or _Collaborators(),
-        _Factory(filesystem),
+        factory or _Factory(filesystem),
         audit or _Audit(),
         _Guard(),
     )
@@ -273,6 +291,38 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
         "bolt_id": "bot",
         "engine_type": "moltis",
     }
+
+
+@pytest.mark.asyncio
+async def test_upload_resolves_package_storage_with_bot_entity():
+    filesystem = _Filesystem()
+    factory = _Factory(filesystem)
+    repo = _Repo()
+    service = _service(
+        filesystem,
+        bot=_Bot(entity_id="project-entity"),
+        factory=factory,
+        repo=repo,
+    )
+
+    await service.upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"---\nname: upload-skill\ndescription: useful\n---\n"}
+        ),
+    )
+
+    assert factory.storage_calls == [
+        {
+            "owner_id": "project-entity",
+            "bot_id": "bot",
+            "engine_type": "moltis",
+            "name": "upload-skill",
+        }
+    ]
+    assert repo.created[0]["user_id"] == "owner"
 
 
 @pytest.mark.asyncio
