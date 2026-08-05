@@ -44,6 +44,17 @@ class LocalSkillCleanupRepository(Protocol):
 
     def list_pending(self, *, env: str, owner_id: str, bot_id: str) -> list[dict]: ...
 
+    def list_repair_required(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+    ) -> list[dict]:
+        """Return quarantines that must be restored before retrying this delete."""
+        ...
+
     def mark_cleaned(
         self, *, work_id: int, env: str, owner_id: str, bot_id: str
     ) -> bool: ...

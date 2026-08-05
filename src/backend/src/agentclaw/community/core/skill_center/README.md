@@ -102,3 +102,7 @@ If a device reports source deletion failure after a partial delete and the
 authoritative package cannot be verified repaired, the complete quarantine is
 retained as `repair_required` cleanup work. It is deliberately excluded from
 ordinary obsolete-byte purge retries until package repair is resolved.
+Before a later deletion of that same Local Skill starts, it reacquires the
+serialized edit lease and restores any such quarantine to the authoritative
+locator; only after that succeeds can the deletion retry. If restoration leaves
+a redundant quarantine, ordinary pending cleanup may purge that duplicate.

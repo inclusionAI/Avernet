@@ -101,6 +101,10 @@ class LocalSkillPackageStorage:
     async def cleanup(self) -> bool:
         return await self._filesystem.delete_tree(self._device_directory)
 
+    async def exists(self) -> bool:
+        """Whether this storage currently has an authoritative package."""
+        return await self._filesystem.exists(self._device_directory)
+
     async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
         """Copy, verify, then remove this authoritative package.
 
