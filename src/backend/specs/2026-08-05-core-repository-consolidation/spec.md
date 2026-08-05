@@ -338,6 +338,15 @@ at one commit.
 
 ## Constraints and collateral
 
+### C0 — Pre-move baselines
+
+Recorded before any file moves, so post-move numbers are comparable:
+
+- `tests/community/architecture/`: **120 passed** (local, clean `dev`).
+- CI on this spec's own PR (`dev` + one Markdown file): **all 7 checks green** —
+  Backend / BaaS / Engine / Gateway / BCS unit tests, BCS e2e, and Singlebox
+  coverage. Per-module coverage figures from that run are in C4.
+
 ### C1 — Architecture guards (baseline: 120 passed)
 
 The full suite under `tests/community/architecture/` passes today. The relocated
@@ -413,13 +422,47 @@ back.
 
 Pulling in the in-core repositories (Decision 2) makes this materially worse:
 `core/economy/`, `core/bot_chat/`, and `core/common_config/` lose whole
-implementation bodies from their denominators, not just Protocol stubs —
-roughly 2,600 lines across the three.
+implementation bodies from their denominators, not just Protocol stubs.
 
-No threshold can be adjusted without a fresh focused run. This gate is not part
-of the default pre-push path (`OCB_PRE_PUSH_RUN_CI=1` selects it) and requires a
-live standalone stack, so the plan must state explicitly whether it can be run
-here and what is left unverified if not.
+**The gate does run in CI** (`.github/workflows/singlebox-coverage.yml`, on every
+PR) — it is only the *local* pre-push path that gates it behind
+`OCB_PRE_PUSH_RUN_CI=1`. A baseline was captured from the green run on this
+spec's own PR (run 31011880791, `singlebox coverage gate passed`), which measures
+`dev` + one Markdown file and is therefore a true pre-move baseline:
+
+| Module | `core_min_percent` | measured | headroom | affected by this move? |
+| --- | ---: | ---: | ---: | --- |
+| `harness` | 41.30 | 41.44 | **+0.14** | yes — `repository_protocol.py` (279 lines) leaves |
+| `expert_chat` | 63.49 | 65.26 | **+1.77** | yes — 2 Protocol files (172 lines) leave |
+| `access` | 42.80 | 45.68 | +2.88 | yes — `repository.py` (38 lines) leaves |
+| `bot_chat` | 67.48 | 71.26 | +3.78 | yes — **both implementations (1,770 lines) leave** |
+| `bot_collaborator` | 53.88 | 60.47 | +6.59 | yes — `repository/protocol.py` (341 lines) leaves |
+| `devices` | 43.36 | 53.69 | +10.33 | yes — `repository/protocol.py` + shim (309 lines) leave |
+| `bot_dormant` | 54.13 | 54.53 | +0.40 | no |
+| `cron` | 41.84 | 48.61 | +6.77 | no |
+| `files` | 63.52 | 70.31 | +6.79 | no |
+| `auth` | 100.00 | 100.00 | +0.00 | no |
+
+Reading this: a module's percentage moves *up* if the removed file was better
+covered than the module average and *down* if it was worse, so the direction is
+per-module and cannot be predicted from line counts alone. What the table does
+establish is where there is no room to absorb a shift in either direction:
+
+- **`harness` has 0.14 points of headroom.** Any denominator change at all is
+  likely to breach it.
+- **`expert_chat` has 1.77.**
+- **`bot_chat` loses roughly half its `core_paths` tree** (1,770 of 3,565 lines)
+  on 3.78 points of headroom — by far the largest single perturbation, and a
+  direct consequence of Decision 2.
+
+Consequence for the plan: re-pinning at least one threshold is probable, not
+hypothetical. That is a re-baseline (the denominator changed, the testing did
+not), **not** a weakening of the gate, but AGENTS.md forbids weakening checks to
+make a change pass and forbids inflating a result by excluding production Core
+paths — so any re-pin must be justified file-by-file in the PR, derived from a
+fresh run, and must never be achieved by trimming `core_paths`. If a module's
+number drops because real coverage was lost rather than because the denominator
+moved, the correct answer is to fix the coverage, not the threshold.
 
 ### C5 — Test blast radius
 
