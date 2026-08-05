@@ -43,10 +43,16 @@ _RETRY_JITTER = 0.4
 # read-timeout / broken-connection retry we shrink further so the model can finish
 # within the window instead of verbatim-repeating the same heavy request.
 _DEFAULT_MAX_TOKENS = 32768
-# Diagnostic calls only emit a short summary + message + ``[SCORE:xx]`` — far
-# smaller than a full-file patch rewrite — so a tighter budget keeps the first
-# request light and avoids pushing GLM into the slow-reasoning path that
-# exceeds antchat's ~90s gateway window.
+# Diagnostics emit a short summary + a patchable draft (mapping table + a few
+# MCP call specs) + ``[SCORE:xx]`` — far smaller than a full-file patch
+# rewrite. Keep this at the default 32k rather than capping it: #717's timeout
+# was caused by the *input* payload (each tool's full inputSchema dumped into
+# the prompt), not the output budget — the gateway-timeout retry already
+# shrinks max_tokens to 8k and still times out when the prompt is huge. The
+# input-side fix lives in mcp_format.py (compact param table + per-MCP tool
+# cap). Capping here would risk truncating the draft and the trailing
+# ``[SCORE:xx]`` (which the parser then scores as "check failed") for no
+# timeout benefit.
 DIAGNOSTIC_MAX_TOKENS = 32768
 # Connection-level failures (gateway dropped mid send/read, or the send-hook
 # wrapper re-raised) get more retries than before — these are transient blips,
