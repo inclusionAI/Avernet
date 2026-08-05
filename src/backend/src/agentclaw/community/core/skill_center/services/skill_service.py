@@ -510,9 +510,14 @@ class SkillService:
                 continue
 
             active_path = self.active_dir / name
-            content = await device_fs.read_file(str(active_path / "SKILL.md"))
-            if content is None:
-                content = await device_fs.read_file(str(active_path / "README.md"))
+            content = None
+            skill_file = active_path / "SKILL.md"
+            if await device_fs.exists(str(skill_file)):
+                content = await device_fs.read_file(str(skill_file))
+            else:
+                readme_file = active_path / "README.md"
+                if await device_fs.exists(str(readme_file)):
+                    content = await device_fs.read_file(str(readme_file))
             if content is None:
                 continue
 

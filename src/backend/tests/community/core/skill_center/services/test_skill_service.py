@@ -675,6 +675,14 @@ class TestSkillServiceGetActiveSkills:
             )
         }
 
+        device_fs.exists = AsyncMock(
+            side_effect=lambda path: path.endswith(
+                (
+                    "sp455-r2-oc-probe/SKILL.md",
+                    "empty-metadata/SKILL.md",
+                )
+            )
+        )
         device_fs.read_file = AsyncMock(side_effect=_read_file)
         device_fs_factory = MagicMock(return_value=device_fs)
         svc = SkillService(
@@ -729,6 +737,57 @@ class TestSkillServiceGetActiveSkills:
             await svc.get_active_skills_from_device(
                 bot_id="desktop_bot_1", owner_id="405935"
             )
+
+    @pytest.mark.asyncio
+    async def test_device_active_list_skips_entries_without_skill_metadata(
+        self, skill_dirs, mock_skill_repo
+    ):
+        active_root = "/home/admin/.claude/skills"
+        device_fs = MagicMock()
+        device_fs.list_dir = AsyncMock(
+            return_value=[
+                {
+                    "name": "mcporter",
+                    "path": f"{active_root}/mcporter",
+                    "is_dir": True,
+                },
+                {
+                    "name": "direct-skill",
+                    "path": f"{active_root}/direct-skill",
+                    "is_dir": True,
+                },
+            ]
+        )
+        device_fs.exists = AsyncMock(
+            side_effect=lambda path: path.endswith("direct-skill/SKILL.md")
+        )
+
+        async def _read_file(path, **_kwargs):
+            if path.endswith("direct-skill/SKILL.md"):
+                return b"---\nname: direct-skill\n---\n"
+            raise AssertionError(f"must not read missing metadata: {path}")
+
+        device_fs.read_file = AsyncMock(side_effect=_read_file)
+        svc = SkillService(
+            skill_repo=mock_skill_repo,
+            skill_repo_sync=_lenient_skill_repo_sync(),
+            category_repo=MagicMock(),
+            active_dir=Path(active_root),
+            repo_dir=skill_dirs["repo_dir"],
+            local_dir=skill_dirs["local_dir"],
+            market_cache=MagicMock(),
+            device_fs_factory=MagicMock(return_value=device_fs),
+            git_sync_service_factory=MagicMock(),
+        )
+
+        skills = await svc.get_active_skills_from_device(
+            bot_id="desktop_bot_1", owner_id="405935"
+        )
+
+        assert [skill.id for skill in skills] == ["direct-skill"]
+        device_fs.read_file.assert_awaited_once_with(
+            f"{active_root}/direct-skill/SKILL.md"
+        )
 
     @pytest.mark.asyncio
     async def test_missing_device_active_root_is_empty(
