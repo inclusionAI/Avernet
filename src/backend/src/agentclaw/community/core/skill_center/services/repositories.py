@@ -82,6 +82,21 @@ class SkillRepository(Protocol):
     def update(self, skill_id: str, skill_data: dict) -> dict | None:
         ...
 
+    def replace_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        old_locator: str,
+        new_locator: str,
+        description: str,
+        requires_runtime_restore: bool,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically switch package authority and commit old-package cleanup."""
+        ...
+
     def delete(self, skill_id: str) -> bool:
         ...
 
