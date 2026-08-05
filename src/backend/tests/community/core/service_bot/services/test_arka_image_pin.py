@@ -197,3 +197,8 @@ def test_resolve_legacy_publish_snapshots_pin_before_use():
 def test_resolve_rejects_pin_without_image():
     with pytest.raises(ImagePinConfigError, match="without a valid image"):
         resolve_publish_image_pin(_record({"sbot_pin_image": True}))
+
+
+def test_resolve_rejects_dangling_image_policy_field():
+    with pytest.raises(ImagePinConfigError, match="inconsistent image policy"):
+        resolve_publish_image_pin(_record({"sbot_docker_image": "arka:v2"}))

@@ -1580,6 +1580,53 @@ class TestAsyncReleasesLock:
         device_service.apply_device.assert_called_once()
         assert device_service.apply_device.call_args.kwargs["device_provider"] == "baas"
 
+    def test_allocator_persists_default_image_after_successful_recreate(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status="PENDING", bot_type="service")
+        bot["ext"] = {"service_bot_config": {"device_count": 2}}
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status="PENDING",
+        )
+        svc._device_service_provider = lambda: device_service
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._template_service.get_template_config.return_value = None
+        svc._query_admin_worknos = MagicMock(return_value=[])
+        default_ext = {
+            "service_bot_config": {"device_count": 2},
+            "sbot_use_default_image": True,
+        }
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch.object(
+            svc, "_persist_service_bot_default_image"
+        ) as persist_default:
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="u1",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=["openclaw"],
+                active_engine="openclaw",
+                device_provider="arca",
+                bot_ext_override=default_ext,
+            )
+
+        persist_default.assert_called_once_with(
+            {**bot, "bot_id": "bot001", "ext": default_ext},
+            user_id="user001",
+        )
+
     def test_allocator_logs_explicit_provider_before_apply_device(self):
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
