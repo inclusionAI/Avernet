@@ -835,6 +835,22 @@ class TestRestartBot:
         assert resp.json()["success"] is False
         assert resp.json()["error_code"] == 409
 
+    def test_rejects_teclaw_bot(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+            "teclaw 类型的 Bot 不支持重启"
+        )
+
+        resp = tc.post("/api/bots/default/restart")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "teclaw 类型的 Bot 不支持重启",
+            "error_code": 400,
+            "data": None,
+        }
+
     def test_activation_in_progress_returns_accepted(self, client):
         tc, svc, _ = client
         svc.restart_bot.return_value = {
@@ -938,6 +954,25 @@ class TestRestartScheduler:
 
         assert resp.status_code == 409
         assert resp.json()["error_code"] == 409
+
+    def test_rejects_teclaw_bot(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+            "teclaw 类型的 Bot 不支持重启"
+        )
+
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "teclaw 类型的 Bot 不支持重启",
+            "error_code": 400,
+            "data": None,
+        }
 
     def test_activation_in_progress_returns_accepted(self, client):
         tc, svc, _ = client
