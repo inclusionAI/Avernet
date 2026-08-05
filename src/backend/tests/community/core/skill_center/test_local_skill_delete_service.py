@@ -175,6 +175,7 @@ class _Cleanup:
     def __init__(self):
         self.work = []
         self.preparing = []
+        self.repair_required = []
 
     def record_preparing(self, **kwargs):
         self.preparing.append(kwargs)
@@ -185,7 +186,7 @@ class _Cleanup:
         return 1
 
     def record_repair_required(self, **kwargs):
-        self.work.append({**kwargs, "status": "repair_required"})
+        self.repair_required.append(kwargs)
         return 2
 
     def mark_cleaned(self, **_kwargs):
@@ -315,6 +316,7 @@ async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(mo
         await service.delete_local_skill(skill_id="9", actor_id="owner")
 
     assert cleanup.preparing[0]["skill_id"] == "9"
+    assert cleanup.repair_required[0]["skill_id"] == "9"
     assert "/skills/one/SKILL.md" not in files.files
     assert any(".one.delete-" in path for path in files.files)
 
@@ -348,7 +350,7 @@ async def test_restore_failure_is_not_swallowed_after_database_rollback():
 
     assert skills.deleted is False
     assert any(".one.delete-" in path for path in files.files)
-    assert cleanup.work[0]["status"] == "repair_required"
+    assert cleanup.repair_required[0]["skill_id"] == "9"
 
 
 @pytest.mark.asyncio
@@ -393,7 +395,7 @@ async def test_unverified_partial_source_repair_retains_complete_quarantine_fail
 
     assert skills.deleted is False
     assert any(".one.delete-" in path for path in files.files)
-    assert cleanup.work[0]["status"] == "repair_required"
+    assert cleanup.repair_required[0]["skill_id"] == "9"
 
 
 @pytest.mark.asyncio
