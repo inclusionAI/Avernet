@@ -734,7 +734,7 @@ class SkillRepository:
                 LocalSkillCleanupWorkModel.bot_id == bot_id,
                 LocalSkillCleanupWorkModel.package_locator == quarantine_locator,
                 LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
-                LocalSkillCleanupWorkModel.status == "preparing",
+                LocalSkillCleanupWorkModel.status.in_(("preparing", "repair_required")),
             ).with_for_update().one_or_none()
             if cleanup is None:
                 raise RuntimeError("Local Skill quarantine preparation is missing")

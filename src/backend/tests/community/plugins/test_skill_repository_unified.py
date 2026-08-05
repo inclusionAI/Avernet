@@ -239,6 +239,10 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
             env="dev", owner_id="owner", bot_id="bot", skill_id=skill["id"],
             package_locator="/skills/.local.delete-verified",
         )
+        assert SqlLocalSkillCleanupRepository(db).record_repair_required(
+            env="dev", owner_id="owner", bot_id="bot", skill_id=skill["id"],
+            package_locator="/skills/.local.delete-verified",
+        ) == cleanup_work_id
         work_id = skills.delete_bot_local_skill(
             skill_id=skill["id"], owner_id="owner", bot_id="bot",
             quarantine_locator="/skills/.local.delete-verified",

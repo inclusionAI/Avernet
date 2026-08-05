@@ -143,6 +143,17 @@ class LocalSkillDeleteService:
                 raise LocalSkillStorageError() from exc
             if cleanup_work_id is None:
                 raise LocalSkillStorageError()
+            # A process can stop at any point while the portable quarantine
+            # operation is copying or removing source bytes. Mark the row as
+            # retained for repair before that operation begins, so the only
+            # complete copy is never left behind as ignored preparation work.
+            self._record_repair_required(
+                bot=bot,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=skill_id,
+                quarantine_locator=quarantine_locator,
+            )
             try:
                 await package.quarantine_to(quarantine)
             except LocalSkillQuarantineRepairError as exc:

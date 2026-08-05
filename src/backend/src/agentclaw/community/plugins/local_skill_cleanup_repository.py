@@ -186,7 +186,9 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                 LocalSkillCleanupWorkModel.env == env,
                 LocalSkillCleanupWorkModel.owner_id == owner_id,
                 LocalSkillCleanupWorkModel.bot_id == bot_id,
-                LocalSkillCleanupWorkModel.status.in_(("pending", "preparing")),
+                LocalSkillCleanupWorkModel.status.in_(
+                    ("pending", "preparing", "repair_required")
+                ),
             ).update(
                 {"status": "cancelled", "last_error": "cleanup target became authoritative"},
                 synchronize_session=False,
