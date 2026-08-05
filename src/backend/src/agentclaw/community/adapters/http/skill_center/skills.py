@@ -696,7 +696,13 @@ async def get_active_skills(
         engine_type=effective_engine,
     )
 
-    active_skills = service.get_active_skills()
+    if is_desktop:
+        active_skills = await service.get_active_skills_from_device(
+            bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
+        )
+    else:
+        active_skills = service.get_active_skills()
     logger.info(f"[skills.get_active_skills] Found {len(active_skills)} active skills")
     return ActiveSkillsResponse(
         success=True,
