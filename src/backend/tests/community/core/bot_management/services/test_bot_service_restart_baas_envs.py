@@ -277,6 +277,24 @@ class TestRestartBaasImagePolicy:
 
         svc._task_queue_service.enqueue.assert_not_called()
 
+    def test_pending_transition_failure_does_not_enqueue(self):
+        svc, _, _ = _make_service(template_config={})
+        svc._device_binding_repo.update_status.side_effect = RuntimeError(
+            "database unavailable"
+        )
+        bot = _make_bot(active_engine="openclaw", template_type=None)
+
+        with pytest.raises(
+            BotServiceError,
+            match="PENDING state could not be persisted.*publish_id=100",
+        ):
+            svc._restart_bot_baas(
+                bot_id="bot001", user_id="user001", binding_id=42, bot=bot
+            )
+
+        svc._repository.update_by_owner.assert_not_called()
+        svc._task_queue_service.enqueue.assert_not_called()
+
 
 class TestRestartBaasEnvInjection:
     def test_restart_records_current_publish_id_and_clears_stale_baas_failure(self):

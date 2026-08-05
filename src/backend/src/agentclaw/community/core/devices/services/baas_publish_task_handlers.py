@@ -365,34 +365,12 @@ class BaasRestartPublishPollHandler:
             publish_id=publish_id,
             payload_value=image_policy_on_success,
         )
-        if (
-            binding is not None
-            and getattr(binding, "status", None) == DeviceBindingStatus.ACTIVE.value
-            and getattr(binding, "device_provider", None) == "baas"
-            and _payload_publish_id_matches(
-                binding,
-                publish_id,
-                "restart_publish_id",
-            )
-        ):
-            return self._finalize_success(
-                binding_id=binding_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                publish_id=publish_id,
-                image_policy_on_success=image_policy_on_success,
-            )
         preflight = self._preflight(binding=binding, publish_id=publish_id)
         if preflight is not None:
             return preflight
         bot = None
         if self._bot_repository is not None:
             bot = self._bot_repository.get_by_binding_id(binding_id)
-        if isinstance(bot, dict) and bot.get("status") in {
-            DeviceBindingStatus.ACTIVE.value,
-            DeviceBindingStatus.FAILED.value,
-        }:
-            return Complete()
         if _business_timed_out(
             started_at_epoch_s=started_at_epoch_s,
             timeout_s=_RESTART_PUBLISH_TIMEOUT_SECONDS,
@@ -462,11 +440,17 @@ class BaasRestartPublishPollHandler:
 
     @staticmethod
     def _preflight(*, binding: Any, publish_id: int) -> TaskOutcome | None:
-        if _binding_is_terminal(binding):
+        if binding is None:
             return Complete()
         if getattr(binding, "device_provider", None) != "baas":
             return Complete()
         if not _payload_publish_id_matches(binding, publish_id, "restart_publish_id"):
+            return Complete()
+        # ACTIVE can belong to the runtime that existed before this restart.
+        # It is therefore not proof that the current BaaS publish succeeded;
+        # matching restart tasks must still poll that publish. FAILED remains a
+        # terminal persisted result for the current binding.
+        if getattr(binding, "status", None) == DeviceBindingStatus.FAILED.value:
             return Complete()
         return None
 
