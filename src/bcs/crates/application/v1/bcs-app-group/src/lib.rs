@@ -12,8 +12,8 @@ use bcs_service_api::application::v1::{
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
     GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinitionReference,
-    StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
+    Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinition,
+    StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
     require_authenticated_user, require_human,
 };
 use bcs_service_api::{
@@ -239,15 +239,18 @@ impl GroupServiceImpl {
         Ok(session_group_ids.iter().any(|id| id == &group.id))
     }
 
-    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
-        let principal_actor_id = principal.actor_id();
-        principal_actor_id == group.driver_bot
-            || principal_actor_id == group.originator()
+    fn can_manage_group_actor(actor_id: &str, group: &DomainGroup) -> bool {
+        actor_id == group.driver_bot
+            || actor_id == group.originator()
             || (group.group_strategy == GroupStrategy::ManagerWorker
                 && group.participants.iter().any(|participant| {
-                    participant.bot_uuid == principal_actor_id
+                    participant.bot_uuid == actor_id
                         && participant.role == bcs_service_api::ParticipantRole::Manager
                 }))
+    }
+
+    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
+        Self::can_manage_group_actor(&principal.actor_id(), group)
     }
 
     async fn load_readable_group(
@@ -439,10 +442,10 @@ impl GroupServiceImpl {
             })
             .collect();
         Ok(StateMachineConfiguration {
-            definition: StateMachineDefinitionReference {
+            definition: StateMachineDefinition::Reference(StateMachineDefinitionReference {
                 definition_id: definition.id,
                 version: definition.version,
-            },
+            }),
             participant_bindings,
         })
     }
@@ -690,15 +693,22 @@ impl GroupServiceImpl {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
+            let (definition_yaml, definition_ref) = match state_machine.definition {
+                StateMachineDefinition::Reference(reference) => (
+                    None,
+                    Some(CollaborationDefinitionRef {
+                        id: reference.definition_id,
+                        version: reference.version,
+                    }),
+                ),
+                StateMachineDefinition::Content(content) => (Some(content.content_yaml), None),
+            };
             let configured = match runtime
                 .configure_group_runtime(ConfigureGroupRuntimeCommand {
                     group_id: created.group_id.clone(),
-                    definition_yaml: None,
+                    definition_yaml,
                     definition: None,
-                    definition_ref: Some(CollaborationDefinitionRef {
-                        id: state_machine.definition.definition_id,
-                        version: state_machine.definition.version,
-                    }),
+                    definition_ref,
                     participant_bindings,
                     auto_start_on_service_invocation: true,
                 })
@@ -929,7 +939,7 @@ impl GroupService for GroupServiceImpl {
         command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         let view_actor_id = self
-            .resolve_view_actor(&command.caller, command.view_bot_id.as_deref())
+            .resolve_view_actor(&command.caller, Some(command.bot_id.as_str()))
             .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(
@@ -1098,10 +1108,6 @@ impl GroupService for GroupServiceImpl {
             group.label = Some(name.clone());
             persistence_patch.label = Some(name);
         }
-        if let Some(context) = patch.context {
-            group.context = Some(context.clone());
-            persistence_patch.context = Some(context);
-        }
         if let Some(visibility) = patch.visibility {
             if visibility == GroupVisibility::Public {
                 for participant in &group.participants {
@@ -1153,7 +1159,7 @@ impl GroupService for GroupServiceImpl {
     }
 
     async fn delete(&self, command: DeleteGroup) -> Result<DeleteResult, ApplicationError> {
-        let principal = require_human(&command.caller)?;
+        let _principal = require_human(&command.caller)?;
         let Some(group) = self
             .groups
             .try_get(&command.group_id)
@@ -1174,7 +1180,10 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         };
-        if !Self::can_manage_group(&principal, &group) {
+        let acting_actor_id = self
+            .resolve_view_actor(&command.caller, command.acting_bot_id.as_deref())
+            .await?;
+        if !Self::can_manage_group_actor(&acting_actor_id, &group) {
             return Err(ApplicationError::forbidden(
                 "Principal cannot delete the group",
             ));
@@ -1191,7 +1200,7 @@ impl GroupService for GroupServiceImpl {
         let result = self
             .management
             .delete_group(GroupDeleteCommand {
-                caller_actor_id: principal.actor_id(),
+                caller_actor_id: acting_actor_id,
                 group_id: command.group_id,
             })
             .await
@@ -1248,7 +1257,7 @@ impl GroupService for GroupServiceImpl {
                 human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
-                role: Some(role_name(command.role).to_string()),
+                role: Some(role_name(default_participant_role(group.group_strategy)).to_string()),
             })
             .await
             .map_err(map_group_error)?;
@@ -1467,6 +1476,13 @@ fn map_create_collaboration(
         CollaborationConfiguration::StateMachine(configuration) => {
             (GroupStrategy::StateMachine, None, Some(configuration))
         }
+    }
+}
+
+fn default_participant_role(strategy: GroupStrategy) -> bcs_service_api::ParticipantRole {
+    match strategy {
+        GroupStrategy::ManagerWorker => bcs_service_api::ParticipantRole::Worker,
+        _ => bcs_service_api::ParticipantRole::Consultant,
     }
 }
 

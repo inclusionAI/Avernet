@@ -217,10 +217,9 @@ fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
     }
 }
 
-fn participant_input(bot_uuid: &str, mode: Option<BotParticipantMode>) -> SessionParticipantInput {
+fn participant_input(bot_uuid: &str, _mode: Option<BotParticipantMode>) -> SessionParticipantInput {
     SessionParticipantInput {
         bot_uuid: bot_uuid.to_string(),
-        mode,
     }
 }
 
@@ -228,8 +227,8 @@ async fn create_session(
     fixture: &Fixture,
     caller: AuthenticatedCaller,
     group_id: &str,
-    driver: &str,
-    participants: Vec<SessionParticipantInput>,
+    _driver: &str,
+    _participants: Vec<SessionParticipantInput>,
     input: Option<SessionInput>,
     title: Option<&str>,
 ) -> bcs_service_api::application::v1::CreateSessionOutcome {
@@ -238,10 +237,8 @@ async fn create_session(
         .create(CreateSession {
             caller,
             group_id: group_id.to_string(),
-            driver_bot_uuid: driver.to_string(),
             title: title.map(str::to_string),
             input,
-            participants,
         })
         .await
         .expect("create session")
@@ -276,7 +273,15 @@ async fn create_as_manager_succeeds_and_projects_participants() {
     for bot in ["driver", "expert"] {
         fixture.add_bot(bot).await;
     }
-    fixture.store_group("g1", "driver", Some("the task")).await;
+    fixture
+        .store_manager_worker_group_with_originator(
+            "g1",
+            "driver",
+            &["expert"],
+            "human_driver",
+            Some("the task"),
+        )
+        .await;
 
     let outcome = create_session(
         &fixture,
@@ -301,15 +306,15 @@ async fn create_as_manager_succeeds_and_projects_participants() {
             query: Some("the task".into())
         })
     );
-    // Driver (Driver role) + expert (Consultant, Muted).
+    // Driver (Driver role) + inherited expert from the parent group.
     assert_eq!(detail.participants.len(), 2);
     let expert = detail
         .participants
         .iter()
         .find(|p| p.actor_id == "expert")
         .expect("expert participant");
-    assert_eq!(expert.role, ParticipantRole::Consultant);
-    assert_eq!(expert.mode, ParticipantMode::Muted);
+    assert_eq!(expert.role, ParticipantRole::Worker);
+    assert_eq!(expert.mode, ParticipantMode::Auto);
     assert_eq!(expert.name.as_deref(), Some("expert"));
     let driver = detail
         .participants
@@ -360,10 +365,8 @@ async fn create_as_non_manager_is_forbidden() {
         .create(CreateSession {
             caller: bot_principal("outsider"),
             group_id: "g1".into(),
-            driver_bot_uuid: "driver".into(),
             title: None,
             input: None,
-            participants: vec![participant_input("driver", None)],
         })
         .await
         .expect_err("non-manager should be forbidden");
@@ -374,24 +377,21 @@ async fn create_as_non_manager_is_forbidden() {
 }
 
 #[tokio::test]
-async fn create_with_unknown_driver_bot_is_not_found() {
+async fn create_with_unknown_group_is_not_found() {
     let fixture = Fixture::new().await;
     fixture.add_bot("driver").await;
-    fixture.store_group("g1", "driver", None).await;
 
     let error = fixture
         .service
         .create(CreateSession {
             caller: bot_principal("driver"),
-            group_id: "g1".into(),
-            driver_bot_uuid: "ghost".into(),
+            group_id: "missing-group".into(),
             title: None,
             input: None,
-            participants: vec![participant_input("driver", None)],
         })
         .await
-        .expect_err("unknown driver should 404");
-    assert_eq!(error.code(), "bot_not_found");
+        .expect_err("unknown group should 404");
+    assert_eq!(error.code(), "group_not_found");
 }
 
 #[tokio::test]
@@ -785,6 +785,7 @@ async fn delete_is_idempotent() {
         .delete(DeleteSession {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
+            acting_bot_id: None,
         })
         .await
         .expect("first delete");
@@ -795,6 +796,7 @@ async fn delete_is_idempotent() {
         .delete(DeleteSession {
             caller: bot_principal("driver"),
             session_id,
+            acting_bot_id: None,
         })
         .await
         .expect("second delete");
@@ -1077,7 +1079,6 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: Some(BotParticipantMode::Auto),
         })
         .await
         .expect("add participant");
@@ -1092,7 +1093,6 @@ async fn participant_add_update_remove_lifecycle() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: None,
         })
         .await
         .expect_err("duplicate add should conflict");
@@ -1332,7 +1332,6 @@ async fn session_only_participant_can_list_sessions() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: Some(BotParticipantMode::Auto),
         })
         .await
         .expect("add newcomer to session");
@@ -1401,7 +1400,6 @@ async fn session_only_participant_list_sessions_scoped() {
             caller: bot_principal("driver"),
             session_id: s1_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: Some(BotParticipantMode::Auto),
         })
         .await
         .expect("add newcomer to S1");
@@ -1461,71 +1459,28 @@ async fn session_only_participant_list_sessions_scoped() {
 }
 
 #[tokio::test]
-async fn create_session_duplicate_participant_rejected() {
-    // VeHS7: a CreateSession command that lists the same bot twice must be
-    // rejected before persistence. The memory store would otherwise silently
-    // accept an inflated roster while the MySQL store would surface the
-    // `uk_session_participants_env_session_bot` unique constraint as a generic
-    // session-ID collision on retry — inconsistent behavior across backends.
+async fn create_session_inherits_parent_group_participants_without_request_roster() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "expert"] {
         fixture.add_bot(bot).await;
     }
-    fixture.store_group("g1", "driver", None).await;
+    fixture
+        .store_manager_worker_group_with_originator("g1", "driver", &["expert"], "human_driver", None)
+        .await;
 
-    let error = fixture
+    let outcome = fixture
         .service
         .create(CreateSession {
             caller: bot_principal("driver"),
             group_id: "g1".into(),
-            driver_bot_uuid: "driver".into(),
             title: None,
             input: None,
-            participants: vec![
-                participant_input("expert", None),
-                participant_input("expert", Some(BotParticipantMode::Muted)),
-            ],
         })
         .await
-        .expect_err("duplicate participant should be rejected");
-    assert!(
-        matches!(
-            error,
-            bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }
-        ),
-        "expected InvalidInput, got {error:?}",
-    );
-    assert_eq!(error.code(), "invalid_request");
+        .expect("session should inherit parent group roster");
 
-    // Guard: no session was materialized for the rejected command.
-    let page = SessionService::list(
-        &fixture.service,
-        ListSessions {
-            caller: bot_principal("driver"),
-            group_id: "g1".into(),
-            view_bot_id: Some("driver".into()),
-            offset: 0,
-            limit: 10,
-            status: None,
-        },
-    )
-    .await
-    .expect("list sessions");
-    assert_eq!(page.total, 0, "no session should be persisted on rejection");
+    assert!(outcome.session.participants.iter().any(|p| p.actor_id == "expert"));
 }
-
-// ── view_bot_id authz (Human-facing visibility scoping) ─────────────────
-//
-// Omission selects the authenticated User's Human Actor. An explicit Human
-// must be that same Actor; an explicit Bot requires exact `created_by`
-// ownership. The selected Actor must be a Session Participant.
-//
-// These tests use a ManagerWorker group + owner-tagged messages so the
-// `MessageOwnerFilter` scoping (`IsNull` public vs `Eq(worker)`) is the
-// observable signal that the right `view_bot_id` was resolved. The Chat
-// `visible_from_seq` cutoff is NOT observable in the memory fixture: the
-// MemoryMessageRepo never bumps `session.current_msg_seq` (only the MySQL
-// store does), so `compute_visible_from_seq` always returns `None` here.
 
 /// Build the ManagerWorker session used by every view_bot_id authz test: a
 /// Chat-kind session seeded with three owner-tagged messages — public at
@@ -1961,7 +1916,17 @@ async fn create_session_defaults_consultant_for_chat_context() {
     for bot in ["driver", "expert"] {
         fixture.add_bot(bot).await;
     }
-    fixture.store_group("g1", "driver", None).await;
+    let mut group = Group::new(
+        "g1",
+        "driver",
+        vec![
+            Participant::bot("driver", ParticipantRole::Driver),
+            Participant::bot("expert", ParticipantRole::Consultant),
+        ],
+    );
+    group.originator = Some("human_driver".into());
+    group.group_strategy = GroupStrategy::Chat;
+    fixture.groups.upsert(group).await.expect("store group");
 
     let outcome = create_session(
         &fixture,
@@ -2016,7 +1981,6 @@ async fn add_participant_duplication_rejects_409() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: Some(BotParticipantMode::Auto),
         })
         .await
         .expect("first add of newcomer");
@@ -2028,7 +1992,6 @@ async fn add_participant_duplication_rejects_409() {
             caller: bot_principal("driver"),
             session_id: session_id.clone(),
             bot_uuid: "newcomer".into(),
-            mode: None,
         })
         .await
         .expect_err("duplicate add should reject with participant_already_exists");
@@ -2061,8 +2024,6 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
             None,
         )
         .await;
-    // Seed a session with driver + expert (NOT worker) so worker can be added
-    // via add_participant and the derived role is observable.
     let outcome = create_session(
         &fixture,
         bot_principal("driver"),
@@ -2073,23 +2034,17 @@ async fn add_participant_derives_worker_role_for_manager_worker() {
         None,
     )
     .await;
-    let session_id = outcome.session.session_id.clone();
-
-    let added = fixture
-        .service
-        .add_participant(AddSessionParticipant {
-            caller: bot_principal("driver"),
-            session_id: session_id.clone(),
-            bot_uuid: "worker".into(),
-            mode: Some(BotParticipantMode::Auto),
-        })
-        .await
-        .expect("add worker participant");
+    let worker = outcome
+        .session
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "worker")
+        .expect("worker participant inherited");
 
     assert_eq!(
-        added.role,
+        worker.role,
         ParticipantRole::Worker,
         "VfhG3: ManagerWorker Worker gains Worker role on add_participant, not Consultant"
     );
-    assert_eq!(added.mode, ParticipantMode::Auto);
+    assert_eq!(worker.mode, ParticipantMode::Auto);
 }

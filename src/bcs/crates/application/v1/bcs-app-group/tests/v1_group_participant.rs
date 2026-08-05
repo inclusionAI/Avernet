@@ -163,7 +163,6 @@ async fn human_manager_can_add_bot_participant() {
             caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
-            role: ParticipantRole::Consultant,
         })
         .await
         .expect("driver can add");
@@ -181,7 +180,6 @@ async fn non_manager_cannot_add_participant() {
             caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
-            role: ParticipantRole::Consultant,
         })
         .await
         .expect_err("plain participant forbidden");

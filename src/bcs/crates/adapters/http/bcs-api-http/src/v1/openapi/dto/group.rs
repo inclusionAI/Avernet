@@ -2,9 +2,8 @@ use bcs_service_api::application::v1::{
     BotFinalDelivery, ChatConfiguration, CollaborationConfiguration, CreateCollaborationGroup,
     CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant, GroupDeliveryPolicy,
     GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility, ManagerWorkerConfiguration,
-    MembershipFilter, ParticipantMode, ParticipantRole, StateMachineConfiguration,
-    StateMachineDefinitionReference,
-    StateMachineParticipantBinding,
+    MembershipFilter, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
+    StateMachineDefinitionContent, StateMachineParticipantBinding,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
 
@@ -44,8 +43,6 @@ impl Default for KindQuery {
 #[serde(deny_unknown_fields)]
 pub struct ListGroupsQuery {
     #[serde(default)]
-    pub view_bot_id: Option<String>,
-    #[serde(default)]
     pub offset: u64,
     #[serde(default = "default_limit")]
     pub limit: u64,
@@ -55,6 +52,14 @@ pub struct ListGroupsQuery {
     #[serde(default)]
     pub kind: KindQuery,
     pub strategy: Option<GroupStrategy>,
+}
+
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeleteGroupQuery {
+    #[serde(default)]
+    pub acting_bot_id: Option<String>,
 }
 
 impl ListGroupsQuery {
@@ -86,14 +91,8 @@ pub struct ParticipantRequest {
 #[serde(deny_unknown_fields)]
 pub struct AddParticipantRequest {
     pub actor_id: String,
-    pub role: ParticipantRole,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct UpdateParticipantRequest {
-    pub mode: ParticipantMode,
-}
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -103,24 +102,8 @@ pub struct DeliveryPolicyRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct DefinitionReferenceRequest {
-    pub definition_id: String,
-    #[serde(deserialize_with = "deserialize_positive_version")]
-    pub version: i32,
-}
-
-fn deserialize_positive_version<'de, D>(deserializer: D) -> Result<i32, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let version = i32::deserialize(deserializer)?;
-    if version > 0 {
-        Ok(version)
-    } else {
-        Err(D::Error::custom(
-            "version must be greater than or equal to 1",
-        ))
-    }
+pub struct DefinitionContentRequest {
+    pub content_yaml: String,
 }
 
 pub(crate) fn deserialize_present_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -155,11 +138,12 @@ pub struct ParticipantBindingRequest {
 #[serde(tag = "strategy", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CollaborationRequest {
     Chat {
-        delivery_policy: DeliveryPolicyRequest,
+        #[serde(default)]
+        delivery_policy: Option<DeliveryPolicyRequest>,
     },
     ManagerWorker {},
     StateMachine {
-        definition: DefinitionReferenceRequest,
+        definition: DefinitionContentRequest,
         participant_bindings: Vec<ParticipantBindingRequest>,
     },
 }
@@ -169,7 +153,9 @@ impl From<CollaborationRequest> for CollaborationConfiguration {
         match value {
             CollaborationRequest::Chat { delivery_policy } => Self::Chat(ChatConfiguration {
                 delivery_policy: GroupDeliveryPolicy {
-                    bot_final_delivery: delivery_policy.bot_final_delivery,
+                    bot_final_delivery: delivery_policy
+                        .map(|policy| policy.bot_final_delivery)
+                        .unwrap_or(BotFinalDelivery::SendToDriver),
                 },
             }),
             CollaborationRequest::ManagerWorker {} => {
@@ -179,10 +165,9 @@ impl From<CollaborationRequest> for CollaborationConfiguration {
                 definition,
                 participant_bindings,
             } => Self::StateMachine(StateMachineConfiguration {
-                definition: StateMachineDefinitionReference {
-                    definition_id: definition.definition_id,
-                    version: definition.version,
-                },
+                definition: StateMachineDefinition::Content(StateMachineDefinitionContent {
+                    content_yaml: definition.content_yaml,
+                }),
                 participant_bindings: participant_bindings
                     .into_iter()
                     .map(|binding| StateMachineParticipantBinding {
@@ -201,8 +186,6 @@ pub enum CreateGroupRequest {
     Normal {
         name: Option<String>,
         context: Option<String>,
-        #[serde(default = "default_visibility")]
-        visibility: GroupVisibility,
         driver_bot_uuid: String,
         participants: Vec<ParticipantRequest>,
         collaboration: CollaborationRequest,
@@ -214,25 +197,20 @@ pub enum CreateGroupRequest {
     },
 }
 
-fn default_visibility() -> GroupVisibility {
-    GroupVisibility::Private
-}
-
 impl From<CreateGroupRequest> for CreateGroupSpec {
     fn from(value: CreateGroupRequest) -> Self {
         match value {
             CreateGroupRequest::Normal {
                 name,
                 context,
-                visibility,
                 driver_bot_uuid,
                 participants,
                 collaboration,
             } => Self::Collaboration(CreateCollaborationGroup {
                 name,
                 context,
-                visibility,
                 driver_bot_uuid,
+                visibility: GroupVisibility::Private,
                 participants: participants
                     .into_iter()
                     .map(|participant| CreateParticipant {
@@ -261,8 +239,6 @@ pub struct UpdateGroupRequest {
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub name: Option<String>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
-    pub context: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub visibility: Option<GroupVisibility>,
     #[serde(default, deserialize_with = "deserialize_present_non_null")]
     pub delivery_policy: Option<DeliveryPolicyRequest>,
@@ -272,7 +248,6 @@ impl From<UpdateGroupRequest> for GroupPatch {
     fn from(value: UpdateGroupRequest) -> Self {
         Self {
             name: value.name,
-            context: value.context,
             visibility: value.visibility,
             delivery_policy: value.delivery_policy.map(|policy| GroupDeliveryPolicy {
                 bot_final_delivery: policy.bot_final_delivery,

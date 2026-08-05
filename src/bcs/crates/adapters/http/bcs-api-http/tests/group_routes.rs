@@ -117,7 +117,7 @@ impl GroupService for FakeGroupService {
             actor_id: command.actor_id,
             actor_kind: ActorKind::Bot,
             name: None,
-            role: command.role,
+            role: ParticipantRole::Consultant,
             mode: ParticipantMode::Auto,
         })
     }
@@ -378,7 +378,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/groups?view_bot_id=bot-1&offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
+            "/openapi/v1/collaboration/bots/bot-1/groups?offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
             Value::Null,
         ))
         .await
@@ -392,7 +392,7 @@ async fn group_routes_forward_the_verified_caller() {
         let list = service.list.lock().expect("list lock");
         let list = list.as_ref().expect("list command");
         assert_eq!(caller_user_id(&list.caller), "staff-1");
-        assert_eq!(list.view_bot_id.as_deref(), Some("bot-1"));
+        assert_eq!(list.bot_id, "bot-1");
         assert_eq!(list.offset, 5);
         assert_eq!(list.limit, 10);
         assert_eq!(list.strategy, Some(GroupStrategy::StateMachine));
@@ -480,7 +480,7 @@ async fn group_routes_forward_the_verified_caller() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/groups/group-1/participants",
-            json!({ "actor_id": "bot-2", "role": "consultant" }),
+            json!({ "actor_id": "bot-2" }),
         ))
         .await
         .expect("add participant forwarding response");
@@ -494,7 +494,6 @@ async fn group_routes_forward_the_verified_caller() {
         assert_eq!(caller_user_id(&added.caller), "staff-1");
         assert_eq!(added.group_id, "group-1");
         assert_eq!(added.actor_id, "bot-2");
-        assert_eq!(added.role, ParticipantRole::Consultant);
     }
 
     let update_participant_response = app
@@ -506,18 +505,8 @@ async fn group_routes_forward_the_verified_caller() {
         ))
         .await
         .expect("update participant forwarding response");
-    assert_eq!(update_participant_response.status(), StatusCode::OK);
-    {
-        let updated = service
-            .updated_participant
-            .lock()
-            .expect("update participant lock");
-        let updated = updated.as_ref().expect("update participant command");
-        assert_eq!(caller_user_id(&updated.caller), "staff-1");
-        assert_eq!(updated.group_id, "group-1");
-        assert_eq!(updated.actor_id, "bot-2");
-        assert_eq!(updated.mode, ParticipantMode::Muted);
-    }
+    assert_eq!(update_participant_response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert!(service.updated_participant.lock().expect("update participant lock").is_none());
 
     let remove_participant_response = app
         .oneshot(authenticated_request(
@@ -632,7 +621,7 @@ async fn malformed_percent_encoded_paths_use_the_common_error_envelope() {
 }
 
 #[tokio::test]
-async fn state_machine_definition_version_must_be_positive_at_the_http_boundary() {
+async fn state_machine_definition_requires_content_yaml_at_the_http_boundary() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service.clone());
 
@@ -650,14 +639,14 @@ async fn state_machine_definition_version_must_be_positive_at_the_http_boundary(
                     "strategy": "state_machine",
                     "definition": {
                         "definition_id": "review",
-                        "version": 0
+                        "version": 1
                     },
                     "participant_bindings": []
                 }
             }),
         ))
         .await
-        .expect("invalid version response");
+        .expect("invalid definition response");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response_json(response).await;
@@ -683,8 +672,7 @@ async fn state_machine_binding_actor_ids_must_not_be_empty_at_the_http_boundary(
                 "collaboration": {
                     "strategy": "state_machine",
                     "definition": {
-                        "definition_id": "review",
-                        "version": 1
+                        "content_yaml": "version: 1\n"
                     },
                     "participant_bindings": [{
                         "binding": "reviewer",
@@ -735,7 +723,7 @@ async fn add_group_participant_returns_participant() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/groups/group-1/participants",
-            json!({ "actor_id": "bot-2", "role": "consultant" }),
+            json!({ "actor_id": "bot-2" }),
         ))
         .await
         .expect("add participant response");
@@ -747,7 +735,7 @@ async fn add_group_participant_returns_participant() {
 }
 
 #[tokio::test]
-async fn update_group_participant_returns_updated_mode() {
+async fn update_group_participant_route_is_not_mounted() {
     let service = Arc::new(FakeGroupService::default());
     let app = test_router(service);
 
@@ -759,9 +747,7 @@ async fn update_group_participant_returns_updated_mode() {
         ))
         .await
         .expect("update participant response");
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response_json(response).await;
-    assert_eq!(body["data"]["mode"], "muted");
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[tokio::test]
@@ -791,7 +777,7 @@ async fn add_group_participant_rejects_unknown_field() {
         .oneshot(authenticated_request(
             "POST",
             "/openapi/v1/collaboration/groups/group-1/participants",
-            json!({ "actor_id": "bot-2", "role": "consultant", "extra": 1 }),
+            json!({ "actor_id": "bot-2", "role": "consultant" }),
         ))
         .await
         .expect("unknown field response");
