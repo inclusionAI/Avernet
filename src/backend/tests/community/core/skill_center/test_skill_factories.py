@@ -241,6 +241,32 @@ def test_legacy_relative_locator_cleanup_resolves_against_bot_local_dir(
     )
 
 
+@pytest.mark.parametrize("locator", ["../skills-repo", "skills-local/.."])
+def test_legacy_locator_cleanup_rejects_paths_outside_bot_local_dir(
+    test_injector, locator
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    factory._device_fs_dispatcher.for_bot = lambda *_: object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda entity_id, bot_id, *_args, **_kwargs: Path(
+            f"/bots/{entity_id}/{bot_id}/skills-local"
+        )
+    )
+
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        factory.local_skill_package_storage_for_locator(
+            entity_id="project-42",
+            owner_id="owner-7",
+            bot_id="bot-1",
+            engine_type="openclaw",
+            entity_type="proj",
+            is_desktop=False,
+            is_teclaw=False,
+            locator=locator,
+        )
+
+
 def test_teclaw_legacy_locator_cleanup_reapplies_workspace_adapter(test_injector):
     factory = test_injector.get(SkillServiceFactory)
     factory._pool_layout_paths = lambda *_: None
