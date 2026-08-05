@@ -163,6 +163,7 @@ class SkillsPoolRollbackOutcome(StrEnum):
     LEGACY_ACTIVE = "legacy_active"
     NOT_FOUND = "not_found"
     NOT_POOL_ACTIVE = "not_pool_active"
+    SERVICE_BOT_UNSUPPORTED = "service_bot_unsupported"
     STALE_GENERATION = "stale_generation"
     INVALID_REQUEST = "invalid_request"
     EDIT_BUSY = "edit_busy"
@@ -211,6 +212,19 @@ class SkillsPoolRollbackService:
         operator: str,
         note: str,
     ) -> SkillsPoolRollbackResult:
+        # Service Drafts intentionally have no Pool -> Legacy operator rollback.
+        # Their image policy is coupled to the Pool-only runtime contract; the
+        # generic filesystem rollback cannot safely produce a deployable
+        # service artifact without also coordinating Runtime Pin. Keep that
+        # cross-domain recovery path closed until it has an explicit contract.
+        bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
+        if bot is not None and bot.get("bot_type") == "service":
+            return SkillsPoolRollbackResult(
+                SkillsPoolRollbackOutcome.SERVICE_BOT_UNSUPPORTED,
+                evidence={"reason": "service_draft_pool_rollback_disabled"},
+                retryable=False,
+            )
+
         edit_lease = self._edit_guard.acquire_for_rollback(scope=scope)
         if edit_lease is None:
             return SkillsPoolRollbackResult(

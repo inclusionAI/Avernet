@@ -657,20 +657,37 @@ class BotBuildService:
                 f"Running rsync skill command:{skill_cmd}"
             )
 
-            self._device_service.exec_shell_new(
+            result = self._device_service.exec_shell_new(
                 device_id=device_id,
                 shell_cmd=skill_cmd,
             )
+
+            if result.exit_code != 0:
+                logger.error(
+                    "[BotBuildService._sync_skill_links] "
+                    "Active Skills mapping snapshot failed: "
+                    f"device_id={device_id}, exit_code={result.exit_code}, "
+                    f"stderr={result.stderr}"
+                )
+                raise BotBuildMigrationError(
+                    "active Skills mapping snapshot failed: "
+                    f"exit_code={result.exit_code}, stderr={result.stderr}"
+                )
 
             logger.info(
                 "[BotBuildService._sync_skill_links] "
                 "Skill links synced successfully"
             )
+        except BotBuildMigrationError:
+            raise
         except Exception as e:
-            logger.warning(
+            logger.error(
                 f"[BotBuildService._sync_skill_links] "
-                f"Failed to synced links: {device_id}, {e}"
+                f"Active Skills mapping snapshot failed: {device_id}, {e}"
             )
+            raise BotBuildMigrationError(
+                f"active Skills mapping snapshot failed: {e}"
+            ) from e
 
     def _run_local_command(
         self,
