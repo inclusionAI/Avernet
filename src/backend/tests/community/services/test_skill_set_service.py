@@ -269,6 +269,100 @@ class TestGetSymlinkMappings:
             ),
         ]
 
+    @pytest.mark.parametrize(
+        ("engine", "active_dir", "pool_dir"),
+        [
+            (
+                "openclaw",
+                "/home/admin/.openclaw/workspace/skills",
+                "/home/admin/.openclaw/workspace/skills-pool",
+            ),
+            (
+                "claude_code",
+                "/home/admin/.claude/skills",
+                "/home/admin/.claude_code/workspace/skills-pool",
+            ),
+            (
+                "hermes",
+                "/home/admin/.hermes/skills",
+                "/home/admin/.hermes/workspace/skills-pool",
+            ),
+        ],
+    )
+    def test_direct_local_activation_uses_pool_mapping_for_filesystem_engines(
+        self,
+        skill_set_service,
+        mock_skill_set_repo,
+        engine,
+        active_dir,
+        pool_dir,
+    ):
+        skill_set_service.engine_type = engine
+        skill_set_service.entity_id = "100015"
+        skill_set_service.is_desktop = True
+        skill_set_service._pool_layout_paths = lambda *_: (
+            active_dir,
+            f"{pool_dir}/skills-local",
+            f"{pool_dir}/skills-repo",
+        )
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = []
+
+        mappings = skill_set_service.get_symlink_mappings(
+            user_id="100015",
+            bolt_id="desktop-bot",
+            additional_skill_paths=[
+                f"local://{pool_dir}/skills-local/direct-local"
+            ],
+        )
+
+        assert [mapping.to_dict() for mapping in mappings] == [
+            {
+                "source": f"{pool_dir}/skills-local/direct-local",
+                "target": f"{active_dir}/direct-local",
+                "skill_uuid": None,
+                "version": None,
+            }
+        ]
+
+    def test_direct_activation_deduplicates_existing_identical_mapping(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/same",
+            }
+        ]
+
+        mappings = skill_set_service.get_symlink_mappings(
+            additional_skill_paths=["git://business/same"]
+        )
+
+        assert len(mappings) == 1
+
+    def test_direct_activation_rejects_runtime_target_collision(
+        self, skill_set_service, mock_skill_set_repo
+    ):
+        mock_skill_set_repo.get_all_active_skill_sets.return_value = [
+            {"id": "1", "name": "Active", "is_default": False}
+        ]
+        mock_skill_set_repo.get_skills_in_set.return_value = [
+            {
+                "id": "1",
+                "name": "same",
+                "git_path": "git://business/one/same",
+            }
+        ]
+
+        with pytest.raises(ValueError, match="Conflicting Skill mappings"):
+            skill_set_service.get_symlink_mappings(
+                additional_skill_paths=["git://business/two/same"]
+            )
+
     def test_pool_active_repo_only_skill_uses_canonical_pool_source(
         self, skill_set_service, mock_skill_set_repo
     ):

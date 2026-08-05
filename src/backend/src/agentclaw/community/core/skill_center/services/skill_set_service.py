@@ -1214,7 +1214,8 @@ class SkillSetService:
     def get_symlink_mappings(
         self,
         user_id: str | None = None,
-        bolt_id: str | None = None
+        bolt_id: str | None = None,
+        additional_skill_paths: list[str] | None = None,
     ) -> list[SynlinkMappingInfo]:
         """生成技能激活软链配置（支持多能力集激活）
 
@@ -1224,11 +1225,39 @@ class SkillSetService:
         Args:
             user_id: 用户 ID
             bolt_id: Bot ID，默认使用 self.bot_id
+            additional_skill_paths: 当前请求直接激活、但尚未属于 active
+                SkillSet 的 Skill locator。它们与 SkillSet 快照使用同一套
+                Engine/Planner 路径规则生成一次完整 publish。
 
         Returns:
             List[SynlinkMappingInfo]: 软链配置列表（已去重）
         """
         unique_skills = self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+
+        # Direct Skill CRUD is intentionally orthogonal to SkillSet membership.
+        # The device boundary accepts a complete mapping publish, so the current
+        # request must be merged into the active-SkillSet snapshot explicitly;
+        # otherwise bindpath can report success while never seeing the requested
+        # Skill. Keep the locator as the identity and let the common mapping code
+        # below select Legacy/Pool roots for every filesystem engine.
+        seen_paths = {
+            str(skill.get("git_path", ""))
+            for skill in unique_skills
+            if skill.get("git_path")
+        }
+        requested_paths = additional_skill_paths or []
+        for skill_path in requested_paths:
+            if not isinstance(skill_path, str) or not skill_path.startswith(
+                ("git://", "local://")
+            ):
+                raise ValueError(
+                    f"Unsupported direct Skill locator: {skill_path!r}"
+                )
+            if skill_path in seen_paths:
+                continue
+            unique_skills.append({"name": "", "git_path": skill_path})
+            seen_paths.add(skill_path)
+
         if not unique_skills:
             return []
 
@@ -1345,11 +1374,31 @@ class SkillSetService:
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
-        logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(symlinks)}")
-        for sm in symlinks:
+        resolved_mappings = symlinks
+        if requested_paths:
+            # A single runtime link name cannot safely resolve to two corpora.
+            # Reject collisions before calling the device boundary; identical
+            # mappings are harmless duplicates and collapse in insertion order.
+            resolved_mappings = []
+            mappings_by_target: dict[str, SynlinkMappingInfo] = {}
+            for mapping in symlinks:
+                existing = mappings_by_target.get(mapping.target)
+                if existing is None:
+                    mappings_by_target[mapping.target] = mapping
+                    resolved_mappings.append(mapping)
+                    continue
+                if existing.source != mapping.source:
+                    raise ValueError(
+                        "Conflicting Skill mappings for runtime target "
+                        f"{mapping.target!r}: {existing.source!r} != "
+                        f"{mapping.source!r}"
+                    )
+
+        logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(resolved_mappings)}")
+        for sm in resolved_mappings:
             logger.info(f"[get_symlink_mappings] symlink: source={sm.source}, target={sm.target}")
 
-        return symlinks
+        return resolved_mappings
 
     # ====== MCP Server Management in SkillSet ======
 
