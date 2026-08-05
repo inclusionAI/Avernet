@@ -248,6 +248,32 @@ def test_compare_and_set_ext_supports_null_expected_ext(repo):
     assert updated.ext == {"sbot_runtime_kind": "arka"}
 
 
+def test_compare_and_set_status_with_ext_guards_both_snapshots(repo):
+    rec = repo.insert(_data(status="DRAFT", ext={"concurrent": "preserve"}))
+
+    updated = repo.compare_and_set_status_with_ext(
+        publish_id=rec.id,
+        source_status="DRAFT",
+        target_status="BUILT",
+        expected_ext={"concurrent": "preserve"},
+        ext={"concurrent": "preserve", "build": {"done": True}},
+    )
+    assert updated is not None
+    assert updated.status == "BUILT"
+
+    stale = repo.compare_and_set_status_with_ext(
+        publish_id=rec.id,
+        source_status="BUILT",
+        target_status="SUCCESS",
+        expected_ext={"concurrent": "preserve"},
+        ext={"lost": "update"},
+    )
+    assert stale is None
+    persisted = repo.get_by_id(rec.id)
+    assert persisted.status == "BUILT"
+    assert persisted.ext == {"concurrent": "preserve", "build": {"done": True}}
+
+
 def test_update_version_and_last_pub_id(repo):
     r = repo.insert(_data(version=1))
     out = repo.update_version(r.id, 5, status="RELEASE")

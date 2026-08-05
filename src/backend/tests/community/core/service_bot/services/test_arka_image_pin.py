@@ -17,6 +17,7 @@ from agentclaw.community.core.service_bot.services.arka_image_pin import (
     apply_runtime_kind_to_ext,
     copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
+    persist_default_image_policy,
     resolve_current_arka_image,
     resolve_publish_image_pin,
     resolve_publish_runtime_kind,
@@ -55,11 +56,12 @@ def test_resolve_current_image_uses_enabled_common_config():
     )
 
 
-def test_resolve_current_image_returns_none_for_disabled_or_missing_config():
+def test_resolve_current_image_fails_closed_for_disabled_or_missing_config():
     service = MagicMock()
     service.get_value.return_value = None
 
-    assert resolve_current_arka_image(service, env="pre") is None
+    with pytest.raises(ImagePinConfigError, match="missing or disabled"):
+        resolve_current_arka_image(service, env="pre")
 
 
 @pytest.mark.parametrize("value", [{}, {"image": ""}, "registry/arka:v2"])
@@ -163,19 +165,17 @@ def test_resolve_default_publish_does_not_read_common_config():
     common_config.get_value.assert_not_called()
 
 
-def test_resolve_legacy_publish_with_disabled_config_stays_legacy():
+def test_resolve_legacy_publish_with_disabled_config_fails_closed():
     common_config = MagicMock()
     common_config.get_value.return_value = None
     persist = MagicMock()
 
-    resolved = resolve_publish_image_pin(
-        _record({"migration_path": "/build/v1"}),
-        common_config_service=common_config,
-        persist_ext=persist,
-    )
-
-    assert resolved.state == ImagePolicyState.LEGACY
-    assert resolved.docker_image is None
+    with pytest.raises(ImagePinConfigError, match="missing or disabled"):
+        resolve_publish_image_pin(
+            _record({"migration_path": "/build/v1"}),
+            common_config_service=common_config,
+            persist_ext=persist,
+        )
     persist.assert_not_called()
 
 
@@ -343,3 +343,31 @@ def test_persisted_resolver_skips_common_config_for_teclaw_publish():
     assert resolved.docker_image is None
     common_config.get_value.assert_not_called()
     publish_repo.compare_and_set_ext.assert_not_called()
+
+
+def test_default_policy_retries_bot_cas_without_losing_concurrent_ext():
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.side_effect = [
+        {"ext": {"keep": "old"}},
+        {"ext": {"keep": "new", "concurrent": True}},
+    ]
+    bot_repo.compare_and_set_ext.side_effect = [None, {"ext": {}}]
+    publish_repo = MagicMock()
+    publish_repo.get_draft_by_publish_bot_id.return_value = None
+
+    persist_default_image_policy(
+        bot_repository=bot_repo,
+        publish_repository=publish_repo,
+        bot_id="bot-1",
+        owner_id="u1",
+        env="pre",
+    )
+
+    assert bot_repo.compare_and_set_ext.call_count == 2
+    second = bot_repo.compare_and_set_ext.call_args_list[1].kwargs
+    assert second["expected_ext"] == {"keep": "new", "concurrent": True}
+    assert second["ext"] == {
+        "keep": "new",
+        "concurrent": True,
+        "sbot_use_default_image": True,
+    }

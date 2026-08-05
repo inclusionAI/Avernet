@@ -61,7 +61,6 @@ from agentclaw.community.core.bot_management.services.default_image_policy_liste
     DEFAULT_IMAGE_POLICY_VALUE,
     IMAGE_POLICY_ON_ACTIVE_KEY,
 )
-from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
@@ -74,7 +73,6 @@ from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
     apply_default_image_to_ext,
-    copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
     persist_default_image_policy,
 )
@@ -4130,6 +4128,22 @@ class BotService:
         if not bot_uuid:
             raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
 
+        raw_binding_props = (
+            binding.get("device_props", {})
+            if isinstance(binding, dict)
+            else (getattr(binding, "device_props", None) or {})
+        )
+        binding_props = raw_binding_props if isinstance(raw_binding_props, dict) else {}
+        if binding_props.get("restart_request_id"):
+            logger.info(
+                "[bot_service._restart_bot_baas] restart already has a durable "
+                "recovery intent: bot_id=%s binding_id=%s request_id=%s",
+                bot_id,
+                binding_id,
+                binding_props["restart_request_id"],
+            )
+            return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
+
         active_engine = (bot.get("active_engine") or "").strip()
         bot_type = bot.get("bot_type") or "personal"
         bot_template_type = (bot.get("template_type") or "").strip()
@@ -4242,12 +4256,6 @@ class BotService:
             upgrade_kwargs["stage"] = restart_stage
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
-        result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
-
-        # 取 publish_id；先把本轮 restart 事实与成功后应落的镜像策略持久化到
-        # Binding，再置 bot/binding 双 PENDING，最后提交 durable poll task。这样
-        # enqueue 失败或进程恢复时，不依赖瞬时 task payload 也能继续收敛。
-        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
         image_policy_on_success = (
             DEFAULT_IMAGE_POLICY_VALUE
             if bot_type == "service"
@@ -4255,102 +4263,128 @@ class BotService:
             and (bot.get("ext") or {}).get("sbot_use_default_image") is True
             else None
         )
-
-        update_data: Dict[str, Any] = {"status": "PENDING"}
-        if publish_id is not None:
-            from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
-                RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+        baas_service = self._baas_service_provider()
+        try:
+            workflows = baas_service.list_bot_publishes(bot_uuid)
+            workflow_baseline = max(
+                (
+                    int(workflow["id"])
+                    for workflow in (workflows or [])
+                    if isinstance(workflow, dict)
+                    and str(workflow.get("id", "")).isdigit()
+                ),
+                default=0,
             )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to snapshot BaaS restart workflow baseline: {e}"
+            ) from e
 
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            BAAS_RESTART_PUBLISH_POLL_TASK,
+            RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            RESTART_REQUEST_ID_KEY,
+            RESTART_WORKFLOW_BASELINE_KEY,
+            build_restart_publish_poll_payload,
+        )
+
+        # The durable task is the operation intent and must exist before the
+        # external BaaS mutation. If enqueue fails, no remote side effect has
+        # happened. The handler can adopt the workflow by baseline if the
+        # process exits after BaaS accepts but before publish_id is persisted.
+        task_queue_service = self._task_queue_service
+        if task_queue_service is None:
+            raise BotServiceError("BaaS restart task queue service is unavailable")
+        started_at_epoch_s = time.time()
+        try:
+            task_queue_service.enqueue(
+                BAAS_RESTART_PUBLISH_POLL_TASK,
+                build_restart_publish_poll_payload(
+                    binding_id=binding_id,
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    publish_id=None,
+                    started_at_epoch_s=started_at_epoch_s,
+                    bot_uuid=bot_uuid,
+                    image_policy_on_success=image_policy_on_success,
+                    request_id=request_id,
+                    workflow_baseline=workflow_baseline,
+                ),
+                deadline_seconds=86400,
+                delay_seconds=2,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                "BaaS restart was not submitted because its durable task "
+                f"could not be persisted: {e}"
+            ) from e
+
+        previous_binding_status = (
+            binding.get("status")
+            if isinstance(binding, dict)
+            else getattr(binding, "status", DeviceBindingStatus.ACTIVE.value)
+        )
+        previous_bot_status = bot.get("status") or DeviceBindingStatus.ACTIVE.value
+        try:
+            self._device_binding_repo.update_device_props(
+                binding_id=binding_id,
+                props={
+                    RESTART_REQUEST_ID_KEY: request_id,
+                    RESTART_WORKFLOW_BASELINE_KEY: workflow_baseline,
+                    "restart_publish_id": None,
+                    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
+                },
+            )
+            self._device_binding_repo.update_status(
+                binding_id=binding_id, status=DeviceBindingStatus.PENDING
+            )
+            if self._repository.update_by_owner(
+                bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
+        except Exception as e:
+            # No BaaS call has happened yet. Invalidate the queued task's request
+            # identity and restore the previous visible lifecycle state.
+            try:
+                self._device_binding_repo.update_device_props(
+                    binding_id=binding_id,
+                    props={RESTART_REQUEST_ID_KEY: None},
+                )
+                self._device_binding_repo.update_status(
+                    binding_id=binding_id,
+                    status=previous_binding_status or DeviceBindingStatus.ACTIVE.value,
+                )
+                self._repository.update_by_owner(
+                    bot_id, user_id, {"status": previous_bot_status}
+                )
+            except Exception:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] failed to roll back restart preparation"
+                )
+            raise BotServiceError(f"Failed to prepare durable BaaS restart: {e}") from e
+
+        # From this point on, every ambiguous failure is recoverable by the
+        # pre-existing task. It either reads the stored publish id or adopts the
+        # single workflow issued after workflow_baseline.
+        result = baas_service.upgrade_bot(**upgrade_kwargs)
+        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
+        if publish_id is not None:
             restart_publish_id = str(publish_id)
-            persisted_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-            if isinstance(persisted_bot, dict):
-                persisted_ext = persisted_bot.get("ext")
-            else:
-                # Tests and defensive fallback: retain unrelated Bot ext but
-                # never leak the in-memory DEFAULT intent into PENDING state.
-                persisted_ext = copy_image_policy_to_ext(None, bot.get("ext"))
-            ext = clear_baas_publish_failure_ext(persisted_ext)
-            ext["restart_publish_id"] = restart_publish_id
-            update_data["ext"] = ext
             try:
                 self._device_binding_repo.update_device_props(
                     binding_id=binding_id,
                     props={
                         "publish_id": restart_publish_id,
                         "restart_publish_id": restart_publish_id,
-                        "restart_request_id": request_id,
-                        RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
                     },
                 )
-            except Exception as e:
+            except Exception:
                 logger.exception(
-                    "[bot_service._restart_bot_baas] failed to persist restart "
-                    "recovery facts for bot_id=%s binding_id=%s publish_id=%s",
-                    bot_id, binding_id, publish_id,
+                    "[bot_service._restart_bot_baas] publish_id persistence failed; "
+                    "durable task will adopt by baseline: bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
                 )
-                raise BotServiceError(
-                    "BaaS restart was accepted but its recovery state could not "
-                    f"be persisted: publish_id={publish_id}"
-                ) from e
-
-        try:
-            # Binding is the poll handler's source of truth. Move it away from
-            # the previous runtime's ACTIVE state before scheduling this
-            # publish, otherwise a worker could mistake old ACTIVE for success
-            # of the newly accepted BaaS publish.
-            self._device_binding_repo.update_status(
-                binding_id=binding_id, status=DeviceBindingStatus.PENDING
-            )
-            self._repository.update_by_owner(bot_id, user_id, update_data)
-        except Exception as e:
-            logger.exception(
-                "[bot_service._restart_bot_baas] failed to mark restart "
-                "PENDING for bot_id=%s binding_id=%s publish_id=%s",
-                bot_id, binding_id, publish_id,
-            )
-            raise BotServiceError(
-                "BaaS restart was accepted but its PENDING state could not "
-                f"be persisted: publish_id={publish_id}"
-            ) from e
-
-        task_queue_service = self._task_queue_service
-        if publish_id is not None and task_queue_service is not None:
-            try:
-                from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload,
-                )
-
-                task_queue_service.enqueue(
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload(
-                        binding_id=binding_id,
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        publish_id=publish_id,
-                        started_at_epoch_s=time.time(),
-                        bot_uuid=bot_uuid,
-                        image_policy_on_success=image_policy_on_success,
-                    ),
-                    deadline_seconds=86400,
-                )
-            except Exception as e:
-                logger.exception(
-                    "[bot_service._restart_bot_baas] restart poll enqueue failed "
-                    "for bot_id=%s publish_id=%s",
-                    bot_id, publish_id,
-                )
-                raise BotServiceError(
-                    "BaaS restart was accepted and recovery state was persisted, "
-                    f"but polling could not be scheduled: publish_id={publish_id}"
-                ) from e
-        else:
-            logger.info(
-                "[bot_service._restart_bot_baas] no publish_id or task queue service; "
-                "skipping restart poll enqueue for bot_id=%s publish_id=%s",
-                bot_id, publish_id,
-            )
 
         return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or {})
 

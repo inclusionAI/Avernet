@@ -59,13 +59,13 @@ class ScaleMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
 
-        active_engine = (bot.get("active_engine") or "").strip().lower()
-        if not self._provider_behavior(bot).supports_scale:
+        publish_runtime_kind = self.resolve_publish_runtime_kind(publish_record)
+        if not self._publish_provider_behavior(publish_record).supports_scale:
             return {
                 "success": True,
                 "message": "Service bots on the teclaw engine do not support scaling",
                 "publish_id": publish_id,
-                "engine": active_engine,
+                "engine": publish_runtime_kind,
                 "supported": True,
             }
 
