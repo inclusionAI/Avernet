@@ -73,6 +73,14 @@ if [[ "$pytest_workers" != "0" ]]; then
   xdist_args=(-n "$pytest_workers" --dist loadfile)
 fi
 
+# Coverage measurement core. ``sysmon`` is coverage.py's PEP 669 (sys.monitoring)
+# backend, available on the 3.12 interpreter this project pins. It is
+# substantially cheaper than the default settrace core — measured on the full
+# suite under ``-n 4``: 418.56s default vs 214.60s sysmon, same 85% total. Only
+# line coverage is collected here (no ``--cov-branch``), which is what sysmon
+# supports well before 3.14. Set ``BACKEND_CI_COVERAGE_CORE=ctrace`` to fall back.
+export COVERAGE_CORE="${BACKEND_CI_COVERAGE_CORE:-sysmon}"
+
 set +e
 DEPLOY_PROFILE=test \
 PYTHONPATH="$backend_dir/src:$backend_dir:${PYTHONPATH:-}" \

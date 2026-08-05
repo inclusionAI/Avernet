@@ -14,6 +14,29 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.plugin_api.passport import PassportError
 
 
+@pytest.fixture(autouse=True)
+def _no_real_polling_thread():
+    """Never let a test in this module spawn a real publish-polling daemon thread.
+
+    ``_start_publish_polling`` runs ``_poll_publish_progress`` on a
+    ``threading.Thread``, polling the BaaS publish endpoint every 5s for up to
+    180s. Two entry points reach it — ``restart()`` (``TestRestart``) and
+    ``create_after_authorization()`` → ``_execute_creation`` (``TestCreate``) —
+    and neither test class mocked it, so every such test left a live thread
+    retrying against an unreachable endpoint for three minutes. That outlived the
+    test, and once the suite got fast enough to finish inside the 180s window it
+    outlived the pytest session too: the thread then logged into an already-closed
+    capture stream, yielding `ValueError: I/O operation on closed file` noise at
+    the end of a run (~70 occurrences).
+
+    The three tests that assert polling *is* started re-patch the same attribute
+    themselves, which layers cleanly on top of this. ``TestPublishPolling`` calls
+    ``_poll_publish_progress`` directly and is unaffected.
+    """
+    with patch.object(DesktopBotService, "_start_publish_polling"):
+        yield
+
+
 class TestHelpers:
     def test_generate_request_id_consistent(self):
         a = _generate_request_id("bot1", "entity1", "staff", "dev", "create")
@@ -868,22 +891,36 @@ class TestVerifyOwnership:
 class TestPublishPolling:
     """Tests for publish progress polling logic."""
 
-    @pytest.fixture(autouse=True)
-    def _instant_poll_interval(self, monkeypatch):
-        """Drop ``_POLL_INTERVAL_SECONDS`` to zero for this class.
+    @pytest.fixture
+    def poll_service(self):
+        """Build a service whose poll loop does not sleep between queries.
 
-        ``_poll_publish_progress`` sleeps the interval *before* its first status
-        query, so each of these tests paid the full 5s even though the very first
-        mocked response is terminal — 20s of pure wall-clock across the class. The
-        loop structure and exit conditions are unchanged by a zero interval; the
-        four tests that assert on timeout behaviour drive ``time.monotonic``
-        themselves and already patch ``time.sleep``, so they are unaffected.
+        ``_poll_publish_progress`` sleeps ``_POLL_INTERVAL_SECONDS`` *before* its
+        first status query, so each of these tests paid the full 5s even though
+        the very first mocked response is terminal — 20s of pure wall-clock across
+        the class. The loop structure and exit conditions are unchanged by a zero
+        interval; the tests that assert on timeout behaviour drive
+        ``time.monotonic`` themselves and already patch ``time.sleep``.
+
+        The zero is set **per instance**, not on
+        ``DesktopBotService._POLL_INTERVAL_SECONDS``. Something in this suite
+        leaves a real ``_start_publish_polling`` daemon thread running against an
+        unreachable endpoint, and a class-level patch is visible to it: its 5s-paced
+        retry loop becomes a hot spin for the whole patch window. That was observed
+        directly — a full run logged 84 "query failed (will retry)" warnings from
+        that thread while a class-level patch was in place. An instance attribute
+        is invisible to it.
         """
-        monkeypatch.setattr(DesktopBotService, "_POLL_INTERVAL_SECONDS", 0)
+        def _make():
+            service, mocks = _make_service_with_mocks()
+            service._POLL_INTERVAL_SECONDS = 0
+            return service, mocks
 
-    def test_poll_success_triggers_device_alive_instead_of_update_local_status(self):
+        return _make
+
+    def test_poll_success_triggers_device_alive_instead_of_update_local_status(self, poll_service):
         """SUCCESS 时应调 _trigger_device_alive(device_id)，不单独调 _update_local_status。"""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         service._trigger_device_alive = MagicMock()
 
         with patch("httpx.Client") as mock_client:
@@ -904,9 +941,9 @@ class TestPublishPolling:
         # _update_local_status 不应再被单独调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 
-    def test_poll_failed_still_calls_update_local_status(self):
+    def test_poll_failed_still_calls_update_local_status(self, poll_service):
         """FAILED 时走原有 _update_local_status 逻辑。"""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         service._trigger_device_alive = MagicMock()
 
         with patch("httpx.Client") as mock_client:
@@ -928,14 +965,14 @@ class TestPublishPolling:
             binding_id="1", status="FAILED",
         )
 
-    def test_service_holds_device_service_reference(self):
+    def test_service_holds_device_service_reference(self, poll_service):
         """DesktopBotService 应持有 device_service 属性。"""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         assert hasattr(service, "_device_service")
         assert service._device_service is mocks["device_service"]
 
-    def test_poll_success_updates_status_to_active(self):
-        service, mocks = _make_service_with_mocks()
+    def test_poll_success_updates_status_to_active(self, poll_service):
+        service, mocks = poll_service()
         service._trigger_device_alive = MagicMock()
 
         with patch("httpx.Client") as mock_client:
@@ -961,8 +998,8 @@ class TestPublishPolling:
         # _update_local_status 不再被调用（由 report_device_alive 内部处理）
         mocks["binding_repo"].update_status.assert_not_called()
 
-    def test_poll_failed_updates_status_to_failed(self):
-        service, mocks = _make_service_with_mocks()
+    def test_poll_failed_updates_status_to_failed(self, poll_service):
+        service, mocks = poll_service()
 
         with patch("httpx.Client") as mock_client:
             mock_response = MagicMock()
@@ -989,9 +1026,9 @@ class TestPublishPolling:
 
     @patch("time.sleep", return_value=None)
     @patch("time.monotonic")
-    def test_poll_timeout_keeps_pending_and_sets_downloading(self, mock_monotonic, mock_sleep):
+    def test_poll_timeout_keeps_pending_and_sets_downloading(self, mock_monotonic, mock_sleep, poll_service):
         """Poll timeout should keep PENDING + ext.start_status=DOWNLOADING, delegate to periodic scan."""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         # Simulate time progression: start=0, then each call advances 10s
         # After 19 calls (190s > 180s timeout), loop exits
         call_count = [0]
@@ -1041,9 +1078,9 @@ class TestPublishPolling:
 
     @patch("time.sleep", return_value=None)
     @patch("time.monotonic")
-    def test_poll_retries_on_query_error(self, mock_monotonic, mock_sleep):
+    def test_poll_retries_on_query_error(self, mock_monotonic, mock_sleep, poll_service):
         """Network errors during polling are retried, not treated as failure."""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         service._trigger_device_alive = MagicMock()
         # time: 0, 5, 10 - within timeout
         mock_monotonic.side_effect = [0, 0, 5, 5, 10, 10]
@@ -1077,9 +1114,9 @@ class TestPublishPolling:
 
     @patch("time.sleep", return_value=None)
     @patch("time.monotonic")
-    def test_poll_uses_extended_timeout_for_non_default_engine(self, mock_monotonic, mock_sleep):
+    def test_poll_uses_extended_timeout_for_non_default_engine(self, mock_monotonic, mock_sleep, poll_service):
         """非默认引擎(如 claude_code)使用更长的轮询超时(600s 而非 180s)。"""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         # Simulate time progression: start=0, then each call advances 20s
         # After 10 calls (200s > 180s default timeout), loop should NOT exit
         # because extended timeout is 600s. After 31 calls (620s > 600s), it exits.
@@ -1162,8 +1199,8 @@ class TestPublishPolling:
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service.DesktopBotService._start_publish_polling"
     )
-    def test_create_continue_starts_polling_when_publish_id_present(self, mock_start_poll):
-        service, mocks = _make_service_with_mocks()
+    def test_create_continue_starts_polling_when_publish_id_present(self, mock_start_poll, poll_service):
+        service, mocks = poll_service()
         mocks["passport"].query_agent_passport.return_value = {
             "agent_code": "ac-001",
         }
@@ -1191,8 +1228,8 @@ class TestPublishPolling:
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service.DesktopBotService._start_publish_polling"
     )
-    def test_create_continue_skips_polling_when_no_publish_id(self, mock_start_poll):
-        service, mocks = _make_service_with_mocks()
+    def test_create_continue_skips_polling_when_no_publish_id(self, mock_start_poll, poll_service):
+        service, mocks = poll_service()
         mocks["passport"].query_agent_passport.return_value = {
             "agent_code": "ac-001",
         }
@@ -1210,8 +1247,8 @@ class TestPublishPolling:
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service.DesktopBotService._start_publish_polling"
     )
-    def test_restart_starts_polling_when_publish_id_present(self, mock_start_poll):
-        service, mocks = _make_service_with_mocks()
+    def test_restart_starts_polling_when_publish_id_present(self, mock_start_poll, poll_service):
+        service, mocks = poll_service()
         _setup_local_lookup(mocks, bot_id="desktop_bot_001")
         mocks["baas"].restart_bot.return_value = {"publish_id": 5}
         mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
@@ -1230,8 +1267,8 @@ class TestPublishPolling:
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service.DesktopBotService._start_publish_polling"
     )
-    def test_restart_skips_polling_when_no_publish_id(self, mock_start_poll):
-        service, mocks = _make_service_with_mocks()
+    def test_restart_skips_polling_when_no_publish_id(self, mock_start_poll, poll_service):
+        service, mocks = poll_service()
         _setup_local_lookup(mocks, bot_id="desktop_bot_001", device_id="m-001")
         mocks["baas"].restart_bot.return_value = {}
 
@@ -1242,9 +1279,9 @@ class TestPublishPolling:
     @patch(
         "agentclaw.community.core.desktop_bot.services.desktop_bot_service.DesktopBotService._start_publish_polling"
     )
-    def test_restart_passes_engine_type_to_polling(self, mock_start_poll):
+    def test_restart_passes_engine_type_to_polling(self, mock_start_poll, poll_service):
         """重启时 active_engine 透传到 _start_publish_polling。"""
-        service, mocks = _make_service_with_mocks()
+        service, mocks = poll_service()
         _setup_local_lookup(mocks, bot_id="desktop_bot_001", active_engine="claude_code")
         mocks["baas"].restart_bot.return_value = {"publish_id": 5}
         mocks["baas"].approve_publish.return_value = {"status": "SUCCESS"}
