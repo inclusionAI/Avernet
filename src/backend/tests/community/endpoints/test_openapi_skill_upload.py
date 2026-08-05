@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_management.repository.protocol import BotRepos
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage, SkillServiceFactory
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import LocalSkillUploadService
 from agentclaw.community.core.skill_center.services.repositories import SkillRepository, SkillSetRepository
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import init_principal_verifier_config
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
@@ -144,6 +145,7 @@ def _seed_uploadable_bot(world) -> None:
             world.get(CollaboratorServiceProtocol),
             storage_factory,
             world.get(BotCollabLogRepositoryProtocol),
+            world.get(SkillsPoolEditGuard),
         ),
         scope=None,
     )
