@@ -54,7 +54,12 @@ def _skill_service_di_app(
     mock_skill_service.activate_skill = AsyncMock(return_value=True)
     mock_skill_service.deactivate_skill = AsyncMock(return_value=True)
     mock_skill_service.activate_skills_batch = AsyncMock(
-        return_value={"success": ["a"], "failed": []}
+        return_value={
+            "success": [
+                {"id": "a", "link_name": "a", "path": "git://path/a"}
+            ],
+            "failed": [],
+        }
     )
     mock_skill_service.get_link_name = MagicMock(return_value="link_name")
     mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
@@ -135,7 +140,7 @@ def _skill_service_di_app(
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
     client = TestClient(app, raise_server_exceptions=False)
-    yield client, mock_skill_service
+    yield client, mock_skill_service, mock_skill_set_service
 
 
 @contextmanager
@@ -532,7 +537,7 @@ class TestActivateSkillAsyncAwait:
     """
 
     def test_activate_skill_awaits_service_method(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post(
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
@@ -554,7 +559,7 @@ class TestActivateSkillAsyncAwait:
         the device_fs router. The fix uses kwargs to make the contract
         explicit and unambiguous.
         """
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post(
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "git://some/path"},
@@ -579,12 +584,51 @@ class TestActivateSkillAsyncAwait:
                 f"got {call.kwargs['user_id']!r}"
             )
 
+    def test_pool_activate_merges_requested_locator_into_mapping_publish(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(
+            mock_ctx, runtime_uses_pool_paths=True
+        ) as (client, _, mock_set_svc):
+            response = client.post(
+                "/api/skills/1120709/activate",
+                json={
+                    "source_path": "local:///pool/direct-local",
+                    "relative_path": "local:///pool/direct-local",
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
+                "user_id": mock_ctx.user_id,
+                "bolt_id": mock_ctx.bot_id,
+                "additional_skill_paths": ["local:///pool/direct-local"],
+            }
+
+    def test_legacy_activate_keeps_existing_mapping_publish_contract(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(mock_ctx) as (client, _, mock_set_svc):
+            response = client.post(
+                "/api/skills/1120709/activate",
+                json={
+                    "source_path": "local:///legacy/direct-local",
+                    "relative_path": "local:///legacy/direct-local",
+                },
+            )
+
+            assert response.status_code == 200, response.text
+            assert mock_set_svc.get_symlink_mappings.call_args.kwargs == {
+                "user_id": mock_ctx.user_id,
+                "bolt_id": mock_ctx.bot_id,
+            }
+
     def test_activate_skill_fails_when_runtime_mapping_sync_fails(self, mock_ctx):
         with _skill_service_di_app(
             mock_ctx,
             device_sync_result={"success": False, "message": "source missing"},
             runtime_uses_pool_paths=True,
-        ) as (client, mock_svc):
+        ) as (client, mock_svc, _):
             response = client.post(
                 "/api/skills/my-skill-id/activate",
                 json={"source_path": "local://skills-local/my-skill"},
@@ -610,7 +654,7 @@ class TestDeactivateSkillAsyncAwait:
     """
 
     def test_deactivate_skill_awaits_service_method(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
             # If the bug exists: mock await_count == 0 (missing await)
             # After fix: mock await_count == 1
@@ -621,7 +665,7 @@ class TestDeactivateSkillAsyncAwait:
 
     def test_deactivate_skill_passes_correct_skill_id(self, mock_ctx):
         """user_id/bolt_id must be passed as kwargs (not positional)."""
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post("/api/skills/my-skill-id/deactivate")
             mock_svc.deactivate_skill.assert_called_once()
             call = mock_svc.deactivate_skill.call_args
@@ -643,7 +687,7 @@ class TestDeactivateSkillAsyncAwait:
             mock_ctx,
             device_sync_result={"success": False, "message": "runtime unavailable"},
             runtime_uses_pool_paths=True,
-        ) as (client, mock_svc):
+        ) as (client, mock_svc, _):
             response = client.post("/api/skills/my-skill-id/deactivate")
 
             assert response.status_code == 502
@@ -666,7 +710,7 @@ class TestActivateSkillsBatchAsyncAwait:
     """
 
     def test_activate_skills_batch_awaits_service_method(self, mock_ctx):
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post(
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
@@ -680,7 +724,7 @@ class TestActivateSkillsBatchAsyncAwait:
 
     def test_activate_skills_batch_passes_correct_skill_paths(self, mock_ctx):
         """skill_paths must propagate; user_id/bolt_id must be kwargs."""
-        with _skill_service_di_app(mock_ctx) as (client, mock_svc):
+        with _skill_service_di_app(mock_ctx) as (client, mock_svc, _):
             client.post(
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a", "git://path/b"]},
@@ -701,6 +745,35 @@ class TestActivateSkillsBatchAsyncAwait:
             )
             assert call.kwargs["user_id"] == mock_ctx.user_id
 
+    def test_pool_batch_merges_only_successful_locators_into_mapping_publish(
+        self, mock_ctx
+    ):
+        with _skill_service_di_app(
+            mock_ctx, runtime_uses_pool_paths=True
+        ) as (client, mock_svc, mock_set_svc):
+            mock_svc.activate_skills_batch.return_value = {
+                "success": [
+                    {
+                        "id": "a",
+                        "link_name": "a",
+                        "path": "git://path/a",
+                    }
+                ],
+                "failed": [
+                    {"path": "git://path/b", "error": "source missing"}
+                ],
+            }
+
+            response = client.post(
+                "/api/skills/market/activate-batch",
+                json={"skill_paths": ["git://path/a", "git://path/b"]},
+            )
+
+            assert response.status_code == 200, response.text
+            assert mock_set_svc.get_symlink_mappings.call_args.kwargs[
+                "additional_skill_paths"
+            ] == ["git://path/a"]
+
     def test_activate_skills_batch_fails_when_runtime_mapping_sync_fails(
         self, mock_ctx
     ):
@@ -708,7 +781,7 @@ class TestActivateSkillsBatchAsyncAwait:
             mock_ctx,
             device_sync_result={"success": False, "message": "source missing"},
             runtime_uses_pool_paths=True,
-        ) as (client, mock_svc):
+        ) as (client, mock_svc, _):
             response = client.post(
                 "/api/skills/market/activate-batch",
                 json={"skill_paths": ["git://path/a"]},

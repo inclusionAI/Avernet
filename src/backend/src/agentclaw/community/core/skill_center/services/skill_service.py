@@ -604,7 +604,10 @@ class SkillService:
             source_relative = source.resolve()
             logger.debug(f"[SkillService.activate_skill] Using absolute path (relative calculation failed): {target_link} -> {source_relative}")
 
-        if target_link.exists() or target_link.is_symlink():
+        if (
+            not self.runtime_uses_pool_paths
+            and (target_link.exists() or target_link.is_symlink())
+        ):
             # Phase 4: engine-view path — 让 engine 在 VM 内删，不要宿主机 shutil.rmtree
             success = await self._delete_active_entry(device_fs, target_link)
             if not success:
@@ -612,6 +615,12 @@ class SkillService:
                     f"[SkillService.activate_skill] Failed to remove existing link at {target_link}"
                 )
                 return False
+
+        # Pool bindpath validates every source before replacing targets. Keep an
+        # existing runtime link in place until that single authoritative publish
+        # succeeds; eagerly deleting it here would create a gap and would violate
+        # fail-before-mutation when the requested mapping conflicts with an active
+        # SkillSet mapping.
 
         # R2 修复: 不再 pathlib 本地写软链。
         # 软链建立由 device_sync (调 adapter bindpath) 单方面负责,跟线上 Arca 行为对齐。
