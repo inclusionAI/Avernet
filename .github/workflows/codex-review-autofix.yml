@@ -4,9 +4,7 @@ on:
   pull_request_review_comment:
     types: [created]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 concurrency:
   group: codex-review-autofix-${{ github.event.pull_request.number }}
@@ -15,9 +13,8 @@ concurrency:
 jobs:
   autofix:
     # Run only on FreddieSun's pull requests, for trusted, current P1/P2 inline
-    # findings on branches in this repository.
-    # Fork pull requests are deliberately excluded: their code must never run
-    # with the repository's write token or personal OpenAI API key.
+    # findings on branches in this repository. Fork pull requests are excluded:
+    # their code must never run with a repository write token or API key.
     if: >-
       github.event.pull_request.user.login == 'FreddieSun' &&
       github.event.sender.login == 'chatgpt-codex-connector[bot]' &&
@@ -26,6 +23,11 @@ jobs:
       (contains(github.event.comment.body, 'P1 Badge') ||
        contains(github.event.comment.body, 'P2 Badge'))
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      summary: ${{ steps.codex.outputs.final-message }}
 
     steps:
       - name: Check out the current pull request head
@@ -33,66 +35,130 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-          # Codex must not receive GitHub write credentials.
           persist-credentials: false
 
-      - name: Prepare the trusted review finding
+      - name: Prepare a trusted prompt with review location
         env:
-          REVIEW_COMMENT: ${{ github.event.comment.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          REVIEW_BODY: ${{ github.event.comment.body }}
+          REVIEW_PATH: ${{ github.event.comment.path }}
+          REVIEW_LINE: ${{ github.event.comment.line }}
+          REVIEW_START_LINE: ${{ github.event.comment.start_line }}
+          REVIEW_DIFF_HUNK: ${{ github.event.comment.diff_hunk }}
         run: |
-          printf '%s\n' "$REVIEW_COMMENT" >> .github/codex/prompts/autofix-review-comment.md
+          git show "$BASE_SHA:.github/codex/prompts/autofix-review-comment.md" \
+            > .codex-autofix-prompt.md
+          {
+            printf '\n\nInline review location:\n'
+            printf 'path: %s\nline: %s\nstart_line: %s\n' \
+              "$REVIEW_PATH" "$REVIEW_LINE" "$REVIEW_START_LINE"
+            printf 'diff_hunk:\n%s\n\nReview comment:\n%s\n' \
+              "$REVIEW_DIFF_HUNK" "$REVIEW_BODY"
+          } >> .codex-autofix-prompt.md
 
       - name: Ask Codex to prepare a minimal fix
         id: codex
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.FREDDIESUN_OPENAI_API_KEY }}
-          prompt-file: .github/codex/prompts/autofix-review-comment.md
+          prompt-file: .codex-autofix-prompt.md
           sandbox: workspace-write
           safety-strategy: drop-sudo
           output-file: codex-autofix-output.md
+
+      - name: Export the candidate patch
+        id: diff
+        run: |
+          git diff --binary > codex-autofix.patch
+          if [ -s codex-autofix.patch ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload the candidate patch
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-autofix-patch
+          path: codex-autofix.patch
+          if-no-files-found: error
+
+  commit:
+    needs: autofix
+    if: needs.autofix.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+
+    steps:
+      - name: Check out the expected pull request head
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Download the candidate patch
+        uses: actions/download-artifact@v4
+        with:
+          name: codex-autofix-patch
 
       - name: Commit and push a validated candidate fix
         id: commit
         env:
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git diff --check
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- ':!.github/**' ':!AGENTS.md' ':!codex-autofix-output.md'
+          git apply --check codex-autofix.patch
+          git apply --whitespace=error codex-autofix.patch
+          git add --all -- ':!.github/**' ':!**/AGENTS.md' \
+            ':!codex-autofix-output.md' ':!.codex-autofix-prompt.md' \
+            ':!codex-autofix.patch'
 
           if git diff --cached --quiet; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "fix: address Codex review feedback"
-          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+          git push --force-with-lease="refs/heads/${PR_HEAD_REF}:${PR_HEAD_SHA}" \
+            "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
             "HEAD:refs/heads/${PR_HEAD_REF}"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
+  report:
+    needs: [autofix, commit]
+    if: always() && needs.autofix.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
       - name: Report the outcome on the pull request
-        if: always()
         uses: actions/github-script@v7
         env:
-          CODEX_SUMMARY: ${{ steps.codex.outputs.final-message }}
-          CHANGED: ${{ steps.commit.outputs.changed }}
-          JOB_STATUS: ${{ job.status }}
+          CODEX_SUMMARY: ${{ needs.autofix.outputs.summary }}
+          CANDIDATE_CHANGED: ${{ needs.autofix.outputs.changed }}
+          COMMIT_CHANGED: ${{ needs.commit.outputs.changed }}
+          AUTOFIX_STATUS: ${{ needs.autofix.result }}
+          COMMIT_STATUS: ${{ needs.commit.result }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const changed = process.env.CHANGED === 'true';
+            const committed = process.env.COMMIT_CHANGED === 'true';
+            const candidate = process.env.CANDIDATE_CHANGED === 'true';
+            const failed = process.env.AUTOFIX_STATUS !== 'success' ||
+              (candidate && process.env.COMMIT_STATUS !== 'success');
             const summary = process.env.CODEX_SUMMARY || 'Codex did not return a summary.';
-            const status = process.env.JOB_STATUS;
-            const header = status === 'success'
-              ? (changed ? '✅ Codex applied and pushed a candidate fix.' : 'ℹ️ Codex made no automatic change.')
-              : '⚠️ Codex autofix did not complete; no successful automatic fix was pushed.';
+            const header = failed
+              ? '⚠️ Codex autofix did not complete; no successful automatic fix was pushed.'
+              : (committed
+                ? '✅ Codex applied and pushed a candidate fix.'
+                : 'ℹ️ Codex made no automatic change.');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
