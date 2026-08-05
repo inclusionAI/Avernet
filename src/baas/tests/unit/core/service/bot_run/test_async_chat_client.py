@@ -544,12 +544,11 @@ class TestOnChat:
             {
                 "sessionKey": _TEST_SESSION_KEY,
                 "state": "error",
-                "message": {"content": [{"text": "error message"}]},
+                "errorMessage": "LLM is trying to invoke a non-exist tool",
             }
         )
         await asyncio.sleep(0)
         assert state.state == "error"
-        assert state.content == "error message"
         assert state.chat_complete.is_set() is True
 
     @pytest.mark.asyncio

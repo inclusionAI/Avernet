@@ -1015,10 +1015,13 @@ async def activate_skill(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
-        symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
-            bolt_id=effective_bot_id
-        )
+        mapping_kwargs: dict[str, Any] = {
+            "user_id": ctx.user_id,
+            "bolt_id": effective_bot_id,
+        }
+        if service.runtime_uses_pool_paths:
+            mapping_kwargs["additional_skill_paths"] = [actual_skill_id]
+        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
@@ -1101,7 +1104,7 @@ async def deactivate_skill(
         )
         symlinks = skill_set_service.get_symlink_mappings(
             user_id=ctx.user_id,
-            bolt_id=effective_bot_id
+            bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
@@ -1592,10 +1595,15 @@ async def activate_skills_batch(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
-        symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
-            bolt_id=effective_bot_id
-        )
+        mapping_kwargs: dict[str, Any] = {
+            "user_id": ctx.user_id,
+            "bolt_id": effective_bot_id,
+        }
+        if service.runtime_uses_pool_paths:
+            mapping_kwargs["additional_skill_paths"] = [
+                item["path"] for item in results["success"]
+            ]
+        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")

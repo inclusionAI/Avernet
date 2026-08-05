@@ -736,14 +736,9 @@ class AsyncChatClient:
                         f"[chat] final: sessionKey={session_key}, state={chat_state}"
                     )
         elif chat_state == "error":
-            state.content = text
-            state.state = chat_state
-            state.chat_complete.set()
-            self._emit_stream_chunk(state, StreamChunk(type="error", content=text))
-            if self.verbose:
-                logger.info(
-                    f"[chat] error: sessionKey={session_key}, payload={payload}"
-                )
+            self._handle_terminal_error(
+                state, session_key, payload.get("errorMessage", ""), "chat"
+            )
         else:
             if self.verbose:
                 logger.info(
