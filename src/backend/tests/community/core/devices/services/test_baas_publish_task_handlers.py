@@ -1668,7 +1668,10 @@ def test_restart_default_policy_is_persisted_only_after_active():
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding(
             status=DeviceBindingStatus.PENDING.value,
-            device_props={"restart_publish_id": 1002},
+            device_props={
+                "restart_publish_id": 1002,
+                "restart_image_policy_on_success": "default",
+            },
         )
         bot_repository = MagicMock()
         bot_repository.get_by_binding_id.return_value = {
@@ -1703,7 +1706,6 @@ def test_restart_default_policy_is_persisted_only_after_active():
                     publish_id=1002,
                     started_at_epoch_s=190.0,
                     bot_uuid="baas-bot-1",
-                    image_policy_on_success="default",
                 )
             )
 
@@ -1715,6 +1717,10 @@ def test_restart_default_policy_is_persisted_only_after_active():
             owner_id="owner-001",
             env="dev",
         )
+        repo.update_device_props.assert_called_once_with(
+            binding_id=42,
+            props={"restart_image_policy_on_success": None},
+        )
         assert len(received) == 1
         assert received[0].publish_kind == "restart"
     finally:
@@ -1725,7 +1731,10 @@ def test_restart_failed_publish_does_not_persist_default_policy():
     repo = MagicMock()
     repo.get_by_id.return_value = _make_binding(
         status=DeviceBindingStatus.PENDING.value,
-        device_props={"restart_publish_id": 1002},
+        device_props={
+            "restart_publish_id": 1002,
+            "restart_image_policy_on_success": "default",
+        },
     )
     bot_repository = MagicMock()
     bot_repository.get_by_binding_id.return_value = {
@@ -1754,7 +1763,6 @@ def test_restart_failed_publish_does_not_persist_default_policy():
                 publish_id=1002,
                 started_at_epoch_s=190.0,
                 bot_uuid="baas-bot-1",
-                image_policy_on_success="default",
             )
         )
 
@@ -1770,7 +1778,10 @@ def test_restart_default_policy_persistence_failure_retries_without_completion()
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding(
             status=DeviceBindingStatus.ACTIVE.value,
-            device_props={"restart_publish_id": 1002},
+            device_props={
+                "restart_publish_id": 1002,
+                "restart_image_policy_on_success": "default",
+            },
         )
         handler, _ = _make_restart_handler(
             repo=repo,
@@ -1792,11 +1803,11 @@ def test_restart_default_policy_persistence_failure_retries_without_completion()
                     publish_id=1002,
                     started_at_epoch_s=190.0,
                     bot_uuid="baas-bot-1",
-                    image_policy_on_success="default",
                 )
             )
 
         assert outcome == Retry("database unavailable")
+        repo.update_device_props.assert_not_called()
         assert received == []
     finally:
         reset_event_bus()
@@ -1806,7 +1817,10 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
     repo = MagicMock()
     repo.get_by_id.return_value = _make_binding(
         status=DeviceBindingStatus.ACTIVE.value,
-        device_props={"restart_publish_id": 1002},
+        device_props={
+            "restart_publish_id": 1002,
+            "restart_image_policy_on_success": "default",
+        },
     )
     handler, _ = _make_restart_handler(
         repo=repo,
@@ -1827,9 +1841,12 @@ def test_restart_replay_after_active_finishes_default_policy_persistence():
                 publish_id=1002,
                 started_at_epoch_s=190.0,
                 bot_uuid="baas-bot-1",
-                image_policy_on_success="default",
             )
         )
 
     assert outcome == Complete()
     persist.assert_called_once()
+    repo.update_device_props.assert_called_once_with(
+        binding_id=42,
+        props={"restart_image_policy_on_success": None},
+    )

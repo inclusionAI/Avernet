@@ -27,6 +27,8 @@ from agentclaw.community.log import get_logger
 BAAS_CREATE_PUBLISH_POLL_TASK = "baas.create.publish_poll"
 BAAS_CREATE_INIT_TASK = "baas.create.init"
 BAAS_RESTART_PUBLISH_POLL_TASK = "baas.restart.publish_poll"
+RESTART_IMAGE_POLICY_ON_SUCCESS_KEY = "restart_image_policy_on_success"
+_DEFAULT_IMAGE_POLICY_VALUE = "default"
 _CREATE_PUBLISH_TIMEOUT_SECONDS = 600
 _RESTART_PUBLISH_TIMEOUT_SECONDS = 600
 _CREATE_INIT_DEADLINE_SECONDS = 86400
@@ -358,6 +360,11 @@ class BaasRestartPublishPollHandler:
         ) = parsed
 
         binding = self._binding_repository.get_by_id(binding_id)
+        image_policy_on_success = self._resolve_image_policy_on_success(
+            binding=binding,
+            publish_id=publish_id,
+            payload_value=image_policy_on_success,
+        )
         if (
             binding is not None
             and getattr(binding, "status", None) == DeviceBindingStatus.ACTIVE.value
@@ -439,6 +446,21 @@ class BaasRestartPublishPollHandler:
             return Fail(f"invalid payload: {exc}")
 
     @staticmethod
+    def _resolve_image_policy_on_success(
+        *,
+        binding: Any,
+        publish_id: int,
+        payload_value: str | None,
+    ) -> str | None:
+        """Read the restart intent from Binding, with old-task compatibility."""
+        if _payload_publish_id_matches(binding, publish_id, "restart_publish_id"):
+            props = getattr(binding, "device_props", None) or {}
+            if RESTART_IMAGE_POLICY_ON_SUCCESS_KEY in props:
+                value = props.get(RESTART_IMAGE_POLICY_ON_SUCCESS_KEY)
+                return value if isinstance(value, str) else None
+        return payload_value
+
+    @staticmethod
     def _preflight(*, binding: Any, publish_id: int) -> TaskOutcome | None:
         if _binding_is_terminal(binding):
             return Complete()
@@ -516,7 +538,7 @@ class BaasRestartPublishPollHandler:
         publish_id: int,
         image_policy_on_success: str | None,
     ) -> TaskOutcome:
-        if image_policy_on_success == "default":
+        if image_policy_on_success == _DEFAULT_IMAGE_POLICY_VALUE:
             if self._bot_repository is None or self._publish_repository is None:
                 return Retry("default-image persistence service unavailable")
             try:
@@ -526,6 +548,12 @@ class BaasRestartPublishPollHandler:
                     bot_id=bot_id,
                     owner_id=owner_id,
                     env=get_current_env(),
+                )
+                # Clear only after Bot + Draft have accepted DEFAULT. Failure
+                # keeps the durable intent for task replay/process recovery.
+                self._binding_repository.update_device_props(
+                    binding_id=binding_id,
+                    props={RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None},
                 )
             except Exception as exc:
                 logger.warning(

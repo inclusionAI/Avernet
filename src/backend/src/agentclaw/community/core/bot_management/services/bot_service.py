@@ -4244,33 +4244,57 @@ class BotService:
             upgrade_kwargs["template_uuid"] = template_uuid
         result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
 
-        # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
-        # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然
-        # 收敛或下次操作触发）。
+        # 取 publish_id；先把本轮 restart 事实与成功后应落的镜像策略持久化到
+        # Binding，再置 bot/binding 双 PENDING，最后提交 durable poll task。这样
+        # enqueue 失败或进程恢复时，不依赖瞬时 task payload 也能继续收敛。
         publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
+        image_policy_on_success = (
+            DEFAULT_IMAGE_POLICY_VALUE
+            if bot_type == "service"
+            and not self.is_teclaw_bot(active_engine)
+            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
+            else None
+        )
 
-        try:
-            update_data: Dict[str, Any] = {"status": "PENDING"}
-            if publish_id is not None:
-                restart_publish_id = str(publish_id)
-                persisted_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
-                if isinstance(persisted_bot, dict):
-                    persisted_ext = persisted_bot.get("ext")
-                else:
-                    # Tests and defensive fallback: retain unrelated Bot ext but
-                    # never leak the in-memory DEFAULT intent into PENDING state.
-                    persisted_ext = copy_image_policy_to_ext(None, bot.get("ext"))
-                ext = clear_baas_publish_failure_ext(persisted_ext)
-                ext["restart_publish_id"] = restart_publish_id
-                update_data["ext"] = ext
+        update_data: Dict[str, Any] = {"status": "PENDING"}
+        if publish_id is not None:
+            from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+                RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            )
+
+            restart_publish_id = str(publish_id)
+            persisted_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+            if isinstance(persisted_bot, dict):
+                persisted_ext = persisted_bot.get("ext")
+            else:
+                # Tests and defensive fallback: retain unrelated Bot ext but
+                # never leak the in-memory DEFAULT intent into PENDING state.
+                persisted_ext = copy_image_policy_to_ext(None, bot.get("ext"))
+            ext = clear_baas_publish_failure_ext(persisted_ext)
+            ext["restart_publish_id"] = restart_publish_id
+            update_data["ext"] = ext
+            try:
                 self._device_binding_repo.update_device_props(
                     binding_id=binding_id,
                     props={
                         "publish_id": restart_publish_id,
                         "restart_publish_id": restart_publish_id,
                         "restart_request_id": request_id,
+                        RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
                     },
                 )
+            except Exception as e:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] failed to persist restart "
+                    "recovery facts for bot_id=%s binding_id=%s publish_id=%s",
+                    bot_id, binding_id, publish_id,
+                )
+                raise BotServiceError(
+                    "BaaS restart was accepted but its recovery state could not "
+                    f"be persisted: publish_id={publish_id}"
+                ) from e
+
+        try:
             self._repository.update_by_owner(bot_id, user_id, update_data)
             self._device_binding_repo.update_status(
                 binding_id=binding_id, status=DeviceBindingStatus.PENDING
@@ -4299,22 +4323,20 @@ class BotService:
                         publish_id=publish_id,
                         started_at_epoch_s=time.time(),
                         bot_uuid=bot_uuid,
-                        image_policy_on_success=(
-                            "default"
-                            if bot_type == "service"
-                            and not self.is_teclaw_bot(active_engine)
-                            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
-                            else None
-                        ),
+                        image_policy_on_success=image_policy_on_success,
                     ),
                     deadline_seconds=86400,
                 )
             except Exception as e:
-                logger.warning(
+                logger.exception(
                     "[bot_service._restart_bot_baas] restart poll enqueue failed "
-                    "for bot_id=%s publish_id=%s: %s",
-                    bot_id, publish_id, e,
+                    "for bot_id=%s publish_id=%s",
+                    bot_id, publish_id,
                 )
+                raise BotServiceError(
+                    "BaaS restart was accepted and recovery state was persisted, "
+                    f"but polling could not be scheduled: publish_id={publish_id}"
+                ) from e
         else:
             logger.info(
                 "[bot_service._restart_bot_baas] no publish_id or task queue service; "
