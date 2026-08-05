@@ -578,7 +578,7 @@ class LocalSkillUploadService:
                     error="runtime restore before cleanup failed",
                 ):
                     raise LocalSkillStorageError()
-                continue
+                raise LocalSkillStorageError()
             storage = (
                 self._skill_service_factory.local_skill_package_storage_for_locator(
                     entity_id=str(bot["entity_id"]),

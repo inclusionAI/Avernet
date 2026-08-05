@@ -1134,6 +1134,32 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
     assert "/private/skills-local/staged/SKILL.md" not in filesystem.files
 
 
+@pytest.mark.asyncio
+async def test_runtime_restore_failure_blocks_the_next_local_skill_mutation():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"
+    cleanup = _RuntimeRestoreCleanup()
+    runtime = _ReplacementRuntime([False])
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, runtime, cleanup
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+
+    assert runtime.calls == 1
+    assert cleanup.failed == [(12, "runtime restore before cleanup failed")]
+    assert repo.updates == []
+    assert "/private/skills-local/staged/SKILL.md" in filesystem.files
+
+
 class _LockingCache:
     def __init__(self):
         self.held: dict[str, str] = {}
