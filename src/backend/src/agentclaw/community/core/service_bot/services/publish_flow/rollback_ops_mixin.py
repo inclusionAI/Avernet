@@ -1,6 +1,7 @@
 """Rollback deploy + BaaS bot teardown, mixed into PublishFlowService."""
 from __future__ import annotations
 
+import copy
 
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
@@ -75,6 +76,7 @@ class RollbackOpsMixin:
 
         # 2. Get the target version's build artifact
         target_ext = self._get_latest_ext(target_publish_id)
+        expected_target_ext = copy.deepcopy(target_ext)
         migration_path = target_ext.get("migration_path")
         config_artifact = target_ext.get("config_artifact")
 
@@ -137,6 +139,7 @@ class RollbackOpsMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(target_record),
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)
@@ -154,6 +157,7 @@ class RollbackOpsMixin:
             target_status=PublishStatus.ONLINE_PUB,
             source_status=PublishStatus.SUCCESS,
             ext=target_ext,
+            expected_ext=expected_target_ext,
         )
         self._operation_runner.complete_operation(op)
 

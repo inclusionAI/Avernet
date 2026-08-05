@@ -240,6 +240,42 @@ def test_explicit_env_ext_update_rolls_back_when_multiple_rows_match(repo, db):
     assert [row["ext"] for row in rows] == [{"row": 1}, {"row": 2}]
 
 
+def test_compare_and_set_ext_preserves_concurrent_bot_metadata(repo):
+    repo.insert(_data(ext={"owner": "first", "中文": "值"}))
+
+    updated = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext={"owner": "first", "中文": "值"},
+        ext={"owner": "first", "中文": "值", "sbot_use_default_image": True},
+    )
+    assert updated is not None
+    assert updated["ext"]["sbot_use_default_image"] is True
+
+    stale = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext={"owner": "first", "中文": "值"},
+        ext={"sbot_pin_image": True, "sbot_docker_image": "arka:v1"},
+    )
+    assert stale is None
+    assert repo.get_by_id_and_owner("bot-1", "emp1")["ext"] == updated["ext"]
+
+
+def test_compare_and_set_ext_supports_null_bot_ext(repo):
+    repo.insert(_data(ext=None))
+
+    updated = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext=None,
+        ext={"sbot_runtime_kind": "arka"},
+    )
+
+    assert updated is not None
+    assert updated["ext"] == {"sbot_runtime_kind": "arka"}
+
+
 def test_list_and_count(repo):
     repo.insert(_data(bot_id="b1"))
     repo.insert(_data(bot_id="b2"))

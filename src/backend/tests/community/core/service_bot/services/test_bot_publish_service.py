@@ -25,6 +25,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    ImagePinConfigError,
+)
 
 
 def _make_service(
@@ -167,21 +170,14 @@ class TestCreatePublishImagePolicy:
         }
         common_config.get_value.assert_called_once()
 
-    def test_legacy_arka_bot_stays_policyless_when_switch_disabled(self):
-        ext, common_config = self._create(
-            source_bot={
-                "bot_type": "service",
-                "active_engine": "openclaw",
-                "ext": {"service_bot_config": {"device_count": 2}},
-            },
-            common_config_value=None,
-        )
-
-        assert ext == {
-            "migration_path": "/build/v1",
-            "sbot_runtime_kind": "arka",
+    def test_legacy_arka_bot_fails_closed_when_switch_config_missing(self):
+        source_bot = {
+            "bot_type": "service",
+            "active_engine": "openclaw",
+            "ext": {"service_bot_config": {"device_count": 2}},
         }
-        common_config.get_value.assert_called_once()
+        with pytest.raises(ImagePinConfigError, match="missing or disabled"):
+            self._create(source_bot=source_bot, common_config_value=None)
 
     def test_teclaw_publish_does_not_consume_arka_common_config(self):
         ext, common_config = self._create(
@@ -1727,7 +1723,12 @@ class TestRecordDraftArtifact:
         mock_repo = Mock()
         mock_repo.get_draft_by_publish_bot_id.return_value = record
         mock_repo.get_by_id.return_value = record
-        mock_repo.update_status_with_ext.return_value = record
+        updated_record = _create_mock_record(
+            record_id=7,
+            status=PublishStatus.DRAFT,
+            ext={"keep": "me", "config_artifact": {"schema_version": 4, "mcp": {"servers": []}}},
+        )
+        mock_repo.compare_and_set_ext.return_value = updated_record
         service = _make_service(bot_publish_repo=mock_repo)
 
         artifact = {"schema_version": 4, "mcp": {"servers": []}}
@@ -1739,9 +1740,10 @@ class TestRecordDraftArtifact:
         mock_repo.get_draft_by_publish_bot_id.assert_called_once_with(
             publish_bot_id="bot_001_pub", env=service._env
         )
-        # update_publish_ext -> update_status_with_ext with merged ext (other keys kept)
-        _, kwargs = mock_repo.update_status_with_ext.call_args
+        # CAS write carries both the old snapshot and merged ext.
+        _, kwargs = mock_repo.compare_and_set_ext.call_args
         assert kwargs["publish_id"] == 7
+        assert kwargs["expected_ext"] == {"keep": "me"}
         assert kwargs["ext"] == {"keep": "me", "config_artifact": artifact}
 
     def test_no_op_when_no_draft_row(self):
@@ -1754,7 +1756,7 @@ class TestRecordDraftArtifact:
         ok = service.record_draft_artifact(bot_id="bot_x", artifact={"schema_version": 4})
 
         assert ok is False
-        mock_repo.update_status_with_ext.assert_not_called()
+        mock_repo.compare_and_set_ext.assert_not_called()
 
 
 class TestGetNextVersion:

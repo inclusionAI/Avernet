@@ -6,6 +6,7 @@ get Owner approval before publishing or unpublishing.
 """
 from __future__ import annotations
 
+import copy
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional
 
@@ -98,7 +99,8 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         Args:
             publish_record: The bot publish record
         """
-        ext = publish_record.ext or {}
+        expected_ext = copy.deepcopy(publish_record.ext)
+        ext = copy.deepcopy(publish_record.ext or {})
         approval = ext.get("approval")
 
         if not approval:
@@ -126,7 +128,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
 
         ext["approval_history"] = history
         ext["approval"] = None
-        self._publish_service.update_publish_ext(publish_record.id, ext)
+        self._publish_service.update_publish_ext(
+            publish_record.id, ext, expected_ext=expected_ext
+        )
 
         logger.info(
             "[_archive_approval] archived: publish_id=%s, history_count=%d",
@@ -235,9 +239,12 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             "approval_url": approval_result.get("approval_url"),
             "created_at": datetime.now().isoformat(),
         }
-        ext = publish_record.ext or {}
+        expected_ext = copy.deepcopy(publish_record.ext)
+        ext = copy.deepcopy(publish_record.ext or {})
         ext["approval"] = new_approval
-        self._publish_service.update_publish_ext(publish_record.id, ext)
+        self._publish_service.update_publish_ext(
+            publish_record.id, ext, expected_ext=expected_ext
+        )
 
         logger.info(
             "[_create_new_approval] created: publish_id=%s, puid=%s",
@@ -329,7 +336,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
 
         # 2. Get current approval and status
-        ext = publish_record.ext or {}
+        ext = copy.deepcopy(publish_record.ext or {})
         approval = ext.get("approval")
         current_status = approval.get("status") if approval else None
 
@@ -490,7 +497,8 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             return {"success": False, "message": f"Publish not found: {publish_id}"}
 
         # 2. Validate approval record
-        ext = publish_record.ext or {}
+        expected_ext = copy.deepcopy(publish_record.ext)
+        ext = copy.deepcopy(publish_record.ext or {})
         approval = ext.get("approval")
 
         if not approval:
@@ -519,7 +527,9 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         approval["status"] = new_status
         approval["processed_at"] = datetime.now().isoformat()
         ext["approval"] = approval
-        self._publish_service.update_publish_ext(publish_id, ext)
+        self._publish_service.update_publish_ext(
+            publish_id, ext, expected_ext=expected_ext
+        )
 
         logger.info(
             "[handle_approval_callback] updated: publish_id=%s, status=%s",
@@ -655,12 +665,15 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 # Re-fetch to get latest ext
                 updated_record = self._publish_service.get_publish_by_id(publish_id)
                 if updated_record:
-                    ext = updated_record.ext or {}
+                    expected_ext = copy.deepcopy(updated_record.ext)
+                    ext = copy.deepcopy(updated_record.ext or {})
                     approval = ext.get("approval")
                     if approval:
                         approval["status"] = "EXECUTED"
                         ext["approval"] = approval
-                        self._publish_service.update_publish_ext(publish_id, ext)
+                        self._publish_service.update_publish_ext(
+                            publish_id, ext, expected_ext=expected_ext
+                        )
                         logger.info(
                             "[_trigger_online_release] marked EXECUTED: publish_id=%s",
                             publish_id,
@@ -724,12 +737,15 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 # Re-fetch to get latest ext
                 updated_record = self._publish_service.get_publish_by_id(publish_id)
                 if updated_record:
-                    ext = updated_record.ext or {}
+                    expected_ext = copy.deepcopy(updated_record.ext)
+                    ext = copy.deepcopy(updated_record.ext or {})
                     approval = ext.get("approval")
                     if approval:
                         approval["status"] = "EXECUTED"
                         ext["approval"] = approval
-                        self._publish_service.update_publish_ext(publish_id, ext)
+                        self._publish_service.update_publish_ext(
+                            publish_id, ext, expected_ext=expected_ext
+                        )
                         logger.info(
                             "[_trigger_offline] marked EXECUTED: publish_id=%s",
                             publish_id,

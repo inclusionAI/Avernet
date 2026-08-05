@@ -69,6 +69,15 @@ class PublishExtState:
             raise PublishNotFoundError(f"Publish order not found: {publish_id}")
         return copy.deepcopy(latest_record.ext or {})
 
+    def get_latest_ext_snapshot(
+        self, publish_id: int
+    ) -> tuple[dict, dict | None]:
+        """Return mutable ext plus its exact nullable persistence snapshot."""
+        latest_record = self._publish_service.get_publish_by_id(publish_id)
+        if not latest_record:
+            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
+        return copy.deepcopy(latest_record.ext or {}), copy.deepcopy(latest_record.ext)
+
     def mutate_and_update_ext(
         self,
         publish_id: int,
@@ -78,10 +87,8 @@ class PublishExtState:
         in place, then persist it. The mutator may make any change (not just a
         merge); reading the latest snapshot first reduces the risk of clobbering
         concurrent writes. Returns the persisted ext."""
-        ext = self.get_latest_ext(publish_id)
-        mutator(ext)
-        self._publish_service.update_publish_ext(publish_id=publish_id, ext=ext)
-        return ext
+        updated = self._publish_service.mutate_publish_ext(publish_id, mutator)
+        return copy.deepcopy(updated.ext or {})
 
     def advance_status(
         self,
@@ -107,19 +114,20 @@ class PublishExtState:
         target_status: PublishStatus,
         source_status: PublishStatus,
         ext: dict,
+        expected_ext: dict | None,
     ) -> None:
         """Atomically update the publish record's status and ext fields.
 
-        ``ext`` is required and written as-is: the downstream repository does a
-        blind overwrite of the record's ext column, so the caller must pass the
-        full ext it wants persisted (read-modify-write), never a partial or empty
-        dict expecting a merge. Every call site already does this.
+        ``ext`` is written only when both ``source_status`` and the complete
+        ``expected_ext`` snapshot still match. Concurrent ext writers therefore
+        produce a rejected CAS instead of losing metadata.
         """
         self._publish_service.update_publish_status_with_ext(
             publish_id=publish_id,
             target_status=target_status,
             ext=ext,
             source_status=source_status,
+            expected_ext=expected_ext,
         )
 
     # ── per-stage engine_overrides / artifact stamping ───────────────────

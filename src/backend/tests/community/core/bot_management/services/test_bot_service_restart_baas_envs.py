@@ -86,6 +86,7 @@ def _make_service(
     svc._device_service_provider = lambda: device_service
 
     baas = MagicMock()
+    baas.list_bot_publishes.return_value = []
     baas.upgrade_bot.return_value = {"publish_id": 100}
     svc._baas_service_provider = lambda: baas
 
@@ -171,7 +172,10 @@ class TestRestartBaasImagePolicy:
                 bot_id="bot001", user_id="user001", binding_id=42, bot=bot
             )
 
-        svc._repository.update_by_owner.assert_not_called()
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001", {"status": "PENDING"}
+        )
+        svc._task_queue_service.enqueue.assert_called_once()
         svc._bot_publish_repo.update_status_with_ext.assert_not_called()
 
     @pytest.mark.parametrize(
@@ -183,7 +187,7 @@ class TestRestartBaasImagePolicy:
         bot_type: str,
         active_engine: str,
     ):
-        svc, _, _ = _make_service(
+        svc, baas, _ = _make_service(
             template_config={},
             bot_type=bot_type,
             active_engine=active_engine,
@@ -223,14 +227,16 @@ class TestRestartBaasImagePolicy:
         svc._bot_publish_repo.update_status_with_ext.assert_not_called()
         payload = svc._task_queue_service.enqueue.call_args.args[1]
         assert payload["image_policy_on_success"] == "default"
-        binding_props = svc._device_binding_repo.update_device_props.call_args.kwargs["props"]
-        assert binding_props["restart_publish_id"] == "100"
+        binding_props = svc._device_binding_repo.update_device_props.call_args_list[0].kwargs["props"]
+        assert binding_props["restart_publish_id"] is None
         assert binding_props["restart_image_policy_on_success"] == "default"
+        assert binding_props["restart_workflow_baseline"] == 0
+        assert binding_props["restart_request_id"]
         pending_update = svc._repository.update_by_owner.call_args.args[2]
         assert "sbot_use_default_image" not in pending_update.get("ext", {})
 
-    def test_enqueue_failure_keeps_durable_default_intent_and_fails_explicitly(self):
-        svc, _, _ = _make_service(
+    def test_enqueue_failure_prevents_external_restart(self):
+        svc, baas, _ = _make_service(
             template_config={},
             bot_type="service",
             active_engine="openclaw",
@@ -243,17 +249,16 @@ class TestRestartBaasImagePolicy:
 
         with pytest.raises(
             BotServiceError,
-            match="recovery state was persisted.*publish_id=100",
+            match="durable task could not be persisted",
         ):
             svc._restart_bot_baas(
                 bot_id="bot001", user_id="user001", binding_id=42, bot=bot
             )
 
-        props = svc._device_binding_repo.update_device_props.call_args.kwargs["props"]
-        assert props["restart_publish_id"] == "100"
-        assert props["restart_image_policy_on_success"] == "default"
+        baas.upgrade_bot.assert_not_called()
+        svc._device_binding_repo.update_device_props.assert_not_called()
 
-    def test_binding_intent_persistence_failure_does_not_enqueue(self):
+    def test_binding_intent_persistence_failure_does_not_call_baas(self):
         svc, _, _ = _make_service(
             template_config={},
             bot_type="service",
@@ -269,16 +274,17 @@ class TestRestartBaasImagePolicy:
 
         with pytest.raises(
             BotServiceError,
-            match="recovery state could not be persisted.*publish_id=100",
+            match="Failed to prepare durable BaaS restart",
         ):
             svc._restart_bot_baas(
                 bot_id="bot001", user_id="user001", binding_id=42, bot=bot
             )
 
-        svc._task_queue_service.enqueue.assert_not_called()
+        svc._task_queue_service.enqueue.assert_called_once()
+        svc._baas_service_provider().upgrade_bot.assert_not_called()
 
-    def test_pending_transition_failure_does_not_enqueue(self):
-        svc, _, _ = _make_service(template_config={})
+    def test_pending_transition_failure_does_not_call_baas(self):
+        svc, baas, _ = _make_service(template_config={})
         svc._device_binding_repo.update_status.side_effect = RuntimeError(
             "database unavailable"
         )
@@ -286,14 +292,14 @@ class TestRestartBaasImagePolicy:
 
         with pytest.raises(
             BotServiceError,
-            match="PENDING state could not be persisted.*publish_id=100",
+            match="Failed to prepare durable BaaS restart",
         ):
             svc._restart_bot_baas(
                 bot_id="bot001", user_id="user001", binding_id=42, bot=bot
             )
 
-        svc._repository.update_by_owner.assert_not_called()
-        svc._task_queue_service.enqueue.assert_not_called()
+        svc._task_queue_service.enqueue.assert_called_once()
+        baas.upgrade_bot.assert_not_called()
 
 
 class TestRestartBaasEnvInjection:
@@ -314,25 +320,17 @@ class TestRestartBaasEnvInjection:
 
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
-        svc._device_binding_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "12372",
-                "restart_publish_id": "12372",
-                "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
-                "restart_image_policy_on_success": None,
-            },
+        calls = svc._device_binding_repo.update_device_props.call_args_list
+        assert calls[0].kwargs["props"]["restart_request_id"] == (
+            baas.upgrade_bot.call_args.kwargs["request_id"]
         )
-        svc._repository.update_by_owner.assert_called_with(
-            "bot001",
-            "user001",
-            {
-                "status": "PENDING",
-                "ext": {
-                    "service_bot_config": {"device_count": 1},
-                    "restart_publish_id": "12372",
-                },
-            },
+        assert calls[0].kwargs["props"]["restart_workflow_baseline"] == 0
+        assert calls[1].kwargs["props"] == {
+            "publish_id": "12372",
+            "restart_publish_id": "12372",
+        }
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001", {"status": "PENDING"}
         )
         svc._task_queue_service.enqueue.assert_called_once()
         enqueue_args = svc._task_queue_service.enqueue.call_args
@@ -347,15 +345,17 @@ class TestRestartBaasEnvInjection:
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
         request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
-        svc._device_binding_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "12372",
-                "restart_publish_id": "12372",
-                "restart_request_id": request_id,
-                "restart_image_policy_on_success": None,
-            },
-        )
+        calls = svc._device_binding_repo.update_device_props.call_args_list
+        assert calls[0].kwargs["props"] == {
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 0,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+        assert calls[1].kwargs["props"] == {
+            "publish_id": "12372",
+            "restart_publish_id": "12372",
+        }
         started_at_epoch_s = svc._task_queue_service.enqueue.call_args.args[1][
             "started_at_epoch_s"
         ]
@@ -365,25 +365,34 @@ class TestRestartBaasEnvInjection:
                 "binding_id": 42,
                 "bot_id": "bot001",
                 "owner_id": "user001",
-                "publish_id": 12372,
                 "started_at_epoch_s": started_at_epoch_s,
                 "bot_uuid": "BOT-uuid-9",
+                "request_id": request_id,
+                "workflow_baseline": 0,
             },
             deadline_seconds=86400,
+            delay_seconds=2,
         )
 
-    def test_restart_baas_marks_pending_before_enqueue(self):
+    def test_restart_baas_enqueues_recovery_before_pending_and_external_call(self):
         svc, baas, device_service = _make_service(template_config={})
         order: list[str] = []
-        svc._repository.update_by_owner.side_effect = lambda *args, **kwargs: order.append("bot_pending")
+        svc._repository.update_by_owner.side_effect = lambda *args, **kwargs: (
+            order.append("bot_pending") or {"bot_id": "bot001"}
+        )
         svc._device_binding_repo.update_status.side_effect = lambda *args, **kwargs: order.append("binding_pending")
         svc._task_queue_service.enqueue.side_effect = lambda *args, **kwargs: order.append("enqueue")
+        baas.upgrade_bot.side_effect = lambda **kwargs: (
+            order.append("upgrade") or {"publish_id": 100}
+        )
         bot = _make_bot(active_engine="openclaw", template_type=None)
 
         svc._restart_bot_baas(bot_id="bot001", user_id="user001", binding_id=42, bot=bot)
 
-        assert order.index("bot_pending") < order.index("enqueue")
-        assert order.index("binding_pending") < order.index("enqueue")
+        assert order.index("enqueue") < order.index("bot_pending")
+        assert order.index("enqueue") < order.index("binding_pending")
+        assert order.index("bot_pending") < order.index("upgrade")
+        assert order.index("binding_pending") < order.index("upgrade")
 
     def test_application_coding_injects_bot_type_model_runtime(self):
         """applicationCoding + aicoding → upgrade_bot 收到 extra_envs 含

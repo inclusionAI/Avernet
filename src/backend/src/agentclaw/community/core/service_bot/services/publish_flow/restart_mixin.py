@@ -401,6 +401,7 @@ class RestartMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
             )
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
@@ -580,6 +581,7 @@ class RestartMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
             )
 
         op = await acquire_deploy_workflow(
