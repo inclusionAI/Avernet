@@ -15,6 +15,11 @@ first, so it does the work and caches the outcome on the request scope; the
 dependency reuses it. Verifying twice would be wasted signature work and, worse,
 a window in which the two seams could disagree about who the caller is.
 
+:func:`resolve_caller` is that shared step, exported because the access log
+(``access_log.py``) is a third reader of it: it names the caller on every
+completed request and must name the *same* caller the route was scoped by, not a
+second opinion arrived at independently.
+
 Failure is uniform on purpose. No header, a bad signature, an expired token, an
 audience meant for another component, a payload we cannot parse — every one of
 them yields *no caller* and a ``401`` carrying the same fixed message. The
@@ -77,7 +82,7 @@ _UNSET = _Unset()
 Principal = VerifiedCaller
 
 
-def _resolve_caller(request: Request) -> VerifiedCaller | None:
+def resolve_caller(request: Request) -> VerifiedCaller | None:
     """Verify the forwarded principal once per request, caching the outcome.
 
     ``None`` means "no caller we can trust" — absent header or failed
@@ -137,7 +142,7 @@ def _verify_from_headers(request: Request) -> VerifiedCaller | None:
 
 async def require_principal(request: Request) -> Principal:
     """Return the verified caller, or raise :class:`MissingPrincipalError` (401)."""
-    caller = _resolve_caller(request)
+    caller = resolve_caller(request)
     if caller is None:
         raise MissingPrincipalError("no verified caller for this request")
     return caller
@@ -169,7 +174,7 @@ def resolve_avernet_tenant(request: Request) -> str:
     :func:`require_principal` and therefore answers ``401`` first — a property
     pinned by ``test_public_routes_require_principal``, not left to inspection.
     """
-    caller = _resolve_caller(request)
+    caller = resolve_caller(request)
     if caller is None:
         return DEFAULT_AVERNET_TENANT
     return caller.tenant

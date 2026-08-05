@@ -45,7 +45,13 @@ from gateway.community.spi.ws_forwarder import (
     WebSocketUpstream,
 )
 
-from ._forward import _INBOUND_STRIP, _PRINCIPAL_HEADER, _bundle
+from ._forward import (
+    _INBOUND_STRIP,
+    _PRINCIPAL_HEADER,
+    _bundle,
+    _identity_label,
+)
+from ._log_redaction import redact_credentials
 
 logger = get_logger("relay_ws")
 
@@ -183,11 +189,23 @@ async def forward_websocket(websocket: WebSocket) -> None:
         headers=headers,
         subprotocols=tuple(websocket.scope.get("subprotocols") or ()),
     )
+    tenant, caller = _identity_label(identities)
+    # Names, never values. Every header here is either forwarded from the client
+    # (Cookie, Authorization) or minted by us (the signed X-Avernet-Principal),
+    # so the map is a set of live credentials and printing it put them in the
+    # log on every handshake. The URL is redacted for the same reason: this
+    # plane's credential travels *in the query string* by design, because a
+    # browser's WebSocket API cannot set a header.
     logger.info(
-        "ws forwarding request url=%s headers=%s subprotocols=%s",
-        request.url,
-        request.headers,
+        "ws forwarding request url=%s headers=%s subprotocols=%s "
+        "tenant=%s caller=%s domain=%s server=%s",
+        redact_credentials(request.url),
+        sorted(request.headers),
         request.subprotocols,
+        tenant,
+        caller,
+        domain.name,
+        domain.server.name,
     )
     try:
         cm = state.ws_forwarder.connect(request)
