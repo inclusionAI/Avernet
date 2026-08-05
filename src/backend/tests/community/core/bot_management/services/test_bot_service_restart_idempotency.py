@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     RESTART_LOCK_TTL_SECONDS,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotService,
     BotServiceError,
 )
@@ -191,6 +192,22 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
 
 
 class TestRestartGuardOrchestration:
+
+    def test_teclaw_bot_restart_is_rejected_before_lock_or_device_work(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(active_engine="teclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotOperationNotAllowedError, match="teclaw 类型的 Bot 不支持重启"):
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
     def test_restart_during_reactivation_is_idempotent(self):
         """Dormant reactivation owns the lifecycle while it is running."""
         repo = FakeRestartLockRepo()

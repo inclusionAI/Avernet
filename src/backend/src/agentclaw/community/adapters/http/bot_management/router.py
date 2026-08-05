@@ -40,6 +40,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
@@ -410,6 +411,14 @@ async def restart_bot_for_others(
             error_code=409,
             data=None,
         )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_bot_for_others] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
+            data=None,
+        )
     except BotServiceError as e:
         logger.error(f"[bot_router.restart_bot_for_others] Bot service error: {e}")
         return ApiResponse(
@@ -487,6 +496,14 @@ async def restart_scheduler(
             success=False,
             message=f"当前状态不允许重启Bot: {str(e)}",
             error_code=409,
+            data=None,
+        )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_scheduler] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
@@ -2663,6 +2680,14 @@ async def restart_bot(
             success=False,
             message=f"当前状态不允许重启Bot: {str(e)}",
             error_code=409,
+            data=None,
+        )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_bot] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
