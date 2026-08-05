@@ -1079,6 +1079,10 @@ impl A2aChat {
             .await
             .ok_or_else(|| ServiceError::BotNotFound(target_bot_id.to_string()))?;
 
+        if from_bot_id == target_bot_id {
+            return Ok(target);
+        }
+
         match target.capabilities.visibility.as_str() {
             "public" => Ok(target),
             "protected" if self.friend.are_friends(from_bot_id, target_bot_id).await => Ok(target),
