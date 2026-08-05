@@ -12,8 +12,8 @@ use bcs_service_api::application::v1::{
     DirectMessageGroupSummary, GetGroup, GroupDetail, GroupKindFilter, GroupService, GroupStatus,
     GroupStrategy as V1GroupStrategy, GroupSummary, GroupVisibility, HumanPrincipal, ListGroups,
     ManagerWorkerConfiguration, Membership, MembershipFilter, NormalGroupSummary, Page,
-    Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinitionReference,
-    StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
+    Participant as V1Participant, Principal, StateMachineConfiguration, StateMachineDefinition,
+    StateMachineDefinitionReference, StateMachineParticipantBinding, UpdateGroup, UpdateGroupParticipant,
     require_authenticated_user, require_human,
 };
 use bcs_service_api::{
@@ -554,10 +554,10 @@ impl GroupServiceImpl {
             })
             .collect();
         Ok(StateMachineConfiguration {
-            definition: StateMachineDefinitionReference {
+            definition: StateMachineDefinition::Reference(StateMachineDefinitionReference {
                 definition_id: definition.id,
                 version: definition.version,
-            },
+            }),
             participant_bindings,
         })
     }
@@ -786,7 +786,7 @@ impl GroupServiceImpl {
             .map_err(map_group_error)?;
 
         if let Some(state_machine) = state_machine {
-            let response_state_machine = state_machine.clone();
+            let mut response_state_machine = state_machine.clone();
             let runtime = self
                 .collaboration_runtime
                 .as_ref()
@@ -805,15 +805,22 @@ impl GroupServiceImpl {
                     )
                 })
                 .collect::<BTreeMap<_, _>>();
+            let (definition_yaml, definition_ref) = match state_machine.definition {
+                StateMachineDefinition::Reference(reference) => (
+                    None,
+                    Some(CollaborationDefinitionRef {
+                        id: reference.definition_id,
+                        version: reference.version,
+                    }),
+                ),
+                StateMachineDefinition::Content(content) => (Some(content.content_yaml), None),
+            };
             let configured = match runtime
                 .configure_group_runtime(ConfigureGroupRuntimeCommand {
                     group_id: created.group_id.clone(),
-                    definition_yaml: None,
+                    definition_yaml,
                     definition: None,
-                    definition_ref: Some(CollaborationDefinitionRef {
-                        id: state_machine.definition.definition_id,
-                        version: state_machine.definition.version,
-                    }),
+                    definition_ref,
                     participant_bindings,
                     auto_start_on_service_invocation: true,
                 })
@@ -835,6 +842,14 @@ impl GroupServiceImpl {
                     ));
                 }
             };
+            if let Some(definition) = configured.default_definition.clone() {
+                response_state_machine.definition = StateMachineDefinition::Reference(
+                    StateMachineDefinitionReference {
+                        definition_id: definition.id,
+                        version: definition.version,
+                    },
+                );
+            }
             if configured.requires_human_input_channel {
                 let group = self
                     .groups
@@ -1213,10 +1228,6 @@ impl GroupService for GroupServiceImpl {
             group.label = Some(name.clone());
             persistence_patch.label = Some(name);
         }
-        if let Some(context) = patch.context {
-            group.context = Some(context.clone());
-            persistence_patch.context = Some(context);
-        }
         if let Some(visibility) = patch.visibility {
             if visibility == GroupVisibility::Public {
                 for participant in &group.participants {
@@ -1289,10 +1300,27 @@ impl GroupService for GroupServiceImpl {
                 deleted: false,
             });
         };
-        let Some(manage_actor_id) = self.resolve_group_manage_actor(&principal, &group).await? else {
-            return Err(ApplicationError::forbidden(
-                "Principal cannot delete the group",
-            ));
+        let manage_actor_id = if command.acting_bot_id.is_some() {
+            let acting_actor_id = self
+                .resolve_view_actor(&command.caller, command.acting_bot_id.as_deref())
+                .await?;
+            let management_actor_ids = Self::group_management_actor_ids(&group);
+            if !management_actor_ids
+                .iter()
+                .any(|actor_id| actor_id == &acting_actor_id)
+            {
+                return Err(ApplicationError::forbidden(
+                    "Principal cannot delete the group",
+                ));
+            }
+            acting_actor_id
+        } else {
+            let Some(manage_actor_id) = self.resolve_group_manage_actor(&principal, &group).await? else {
+                return Err(ApplicationError::forbidden(
+                    "Principal cannot delete the group",
+                ));
+            };
+            manage_actor_id
         };
         let state_machine_runtime = if group.group_strategy == GroupStrategy::StateMachine {
             Some(self.collaboration_runtime.as_ref().ok_or_else(|| {
@@ -1384,7 +1412,7 @@ impl GroupService for GroupServiceImpl {
                 human_actor_id: legacy_human_actor_id,
                 group_id: command.group_id.clone(),
                 bot_id,
-                role: Some(role_name(command.role).to_string()),
+                role: Some(role_name(default_participant_role(group.group_strategy)).to_string()),
             })
             .await
             .map_err(map_group_error)?;
@@ -1607,6 +1635,13 @@ fn map_create_collaboration(
         CollaborationConfiguration::StateMachine(configuration) => {
             (GroupStrategy::StateMachine, None, Some(configuration))
         }
+    }
+}
+
+fn default_participant_role(strategy: GroupStrategy) -> bcs_service_api::ParticipantRole {
+    match strategy {
+        GroupStrategy::ManagerWorker => bcs_service_api::ParticipantRole::Worker,
+        _ => bcs_service_api::ParticipantRole::Consultant,
     }
 }
 

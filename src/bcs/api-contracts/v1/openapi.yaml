@@ -47,8 +47,6 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateGroupInvitationPath
   /openapi/v1/collaboration/sessions/{session_id}:
     $ref: ./openapi/sessions.yaml#/SessionPath
-  /openapi/v1/collaboration/sessions/{session_id}/completion:
-    $ref: ./openapi/sessions.yaml#/SessionCompletionPath
   /openapi/v1/collaboration/sessions/{session_id}/messages:
     $ref: ./openapi/sessions.yaml#/SessionMessagesPath
   /openapi/v1/collaboration/sessions/{session_id}/token:

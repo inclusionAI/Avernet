@@ -6,7 +6,7 @@ use bcs_service_api::application::v1::{
     DeleteSessionParticipant, GetSession, ListSessionMessages, ListSessions, MessageSenderKind,
     Page, ParticipantMode, SessionCompletionResult, SessionDetail, SessionMessage,
     SessionMessageKind, SessionMessagePage, SessionMessageService, SessionParticipant,
-    SessionParticipantInput, SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
+    SessionService, SessionStatus, UpdateSession, UpdateSessionParticipant,
 };
 
 fn human_caller() -> AuthenticatedCaller {
@@ -110,13 +110,8 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     let create = CreateSession {
         caller: caller.clone(),
         group_id: "g1".into(),
-        driver_bot_uuid: "bot-1".into(),
         title: Some("plan".into()),
         input: None,
-        participants: vec![SessionParticipantInput {
-            bot_uuid: "bot-2".into(),
-            mode: Some(BotParticipantMode::Auto),
-        }],
     };
     let list = ListSessions {
         caller: caller.clone(),
@@ -138,6 +133,7 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
     let delete = DeleteSession {
         caller: caller.clone(),
         session_id: "s1".into(),
+        acting_bot_id: Some("bot-1".into()),
     };
     let complete = CompleteSession {
         caller: caller.clone(),
@@ -147,7 +143,6 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         session_id: "s1".into(),
         bot_uuid: "bot-3".into(),
-        mode: Some(BotParticipantMode::Muted),
     };
     let update_p = UpdateSessionParticipant {
         caller: caller.clone(),
@@ -174,8 +169,7 @@ fn session_commands_carry_caller_and_no_raw_credentials() {
         let s = format!("{cmd:?}");
         assert!(!s.contains("Cookie") && !s.contains("Bearer") && !s.contains("sender"));
     }
-    assert_eq!(create.driver_bot_uuid, "bot-1");
-    assert_eq!(create.participants.len(), 1);
+    assert_eq!(create.group_id, "g1");
     assert_eq!(list.status, Some(SessionStatus::Running));
 }
 

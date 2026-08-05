@@ -2,7 +2,7 @@ GroupsPath:
   get:
     operationId: list_groups
     tags: ["Collaboration / Groups"]
-    summary: List groups visible from the selected View Actor.
+    summary: List Groups for the selected View Actor.
     x-avernet-security:
       user: required
     parameters:
@@ -54,10 +54,13 @@ GroupsPath:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after selected-Actor relation, strategy, kind, and
+          tie-breaker) after selected View Actor relation, strategy, kind, and
           search filtering and deduplication, then paginated with offset/limit.
-          Both items and total are scoped before pagination. An authorized View
-          Actor with no matching Group relation receives an empty page.
+          Omitting view_bot_id selects the authenticated Human Actor. An explicit
+          Human Actor must be that same User; an explicit Bot must be owned by
+          the authenticated User. Both items and total are scoped before
+          pagination. An authorized View Actor with no matching Group relation
+          receives an empty page.
         content:
           application/json:
             schema:
@@ -80,8 +83,7 @@ GroupsPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          The explicit View Actor is not the authenticated Human or a Bot
-          created by that Human.
+          The selected View Actor is not authorized for the authenticated Human.
         x-error-codes:
           - forbidden
         content:
@@ -90,7 +92,6 @@ GroupsPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
-
   post:
     operationId: create_group
     tags: ["Collaboration / Groups"]
@@ -147,10 +148,9 @@ GroupsPath:
             schema:
               $ref: ../shared.yaml#/ErrorEnvelope
       "404":
-        description: A referenced Bot Actor or collaboration definition is missing.
+        description: A referenced Bot Actor is missing.
         x-error-codes:
           - bot_not_found
-          - collaboration_definition_not_found
         content:
           application/json:
             schema:
@@ -308,6 +308,7 @@ GroupPath:
       user: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ActingBotIdQuery
     responses:
       "200":
         description: Idempotent delete result.
@@ -373,20 +374,40 @@ CreateParticipant:
         - worker
         - observer
 
+AddGroupParticipantRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+  properties:
+    actor_id:
+      type: string
+
 CreateDeliveryPolicy:
-  $ref: ../domain-models.yaml#/DeliveryPolicy
+  type: object
+  additionalProperties: false
+  required:
+    - bot_final_delivery
+  properties:
+    bot_final_delivery:
+      type: string
+      enum:
+        - send_to_driver
+        - inject_observers
+      default: send_to_driver
 
 CreateChatConfiguration:
   type: object
   additionalProperties: false
   required:
     - strategy
-    - delivery_policy
   properties:
     strategy:
       const: chat
     delivery_policy:
       $ref: "#/CreateDeliveryPolicy"
+      default:
+        bot_final_delivery: send_to_driver
 
 CreateManagerWorkerConfiguration:
   type: object
@@ -396,6 +417,16 @@ CreateManagerWorkerConfiguration:
   properties:
     strategy:
       const: manager_worker
+
+CreateStateMachineDefinitionContent:
+  type: object
+  additionalProperties: false
+  required:
+    - content_yaml
+  properties:
+    content_yaml:
+      type: string
+      minLength: 1
 
 CreateStateMachineConfiguration:
   type: object
@@ -408,7 +439,7 @@ CreateStateMachineConfiguration:
     strategy:
       const: state_machine
     definition:
-      $ref: ../domain-models.yaml#/StateMachineDefinitionReference
+      $ref: "#/CreateStateMachineDefinitionContent"
     participant_bindings:
       type: array
       items:
@@ -437,12 +468,6 @@ CreateCollaborationGroup:
       type: string
     context:
       type: string
-    visibility:
-      type: string
-      enum:
-        - private
-        - public
-      default: private
     driver_bot_uuid:
       type: string
     participants:
@@ -476,8 +501,6 @@ UpdateGroup:
   properties:
     name:
       type: string
-    context:
-      type: string
     visibility:
       type: string
       enum:
@@ -508,7 +531,7 @@ AddGroupParticipantPath:
       content:
         application/json:
           schema:
-            $ref: "#/CreateParticipant"
+            $ref: "#/AddGroupParticipantRequest"
     responses:
       "200":
         description: Added participant.
@@ -572,79 +595,6 @@ AddGroupParticipantPath:
         $ref: ../shared.yaml#/InternalErrorResponse
 
 GroupParticipantPath:
-  patch:
-    operationId: update_group_participant
-    tags: ["Collaboration / Groups"]
-    summary: Update the mutable properties of a Group participant.
-    x-avernet-security:
-      user: required
-    parameters:
-      - $ref: ../shared.yaml#/GroupIdPath
-      - $ref: ../shared.yaml#/ActorIdPath
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: "#/UpdateGroupParticipantRequest"
-    responses:
-      "200":
-        description: Updated participant.
-        content:
-          application/json:
-            schema:
-              $ref: ../domain-models.yaml#/ParticipantEnvelope
-      "400":
-        description: Invalid patch.
-        x-error-codes:
-          - invalid_request
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "401":
-        description: Gateway Principal is missing or invalid.
-        x-error-codes:
-          - unauthenticated
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "403":
-        description: >-
-          Principal cannot manage the participant. A Human Principal may manage
-          the participant when it can act as the target actor (self-service) or
-          as at least one Group management actor: the driver, originator, or
-          ManagerWorker manager participant. Human-to-actor authority is checked only against
-          those target actors: direct human_{user.id}, a Bot whose created_by
-          equals the Human user id, or a creator relation edge from
-          human_{user.id} to that Bot.
-        x-error-codes:
-          - forbidden
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "404":
-        description: Group, participant, or referenced actor is missing or hidden.
-        x-error-codes:
-          - group_not_found
-          - participant_not_found
-          - actor_not_found
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "409":
-        description: Patch conflicts with role or group invariants.
-        x-error-codes:
-          - conflict
-        content:
-          application/json:
-            schema:
-              $ref: ../shared.yaml#/ErrorEnvelope
-      "500":
-        $ref: ../shared.yaml#/InternalErrorResponse
   delete:
     operationId: remove_group_participant
     tags: ["Collaboration / Groups"]

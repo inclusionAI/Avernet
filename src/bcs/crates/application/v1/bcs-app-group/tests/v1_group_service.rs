@@ -24,7 +24,8 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand, CollaborationDefinition,
-    ChannelBindingCleanupPort, CollaborationRuntimeError, CollaborationRuntimeService,
+    CollaborationDefinitionRef, ChannelBindingCleanupPort, CollaborationRuntimeError,
+    CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
     DefaultDelivery, DefinitionYamlSource, FriendCoreService, FriendRepoPort, Group,
     GroupCollaborationDefinitionView, GroupCoreService, GroupStrategy,
@@ -488,7 +489,12 @@ impl CollaborationRuntimeService for RecordingRuntime {
         }
         let outcome = ConfigureGroupRuntimeOutcome {
             group_id: cmd.group_id.clone(),
-            default_definition: cmd.definition_ref.clone(),
+            default_definition: cmd.definition_ref.clone().or_else(|| {
+                cmd.definition_yaml.as_ref().map(|_| CollaborationDefinitionRef {
+                    id: "generated-definition".into(),
+                    version: 1,
+                })
+            }),
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
             requires_human_input_channel: self.requires_human_input_channel,
         };
@@ -741,26 +747,32 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         .save_created_by("owned-by-alice", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
-    for (group_id, actor_id) in [
-        ("human-group", "human_alice"),
-        ("owned-bot-group", "owned-by-alice"),
-    ] {
-        fixture
-            .groups
-            .upsert(normal_group(
-                group_id,
-                "owned-by-someone-else",
-                vec![Participant::bot(actor_id, ParticipantRole::Consultant)],
-                GroupStrategy::Chat,
-                1,
-            ))
-            .await
-            .expect("store Group");
-    }
+    fixture
+        .groups
+        .upsert(normal_group(
+            "human-group",
+            "owned-by-someone-else",
+            vec![Participant::human("human_alice", ParticipantRole::Observer)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store Human Group");
+    fixture
+        .groups
+        .upsert(normal_group(
+            "owned-bot-group",
+            "owned-by-someone-else",
+            vec![Participant::bot("owned-by-alice", ParticipantRole::Consultant)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store owned Bot Group");
 
-    let list = |view_bot_id| ListGroups {
+    let list = |view_bot_id: Option<&str>| ListGroups {
         caller: bot_principal("alice"),
-        view_bot_id,
+        view_bot_id: view_bot_id.map(str::to_string),
         offset: 0,
         limit: 20,
         q: None,
@@ -777,13 +789,13 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
     assert_eq!(default_view.total, 1);
     let explicit_human = fixture
         .service
-        .list_groups(list(Some("human_alice".into())))
+        .list_groups(list(Some("human_alice")))
         .await
         .expect("the caller's Human Actor is an explicit valid view");
     assert_eq!(explicit_human.total, 1);
     let owned_bot = fixture
         .service
-        .list_groups(list(Some("owned-by-alice".into())))
+        .list_groups(list(Some("owned-by-alice")))
         .await
         .expect("an exact-created_by Bot is an explicit valid view");
     assert_eq!(owned_bot.total, 1);
@@ -791,7 +803,7 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
     for invalid_view in ["human_bob", "owned-by-someone-else", "unknown-bot"] {
         let error = fixture
             .service
-            .list_groups(list(Some(invalid_view.into())))
+            .list_groups(list(Some(invalid_view)))
             .await
             .expect_err("unauthorized View Actor must not fall back");
         assert!(matches!(error, ApplicationError::Forbidden(_)));
@@ -1427,10 +1439,10 @@ async fn state_machine_create_without_runtime_fails_before_persisting_group() {
                     CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
-                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                },
+                                }),
                             participant_bindings: vec![
                                 bcs_service_api::application::v1::StateMachineParticipantBinding {
                                     binding: "worker".into(),
@@ -1471,10 +1483,10 @@ async fn state_machine_create_rejects_duplicate_participant_binding_names() {
                     CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
-                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                },
+                                }),
                             participant_bindings: vec![
                                 bcs_service_api::application::v1::StateMachineParticipantBinding {
                                     binding: "worker".into(),
@@ -1526,10 +1538,10 @@ async fn state_machine_runtime_failure_rolls_back_created_group() {
                     CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
-                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                },
+                                }),
                             participant_bindings: vec![],
                         },
                     ),
@@ -1568,10 +1580,10 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
                     CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
-                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 3,
-                                },
+                                }),
                             participant_bindings: vec![
                                 bcs_service_api::application::v1::StateMachineParticipantBinding {
                                     binding: "worker".into(),
@@ -1593,8 +1605,13 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
     else {
         panic!("expected state-machine collaboration");
     };
-    assert_eq!(collaboration.definition.definition_id, "definition-1");
-    assert_eq!(collaboration.definition.version, 3);
+    match &collaboration.definition {
+        bcs_service_api::application::v1::StateMachineDefinition::Reference(reference) => {
+            assert_eq!(reference.definition_id, "definition-1");
+            assert_eq!(reference.version, 3);
+        }
+        other => panic!("expected definition reference, got {other:?}"),
+    }
     assert_eq!(collaboration.participant_bindings[0].binding, "worker");
     assert_eq!(
         collaboration.participant_bindings[0].actor_ids,
@@ -1639,6 +1656,60 @@ async fn state_machine_create_configures_runtime_and_returns_typed_detail() {
 }
 
 #[tokio::test]
+async fn state_machine_create_with_inline_yaml_returns_persisted_definition_ref() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let fixture = Fixture::new_with_runtime(runtime.clone()).await;
+    fixture.add_public_bot("driver").await;
+    fixture.add_public_bot("worker").await;
+
+    let detail = fixture
+        .service
+        .create(CreateGroup {
+            caller: bot_principal("driver"),
+            group: CreateGroupSpec::Collaboration(CreateCollaborationGroup {
+                name: Some("State machine".into()),
+                context: None,
+                visibility: GroupVisibility::Private,
+                driver_bot_uuid: "driver".into(),
+                participants: vec![CreateParticipant {
+                    actor_id: "worker".into(),
+                    role: ParticipantRole::Consultant,
+                }],
+                collaboration: CollaborationConfiguration::StateMachine(
+                    bcs_service_api::application::v1::StateMachineConfiguration {
+                        definition:
+                            bcs_service_api::application::v1::StateMachineDefinition::Content(bcs_service_api::application::v1::StateMachineDefinitionContent {
+                                content_yaml: "version: 1\n".into(),
+                            }),
+                        participant_bindings: Vec::new(),
+                    },
+                ),
+            }),
+        })
+        .await
+        .expect("create state-machine Group from inline YAML");
+
+    let GroupDetail::Collaboration(detail) = detail else {
+        panic!("expected collaboration detail");
+    };
+    let CollaborationConfiguration::StateMachine(collaboration) = detail.collaboration else {
+        panic!("expected state-machine collaboration");
+    };
+    match collaboration.definition {
+        bcs_service_api::application::v1::StateMachineDefinition::Reference(reference) => {
+            assert_eq!(reference.definition_id, "generated-definition");
+            assert_eq!(reference.version, 1);
+        }
+        other => panic!("expected persisted definition reference, got {other:?}"),
+    }
+
+    let configured = runtime.configured.lock().expect("runtime lock");
+    let configured = configured.as_ref().expect("configured runtime");
+    assert_eq!(configured.definition_yaml.as_deref(), Some("version: 1\n"));
+    assert!(configured.definition_ref.is_none());
+}
+
+#[tokio::test]
 async fn state_machine_create_defers_initial_run_until_required_channel_is_bound() {
     let runtime = Arc::new(RecordingRuntime {
         requires_human_input_channel: true,
@@ -1665,10 +1736,10 @@ async fn state_machine_create_defers_initial_run_until_required_channel_is_bound
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "bot-human-bot-review".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1709,10 +1780,10 @@ async fn state_machine_create_rejects_human_actors_in_bot_bindings() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "definition-1".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: vec![
                             bcs_service_api::application::v1::StateMachineParticipantBinding {
                                 binding: "worker".into(),
@@ -1757,10 +1828,10 @@ async fn state_machine_create_preserves_authenticated_human_in_audit_and_start()
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "definition-1".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1823,10 +1894,10 @@ async fn state_machine_create_does_not_reread_runtime_for_its_response() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "definition-1".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1861,10 +1932,10 @@ async fn state_machine_start_failure_removes_runtime_session_and_group() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "definition-1".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1926,10 +1997,10 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
                 collaboration: CollaborationConfiguration::StateMachine(
                     bcs_service_api::application::v1::StateMachineConfiguration {
                         definition:
-                            bcs_service_api::application::v1::StateMachineDefinitionReference {
+                            bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                 definition_id: "definition-1".into(),
                                 version: 1,
-                            },
+                            }),
                         participant_bindings: Vec::new(),
                     },
                 ),
@@ -1946,6 +2017,7 @@ async fn deleting_state_machine_group_cancels_runs_and_removes_runtime_state() {
         .delete(DeleteGroup {
             caller: bot_principal("driver"),
             group_id: detail.group_id.clone(),
+            acting_bot_id: None,
         })
         .await
         .expect("delete state-machine group");
@@ -1992,6 +2064,7 @@ async fn failed_group_delete_does_not_cancel_runs_before_group_rollback() {
         .delete(DeleteGroup {
             caller: bot_principal("driver"),
             group_id: "group-1".into(),
+            acting_bot_id: None,
         })
         .await
         .expect_err("binding cleanup failure must fail deletion");
@@ -2108,6 +2181,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
         .delete(DeleteGroup {
             caller: bot_principal("driver"),
             group_id: "group-1".into(),
+            acting_bot_id: None,
         })
         .await
         .expect("first delete");
@@ -2118,6 +2192,7 @@ async fn get_requires_a_group_relation_and_delete_is_idempotent() {
         .delete(DeleteGroup {
             caller: bot_principal("driver"),
             group_id: "group-1".into(),
+            acting_bot_id: None,
         })
         .await
         .expect("second delete");
@@ -2195,6 +2270,7 @@ async fn human_originator_can_update_and_delete_group() {
         .delete(DeleteGroup {
             caller: bot_principal("manager"),
             group_id: "group-1".into(),
+            acting_bot_id: None,
         })
         .await
         .expect("manager may delete");
@@ -2228,6 +2304,7 @@ async fn delete_group_unauthorized_principal_forbidden() {
         .delete(DeleteGroup {
             caller: bot_principal("outsider"),
             group_id: "group-1".into(),
+            acting_bot_id: None,
         })
         .await
         .expect_err("non-manager delete must be forbidden, not idempotent");
@@ -2262,10 +2339,10 @@ async fn state_machine_patch_failure_does_not_commit_requested_changes() {
                     CollaborationConfiguration::StateMachine(
                         bcs_service_api::application::v1::StateMachineConfiguration {
                             definition:
-                                bcs_service_api::application::v1::StateMachineDefinitionReference {
+                                bcs_service_api::application::v1::StateMachineDefinition::Reference(bcs_service_api::application::v1::StateMachineDefinitionReference {
                                     definition_id: "definition-1".into(),
                                     version: 1,
-                                },
+                                }),
                             participant_bindings: Vec::new(),
                         },
                     ),
@@ -2745,6 +2822,7 @@ async fn deleting_dm_maps_the_legacy_rejection_to_contract_conflict() {
         .delete(DeleteGroup {
             caller: bot_principal("driver"),
             group_id: detail.group_id,
+            acting_bot_id: None,
         })
         .await;
 

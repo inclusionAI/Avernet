@@ -6,7 +6,7 @@ use bcs_service_api::application::v1::{
     AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
     GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
-    MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
+    MembershipFilter, Page, Participant, ParticipantMode, Principal, UpdateGroup,
     UpdateGroupParticipant,
 };
 
@@ -172,7 +172,6 @@ fn participant_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
-        role: ParticipantRole::Consultant,
     };
     let update = UpdateGroupParticipant {
         caller: caller.clone(),

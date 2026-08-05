@@ -66,4 +66,3 @@
 **Commands:**
 - `cargo test -p bcs-app-group --test v1_group_participant`
 - `cargo test -p bcs-app-session --test v1_session_service`
-
