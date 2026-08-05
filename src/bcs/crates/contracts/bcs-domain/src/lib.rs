@@ -93,7 +93,7 @@ pub use session::{
     CallbackChannelConfig, CallbackConfig, Session, SessionKind, SessionStatus, ServiceSpec,
 };
 pub use system_message::{
-    SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind
+    PersistMode, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind
 };
 pub use task_ledger::LedgerSummary;
 pub use invite::{InviteTargetType, InviteTokenPayload, InviteTokenError, encode as invite_token_encode, decode_and_verify as invite_token_decode_and_verify, decode_and_verify_no_expiry as invite_token_decode_no_expiry};

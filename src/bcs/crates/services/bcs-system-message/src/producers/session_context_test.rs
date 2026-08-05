@@ -523,6 +523,12 @@ async fn driver_delivery_defaults_to_send_for_driver() {
         .find(|m| m.recipients == vec!["bot-peer".to_string()])
         .expect("peer receives context");
     assert_eq!(peer_message.delivery_type, DeliveryType::Inject);
+
+    // Personalized per-bot context is persisted per recipient; it must NOT
+    // produce a public (owner = None) record readable by human viewers.
+    assert!(messages
+        .iter()
+        .all(|m| m.persist == bcs_domain::PersistMode::PerRecipient));
 }
 
 #[tokio::test]

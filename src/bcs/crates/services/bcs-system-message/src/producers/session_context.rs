@@ -13,7 +13,8 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use bcs_domain::{
     CoordinationMode, CoordinationSurface, DeliveryType, Group, GroupStrategy, LedgerSummary,
-    Participant, ParticipantRole, SystemMessageEvent, SystemMessageEventKind, SystemGroupMessage,
+    Participant, ParticipantRole, PersistMode, SystemMessageEvent, SystemMessageEventKind,
+    SystemGroupMessage,
 };
 use bcs_service_api::{
     BotRegistryCoreService, SystemMessageProducerService, backfill_bot_names,
@@ -116,6 +117,10 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                 recipients: vec![participant.bot_uuid.clone()],
                 message: context_message,
                 delivery_type,
+                // Personalized per-bot context: persist per recipient so each
+                // bot's history view reads its own copy; not visible to human
+                // viewers (their filter is owner_bot_id IS NULL).
+                persist: PersistMode::PerRecipient,
             });
         }
         // SessionContext does not emit a user-facing WS message: the bot

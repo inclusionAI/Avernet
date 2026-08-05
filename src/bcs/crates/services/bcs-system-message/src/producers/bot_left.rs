@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    DeliveryType, Group, Participant, SystemMessageEvent, SystemMessageEventKind, SystemGroupMessage,
+    DeliveryType, Group, Participant, PersistMode, SystemMessageEvent, SystemMessageEventKind,
+    SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
 
@@ -44,16 +45,16 @@ impl SystemMessageProducerService for BotLeftMessageProducer {
             .filter(|p| p.is_bot())
             .map(|p| p.bot_uuid.clone())
             .collect();
-        let bot_messages = if recipients.is_empty() {
-            vec![]
-        } else {
-            vec![SystemGroupMessage {
-                recipients,
-                message: user_text,
-                delivery_type: DeliveryType::Inject,
-            }]
-        };
-        // empty recipients does NOT block user_message (last bot leaving)
+        // Identical text for every recipient: persist a single public record
+        // (owner = None) that human viewers also read in history. Empty
+        // recipients still persists the public record and does NOT block
+        // user_message (last bot leaving).
+        let bot_messages = vec![SystemGroupMessage {
+            recipients,
+            message: user_text,
+            delivery_type: DeliveryType::Inject,
+            persist: PersistMode::Public,
+        }];
         (bot_messages, user_message)
     }
 }
@@ -192,7 +193,12 @@ mod tests {
             .produce(&event, &group, &registry, &group.participants)
             .await;
 
-        assert!(messages.is_empty(), "no other recipients → empty bot_messages");
+        // No bot recipients remain, but the message is still emitted so the
+        // dispatcher persists a single public record (owner = None) for
+        // human history.
+        assert_eq!(messages.len(), 1, "last bot leaving still emits the notice message");
+        assert!(messages[0].recipients.is_empty());
+        assert_eq!(messages[0].persist, PersistMode::Public);
         assert_eq!(
             user_message.as_deref(),
             Some("bot-1(bot-1) 已退出协作群"),
