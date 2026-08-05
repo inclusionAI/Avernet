@@ -44,6 +44,19 @@ from src.interfaces.api.schemas.fusion_schemas import (
 
 logger = logging.getLogger(__name__)
 
+
+async def _run_fuse(service, request, group_id: str):
+    """Run the synchronous GroupFusionService.fuse() off the event loop.
+
+    The R5 fusion handler is async; calling service.fuse() inline blocks the
+    loop for the full fusion duration (up to 600s). run_in_threadpool keeps the
+    gateway's concurrent requests from serializing on it.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(service.fuse, request, group_id=group_id)
+
+
 # Router for R5 fusion routes - mounted at /api/v1
 router = APIRouter()
 
@@ -336,7 +349,7 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             logger.info(f"[Fusion][R5] Calling real LLM fusion: group_id={group_id}, participants={len(req.participants)}")
             start_time = datetime.now()
 
-            result = service.fuse(real_request, group_id=group_id)
+            result = await _run_fuse(service, real_request, group_id)
 
             latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             logger.info(f"[Fusion][R5] Real LLM fusion completed in {latency_ms}ms")
