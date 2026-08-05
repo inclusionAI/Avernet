@@ -495,6 +495,7 @@ class SkillCenterModule(Module):
         git_sync_service_factory: Callable[[], GitSyncService],
         bot_repo: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        path_factory: WorkspacePathFactory,
     ) -> SkillServiceFactory:
         def resolve_pool_paths(
             owner_id: str,
@@ -526,6 +527,7 @@ class SkillCenterModule(Module):
             device_fs_dispatcher=device_fs_dispatcher,
             market_cache=market_cache,
             git_sync_service_factory=git_sync_service_factory,
+            path_factory=path_factory,
             pool_layout_paths=resolve_pool_paths,
         )
 
