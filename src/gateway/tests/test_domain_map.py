@@ -17,6 +17,7 @@ _VARS = {
     "baas_server_url": "http://baas:9090",
     "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
+    "bcsfuse_server_url": "http://bcsfuse:8765",
 }
 
 
@@ -98,6 +99,35 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
         "GET", "/openapi/v1/collaboration/messages/ws"
     )
     assert websocket_requirement == {}
+
+
+def test_shipped_config_routes_bcsfuse_via_strip_rewrite() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    fusion = dm.domain_for("/openapi/v1/bcsfuse/api/v1/groups/group-1")
+    assert fusion is not None
+    assert fusion.server.name == "bcsfuse"
+    assert fusion.server.base_url == "http://bcsfuse:8765"
+    assert fusion.serves_http
+    assert not fusion.serves_websocket
+    assert fusion.rewrite is not None
+    # Strip rewrite drops the domain prefix; the upstream's own /api/v1 and /v1 stay.
+    assert fusion.upstream_path(
+        "/openapi/v1/bcsfuse/api/v1/groups/group-1"
+    ) == "/api/v1/groups/group-1"
+    assert fusion.upstream_path(
+        "/openapi/v1/bcsfuse/v1/workers/w-1/config"
+    ) == "/v1/workers/w-1/config"
+    assert fusion.upstream_path(
+        "/openapi/v1/bcsfuse/v1/workers/config/batch"
+    ) == "/v1/workers/config/batch"
+    assert fusion.schema.location == "schemas/bcsfuse.openapi.json"
+
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    requirement = security.resolve("POST", "/openapi/v1/bcsfuse/api/v1/groups/group-1")
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.REQUIRED
 
 
 # ── protocols ────────────────────────────────────────────────────────────────

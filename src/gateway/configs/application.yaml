@@ -77,6 +77,7 @@ user_config:
     baas_server_url: https://baas.sample.com
     bcs_server_url: https://bcs.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
+    bcsfuse_server_url: https://bcsfuse.sample.com
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -105,6 +106,9 @@ user_config:
       user: required
 
     "/openapi/v1/collaboration/**":
+      user: required
+
+    "/openapi/v1/bcsfuse/**":
       user: required
 
     # BCN verifies the short-lived session credential carried by this exact
@@ -179,6 +183,18 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
+      bcsfuse:
+        server: bcsfuse
+        protocols: [http]
+        # bcsfuse serves fusion under /api/v1 and worker-config under /v1.
+        # Strip the gateway prefix so both upstream prefixes pass through unchanged.
+        rewrite:
+          from: /openapi/v1/bcsfuse
+          to: /
+        schema:
+          source: file
+          path: schemas/bcsfuse.openapi.json
+          refresh_seconds: 300
       sessions:
         server: baas
         schema:
@@ -231,5 +247,7 @@ user_config:
         base_url: "${baas_server_url}"
       bcs:
         base_url: "${bcs_server_url}"
+      bcsfuse:
+        base_url: "${bcsfuse_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"
