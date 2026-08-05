@@ -213,6 +213,56 @@ def test_teclaw_legacy_local_skill_package_storage_uses_workspace_adapter(
     assert storage._device_directory == "workspace/skills-local/reviewer"
 
 
+def test_legacy_relative_locator_cleanup_resolves_against_bot_local_dir(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    factory._device_fs_dispatcher.for_bot = lambda *_: object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda entity_id, bot_id, *_args, **_kwargs: Path(
+            f"/bots/{entity_id}/{bot_id}/skills-local"
+        )
+    )
+
+    storage = factory.local_skill_package_storage_for_locator(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="openclaw",
+        entity_type="proj",
+        is_desktop=False,
+        is_teclaw=False,
+        locator="reviewer",
+    )
+
+    assert storage._device_directory == (
+        "/bots/project-42/bot-1/skills-local/reviewer"
+    )
+
+
+def test_teclaw_legacy_locator_cleanup_reapplies_workspace_adapter(test_injector):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    factory._device_fs_dispatcher.for_bot = lambda *_: object()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda _entity_id, _bot_id, *_args, **_kwargs: Path("skills-local")
+    )
+
+    storage = factory.local_skill_package_storage_for_locator(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="openclaw",
+        entity_type="proj",
+        is_desktop=False,
+        is_teclaw=True,
+        locator="skills-local/reviewer",
+    )
+
+    assert storage._device_directory == "workspace/skills-local/reviewer"
+
+
 def test_legacy_local_skill_packages_are_isolated_for_same_name_across_bots(
     test_injector,
 ):
