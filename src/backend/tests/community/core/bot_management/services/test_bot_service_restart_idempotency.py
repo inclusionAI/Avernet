@@ -679,6 +679,153 @@ class TestRestartGuardOrchestration:
         start.assert_called_once()
         assert start.call_args.kwargs["device_provider"] == "arca"
 
+    @pytest.mark.parametrize(
+        ("active_engine", "template_type", "bot_type"),
+        [
+            ("openclaw", None, "personal"),
+            ("hermes", None, "personal"),
+            ("claude_code", "normalCC", "personal"),
+            ("openclaw", None, "service"),
+        ],
+        ids=["openclaw", "hermes", "claude-code", "service"],
+    )
+    def test_restart_migrates_arca_to_baas_only_on_template_override_hit(
+        self,
+        active_engine,
+        template_type,
+        bot_type,
+    ):
+        """A positive hit in the existing DB config opts ARCA into BaaS."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        resolver.resolve_template_override.return_value = "TEMPLATE-new"
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            active_engine=active_engine,
+            template_type=template_type,
+            bot_type=bot_type,
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "baas"
+        resolver.resolve_template_override.assert_called_once_with(
+            env="dev",
+            user_id="user001",
+            bot_type=bot_type,
+        )
+
+    @pytest.mark.parametrize(
+        "lookup_result",
+        [None, "raises"],
+        ids=["not-configured-or-not-matched", "read-error"],
+    )
+    def test_restart_preserves_arca_when_template_override_does_not_hit(
+        self,
+        lookup_result,
+    ):
+        """Missing, unmatched, or unreadable config keeps the old ARCA path."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        if lookup_result == "raises":
+            resolver.resolve_template_override.side_effect = RuntimeError(
+                "config unavailable"
+            )
+        else:
+            resolver.resolve_template_override.return_value = lookup_result
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(status="ACTIVE", binding_id=42, active_engine="openclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_restart_preserves_arca_without_template_resolver(self):
+        """Deployments without the resolver retain the original ARCA path."""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo, baas_template_resolver=None)
+        bot = _make_bot(status="ACTIVE", binding_id=42, active_engine="openclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    @pytest.mark.parametrize(
+        ("active_engine", "template_type"),
+        [
+            ("aicoding", "personalCoding"),
+            ("claude_code", "personalCoding"),
+            ("claude_code", "applicationCoding"),
+        ],
+        ids=["aicoding", "claude-personal-coding", "claude-application-coding"],
+    )
+    def test_restart_does_not_migrate_aicoding_paths(
+        self,
+        active_engine,
+        template_type,
+    ):
+        """AI Coding paths remain on their original provider."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        resolver.resolve_template_override.return_value = "TEMPLATE-new"
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            active_engine=active_engine,
+            template_type=template_type,
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+        resolver.resolve_template_override.assert_not_called()
+
     def test_restart_logs_preserved_provider_before_stop(self):
         """Regression evidence: pre-release provider preservation must be visible
         in logs so staging rollback checks do not rely on DB side evidence only."""
