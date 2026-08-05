@@ -213,7 +213,9 @@ class SkillSetRepository(Protocol):
     def delete(self, skill_set_id: str) -> bool:
         ...
 
-    def add_skill_to_set(self, skill_set_id: str, skill_id: str) -> bool:
+    def add_skill_to_set(
+        self, skill_set_id: str, skill_id: str, user_id: str | None = None
+    ) -> bool:
         ...
 
     def get_skills_in_set(self, skill_set_id: str) -> list[dict]:
