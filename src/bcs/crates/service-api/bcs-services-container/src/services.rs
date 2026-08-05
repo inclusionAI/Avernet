@@ -16,7 +16,7 @@ use bcs_service_api::{
     MessageFlowService, OrganizationManagementService,
     ProposalCoreService, ProviderBotCoreService, ProviderCoreService,
     ProviderBotEventService, ProviderManagementService, RelationCoreService, RoutingCoreService,
-    SecretService, SessionManagementService, SystemMessageService, WorkbenchSessionService,
+    SecretService, SessionFileService, SessionManagementService, SystemMessageService, WorkbenchSessionService,
     backfill_bot_names,
 };
 use thiserror::Error;
@@ -104,8 +104,10 @@ pub struct Services {
     pub session_management: Arc<dyn SessionManagementService>,
     /// Channel(IM bridge) application service.
     pub channel: Arc<dyn ChannelService>,
-    /// Secret access application service (mist in prod, in-memory/env in dev).
+    /// Secret access application service.
     pub secret: Arc<dyn SecretService>,
+    /// Session file workspace application service.
+    pub session_files: Arc<dyn SessionFileService>,
 }
 
 impl Services {
@@ -161,6 +163,7 @@ pub struct ServicesBuilder {
     session_management: Option<Arc<dyn SessionManagementService>>,
     channel: Option<Arc<dyn ChannelService>>,
     secret: Option<Arc<dyn SecretService>>,
+    session_files: Option<Arc<dyn SessionFileService>>,
 }
 
 impl ServicesBuilder {
@@ -403,6 +406,12 @@ impl ServicesBuilder {
         self
     }
 
+    /// Set the session file workspace application service.
+    pub fn session_files(mut self, service: Arc<dyn SessionFileService>) -> Self {
+        self.session_files = Some(service);
+        self
+    }
+
     /// Build the services bundle, failing if any required service is unset.
     pub fn build(self) -> Result<Services, BuilderError> {
         Ok(Services {
@@ -450,6 +459,7 @@ impl ServicesBuilder {
             session_management: required(self.session_management, "session_management")?,
             channel: required(self.channel, "channel")?,
             secret: required(self.secret, "secret")?,
+            session_files: required(self.session_files, "session_files")?,
         })
     }
 
@@ -470,7 +480,7 @@ impl ServicesBuilder {
             NoopProposalCoreService, NoopProviderBotCoreService, NoopProviderBotEventService,
             NoopProviderCoreService,
             NoopProviderManagementService, NoopRelationCoreService, NoopRoutingCoreService,
-            NoopSecretService, NoopSessionManagementService,
+            NoopSecretService, NoopSessionFileService, NoopSessionManagementService,
             NoopSystemMessageService, NoopWorkbenchSessionService,
         };
 
@@ -583,6 +593,9 @@ impl ServicesBuilder {
                 .unwrap_or_else(|| Arc::new(NoopSessionManagementService)),
             channel: self.channel.unwrap_or_else(|| Arc::new(NoopChannelService)),
             secret: self.secret.unwrap_or_else(|| Arc::new(NoopSecretService)),
+            session_files: self
+                .session_files
+                .unwrap_or_else(|| Arc::new(NoopSessionFileService)),
         }
     }
 }

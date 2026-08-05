@@ -64,8 +64,22 @@ class FakeWorkspaceService:
     get_file_diff_raise: Optional[BaseException] = None
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
-    async def list_file_tree(self, session_id: str, cwd: str | None = None):
-        self.calls.append(("list_file_tree", {"session_id": session_id, "cwd": cwd}))
+    async def list_file_tree(
+        self,
+        session_id: str | None,
+        cwd: str | None = None,
+        max_depth: int = 3,
+    ):
+        self.calls.append(
+            (
+                "list_file_tree",
+                {
+                    "session_id": session_id,
+                    "cwd": cwd,
+                    "max_depth": max_depth,
+                },
+            )
+        )
         if self.list_file_tree_raise:
             raise self.list_file_tree_raise
         return self.list_file_tree_return or []
@@ -103,6 +117,8 @@ class FakeRunStatusService:
     phase_raise: Optional[BaseException] = None
     pr_return: Any = None
     pr_raise: Optional[BaseException] = None
+    issue_return: Any = None
+    issue_raise: Optional[BaseException] = None
     calls: list[tuple[str, dict]] = field(default_factory=list)
 
     async def enrich_with_run_status(self, sessions):
@@ -137,6 +153,14 @@ class FakeRunStatusService:
         if self.pr_raise:
             raise self.pr_raise
         return self.pr_return or []
+
+    async def get_session_issues(self, session_id: str, cwd: str | None = None):
+        self.calls.append(
+            ("get_session_issues", {"session_id": session_id, "cwd": cwd})
+        )
+        if self.issue_raise:
+            raise self.issue_raise
+        return self.issue_return or []
 
 
 @dataclass
@@ -260,6 +284,120 @@ def test_file_tree_success(client, workspace_svc):
     assert body["session_id"] == "s1"
     assert body["tree"][0]["name"] == "project-fe"
     assert body["tree"][0]["children"][0]["name"] == "README.md"
+
+
+def test_file_tree_defaults_to_three_levels(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1"},
+    )
+
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["max_depth"] == 3
+
+
+@pytest.mark.parametrize("depth", [0, 1, 5])
+def test_file_tree_forwards_depth(client, workspace_svc, depth):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "depth": depth},
+    )
+
+    assert resp.status_code == 200
+    assert workspace_svc.calls[-1][1]["max_depth"] == depth
+
+
+@pytest.mark.parametrize("depth", [-1, "abc", "1.5"])
+def test_file_tree_rejects_invalid_depth(client, workspace_svc, depth):
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1", "depth": depth},
+    )
+
+    assert resp.status_code == 422
+    assert workspace_svc.calls == []
+
+
+def test_file_tree_keeps_size_field_when_service_leaves_it_unset(
+    client, workspace_svc,
+):
+    workspace_svc.list_file_tree_return = [
+        FileTreeNode(
+            name="README.md",
+            path="README.md",
+            is_dir=False,
+        ),
+    ]
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "s1"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["tree"][0]["size"] is None
+
+
+def test_file_tree_accepts_cwd_with_blank_session_id(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+    cwd = "/home/admin/.aicoding/workspace/direct"
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={"session_id": "   ", "cwd": cwd},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] is None
+    assert workspace_svc.calls[-1] == (
+        "list_file_tree",
+        {"session_id": None, "cwd": cwd, "max_depth": 3},
+    )
+
+
+def test_file_tree_normalizes_optional_locators(client, workspace_svc):
+    workspace_svc.list_file_tree_return = []
+
+    resp = client.get(
+        "/api/aicoding/sessions/file-tree",
+        params={
+            "session_id": "  s1  ",
+            "cwd": "  /home/admin/.aicoding/workspace/s1  ",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["session_id"] == "s1"
+    assert workspace_svc.calls[-1][1] == {
+        "session_id": "s1",
+        "cwd": "/home/admin/.aicoding/workspace/s1",
+        "max_depth": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"session_id": ""},
+        {"cwd": "   "},
+        {"session_id": "  ", "cwd": "\t"},
+    ],
+)
+def test_file_tree_rejects_empty_session_id_and_cwd(
+    client,
+    workspace_svc,
+    params,
+):
+    resp = client.get("/api/aicoding/sessions/file-tree", params=params)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "session_id and cwd cannot both be empty"
+    assert workspace_svc.calls == []
 
 
 @pytest.mark.parametrize(
@@ -658,6 +796,57 @@ def test_pull_requests_propagates_500_on_aix_failure(client, runstatus_svc):
     )
     resp = client.get(
         "/api/aicoding/sessions/runs/pull-requests",
+        params={"session_id": "s1"},
+    )
+    assert resp.status_code == 500
+    assert "boom" in resp.json()["detail"]
+
+
+# ── /runs/issues ────────────────────────────────────────────────────────────
+
+
+def test_issues_success(client, runstatus_svc):
+    runstatus_svc.issue_return = [
+        {
+            "runId": "r-issue-1",
+            "kind": "issue",
+            "provider": "generic",
+            "url": (
+                "https://issues.example.com/"
+                "work-items/2026071700117528182"
+            ),
+            "title": "评测实例增加字段：运行时长",
+            "at": 1784295500923,
+            "projectDir": (
+                "/home/admin/.aicoding/workspace/"
+                "07644ab3-1f06-4516-93c4-a68e0b0485f7"
+            ),
+        }
+    ]
+    resp = client.get(
+        "/api/aicoding/sessions/runs/issues",
+        params={"session_id": "s1"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["issues"][0]["kind"] == "issue"
+    assert body["issues"][0]["provider"] == "generic"
+    assert body["issues"][0]["runId"] == "r-issue-1"
+    assert body["issues"][0]["projectDir"].endswith(
+        "07644ab3-1f06-4516-93c4-a68e0b0485f7"
+    )
+    assert runstatus_svc.calls[-1] == (
+        "get_session_issues",
+        {"session_id": "s1", "cwd": None},
+    )
+
+
+def test_issues_propagates_500_on_aix_failure(client, runstatus_svc):
+    runstatus_svc.issue_raise = HTTPException(
+        status_code=500, detail="aix run output list failed: boom"
+    )
+    resp = client.get(
+        "/api/aicoding/sessions/runs/issues",
         params={"session_id": "s1"},
     )
     assert resp.status_code == 500

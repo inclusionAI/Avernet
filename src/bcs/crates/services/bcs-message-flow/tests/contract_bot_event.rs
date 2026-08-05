@@ -818,6 +818,9 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let recording_channel = Arc::new(RecordingChannelService::default());
     let channel: Arc<dyn ChannelService> = recording_channel.clone();
     assert!(flow.channel_slot().set(channel).is_ok());
+    flow.message_tracker
+        .cache_channel_source_message_id("run-channel-delta", "source-msg-1")
+        .await;
     let group_get_count_before = support.group.get_count("group-1").await;
 
     for delta in ["你", "好"] {
@@ -840,6 +843,14 @@ async fn bot_delta_channel_outbound_uses_delta_text_not_synthesized_snapshot() {
     let outbound = recording_channel.outbound().await;
     assert_eq!(outbound.len(), 2);
     assert_eq!(outbound[0].sender_label, "Observer");
+    assert_eq!(
+        outbound[0].source_im_message_id.as_deref(),
+        Some("source-msg-1")
+    );
+    assert_eq!(
+        outbound[1].source_im_message_id.as_deref(),
+        Some("source-msg-1")
+    );
     assert_eq!(
         support
             .registry
@@ -1658,6 +1669,41 @@ async fn task_run_alias_requires_target_bot_and_dispatched_task() {
         .unwrap();
     assert_eq!(late_alias, TaskRunAliasRegistration::Rejected);
     assert_eq!(flow.task_store.resolve_task_id("late-worker-run").await, None);
+}
+
+#[tokio::test]
+async fn channel_source_message_can_be_rebound_to_accepted_run_id() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+    flow.message_tracker
+        .cache_channel_source_message_id("source-run", "source-message")
+        .await;
+
+    let rebound = flow
+        .rebind_channel_source_message("source-run", "accepted-run")
+        .await
+        .unwrap();
+
+    assert!(rebound);
+    assert!(
+        flow.message_tracker
+            .channel_source_message_id("source-run")
+            .await
+            .is_none()
+    );
+    assert_eq!(
+        flow.message_tracker
+            .channel_source_message_id("accepted-run")
+            .await
+            .as_deref(),
+        Some("source-message")
+    );
 }
 
 #[tokio::test]
@@ -3904,6 +3950,7 @@ fn test_session(id: &str, group_id: &str, kind: SessionKind) -> Session {
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 

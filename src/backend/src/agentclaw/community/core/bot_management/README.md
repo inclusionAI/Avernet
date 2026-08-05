@@ -14,6 +14,7 @@ provides:
   - "RenderScreenService"
   - "TeclawProvisionService"
   - "TeclawPublishTaskLifecycle"
+  - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
 consumes:
   - "DeviceAccessor"
@@ -26,12 +27,14 @@ consumes:
   - "PolicyService"
   - "TaskQueueService"
   - "HandlerRegistry"
+  - "CommonConfigService"
 internal_dependencies:
   - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose
+  - agentclaw.community.core.common_config
   - agentclaw.community.core.cron.services.aicoding.cron_auto_setup
   - agentclaw.community.core.desktop_bot
   - agentclaw.community.core.mcp
@@ -50,6 +53,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.auth_relationship
+  - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils
 ```

@@ -8,7 +8,6 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from secbaas.community.api.device_manage import DeviceStatus
 from secbaas.community.api.health_check.sandbox import (
     SandboxDeviceRouter as SandboxDeviceRouterProtocol,
 )
@@ -146,6 +145,24 @@ def _extract_sandbox_info_from_device(record: Any) -> SandboxDeviceInfo:
     )
 
 
+def _log_threshold_reached_warning(
+    handler_name: str,
+    sandbox_id: str | None,
+    fail_count: int,
+) -> None:
+    """记录设备达到告警阈值的日志。
+
+    注意：本函数只负责打日志，不会落库改 status。
+    阈值到达后是否真的把设备状态改为 STOPPED 由调用方决定（按表类型，部分
+    分支选择仅记录告警，不写库）。
+    """
+    logger.warning(
+        f"[{handler_name}] sandbox_id={sandbox_id} "
+        f"reached warning threshold ({fail_count} >= {WARNING_THRESHOLD}), "
+        f"device will be escalated to STOPPED status"
+    )
+
+
 # ---------------------------------------------------------------------------
 # AcBinding Handler
 # ---------------------------------------------------------------------------
@@ -204,8 +221,10 @@ class AcBindingSandboxHandler:
         fail_count = dp.get("refresh_fail_count", 0)
 
         if fail_count >= WARNING_THRESHOLD:
-            self._binding_repo.update_status(
-                binding_id=table_id, status=DeviceStatus.STOPPED.value
+            _log_threshold_reached_warning(
+                handler_name="AcBindingSandboxHandler",
+                sandbox_id=sandbox_id,
+                fail_count=fail_count,
             )
             return WarnResult(
                 table_id=table_id,
@@ -370,10 +389,10 @@ class BaasSandboxHandler:
         fail_count = dp.get("refresh_fail_count", 0)
 
         if fail_count >= WARNING_THRESHOLD:
-            self._binding_repo.update_baas_device_status_by_id(
-                baas_device_id=table_id,
-                status=DeviceStatus.STOPPED.value,
-                modifier="health-checker",
+            _log_threshold_reached_warning(
+                handler_name="BaasSandboxHandler",
+                sandbox_id=dp.get("sandbox_id"),
+                fail_count=fail_count,
             )
             return WarnResult(
                 table_id=table_id,

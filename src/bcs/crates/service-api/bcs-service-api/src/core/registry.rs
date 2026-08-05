@@ -6,8 +6,8 @@ use bcs_domain::Group;
 pub use bcs_domain::registry::deserialize_skills;
 pub use bcs_domain::{
     AgentCredentials, BindingChannel, BindingChannels, BotCapabilities, BotConnectParams,
-    BotConnectResult, BotDynamicStatus, ConnectionKind, CoordinationSurface,
-    DynamicStatusResponse, RegisteredBot, Skill, BotDeliveryTarget,
+    BotConnectResult, BotDeliveryTarget, BotDynamicStatus, ConnectionKind, CoordinationSurface,
+    DynamicStatusResponse, RegisteredBot, Skill,
 };
 
 // ---------------------------------------------------------------------------
@@ -67,6 +67,14 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// This method excludes `agent_code` so delivery contracts must opt in to
     /// exposing that routing identifier, and excludes the sensitive `agent_token` credential.
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot>;
+
+    /// Get registration info without hiding persistence failures.
+    ///
+    /// Existing implementations retain their compatibility behavior through
+    /// this default. Fallible core/store implementations should override it.
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
+        Ok(self.get(bot_id).await)
+    }
 
     /// Like [`get`](Self::get) but also returns soft-deleted bots.
     ///
@@ -147,6 +155,19 @@ pub trait BotRegistryCoreService: Send + Sync {
     /// List active bots created by a specific user (staff_no).
     /// Filters by both `created_by` and current `env`.
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot>;
+
+    /// List active Bots by creator without hiding persistence failures.
+    ///
+    /// The compatibility default preserves existing core implementations.
+    /// Persistence-backed implementations should override this method for
+    /// authorization decisions where an empty result and an unavailable store
+    /// have different meanings.
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        Ok(self.list_bots_by_creator(created_by).await)
+    }
 
     /// Discover bots by capability keywords.
     async fn discover(&self, query: &str) -> Vec<RegisteredBot>;

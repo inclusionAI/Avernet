@@ -7,8 +7,6 @@ extra_sync_* 是否正确装配。
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
 from agentclaw.community.core.workspace.engines.claude_code import ClaudeCodeSandboxProvider
@@ -59,6 +57,14 @@ class TestOpenClawProvider:
         assert plan.extra_sync_source_relpath == ""
         assert plan.extra_sync_target_relpath == ""
 
+    def test_build_snapshot_excludes_pool_shared_repo(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+
+        assert (
+            "workspace/skills-pool/skills-repo"
+            in provider.get_build_plan().rsync_excludes
+        )
+
     def test_default_read_only_rules_include_skills_local(self):
         # 验证 workspace/skills/skills-local 路径在只读规则中
         # （修正了历史路径 workspace/skills-local 的错误）
@@ -100,6 +106,14 @@ class TestClaudeCodeProvider:
 
         assert plan.extra_sync_source_relpath == ".claude"
         assert plan.extra_sync_target_relpath == "claude"
+
+    def test_build_snapshot_excludes_pool_shared_repo(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+
+        assert (
+            "workspace/skills-pool/skills-repo"
+            in provider.get_build_plan().rsync_excludes
+        )
 
     def test_default_read_only_rules_include_settings_models_config(self):
         # 这次新增的只读规则覆盖了 settings.json / models.json / config.json
@@ -231,6 +245,21 @@ class TestOpenClawIsRsyncExcluded:
         provider = OpenClawSandboxProvider(workspace=_workspace())
         assert provider._is_rsync_excluded("workspace/README.md") is False
 
+    def test_clawbench_exact_directory_rules_exclude_and_descendants(self):
+        # ``workspace/clawbench_results/`` and ``workspace/clawbench_template_generate/``
+        # are exact directory rules (trailing slash): hide the directory and descendants.
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        # clawbench_results directory and descendants are excluded
+        assert provider._is_rsync_excluded("workspace/clawbench_results") is True
+        assert provider._is_rsync_excluded("workspace/clawbench_results/sub/file") is True
+        # clawbench_template_generate directory and descendants are excluded
+        assert provider._is_rsync_excluded("workspace/clawbench_template_generate") is True
+        assert provider._is_rsync_excluded("workspace/clawbench_template_generate/sub/file") is True
+        # other clawbench_* paths are NOT excluded (no longer wildcard)
+        assert provider._is_rsync_excluded("workspace/clawbench_test") is False
+        assert provider._is_rsync_excluded("workspace/clawbench_other") is False
+        assert provider._is_rsync_excluded("workspace/clawbench-foo") is False
+
 
 @pytest.mark.unit
 class TestOpenClawListDirectorySandbox:
@@ -325,3 +354,145 @@ class TestClaudeCodeListDirectorySandbox:
         items = await provider.list_directory(recursive=True, device_fs=_device_fs({base: []}))
 
         assert items == []
+
+
+# ============================================================================
+# Bot-level rsync_excludes override tests (merge mode)
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestRsyncExcludesBotOverride:
+    """Test Bot-level build_rsync_excludes override with merge semantics."""
+
+    def test_openclaw_uses_default_when_no_override(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        # 默认值必须存在
+        assert "workspace/memory/" in plan.rsync_excludes
+        assert "logs/" in plan.rsync_excludes
+
+    def test_openclaw_merges_bot_override_with_default(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        custom_excludes = ["custom_exclude/", "another_exclude"]
+        plan = provider.get_build_plan(build_rsync_excludes_append=custom_excludes)
+
+        # 合并模式：默认值 + 自定义项
+        assert "workspace/memory/" in plan.rsync_excludes  # 默认值保留
+        assert "logs/" in plan.rsync_excludes  # 默认值保留
+        assert "custom_exclude/" in plan.rsync_excludes  # 自定义项追加
+        assert "another_exclude" in plan.rsync_excludes  # 自定义项追加
+
+    def test_openclaw_deduplicates_on_merge(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        # 包含与默认值重复的项
+        custom_excludes = ["workspace/memory/", "logs/", "new_exclude/"]
+        plan = provider.get_build_plan(build_rsync_excludes_append=custom_excludes)
+
+        # 去重：重复项只保留一个
+        assert plan.rsync_excludes.count("workspace/memory/") == 1
+        assert plan.rsync_excludes.count("logs/") == 1
+        assert "new_exclude/" in plan.rsync_excludes
+
+    def test_openclaw_empty_override_keeps_default(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        # 空列表保持默认值不变
+        plan = provider.get_build_plan(build_rsync_excludes_append=[])
+
+        assert "workspace/memory/" in plan.rsync_excludes
+        assert "logs/" in plan.rsync_excludes
+
+    def test_openclaw_none_override_keeps_default(self):
+        provider = OpenClawSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan(build_rsync_excludes_append=None)
+
+        assert "workspace/memory/" in plan.rsync_excludes
+        assert "logs/" in plan.rsync_excludes
+
+    def test_claude_code_uses_default_when_no_override(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+        plan = provider.get_build_plan()
+
+        # 默认值必须存在
+        assert "workspace/memory/" in plan.rsync_excludes
+        assert "logs/" in plan.rsync_excludes
+
+    def test_claude_code_merges_bot_override(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+        custom_excludes = ["workspace/.custom", "/skills-repo-custom"]
+        plan = provider.get_build_plan(build_rsync_excludes_append=custom_excludes)
+
+        # 合并模式：默认值 + 自定义项
+        assert "workspace/.custom" in plan.rsync_excludes
+        assert "/skills-repo-custom" in plan.rsync_excludes
+        # 默认值仍保留
+        assert "workspace/memory/" in plan.rsync_excludes
+        assert "logs/" in plan.rsync_excludes
+
+    def test_claude_code_deduplicates_on_merge(self):
+        provider = ClaudeCodeSandboxProvider(workspace=_workspace())
+        # 包含与默认值重复的项
+        custom_excludes = ["workspace/memory/", "projects", "new_exclude/"]
+        plan = provider.get_build_plan(build_rsync_excludes_append=custom_excludes)
+
+        # 去重：重复项只保留一个
+        assert plan.rsync_excludes.count("workspace/memory/") == 1
+        assert plan.rsync_excludes.count("projects") == 1
+        assert "new_exclude/" in plan.rsync_excludes
+
+
+@pytest.mark.unit
+class TestParseRsyncExcludesFromExt:
+    """Test parsing build_rsync_excludes from ac_bots.ext field."""
+
+    def test_none_ext(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        assert parse_build_rsync_excludes_from_ext(None) is None
+
+    def test_empty_ext(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        assert parse_build_rsync_excludes_from_ext({}) is None
+
+    def test_missing_rsync_key(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        assert parse_build_rsync_excludes_from_ext({"other": "value"}) is None
+
+    def test_valid_config(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        ext = {"build_rsync_excludes": ["workspace/memory/", "logs/", "custom/"]}
+        result = parse_build_rsync_excludes_from_ext(ext)
+        assert result == ["workspace/memory/", "logs/", "custom/"]
+
+    def test_config_with_non_string_items(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        # 非字符串项会被转为字符串
+        ext = {"build_rsync_excludes": ["a", 123, "b", 45.6]}
+        result = parse_build_rsync_excludes_from_ext(ext)
+        assert result == ["a", "123", "b", "45.6"]
+
+    def test_empty_list_returns_none(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        # 空列表被视为 falsy，返回 None（使用默认值）
+        assert parse_build_rsync_excludes_from_ext({"build_rsync_excludes": []}) is None
+
+    def test_invalid_type_returns_none(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        # 非列表类型返回 None
+        assert parse_build_rsync_excludes_from_ext({"build_rsync_excludes": "invalid"}) is None
+        assert parse_build_rsync_excludes_from_ext({"build_rsync_excludes": 123}) is None
+
+    def test_filters_non_string_items(self):
+        from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
+
+        # 复杂类型（如 dict、list）被过滤掉
+        ext = {"build_rsync_excludes": ["valid", {"invalid": "dict"}, ["nested"], True]}
+        result = parse_build_rsync_excludes_from_ext(ext)
+        assert result == ["valid"]

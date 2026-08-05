@@ -6,28 +6,10 @@ on:
       - dev
       - main
       - 'REL*'
-    paths:
-      - "scripts/**"
-      - "src/backend/**"
-      - "src/baas/**"
-      - "src/bcs/**"
-      - "src/engine/**"
-      - "src/frontend/**"
-      - "src/plugin/**"
-      - ".github/workflows/singlebox-coverage.yml"
   push:
     branches:
       - dev
       - main
-    paths:
-      - "scripts/**"
-      - "src/backend/**"
-      - "src/baas/**"
-      - "src/bcs/**"
-      - "src/engine/**"
-      - "src/frontend/**"
-      - "src/plugin/**"
-      - ".github/workflows/singlebox-coverage.yml"
   workflow_dispatch:
     inputs:
       use_cn_mirror:
@@ -53,9 +35,14 @@ jobs:
       OCB_SKIP_GIT_HOOKS: "1"
       SINGLEBOX_MODEL_CONFIG_MODE: mock
       SINGLEBOX_COVERAGE_MODE: real
+      SINGLEBOX_COVERAGE_BCS_LINE_MIN: "40"
+      SINGLEBOX_COVERAGE_BCS_METHOD_MIN: "36"
       USE_CN_MIRROR: ${{ inputs.use_cn_mirror && '1' || '' }}
       BCN_PLUGIN_SOURCE: source
       CARGO_TERM_COLOR: always
+      # PR: compare against the checked-out merge commit's exact base tree.
+      # push/dispatch: compare against dev (repo default branch) instead.
+      SINGLEBOX_BASE_REF: ${{ github.event_name == 'pull_request' && 'HEAD^1' || 'origin/dev' }}
 
     defaults:
       run:
@@ -68,26 +55,70 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Detect singlebox-relevant changes vs base
+        id: changes
+        shell: bash
+        run: |
+          # Always run on manual dispatch so an operator can force coverage.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch; running singlebox coverage regardless of changed files."
+            exit 0
+          fi
+          # Ensure the base ref is present locally (shallow clones may not have it).
+          git fetch --no-tags --depth=1 origin "${SINGLEBOX_BASE_REF#origin/}" 2>/dev/null || true
+          # Diff base against the working tree. PR checkouts are merge commits,
+          # so diffing the tree (not HEAD) against the base captures all PR-introduced
+          # changes regardless of the merge-commit structure.
+          mapfile -t files < <(git diff --name-only "${SINGLEBOX_BASE_REF}" -- \
+            scripts \
+            src/backend \
+            src/baas \
+            src/bcs \
+            src/engine \
+            src/frontend \
+            .github/workflows/singlebox-coverage.yml \
+            || true)
+          n=${#files[@]}
+          if [ "$n" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No singlebox-relevant changes vs ${SINGLEBOX_BASE_REF}; skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Detected ${n} singlebox-relevant changed file(s) vs ${SINGLEBOX_BASE_REF}:"
+            printf '%s\n' "${files[@]}" | sed 's/^/  - /'
+          fi
+
+      - name: Mark singlebox coverage as passed (no relevant changes)
+        if: steps.changes.outputs.skip == 'true'
+        run: echo "No singlebox-relevant changes detected; marking job as passed."
+
       - name: Set up Python
+        if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Set up Node.js
+        if: steps.changes.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"
 
       - name: Install Rust toolchain
+        if: steps.changes.outputs.skip != 'true'
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup component add llvm-tools
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
+          cargo install cargo-llvm-cov --locked
           rustc --version
           cargo --version
+          cargo llvm-cov --version
 
       - name: Install system dependencies
+        if: steps.changes.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -103,33 +134,42 @@ jobs:
             protobuf-compiler
 
       - name: Install Python tooling
+        if: steps.changes.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip uv
           uv --version
 
       - name: Install OpenClaw CLI
+        if: steps.changes.outputs.skip != 'true'
         run: |
           npm install -g openclaw@2026.6.1
           openclaw --version || true
 
       - name: Validate shell scripts
+        if: steps.changes.outputs.skip != 'true'
         run: |
           bash -n scripts/singlebox.sh
           bash -n scripts/ci/singlebox_coverage.sh
           find scripts/modules -name "*.sh" -print0 | xargs -0 -n1 bash -n
 
       - name: Run singlebox coverage
+        if: steps.changes.outputs.skip != 'true'
         run: |
           echo "SINGLEBOX_COVERAGE_MODE=${SINGLEBOX_COVERAGE_MODE}"
           bash scripts/ci/singlebox_coverage.sh
 
       - name: Verify singlebox coverage artifacts
+        if: steps.changes.outputs.skip != 'true'
         run: |
           python3 scripts/ci/verify_singlebox_coverage_artifacts.py \
-            --reports-dir scripts/.dependencies/coverage/singlebox/reports
+            --reports-dir scripts/.dependencies/coverage/singlebox/reports \
+            --bcs-line-min 40 \
+            --bcs-method-min 36 \
+            --bcs-router-min 100 \
+            --bcs-cli-min 100
 
       - name: Show singlebox diagnostics on failure
-        if: failure()
+        if: failure() && steps.changes.outputs.skip != 'true'
         run: |
           bash scripts/singlebox.sh --standalone status all || true
           bash scripts/singlebox.sh --local status all || true
@@ -137,13 +177,13 @@ jobs:
           find .standalone-openclaw -type f -name "*.log" -print -exec tail -n 160 {} \; || true
 
       - name: Stop singlebox
-        if: always()
+        if: always() && steps.changes.outputs.skip != 'true'
         run: |
           bash scripts/singlebox.sh --standalone stop all || true
           bash scripts/singlebox.sh --local stop all || true
 
       - name: Upload singlebox artifacts
-        if: always()
+        if: always() && steps.changes.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: singlebox-coverage-artifacts
@@ -152,4 +192,10 @@ jobs:
             scripts/.dependencies/coverage/singlebox/**
             scripts/.dependencies/standalone/**
             .standalone-openclaw/logs/**
+            src/bcs/target/cov-e2e/cobertura.xml
+            src/bcs/target/cov-e2e/coverage.txt
+            src/bcs/target/cov-e2e/summary.json
+            src/bcs/target/cov-e2e/endpoint_coverage.xml
+            src/bcs/target/cov-e2e/endpoint_coverage.txt
+            src/bcs/target/cov-e2e/cli_command_coverage.txt
           if-no-files-found: ignore

@@ -33,6 +33,10 @@ from agentclaw.community.core.economy.governance.services.notify_render_service 
     NotifyRenderService,
 )
 
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.domain.record import GovernanceRecord
 from agentclaw.community.core.economy.governance.services.lifecycle_service import (
     GovernanceLifecycleService,
@@ -77,6 +81,9 @@ def _sample_record(
     owner_id: str = "staff-001",
     bot_id: str = "bot-001",
     governance_decision: str = "actionable",
+    dt_version: str = "20260705",
+    expected_token_saving: int = 1000,
+    hit_dimensions: str = "token_usage",
 ) -> GovernanceRecord:
     """Build a minimal GovernanceRecord for process_record."""
     return GovernanceRecord(
@@ -84,11 +91,11 @@ def _sample_record(
         bot_id=bot_id,
         bot_name="TestBot",
         governance_decision=governance_decision,
-        dt_version="20260705",
-        hit_dimensions="token_usage",
+        dt_version=dt_version,
+        hit_dimensions=hit_dimensions,
         hit_dimensions_count=3,
         governance_max_priority="high",
-        expected_token_saving=1000,
+        expected_token_saving=expected_token_saving,
         saving_ratio=0.5,
         task_summary="Token saving opportunity",
         notification_structured=None,
@@ -105,6 +112,8 @@ def _make_ticket(
     governance_decision: str = "actionable",
     latest_decision: str = "actionable",
     close_reason: str | None = None,
+    response: str | None = None,
+    gmt_create: datetime | None = None,
     env: str = "dev",
 ) -> GovernanceTicketOrm:
     """Create a test ticket row."""
@@ -119,6 +128,7 @@ def _make_ticket(
         governance_decision=governance_decision,
         latest_decision=latest_decision,
         close_reason=close_reason,
+        response=response,
         env=env,
         bot_id=bot_id,
         owner_id=owner_id,
@@ -127,6 +137,7 @@ def _make_ticket(
         consecutive_normal_days=0,
         remind_count=0,
         last_sync_at=datetime.now(),
+        gmt_create=gmt_create or datetime.now(),
     )
     session.add(row)
     session.commit()
@@ -203,7 +214,11 @@ class TestProcessRecord:
             assert ticket.active_worker == "staff-001:bot-001"
 
     def test_whitelist_filtered(self, session, engine):
-        """Whitelisted owner:bot → skipped, no ticket created."""
+        """Whitelisted owner:bot → 建观察单(OBSERVED),不创建通知。
+
+        新设计(白名单观察态):加白命中无活跃单无观察单 → 路 3 新建一条 OBSERVED
+        工单承载持续刷新画像。核心契约不变:**不创建通知**(加白 = 不发通知)。
+        """
         svc, db = _build_svc(engine)
 
         # Add to whitelist — repo uses self-managed session
@@ -219,8 +234,126 @@ class TestProcessRecord:
             record, run_id="run-2", notify_source="offline_batch",
         )
 
-        assert result.action == "whitelist_filtered"
+        assert result.action == "whitelist_observed"
         assert result.entered_governance_scope is False
+        # 契约:加白后该 bot 不创建通知(加白核心语义 = 不创建通知)。
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1
+            assert tickets[0].governance_status == GovernanceStatus.OBSERVED.value
+            # 不创建通知(观察单不发 first_send)
+            assert s.query(GovernanceNotificationOrm).count() == 0
+            # 审计记 WHITELIST_OBSERVED(路 3 建观察单)
+            assert any(
+                a.action_taken == AuditAction.WHITELIST_OBSERVED
+                for a in s.query(AuditLogOrm).all()
+            )
+
+    def test_whitelist_remove_restores_ticket_and_notify(self, session, engine):
+        """契约:移除白名单 → 下次 batch 自然走正常建单 + 发通知。
+
+        新设计(白名单观察态):加白期间建一条 OBSERVED 观察单(不发通知);移除
+        白名单后(纯删,无补发/补建)下次 batch is_whitelisted=False、find_active
+        不命中观察单(归终态族)、find_latest_closed 不命中观察单(非 closed)→
+        Step6 建新活跃 OPEN 单 + first_send 通知。老观察单暂留(Group D 删白收尾
+        才转 CLOSED)。
+        """
+        from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
+            GovernanceWhitelistRepository,
+        )
+        svc, db = _build_svc(engine)
+        whitelist_repo = GovernanceWhitelistRepository(db=db)
+        whitelist_repo.add(
+            bot_id="bot-001", owner_id="staff-001",
+            created_by="admin", whitelist_type="governance",
+        )
+        record = _sample_record()
+
+        # 1. 加白期间:建观察单(不发通知)
+        svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+        with db.orm_session() as s:
+            assert s.query(GovernanceTicketOrm).count() == 1  # 观察单
+            assert s.query(GovernanceNotificationOrm).count() == 0  # 不发通知
+
+        # 2. 移除白名单(纯删,无补发/补建)
+        removed = whitelist_repo.remove(
+            bot_id="bot-001", owner_id="staff-001",
+            whitelist_type="governance",
+        )
+        assert removed is True
+
+        # 3. 下次 batch:is_whitelisted=False → 正常建活跃单 + 发通知
+        result = svc.process_record(record, run_id="run-2", notify_source="offline_batch")
+        assert result.entered_governance_scope is True
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 2  # 1 观察单(老)+ 1 活跃单(新)
+            assert s.query(GovernanceNotificationOrm).count() >= 1  # 活跃单 first_send
+
+    def test_whitelist_observed_refresh_updates_snapshot(self, session, engine):
+        """路 2:白名单 bot 已有观察单 → 新 dt_version record 刷新其快照(状态不变不发通知)。
+
+        用例:第 1 次 off-batch 建观察单(dt=v1)→ 第 2 次更新 dt=v2 → 观察单快照
+        刷成 v2,状态仍 OBSERVED,notify 零新增。这是'白名单 bot 持续可见最新画像'
+        的核心路径。
+        """
+        svc, db = _build_svc(engine)
+        whitelist_repo = GovernanceWhitelistRepository(db=db)
+        whitelist_repo.add(
+            bot_id="bot-001", owner_id="staff-001",
+            created_by="admin", whitelist_type="governance",
+        )
+
+        # 第 1 次:建观察单 dt=v1
+        svc.process_record(
+            _sample_record(dt_version="20260701"),
+            run_id="run-1", notify_source="offline_batch",
+        )
+
+        # 第 2 次:更新 dt=v2 → 刷新
+        result = svc.process_record(
+            _sample_record(dt_version="20260710", expected_token_saving=9999),
+            run_id="run-2", notify_source="offline_batch",
+        )
+        assert result.action == "whitelist_observed"
+        assert result.reason == "observed_ticket_refreshed"
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 仍是同一条观察单,未新建
+            t = tickets[0]
+            assert t.governance_status == GovernanceStatus.OBSERVED.value
+            assert t.dt_version == "20260710"  # 快照刷成 v2
+            assert t.expected_token_saving == 9999
+            assert s.query(GovernanceNotificationOrm).count() == 0  # 零通知(核心不变式)
+
+    def test_whitelist_observed_stale_dt_version_skipped(self, session, engine):
+        """路 2 guard:incoming dt_version ≤ 现有 → 跳过刷新,仅记审计(防 stale 倒刷)。"""
+        svc, db = _build_svc(engine)
+        whitelist_repo = GovernanceWhitelistRepository(db=db)
+        whitelist_repo.add(
+            bot_id="bot-001", owner_id="staff-001",
+            created_by="admin", whitelist_type="governance",
+        )
+
+        # 建观察单 dt=v2
+        svc.process_record(
+            _sample_record(dt_version="20260710", expected_token_saving=5000),
+            run_id="run-1", notify_source="offline_batch",
+        )
+
+        # 来一条更老的 dt=v1 → 跳过刷新
+        result = svc.process_record(
+            _sample_record(dt_version="20260701", expected_token_saving=111),
+            run_id="run-2", notify_source="offline_batch",
+        )
+        assert result.action == "whitelist_observed"
+        assert result.reason == "stale_dt_version_skipped"
+
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).one()
+            assert t.dt_version == "20260710"  # 未被 stale record 倒刷
+            assert t.expected_token_saving == 5000  # 保持 v2 的值
 
     def test_dry_run_no_writes(self, session, engine):
         """dry_run=True → no DB writes, preview returned."""
@@ -276,6 +409,110 @@ class TestProcessRecord:
         )
 
         assert result.action == "cooldown_filtered"
+
+
+# --- Tests: feedback_verdict strong-signal consumption (review-feedback-loop) ---
+
+
+class TestFeedbackVerdictConsumption:
+    """建单消费上次工单 feedback_verdict 强信号:通知带提示 + 审计带 verdict/remark。"""
+
+    def _seed_closed_with_verdict(
+        self, session, *, response, review_decision, close_reason="review_rejected",
+        review_remark=None,
+    ):
+        """种一条 closed 工单(带 user feedback + admin review),cooldown 过期。
+        verdict = compute_feedback_verdict(response, review_decision, 'closed')。"""
+        row = GovernanceTicketOrm(
+            ticket_id=uuid.uuid4().hex,
+            worker_id="staff-001:bot-001",
+            active_worker=None,  # closed 释放
+            governance_status="closed",
+            governance_decision="actionable",
+            latest_decision="actionable",
+            close_reason=close_reason,
+            env="dev",
+            bot_id="bot-001",
+            owner_id="staff-001",
+            dt_version="20260705",
+            bot_name="TestBot",
+            consecutive_normal_days=0,
+            remind_count=0,
+            last_sync_at=datetime.now(),
+            response=response,
+            review_decision=review_decision,
+            reviewed_by="admin-1",
+            reviewed_at=datetime.now(),
+            review_remark=review_remark,
+            cooldown_until=datetime.now() - timedelta(days=1),  # 过期,不被 cooldown 过滤
+        )
+        session.add(row)
+        session.commit()
+        return row
+
+    def test_whitelist_denied_strong_signal_hint_and_audit(self, session, engine):
+        """whitelist_denied(用户加白被驳回)→ 新单通知带提示 + 审计带 last_verdict。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="whitelist", review_decision="reject_for_reopen",
+            review_remark="加白理由不充分",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert result.action == "would_create"
+        assert "上次用户申请加白已被管理员驳回" in (result.notification_md_preview or "")
+        # 审计(自管 session,经 audit_repo 写入)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd").first()
+            assert audit is not None
+            assert "last_verdict=whitelist_denied" in (audit.error_msg or "")
+            assert "last_review_remark=加白理由不充分" in (audit.error_msg or "")
+
+    def test_dispute_accepted_strong_signal(self, session, engine):
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="dispute", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd2", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "上次用户申诉已被管理员采纳关单" in (result.notification_md_preview or "")
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd2").first()
+            assert "last_verdict=dispute_accepted" in (audit.error_msg or "")
+
+    def test_non_strong_signal_no_hint(self, session, engine):
+        """非强信号(confirmed)→ 通知无提示句;审计 last_verdict 仍记录(verdict 非 other)。"""
+        svc, db = _build_svc(engine)
+        self._seed_closed_with_verdict(
+            session, response="optimized", review_decision="approve_close",
+            close_reason="approve_close",
+        )
+        result = svc.process_record(
+            _sample_record(), run_id="run-vd3", notify_source="offline_batch",
+            dry_run=True,
+        )
+        assert "💡" not in (result.notification_md_preview or "")
+        # confirmed 非 other → 审计仍记 last_verdict(但不带提示)
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd3").first()
+            assert "last_verdict=confirmed" in (audit.error_msg or "")
+
+    def test_no_prior_closed_no_audit_fragment(self, session, engine):
+        """无上一 closed 工单 → 审计 error_msg 不含 last_verdict。"""
+        svc, db = _build_svc(engine)
+        svc.process_record(
+            _sample_record(), run_id="run-vd4", notify_source="offline_batch",
+            dry_run=True,
+        )
+        with db.orm_session() as s:
+            audit = s.query(AuditLogOrm).filter_by(run_id="run-vd4").first()
+            assert audit is not None
+            assert audit.error_msg is None or "last_verdict" not in (audit.error_msg or "")
 
 
 # --- Tests: process_offline_batch ---
@@ -591,6 +828,113 @@ class TestIncrementalIdempotency:
         # 工单 dt 仍 0712(未被旧数据覆盖)
         with db.orm_session() as s:
             assert s.query(GovernanceTicketOrm).first().dt_version == "20260712"
+
+
+# --- Tests: stale-replace (未回复换新) ---
+
+
+class TestStaleReplace:
+    """未回复 + actionable + 开够7天 → 关老换新;否则刷快照不换。"""
+
+    def test_stale_replace_open_8days_unresponded(self, session, engine):
+        """开够8天 + 未回复 + actionable → 关老(stale_replaced) + 建新单 first_send。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        assert result.action == "enqueued"
+        assert result.entered_governance_scope is True
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 2
+            # 老工单 closed + stale_replaced
+            assert tickets[0].governance_status == "closed"
+            assert tickets[0].close_reason == "stale_replaced"
+            assert tickets[0].cooldown_until is None
+            # 新工单 open
+            assert tickets[1].governance_status == "open"
+            assert tickets[1].dt_version == "20260706"
+
+    def test_no_replace_open_3days_unresponded(self, session, engine):
+        """开了3天 + 未回复 → 刷快照不换(防 spam)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=3)
+        old = _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        # 刷新(refresh),不换
+        assert result.action in ("still_actionable", "enqueued", "")
+        assert result.ticket_id == old.ticket_id
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 仍是老工单,没新建
+            assert tickets[0].governance_status == "open"
+
+    def test_no_replace_replied_10days(self, session, engine):
+        """已回复(response 非空) + 开10天 → 不换(口径保护)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=10)
+        old = _make_ticket(session, gmt_create=old_gmt, response="optimized")
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 没新建
+            assert tickets[0].response == "optimized"
+            assert tickets[0].governance_status == "open"
+
+    def test_no_replace_scheduled_status(self, session, engine):
+        """scheduled 状态 + 未回复 → 不换(仅 open 才换)。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, governance_status="scheduled", gmt_create=old_gmt, response=None)
+
+        record = _sample_record(dt_version="20260706")
+        result = svc.process_record(record, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).all()
+            assert len(tickets) == 1  # 没新建
+
+    def test_multi_round_stale_replace(self, session, engine):
+        """两轮换新:第一次8天→换新;推进新单gmt_create到8天前→再换新。"""
+        svc, db = _build_svc(engine)
+        old_gmt = datetime.now() - timedelta(days=8)
+        _make_ticket(session, gmt_create=old_gmt, response=None)
+
+        # 第一轮:8天 → 换新
+        record1 = _sample_record(dt_version="20260706")
+        svc.process_record(record1, run_id="run-1", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 2
+            new_ticket = tickets[1]
+            assert new_ticket.governance_status == "open"
+            # 推进新单 gmt_create 到8天前(模拟又过了7天)
+            new_ticket.gmt_create = datetime.now() - timedelta(days=8)
+            s.commit()
+
+        # 第二轮:新单又8天 → 再换新
+        record2 = _sample_record(dt_version="20260707")
+        svc.process_record(record2, run_id="run-2", notify_source="offline_batch")
+
+        with db.orm_session() as s:
+            tickets = s.query(GovernanceTicketOrm).order_by(GovernanceTicketOrm.id).all()
+            assert len(tickets) == 3  # 老老+老+新
+            stale_closed = [t for t in tickets if t.close_reason == "stale_replaced"]
+            assert len(stale_closed) == 2
+            open_tickets = [t for t in tickets if t.governance_status == "open"]
+            assert len(open_tickets) == 1
 
 
 if __name__ == "__main__":

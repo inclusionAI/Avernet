@@ -57,7 +57,11 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("post")[0]
         assert call.args[0] == "/api/v1/bots/BOT-1/destroy"
         assert call.kwargs["params"] == {"tenant": "tnt"}
-        assert call.kwargs["json"] == {"operator": "op", "request_id": "req-1"}
+        assert call.kwargs["json"] == {
+            "operator": "op",
+            "request_id": "req-1",
+            "auto_approve_publish": True,
+        }
 
     def test_restart_bot(self):
         service, http = _make_service()
@@ -190,6 +194,23 @@ class TestBaasServiceHttpMethods:
         call = http.calls_to("put")[0]
         assert call.args[0] == "/api/v1/paas/devices/PAAS-1/outbound-rule"
         assert call.kwargs["json"] == {"header_operation_rules": []}
+
+    def test_append_caller_outbound_rule_uses_exact_append_path_and_body(self):
+        service, http = _make_service()
+        http.set_response("put", _resp({}))
+        rule = MagicMock()
+        rule.header_operation_rules = [MagicMock()]
+        service._outbound_rule_to_dict = MagicMock(
+            return_value={"header_operation_rules": [{"header_name": "x-caller-token"}]}
+        )
+
+        assert service.append_caller_outbound_rule("dev-1@tpl-1", rule) is True
+
+        call = http.calls_to("put")[0]
+        assert call.args[0] == "/api/v1/paas/devices/dev-1@tpl-1/outbound-rule?mode=append"
+        assert call.kwargs["json"] == {
+            "header_operation_rules": [{"header_name": "x-caller-token"}]
+        }
 
     def test_get_http_info_uses_http_client_port(self):
         """get_http_info 走 self._http.get 而非裸 httpx。

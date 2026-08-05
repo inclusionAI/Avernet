@@ -17,20 +17,6 @@ from secbaas.community.spi.database import PluginDatabaseType
 R = TypeVar("R")
 
 
-def _is_expected_distributed_lock_conflict(
-    instance: Any,
-    func: Callable[..., Any],
-    exc: Exception,
-) -> bool:
-    from sqlalchemy.exc import IntegrityError
-
-    return (
-        isinstance(exc, IntegrityError)
-        and "OrmDistributedLockRepository" in type(instance).__name__
-        and func.__name__ == "insert_lock"
-    )
-
-
 def with_orm_session[
     **P,
     R,
@@ -70,6 +56,8 @@ def with_orm_session[
             return result
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
+            from ._utils import _is_expected_distributed_lock_conflict
+
             if _is_expected_distributed_lock_conflict(self, func, exc):
                 _perf_logger.warning(
                     "%s,%s,CONFLICT,elapsed=%.2fms",

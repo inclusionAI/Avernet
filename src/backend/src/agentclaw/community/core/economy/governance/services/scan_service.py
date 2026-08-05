@@ -25,6 +25,7 @@ from injector import inject
 from agentclaw.community.core.economy.governance.domain.enums import (
     AuditAction,
     GovernanceStatus,
+    NotifyStatus,
     NotifyType,
 )
 from agentclaw.community.core.economy.governance.domain.notification import FrozenSnapshot, GovernanceNotification
@@ -32,6 +33,10 @@ from agentclaw.community.core.economy.governance.domain.ticket import Governance
 from agentclaw.community.core.economy.governance.services.service_protocols import (
     GovernanceLifecycleServiceProtocol,
     NotifyLifecycleServiceProtocol,
+)
+from agentclaw.community.core.economy.governance.services.delivery_service import (
+    GovernanceDeliveryService,
+    SendResult,
 )
 from agentclaw.community.core.economy.governance.services.notify_render_service import (
     NotifyRenderService,
@@ -48,9 +53,10 @@ _MAX_SEND_ATTEMPTS: int = 5
 """Terminal failure threshold — after this many failed sends the notify is
 marked as permanently failed and no further attempts are made."""
 
-_DEFAULT_REMIND_DELAYS_DAYS: tuple[int, ...] = (3, 7, 14)
+_DEFAULT_REMIND_DELAYS_DAYS: tuple[int, ...] = (3, 7)
 """Default reminder rhythm (days after the previous send).
-Indexes correspond to remind_count: [0]=first reminder, [1]=second, etc."""
+Indexes correspond to remind_count: [0]=first reminder, [1]=second, etc.
+首条 3 天,之后每 7 天(一周至少提醒一次)。"""
 
 _DEFAULT_REPEAT_LAST_REMIND_DELAY: bool = True
 """When True, the last delay in _REMIND_DELAYS_DAYS repeats indefinitely;
@@ -70,16 +76,6 @@ if TYPE_CHECKING:
     )
 
 log = get_logger(__name__)
-
-
-@dataclass(frozen=True)
-class SendResult:
-    """Result of a single notification send attempt."""
-
-    notification_id: str
-    success: bool
-    external_message_id: str | None = None
-    actual_channel: str | None = None
 
 
 @dataclass
@@ -135,6 +131,7 @@ class GovernanceBotService:
         lifecycle_svc: GovernanceLifecycleServiceProtocol,
         render_svc: NotifyRenderService,
         notify_lifecycle_svc: NotifyLifecycleServiceProtocol,
+        delivery_svc: GovernanceDeliveryService | None = None,
     ) -> None:
         self._task_repo = task_repo
         self._notify_repo = notify_repo
@@ -144,6 +141,11 @@ class GovernanceBotService:
         self._lifecycle_svc = lifecycle_svc
         self._render_svc = render_svc
         self._notify_lifecycle_svc = notify_lifecycle_svc
+        # 投递域统一发送出口(DI 注入)。注入后 cron 投递经此统一出口,与
+        # 手动补发 / 批量投递同口径(tickets-remind-content-divergence SDD)。
+        # Optional:历史单测直接构造 scan 不传本依赖,fallback 走下方本地
+        # 同口径实现;生产 DI 必注入,走 delivery 权威出口。
+        self._delivery_svc = delivery_svc
 
         # Parse remind_delays_days from config string (e.g. "3,7,14") or use default
         raw_delays = getattr(config, "remind_delays_days", None)
@@ -362,6 +364,18 @@ class GovernanceBotService:
                     )
                     summary.sent_count += 1
 
+                    # 回写工单投递态(scanf 投递成功 → task_record.delivery_status=sent
+                    # + last_notified_at)。first_send/reminder 都经此统一成功分支,
+                    # notify_log 已由 mark_sent 刷新,此处补刷 task_record 让列表/详情
+                    # 的 delivery_status 与真实投递一致(不再靠读时反推)。
+                    if notify_row.ticket_id:
+                        self._task_repo.update_delivery_status(
+                            notify_row.ticket_id, NotifyStatus.SENT.value,
+                        )
+                        self._task_repo.update_last_notified_at(
+                            notify_row.ticket_id, now,
+                        )
+
                     # Audit: notification_sent (first_send or reminder)
                     audit_action = (
                         AuditAction.NOTIFICATION_SENT
@@ -487,7 +501,7 @@ class GovernanceBotService:
                     ticket_id=ticket.ticket_id,
                     bot_id=ticket.bot_id,
                     bot_name=ticket.bot_name,
-                    owner_id=ticket.owner_id,
+                    owner_id=ticket.override_owner or ticket.owner_id,  # D4: override 落 notify_log.owner_id,投递层无感知
                     worker_id=ticket.worker_id,
                     snapshot=FrozenSnapshot(
                         dt_version=ticket.dt_version,
@@ -717,7 +731,16 @@ class GovernanceBotService:
         渲染委托 ``render_svc.build_send_payload``(TC 卡片);标题在这里取
         (依 notify_type),markdown 频道用通知 frozen 快照里的 notification_md。
         Returns SendResult indicating success/failure and metadata.
+
+        DI 注入 ``delivery_svc`` 时转调投递域统一出口
+        :meth:`GovernanceDeliveryService.send_notification`,让 cron 投递
+        与手动补发 / 批量投递走同一发送口径(tickets-remind-content-divergence
+        SDD)。下方保留同口径 fallback,供历史单测(直接构造 scan 未注入
+        delivery_svc)使用;生产 DI 必注入,以 delivery 出口为权威。
         """
+        if self._delivery_svc is not None:
+            return self._delivery_svc.send_notification(notify)
+
         from agentclaw.community.plugin_api.notify_sender import NotifyMessage
 
         user_id = notify.owner_id

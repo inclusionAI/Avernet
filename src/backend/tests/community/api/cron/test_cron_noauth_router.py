@@ -1,8 +1,8 @@
-"""Tests for cron_noauth_router — 免鉴权手动触发 autoInitiate。
+"""Tests for cron_noauth_router — 手动触发 autoInitiate。
 
 覆盖场景:
 1. 成功触发 → 200 + success=True
-2. 免鉴权 — 无需认证头
+2. 通过 query 参数触发
 3. ValueError → 400
 4. 通用异常 → 500
 5. nick_name 缺省时用 user_id 填充
@@ -56,7 +56,7 @@ class TestRunAutoInitiate:
     """POST /api/public/cron/auto-initiate/run"""
 
     def test_no_auth_required(self, client):
-        """免鉴权 — 无需任何认证头即可访问。"""
+        """通过 query 参数即可触发。"""
         resp = client.post(
             "/api/public/cron/auto-initiate/run",
             params={"bot_id": "bot-1", "user_id": "user-1"},
@@ -225,7 +225,7 @@ class TestRunSingleAutoInitiate:
         assert call_kwargs["append_message"] == "优先处理核心逻辑"
 
     def test_no_auth_required(self, client, mock_relay_service):
-        """免鉴权 — 无需任何认证头即可访问。"""
+        """通过 query 参数即可触发。"""
         mock_relay_service.run_single_auto_initiate = AsyncMock(return_value={
             "success": True, "data": {},
         })

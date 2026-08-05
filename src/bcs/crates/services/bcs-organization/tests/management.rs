@@ -49,12 +49,20 @@ fn member_auth(provider: &ProviderFixture) -> OrganizationMemberAuth {
     }
 }
 
+fn candidate_query() -> OrganizationCandidateQuery {
+    OrganizationCandidateQuery {
+        organization_code: "promo-2026".to_string(),
+        ..OrganizationCandidateQuery::default()
+    }
+}
+
 async fn test_context() -> TestContext {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let provider_store = Arc::new(MemoryProviderStore::new());
     let providers: Arc<dyn ProviderRepoPort> = provider_store.clone();
     let provider_credentials: Arc<dyn ProviderCredentialRepoPort> = provider_store.clone();
     let provider_bindings: Arc<dyn ProviderBotBindingRepoPort> = provider_store.clone();
+    let candidate_reads: Arc<dyn bcs_service_api::OrganizationCandidateReadPort> = provider_store.clone();
     let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(temp_dir.path().to_path_buf()));
     let registry = Arc::new(BotCore::with_provider_repos(
         bot_repo,
@@ -73,6 +81,7 @@ async fn test_context() -> TestContext {
         Arc::new(MemoryOrganizationRepo::new()),
         providers,
         provider_bindings,
+        candidate_reads,
         registry.clone(),
     ));
     let service = OrganizationManagement::new(provider_core.clone(), organization_core.clone());
@@ -666,7 +675,7 @@ async fn put_member_rejects_disabled_organization_before_bot_checks() {
     create_org(&ctx, &provider_a).await;
     ctx.service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,
@@ -731,7 +740,7 @@ async fn organization_management_rejects_wrong_manager_and_bad_auth() {
 
     let wrong_manager = ctx
         .service
-        .get(provider_auth(&provider_b), "promo-2026")
+        .get(member_auth(&provider_b), "promo-2026")
         .await
         .expect_err("wrong manager should be rejected");
     assert!(matches!(wrong_manager, ServiceError::Forbidden(reason) if reason == "organization_manager_required"));
@@ -778,7 +787,7 @@ async fn validation_rejects_invalid_code_invalid_role_and_patch_without_fields()
     let patch_without_fields = ctx
         .service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,
@@ -799,10 +808,11 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
     register_bot(&ctx, &provider_a, "bot-a").await;
     register_bot(&ctx, &provider_b, "bot-b").await;
     register_bot(&ctx, &provider_c, "bot-c").await;
+    create_org(&ctx, &provider_a).await;
 
     let candidates = ctx
         .service
-        .candidate_bots(provider_auth(&provider_a), OrganizationCandidateQuery::default())
+        .candidate_bots(provider_auth(&provider_a), candidate_query())
         .await
         .expect("candidate bots");
     let mut bot_ids = candidates
@@ -824,7 +834,7 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
             provider_auth(&provider_a),
             OrganizationCandidateQuery {
                 q: Some("bot-b name".to_string()),
-                ..OrganizationCandidateQuery::default()
+                ..candidate_query()
             },
         )
         .await
@@ -839,7 +849,7 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
             provider_auth(&provider_a),
             OrganizationCandidateQuery {
                 provider_id: Some(provider_b.provider_id.clone()),
-                ..OrganizationCandidateQuery::default()
+                ..candidate_query()
             },
         )
         .await
@@ -856,7 +866,7 @@ async fn candidate_bots_include_manager_and_granted_bots_without_leaking_ungrant
             provider_auth(&provider_a),
             OrganizationCandidateQuery {
                 provider_id: Some(provider_c.provider_id.clone()),
-                ..OrganizationCandidateQuery::default()
+                ..candidate_query()
             },
         )
         .await;
@@ -878,13 +888,14 @@ async fn candidate_bot_page_is_sorted_and_counts_before_paging() {
     grant_manager(&ctx, &provider_b, &provider_a).await;
     register_bot(&ctx, &provider_b, "bot-z").await;
     register_bot(&ctx, &provider_a, "bot-a").await;
+    create_org(&ctx, &provider_a).await;
 
     let page = ctx
         .service
         .candidate_bots_page(
             provider_auth(&provider_a),
             OrganizationCandidatePageQuery {
-                candidate: OrganizationCandidateQuery::default(),
+                candidate: candidate_query(),
                 offset: 1,
                 limit: 1,
             },
@@ -895,6 +906,93 @@ async fn candidate_bot_page_is_sorted_and_counts_before_paging() {
     assert_eq!(page.total, 2);
     assert_eq!(page.bots.len(), 1);
     assert_eq!(page.bots[0].bot_uuid, "bot-z");
+}
+
+#[tokio::test]
+async fn candidate_bot_page_excludes_active_members_before_paging() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    register_bot(&ctx, &provider_a, "bot-z").await;
+    create_org(&ctx, &provider_a).await;
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: member_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-a".to_string(),
+            role: None,
+        })
+        .await
+        .expect("add active member");
+
+    let page = ctx
+        .service
+        .candidate_bots_page(
+            provider_auth(&provider_a),
+            OrganizationCandidatePageQuery {
+                candidate: OrganizationCandidateQuery {
+                    organization_code: "promo-2026".to_string(),
+                    ..OrganizationCandidateQuery::default()
+                },
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .expect("candidate bot page");
+
+    assert_eq!(page.total, 1);
+    assert_eq!(page.bots.len(), 1);
+    assert_eq!(page.bots[0].bot_uuid, "bot-z");
+}
+
+#[tokio::test]
+async fn candidate_bot_detail_reports_active_and_disabled_membership() {
+    let ctx = test_context().await;
+    let provider_a = register_provider(&ctx, "Provider A").await;
+    register_bot(&ctx, &provider_a, "bot-a").await;
+    create_org(&ctx, &provider_a).await;
+
+    let candidate = ctx
+        .service
+        .candidate_bot_detail(provider_auth(&provider_a), "promo-2026", "bot-a")
+        .await
+        .expect("candidate detail")
+        .expect("candidate exists");
+    assert!(!candidate.is_member);
+    assert_eq!(candidate.organization_code, "promo-2026");
+    assert_eq!(candidate.bot_uuid, "bot-a");
+    assert_eq!(candidate.bot.provider_id, provider_a.provider_id);
+    assert_eq!(candidate.bot.capabilities.name.as_deref(), Some("bot-a name"));
+
+    ctx.service
+        .put_member(PutOrganizationMemberCommand {
+            auth: member_auth(&provider_a),
+            organization_code: "promo-2026".to_string(),
+            bot_uuid: "bot-a".to_string(),
+            role: None,
+        })
+        .await
+        .expect("add member");
+    let member = ctx
+        .service
+        .candidate_bot_detail(provider_auth(&provider_a), "promo-2026", "bot-a")
+        .await
+        .expect("candidate detail")
+        .expect("candidate exists");
+    assert!(member.is_member);
+
+    ctx.service
+        .delete_member(member_auth(&provider_a), "promo-2026", "bot-a")
+        .await
+        .expect("disable member");
+    let removed = ctx
+        .service
+        .candidate_bot_detail(provider_auth(&provider_a), "promo-2026", "bot-a")
+        .await
+        .expect("candidate detail")
+        .expect("candidate exists");
+    assert!(!removed.is_member);
 }
 
 
@@ -996,7 +1094,7 @@ async fn effective_membership_rejects_disabled_org_disabled_member_and_nonmember
 
     ctx.service
         .update(UpdateOrganizationCommand {
-            auth: provider_auth(&provider_a),
+            auth: member_auth(&provider_a),
             organization_code: "promo-2026".to_string(),
             name: None,
             description: None,

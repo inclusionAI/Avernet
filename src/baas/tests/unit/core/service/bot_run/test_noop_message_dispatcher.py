@@ -42,6 +42,7 @@ class TestNoopMessageDispatcher:
             message="hello",
             binding_info=binding_info,
             context=context,
+            timeout=30.0,
         )
 
     @pytest.mark.asyncio

@@ -42,17 +42,20 @@ def test_engine_ext_fetched_via_plugin_and_frozen_verbatim() -> None:
     producer = TeclawComposeProducer(_StubComposer(_artifact()), client)
 
     result = producer.produce_artifact(
-        {"bot_id": "b", "entity_id": "u", "owner_id": "u1"}, 3
+        {"bot_id": "b", "entity_id": "u", "owner_id": "u1", "bot_name": "Support Bot"}, 3
     )
 
     # plugin consulted with the bot dict
-    assert client.calls == [{"bot_id": "b", "entity_id": "u", "owner_id": "u1"}]
+    assert client.calls == [
+        {"bot_id": "b", "entity_id": "u", "owner_id": "u1", "bot_name": "Support Bot"}
+    ]
     # engine_ext payload carried verbatim, alongside the backend identity/stage keys.
     frozen = result.ext["config_artifact"]
     assert frozen["engine_ext"] == {
         **opaque,
         "bot_id": "b",
         "owner_id": "u1",
+        "bot_name": "Support Bot",
         "stage": "draft",
     }
     assert frozen["engine_type"] == "teclaw"
@@ -68,6 +71,7 @@ def test_empty_engine_ext_from_noop_client() -> None:
     assert result.ext["config_artifact"]["engine_ext"] == {
         "bot_id": "b",
         "owner_id": "",
+        "bot_name": "",
         "stage": "draft",
     }
     assert result.success is True

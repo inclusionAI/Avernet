@@ -10,7 +10,7 @@ use bcs_domain::ProviderRecord;
 use bcs_protocol::BCN_PROVIDER_ID_HEADER;
 use bcs_service_api::{
     AsyncA2aChatCommand, BotActor, CallerContext, ChatResponseMode, ChatRunQueryCommand,
-    BotTerminalState, OrganizationAuth, ServiceError,
+    BotTerminalState, OrganizationAuth, OrganizationMemberAuth, ServiceError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -215,7 +215,7 @@ pub async fn create_admin_run(
     schedule_timeout_callback(state.clone(), run_id.clone(), timeout_ms);
     let location = format!("/organizations/{organization_code}/admin-runs/{run_id}");
     let mut response = (
-        StatusCode::ACCEPTED,
+        StatusCode::OK,
         Json(Envelope {
             code: 20000,
             message: "accepted".to_string(),
@@ -470,7 +470,12 @@ async fn authenticate_manager(
     let organization = state
         .services
         .organization_management
-        .get(auth.clone(), organization_code)
+        .get(
+            OrganizationMemberAuth {
+                provider_admin_token: token.to_string(),
+            },
+            organization_code,
+        )
         .await
         .map_err(|error| match error {
             ServiceError::Unauthorized(_) => AdminRunRouteError::new(

@@ -51,6 +51,12 @@ pub struct MessageTracker {
     /// Cache sender metadata for the run instead of reading the group and bot
     /// registry on every streaming delta.
     channel_sender_info: Mutex<HashMap<String, (bcs_domain::ParticipantRole, String)>>,
+    /// run_id → source IM message id.
+    ///
+    /// Channel ingress attaches the IM message id to the web-send command.
+    /// Cache it before bot delivery so the first response event can target
+    /// the exact source message even when requests share one conversation.
+    channel_source_message_ids: Mutex<HashMap<String, String>>,
 }
 
 impl MessageTracker {
@@ -62,6 +68,7 @@ impl MessageTracker {
             chat_delta_mode: Mutex::new(HashSet::new()),
             streaming_thinking_buf: Mutex::new(HashMap::new()),
             channel_sender_info: Mutex::new(HashMap::new()),
+            channel_source_message_ids: Mutex::new(HashMap::new()),
         }
     }
 
@@ -147,6 +154,45 @@ impl MessageTracker {
             .insert(run_id.to_string(), info);
     }
 
+    pub async fn channel_source_message_id(&self, run_id: &str) -> Option<String> {
+        self.channel_source_message_ids
+            .lock()
+            .await
+            .get(run_id)
+            .cloned()
+    }
+
+    pub async fn cache_channel_source_message_id(&self, run_id: &str, message_id: &str) {
+        self.channel_source_message_ids
+            .lock()
+            .await
+            .insert(run_id.to_string(), message_id.to_string());
+    }
+
+    pub async fn rebind_channel_source_message_id(
+        &self,
+        source_run_id: &str,
+        accepted_run_id: &str,
+    ) -> bool {
+        if source_run_id == accepted_run_id {
+            return self
+                .channel_source_message_ids
+                .lock()
+                .await
+                .contains_key(source_run_id);
+        }
+        let mut message_ids = self.channel_source_message_ids.lock().await;
+        let Some(message_id) = message_ids.remove(source_run_id) else {
+            return false;
+        };
+        message_ids.insert(accepted_run_id.to_string(), message_id);
+        true
+    }
+
+    pub async fn remove_channel_source_message_id(&self, run_id: &str) {
+        self.channel_source_message_ids.lock().await.remove(run_id);
+    }
+
     /// Whether the run has received any `delta_text` frame (SSE self-accumulate
     /// mode). At `final`, delta-mode runs flush their accumulated buffer instead
     /// of overriding with the final frame's cumulative full text.
@@ -184,6 +230,75 @@ impl MessageTracker {
         self.chat_delta_mode.lock().await.remove(run_id);
         self.streaming_thinking_buf.lock().await.remove(run_id);
         self.channel_sender_info.lock().await.remove(run_id);
+        self.channel_source_message_ids.lock().await.remove(run_id);
         self.streaming_chat_buf.lock().await.remove(run_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MessageTracker;
+
+    #[tokio::test]
+    async fn channel_source_message_ids_are_scoped_to_run_and_cleaned_up() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_channel_source_message_id("run-1", "message-1")
+            .await;
+        tracker
+            .cache_channel_source_message_id("run-2", "message-2")
+            .await;
+
+        assert_eq!(
+            tracker.channel_source_message_id("run-1").await.as_deref(),
+            Some("message-1")
+        );
+        assert_eq!(
+            tracker.channel_source_message_id("run-2").await.as_deref(),
+            Some("message-2")
+        );
+
+        tracker.cleanup_run("run-1").await;
+
+        assert!(tracker.channel_source_message_id("run-1").await.is_none());
+        assert_eq!(
+            tracker.channel_source_message_id("run-2").await.as_deref(),
+            Some("message-2")
+        );
+    }
+
+    #[tokio::test]
+    async fn channel_source_message_id_follows_accepted_run_id() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_channel_source_message_id("source-run", "message-1")
+            .await;
+
+        assert!(
+            tracker
+                .rebind_channel_source_message_id("source-run", "accepted-run")
+                .await
+        );
+        assert!(
+            tracker
+                .channel_source_message_id("source-run")
+                .await
+                .is_none()
+        );
+        assert_eq!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .as_deref(),
+            Some("message-1")
+        );
+
+        tracker.cleanup_run("accepted-run").await;
+        assert!(
+            tracker
+                .channel_source_message_id("accepted-run")
+                .await
+                .is_none()
+        );
     }
 }

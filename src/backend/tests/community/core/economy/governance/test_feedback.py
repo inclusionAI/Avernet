@@ -29,7 +29,7 @@ from agentclaw.community.core.economy.governance.services.lifecycle_service impo
     GovernanceLifecycleService,
 )
 
-from .conftest import FakeDB, FakeGovernanceConfig, FakeWhitelistService
+from .conftest import FakeDB, FakeGovernanceConfig
 
 
 def _build_svc(engine):
@@ -44,7 +44,6 @@ def _build_svc(engine):
         audit_repo=audit_repo,
     )
     svc = GovernanceFeedbackService(
-        whitelist_service=FakeWhitelistService(),
         notify_repo=notify_repo,
         task_repo=task_repo,
         audit_repo=audit_repo,
@@ -248,7 +247,11 @@ class TestFeedback:
         assert "repair_deadline" in (result.error or "").lower()
 
     def test_need_time_sets_scheduled_and_mute_until(self, session, engine):
-        """response=need_time → scheduled + mute_until = repair_deadline + cooldown_days."""
+        """response=need_time → waiting_review (待审); repair_deadline recorded.
+
+        need_time 不再直接 scheduled+mute,改为进 waiting_review 等管理员 approve_scheduled
+        审批后再进 scheduled。repair_deadline 记录供 approve_scheduled 用。
+        """
         svc, db = _build_svc(engine)
         _make_notification(session)
 
@@ -258,9 +261,9 @@ class TestFeedback:
             repair_deadline=deadline,
         )
         assert result.success
-        assert result.governance_status == "scheduled"
-        # mute_until = 2026-07-15 + cooldown_days(14) = 2026-07-29
-        assert result.mute_until == datetime(2026, 7, 29)
+        assert result.governance_status == "waiting_review"
+        # 待审不 mute;mute 由管理员 approve_scheduled 审批后决定
+        assert result.mute_until is None
 
     def test_owner_check_currently_bypassed(self, session, engine):
         """Owner check temporarily disabled — any user_id can resolve."""
@@ -473,6 +476,7 @@ class TestStateTransitions:
         assert result.governance_status == "waiting_review"
 
     def test_need_time_to_scheduled(self, session, engine):
+        """need_time → waiting_review 待审(不再直接 scheduled+mute)。"""
         svc, db = _build_svc(engine)
 
         repair_deadline = datetime.now() + timedelta(days=7)
@@ -496,5 +500,6 @@ class TestStateTransitions:
             s.commit()
 
         assert result.success is True
-        assert result.governance_status == "scheduled"
-        assert result.mute_until is not None
+        # need_time 改为进 waiting_review 待审(管理员 approve_scheduled 后才 scheduled)
+        assert result.governance_status == "waiting_review"
+        assert result.mute_until is None  # 待审不 mute

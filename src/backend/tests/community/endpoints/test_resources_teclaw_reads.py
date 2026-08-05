@@ -35,6 +35,7 @@ from tests.community.framework.endpoint_helpers import http_envelope_response
 
 
 _OWNER = "u_teclaw_read"
+_ATTACKER = "u_teclaw_attacker"
 _DEVICE_ID = "teclaw_dev_read"
 _ENGINE = "moltis"
 
@@ -188,6 +189,31 @@ def _seed_preview(world) -> None:
 )
 def preview_teclaw_file_returns_200():
     """Previewing a teclaw bot's text file returns its content (200)."""
+
+
+def _seed_preview_cross_owner(world) -> None:
+    _seed_teclaw_bot(world, bot_id="bot_teclaw_victim")
+    make_staff_user(world, user_id=_ATTACKER)
+    _stub_engine(world, _engine_response(content=b"private content"))
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/resources/files/preview",
+    scenario="reject_cross_owner_bot_preview",
+    input=CaseInput(
+        query_params={
+            "path": "/home/admin/.openclaw/workspace/AGENTS.md",
+            "bot_id": "bot_teclaw_victim",
+            "owner_id": _ATTACKER,
+        },
+        headers={"x-user-id": _ATTACKER},
+    ),
+    seed=_seed_preview_cross_owner,
+    expect=ExpectError(status=403),
+)
+def preview_rejects_cross_owner_bot_id():
+    """A caller-controlled owner_id cannot authorize another user's bot_id."""
 
 
 # ============================================================

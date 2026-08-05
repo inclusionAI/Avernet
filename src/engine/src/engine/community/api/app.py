@@ -73,6 +73,7 @@ from starlette.middleware.base import BaseHTTPMiddleware  # noqa: E402
 
 from engine.community.api.cron.router import router as cron  # noqa: E402
 from engine.community.api.session.router import router as session_router  # noqa: E402
+from engine.community.api.session_favorites import router as session_favorites_router  # noqa: E402
 from engine.community.manager import EngineManager  # noqa: E402
 from engine.community.di import Injected  # noqa: E402
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService  # noqa: E402
@@ -84,6 +85,10 @@ from engine.community.api.file import router as file_router  # noqa: E402
 from engine.community.api.bash import router as bash_router  # noqa: E402
 from engine.community.api.mcp import router as mcp  # noqa: E402
 from engine.community.api.models import router as models  # noqa: E402
+from engine.community.api.resource_materialization import (  # noqa: E402
+    router as resource_materialization_router,
+)
+from engine.community.api.session_files import router as session_files_router  # noqa: E402
 from engine.community.api.node import router as node  # noqa: E402
 from engine.community.api.skills import router as skills_router  # noqa: E402
 from engine.community.api.web_shell import router as web_shell_router  # noqa: E402
@@ -202,6 +207,22 @@ async def lifespan(app: FastAPI):
     manager = EngineManager.get_instance()
     await manager.initialize()
 
+    # Engine initialization installs the engine's existing Legacy bridges.
+    # Retry the same sidecar-only preparation afterwards so every filesystem
+    # engine can publish a valid Pool-ready marker without changing active
+    # mappings or blocking startup.
+    try:
+        import asyncio
+        from engine.community.config import is_agentbox_runtime
+        from engine.community.core.skills.skills_repo_download import (
+            prepare_pool_layout,
+        )
+
+        if is_agentbox_runtime():
+            asyncio.create_task(asyncio.to_thread(prepare_pool_layout))
+    except Exception:
+        pass
+
     yield
 
     # ── shutdown ──
@@ -239,7 +260,10 @@ attach_injector(app, _INJECTOR)
 
 app.include_router(engine_router)
 app.include_router(session_router)
+app.include_router(session_favorites_router)
 app.include_router(models)
+app.include_router(resource_materialization_router)
+app.include_router(session_files_router)
 app.include_router(cron)
 app.include_router(approvals)
 app.include_router(mcp)

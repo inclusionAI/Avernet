@@ -24,6 +24,7 @@ Per-event side effects (Langfuse emission, etc.) live inside the plugin.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -37,7 +38,9 @@ from engine.community.config import load_max_connections, load_mcp_token_setting
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService
 from engine.community.core.chat.models import ChatAbortRequest, ChatRequest
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.resource_references.service import ResourceReferenceService
 from engine.community.manager import EngineManager
+from engine.community.plugin_api.workspace_root import workspace_root_strict
 from engine.community.openclaw.protocol import (
     PROTOCOL_VERSION,
     ConnectParams,
@@ -73,6 +76,36 @@ from engine.community.api.transport.auth_gate import verify_chat_send  # noqa: E
 
 log = logging.getLogger("engine-ws-server")
 _DEBUG = os.getenv("OPENCLAW_DEBUG_EVENTS", "").lower() in {"1", "true", "yes", "on"}
+_REDACTED_MATERIALIZED_FILE = "[materialized-file]"
+_SESSION_FILES_PATH_MARKER = "/.teamclaw/session-files/"
+
+
+def _redact_materialized_paths(value: Any, paths: tuple[str, ...]) -> Any:
+    """Prevent internally resolved workspace paths from reaching WS clients."""
+    if not paths:
+        return value
+    if isinstance(value, str):
+        redacted = value
+        for path in paths:
+            redacted = redacted.replace(path, _REDACTED_MATERIALIZED_FILE)
+        return redacted
+    if isinstance(value, dict):
+        return {key: _redact_materialized_paths(item, paths) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_materialized_paths(item, paths) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_materialized_paths(item, paths) for item in value)
+    return value
+
+
+def _materialized_path_redaction_targets(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """Include each controlled session-files workspace root in WS redaction."""
+    targets = set(paths)
+    for path in paths:
+        workspace_root, marker, _ = path.partition(_SESSION_FILES_PATH_MARKER)
+        if marker and workspace_root:
+            targets.add(workspace_root)
+    return tuple(sorted(targets, key=len, reverse=True))
 
 
 def _chat_plugin_supports_inject(chat_plugin: Any) -> bool:
@@ -143,12 +176,21 @@ class EngineWebSocketServer:
     bookkeeping (e.g. OpenClaw's refcount) collapses them if it wants to.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        resource_reference_service: ResourceReferenceService | None = None,
+    ) -> None:
         self._mcp_token_settings = load_mcp_token_settings()
+        self._resource_reference_service = (
+            resource_reference_service or ResourceReferenceService()
+        )
         self._connections: Dict[str, WebSocket] = {}
         self._conn_auth: Dict[str, AuthContext] = {}
         self._session_subscribers: Dict[str, set[str]] = {}
         self._conn_sessions: Dict[str, set[str]] = {}
+        self._session_materialized_redaction_paths: Dict[str, tuple[str, ...]] = {}
+        self._conn_materialized_redaction_paths: Dict[str, tuple[str, ...]] = {}
         self._inject_listener_refs: Dict[
             tuple[str | None, int], tuple[Any, Callable[[EventFrame], Any]]
         ] = {}
@@ -624,18 +666,26 @@ class EngineWebSocketServer:
         return await self._forward_request(conn_id, request)
 
     async def _send_event(
-        self, websocket: WebSocket, event_name: str, payload: Dict[str, Any],
+        self,
+        websocket: WebSocket,
+        event_name: str,
+        payload: Dict[str, Any],
+        *,
+        materialized_paths: tuple[str, ...] = (),
     ) -> None:
         """Stamp seq/ts on an outgoing event and ship it."""
+        outbound_payload = _redact_materialized_paths(payload, materialized_paths)
+        if not isinstance(outbound_payload, dict):
+            outbound_payload = {}
         # 先检查键是否存在，避免 _next_seq() 被无条件调用导致序列号跳号
-        if "seq" not in payload:
-            payload["seq"] = self._next_seq()
-        if "ts" not in payload:
-            payload["ts"] = int(time.time() * 1000)
+        if "seq" not in outbound_payload:
+            outbound_payload["seq"] = self._next_seq()
+        if "ts" not in outbound_payload:
+            outbound_payload["ts"] = int(time.time() * 1000)
         event = EventFrame(
             event=event_name,
-            payload=payload,
-            seq=payload["seq"],
+            payload=outbound_payload,
+            seq=outbound_payload["seq"],
         )
         await websocket.send_text(event.to_json())
 
@@ -692,6 +742,7 @@ class EngineWebSocketServer:
         return await self._ensure_openclaw_inject_listener(conn_id)
 
     def _unsubscribe_conn(self, conn_id: str) -> None:
+        self._conn_materialized_redaction_paths.pop(conn_id, None)
         for session_key in list(self._conn_sessions.pop(conn_id, set())):
             subscribers = self._session_subscribers.get(session_key)
             if subscribers is None:
@@ -699,6 +750,7 @@ class EngineWebSocketServer:
             subscribers.discard(conn_id)
             if not subscribers:
                 self._session_subscribers.pop(session_key, None)
+                self._session_materialized_redaction_paths.pop(session_key, None)
         self._drop_idle_inject_listeners()
 
     def _unsubscribe_conn_from_session(self, conn_id: str, session_key: str) -> None:
@@ -712,6 +764,7 @@ class EngineWebSocketServer:
             subscribers.discard(conn_id)
             if not subscribers:
                 self._session_subscribers.pop(session_key, None)
+                self._session_materialized_redaction_paths.pop(session_key, None)
 
     async def _ensure_openclaw_inject_listener(self, conn_id: str) -> bool:
         manager = EngineManager.get_instance()
@@ -755,6 +808,11 @@ class EngineWebSocketServer:
         self._inject_listener_refs[key] = (client, on_injected_event)
         return True
 
+    def _connection_has_live_inject_listener(self, conn_id: str, session_key: str) -> bool:
+        if conn_id not in self._session_subscribers.get(session_key, set()):
+            return False
+        return any(conn_id in conns for conns in self._inject_listener_conns.values())
+
     async def _fanout_injected_event(self, event: EventFrame) -> None:
         payload = event.payload if isinstance(event.payload, dict) else {}
         session_key = payload.get("sessionKey")
@@ -773,12 +831,6 @@ class EngineWebSocketServer:
             send_payload["seq"] = self._next_seq()
         if "ts" not in send_payload:
             send_payload["ts"] = int(time.time() * 1000)
-        frame = EventFrame(
-            event=event.event,
-            payload=send_payload,
-            seq=send_payload["seq"],
-        )
-        raw = frame.to_json()
         stale: list[str] = []
         for subscriber_conn_id in subscribers:
             websocket = self._connections.get(subscriber_conn_id)
@@ -786,7 +838,26 @@ class EngineWebSocketServer:
                 stale.append(subscriber_conn_id)
                 continue
             try:
-                await websocket.send_text(raw)
+                redaction_paths = self._conn_materialized_redaction_paths.get(
+                    subscriber_conn_id,
+                    self._session_materialized_redaction_paths.get(session_key, ()),
+                )
+                outbound_payload = _redact_materialized_paths(
+                    send_payload,
+                    redaction_paths,
+                )
+                if redaction_paths:
+                    log.info(
+                        "engine.ws_injected_event.redaction session_key_hash=%s target_count=%s",
+                        hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16],
+                        len(redaction_paths),
+                    )
+                frame = EventFrame(
+                    event=event.event,
+                    payload=outbound_payload,
+                    seq=send_payload["seq"],
+                )
+                await websocket.send_text(frame.to_json())
             except Exception as e:
                 log.debug(
                     "chat.subscribe: fanout failed conn=%s: %s",
@@ -832,18 +903,22 @@ class EngineWebSocketServer:
         message = params.get("message")
         iam_token = params.get("x-iam-token")
         attachments = params.get("attachments")
+        resource_references = params.get("resourceReferences")
+        prompt_file_refs = params.get("promptFileRefs")
 
         if not session_key or not message:
             return ResponseFrame.err_response(
                 request.id,
                 ErrorShape(ErrorCodes.INVALID_REQUEST, "Missing sessionKey or message"),
             )
+        # COSEC: session keys are identifiers; use a non-reversible digest in logs.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
         if attachments is not None:
             if not isinstance(attachments, list) or not all(isinstance(item, dict) for item in attachments):
                 log.warning(
-                    "[attachments][ws_received_invalid] requestId=%s sessionKey=%s summary=%s",
+                    "[attachments][ws_received_invalid] requestId=%s session_key_hash=%s summary=%s",
                     request.id,
-                    session_key,
+                    session_key_hash,
                     _summarize_attachments(attachments),
                 )
                 return ResponseFrame.err_response(
@@ -851,11 +926,26 @@ class EngineWebSocketServer:
                     ErrorShape(ErrorCodes.INVALID_REQUEST, "attachments must be an array of objects"),
                 )
             log.info(
-                "[attachments][ws_received] requestId=%s sessionKey=%s summary=%s",
+                "[attachments][ws_received] requestId=%s session_key_hash=%s summary=%s",
                 request.id,
-                session_key,
+                session_key_hash,
                 _summarize_attachments(attachments),
             )
+        for field_name, value in (
+            ("resourceReferences", resource_references),
+            ("promptFileRefs", prompt_file_refs),
+        ):
+            if value is not None and (
+                not isinstance(value, list)
+                or not all(isinstance(item, dict) for item in value)
+            ):
+                return ResponseFrame.err_response(
+                    request.id,
+                    ErrorShape(
+                        ErrorCodes.INVALID_REQUEST,
+                        f"{field_name} must be an array of objects",
+                    ),
+                )
 
         auth_gate_enabled = await auth_gate_service.get_switch()
         if auth_gate_enabled:
@@ -890,6 +980,14 @@ class EngineWebSocketServer:
         else:
             params.setdefault("idempotencyKey", uuid.uuid4().hex)
 
+        # The browser only sends chat.send. Bind this connection before starting
+        # the stream so OpenClaw-originated inject events can reach the session.
+        try:
+            await self._subscribe_conn_to_session(conn_id, session_key)
+        except Exception as e:
+            # Listener binding is best-effort and must not reject a valid chat.send.
+            log.warning("chat.send: failed to bind inject listener: %s", e)
+
         # ack first, then stream events in the background
         response = ResponseFrame.ok_response(request.id, {"accepted": True})
 
@@ -902,6 +1000,8 @@ class EngineWebSocketServer:
                 params.get("timeoutMs"),
                 params.get("idempotencyKey"),
                 attachments=attachments,
+                resource_references=resource_references,
+                prompt_file_refs=prompt_file_refs,
             )
         )
 
@@ -916,6 +1016,8 @@ class EngineWebSocketServer:
         timeout_ms: Optional[int],
         idempotency_key: Optional[str] = None,
         attachments: Optional[list[dict[str, Any]]] = None,
+        resource_references: Optional[list[dict[str, Any]]] = None,
+        prompt_file_refs: Optional[list[dict[str, Any]]] = None,
     ) -> None:
         """Relay `ChatService.stream` events back to the client verbatim.
 
@@ -923,7 +1025,13 @@ class EngineWebSocketServer:
         inside the plugin — the server is event-shape-agnostic on the chat
         hot path.
         """
-        log.info(f"[stream] Starting chat stream: conn={conn_id}, session={session_key}")
+        # COSEC: session keys are identifiers; use a non-reversible digest in logs.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+        log.info(
+            "[stream] Starting chat stream: conn=%s session_key_hash=%s",
+            conn_id,
+            session_key_hash,
+        )
 
         chat_plugin = EngineManager.get_instance().chat
         extra_params: dict[str, Any] = {}
@@ -932,11 +1040,15 @@ class EngineWebSocketServer:
         if attachments is not None:
             extra_params["attachments"] = attachments
             log.info(
-                "[attachments][chat_request_extra] conn=%s sessionKey=%s summary=%s",
+                "[attachments][chat_request_extra] conn=%s session_key_hash=%s summary=%s",
                 conn_id,
-                session_key,
+                session_key_hash,
                 _summarize_attachments(attachments),
             )
+        if resource_references is not None:
+            extra_params["resourceReferences"] = resource_references
+        if prompt_file_refs is not None:
+            extra_params["promptFileRefs"] = prompt_file_refs
         chat_request = ChatRequest(
             # userId / agentId are encoded inside session_key for OpenClaw;
             # the plugin forwards session_key verbatim. Empty strings match
@@ -949,27 +1061,94 @@ class EngineWebSocketServer:
             extraParams=extra_params or None,
         )
         auth = self._auth_for(conn_id)
+        materialized_paths: tuple[str, ...] = ()
 
         try:
+            if (
+                resource_references is not None
+                or prompt_file_refs is not None
+                or "<file-ref" in message
+            ):
+                # Reference validation includes controlled workspace file hashing.
+                # Keep that I/O off the WebSocket event loop.
+                resolved = await asyncio.to_thread(
+                    self._resource_reference_service.rewrite,
+                    prompt=message,
+                    session_key=session_key,
+                    resource_references=resource_references,
+                    prompt_file_refs=prompt_file_refs,
+                )
+                chat_request.query = resolved.prompt
+                merged_extra = dict(chat_request.extraParams or {})
+                merged_extra["materializedFiles"] = resolved.materialized_files
+                chat_request.extraParams = merged_extra
+                materialized_paths = tuple(
+                    path
+                    for item in resolved.materialized_files
+                    if isinstance(item, dict)
+                    and isinstance(
+                        path := item.get("canonical_bot_absolute_path"), str
+                    )
+                    and path
+                )
+                workspace_root = workspace_root_strict()
+                if workspace_root is not None:
+                    materialized_paths = (*materialized_paths, str(workspace_root))
+                materialized_paths = _materialized_path_redaction_targets(
+                    materialized_paths
+                )
+                self._session_materialized_redaction_paths[session_key] = (
+                    materialized_paths
+                )
+                self._conn_materialized_redaction_paths[conn_id] = materialized_paths
+                log.info(
+                    "engine.resource_reference.validate session_key_hash=%s reference_count=%s ok=true",
+                    session_key_hash,
+                    len(resolved.materialized_files),
+                )
             event_count = 0
-            log.info(f"[stream] Starting to iterate chat_plugin.stream() for session={session_key}")
+            log.info(
+                "[stream] Starting to iterate chat_plugin.stream() session_key_hash=%s",
+                session_key_hash,
+            )
             async for event_frame in chat_plugin.stream(chat_request, auth=auth):
                 event_count += 1
                 event_name = event_frame.event
                 event_data = event_frame.payload
                 state = event_data.get("state", "")
+                run_id = event_data.get("runId", "")
 
                 # seq/ts stamping happens inside _send_event (guarded so
                 # pre-populated payloads are preserved).
                 event_data.setdefault("sessionKey", session_key)
 
-                await self._send_event(websocket, event_name, event_data)
+                # The live listener already fans this frame out to the current
+                # connection. Avoid sending the same inject event a second time
+                # through the foreground chat stream.
+                if (
+                    isinstance(run_id, str)
+                    and run_id.startswith("inject-")
+                    and self._connection_has_live_inject_listener(conn_id, session_key)
+                ):
+                    continue
+
+                await self._send_event(
+                    websocket,
+                    event_name,
+                    event_data,
+                    materialized_paths=materialized_paths,
+                )
 
                 if state in ("final", "error", "aborted"):
-                    run_id = event_data.get("runId", "")
                     if isinstance(run_id, str) and run_id.startswith("inject-"):
                         continue
-                    log.info(f"[stream] chat stream ended: conn={conn_id}, reason={state}, total_events={event_count}")
+                    log.info(
+                        "[stream] chat stream ended: conn=%s session_key_hash=%s reason=%s total_events=%s",
+                        conn_id,
+                        session_key_hash,
+                        state,
+                        event_count,
+                    )
                     break
 
         except WebSocketDisconnect:

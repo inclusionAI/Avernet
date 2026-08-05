@@ -18,11 +18,14 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_dormant   # SQLite ORM side-effect import for local table creation
+  - agentclaw.community.core.caller_identity.models  # SQLite ORM side-effect import for caller identity tables
+  - agentclaw.community.core.user_list.models  # SQLite ORM side-effect import for user-list tables
   - agentclaw.community.core.economy.governance.contracts.models  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.economy.governance.repositories.orm  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat
+  - agentclaw.community.core.config.yaml_provider  # LocalSecretResolver reuses the provider's deep-merge so both read one effective config
   - agentclaw.community.core.devices
   - agentclaw.community.core.errors
   - agentclaw.community.core.expert_chat
@@ -30,7 +33,9 @@ internal_dependencies:
   - agentclaw.community.core.models
   - agentclaw.community.core.operator_context
   - agentclaw.community.core.service_bot
+  - agentclaw.community.core.session_resources  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.skill_center
+  - agentclaw.community.core.skills_pool  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.task_queue   # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.workspace
   - agentclaw.community.kernel
@@ -71,6 +76,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.tracer
   - agentclaw.community.plugins.prod.baas_service    # LocalBaasService inherits ProdBaasService to reuse httpx logic, override URL only
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.avernet_tenant_guard  # Shared tenant isolation for local SQLite ORM models
 ```
 
 ### Change impact

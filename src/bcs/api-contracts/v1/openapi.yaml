@@ -1,0 +1,97 @@
+openapi: 3.1.0
+info:
+  title: BCN OpenAPI
+  version: 1.0.0
+  description: Versioned public contract for Bot Collaboration Network resources.
+tags:
+  - name: Collaboration / Bots
+    description: Bot discovery, lookup, and management within BCN.
+  - name: Collaboration / Friendships
+    description: Bot friendships and friend-request lifecycle operations.
+  - name: Collaboration / Groups
+    description: Collaboration groups and their participants.
+  - name: Collaboration / Sessions
+    description: Group sessions, participants, messages, and connection access.
+  - name: Collaboration / Invitations
+    description: Invitations for joining collaboration groups and sessions.
+paths:
+  /openapi/v1/collaboration/bots/mine:
+    $ref: ./openapi/bots.yaml#/MyBotsPath
+  /openapi/v1/collaboration/bots/query:
+    $ref: ./openapi/bots.yaml#/QueryBotsPath
+  /openapi/v1/collaboration/bots/{bot_id}:
+    $ref: ./openapi/bots.yaml#/BotPath
+  /openapi/v1/collaboration/bots/{bot_id}/candidates:
+    $ref: ./openapi/bots.yaml#/BotCandidatesPath
+  /openapi/v1/collaboration/bots/{bot_uuid}/friendships:
+    $ref: ./openapi/friendships.yaml#/ListFriendshipsPath
+  /openapi/v1/collaboration/bots/{bot_uuid}/friendships/{friend_bot_uuid}:
+    $ref: ./openapi/friendships.yaml#/FriendshipPath
+  /openapi/v1/collaboration/bots/{bot_uuid}/friend-requests:
+    $ref: ./openapi/friendships.yaml#/BotFriendRequestsPath
+  /openapi/v1/collaboration/friend-requests/{request_id}/accept:
+    $ref: ./openapi/friendships.yaml#/AcceptFriendRequestPath
+  /openapi/v1/collaboration/friend-requests/{request_id}/reject:
+    $ref: ./openapi/friendships.yaml#/RejectFriendRequestPath
+  /openapi/v1/collaboration/groups:
+    $ref: ./openapi/groups.yaml#/GroupsPath
+  /openapi/v1/collaboration/groups/{group_id}:
+    $ref: ./openapi/groups.yaml#/GroupPath
+  /openapi/v1/collaboration/groups/{group_id}/participants:
+    $ref: ./openapi/groups.yaml#/AddGroupParticipantPath
+  /openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}:
+    $ref: ./openapi/groups.yaml#/GroupParticipantPath
+  /openapi/v1/collaboration/groups/{group_id}/sessions:
+    $ref: ./openapi/sessions.yaml#/GroupSessionsPath
+  /openapi/v1/collaboration/groups/{group_id}/invitations:
+    $ref: ./openapi/invitations.yaml#/CreateGroupInvitationPath
+  /openapi/v1/collaboration/sessions/{session_id}:
+    $ref: ./openapi/sessions.yaml#/SessionPath
+  /openapi/v1/collaboration/sessions/{session_id}/messages:
+    $ref: ./openapi/sessions.yaml#/SessionMessagesPath
+  /openapi/v1/collaboration/sessions/{session_id}/token:
+    $ref: ./openapi/connections.yaml#/SessionConnectionTokenPath
+  /openapi/v1/collaboration/sessions/{session_id}/participants:
+    $ref: ./openapi/sessions.yaml#/AddSessionParticipantPath
+  /openapi/v1/collaboration/sessions/{session_id}/participants/{bot_uuid}:
+    $ref: ./openapi/sessions.yaml#/SessionParticipantPath
+  /openapi/v1/collaboration/sessions/{session_id}/invitations:
+    $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
+  /openapi/v1/collaboration/invitations/{token}/accept:
+    $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
+  /openapi/v1/collaboration/messages/ws:
+    $ref: ./openapi/connections.yaml#/GroupSessionWebSocketPath
+components:
+  schemas:
+    Bot:
+      $ref: ./domain-models.yaml#/Bot
+    PhysicalBot:
+      $ref: ./domain-models.yaml#/PhysicalBot
+    HumanBot:
+      $ref: ./domain-models.yaml#/HumanBot
+    BotDescriptor:
+      $ref: ./domain-models.yaml#/BotDescriptor
+    BotCandidate:
+      $ref: ./domain-models.yaml#/BotCandidate
+    BotPage:
+      $ref: ./domain-models.yaml#/BotPage
+    GroupSummary:
+      $ref: ./domain-models.yaml#/GroupSummary
+    GroupDetail:
+      $ref: ./domain-models.yaml#/GroupDetail
+    SessionDetail:
+      $ref: ./domain-models.yaml#/SessionDetail
+    SessionPage:
+      $ref: ./domain-models.yaml#/SessionPage
+    SessionMessage:
+      $ref: ./domain-models.yaml#/SessionMessage
+    SessionParticipant:
+      $ref: ./domain-models.yaml#/SessionParticipant
+    Invitation:
+      $ref: ./domain-models.yaml#/Invitation
+    Friendship:
+      $ref: ./domain-models.yaml#/Friendship
+    FriendRequest:
+      $ref: ./domain-models.yaml#/FriendRequest
+    ErrorEnvelope:
+      $ref: ./shared.yaml#/ErrorEnvelope

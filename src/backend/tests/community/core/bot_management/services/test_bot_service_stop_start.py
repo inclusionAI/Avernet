@@ -113,6 +113,27 @@ class TestStopBot:
         )
         assert result is True
 
+    def test_releases_stopped_device_and_resets_status(self):
+        """STOPPED binding is finalized before restart allocates a replacement."""
+        svc = _make_service()
+        bot = _make_bot()
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        mock_device_service = MagicMock()
+        mock_device_service.get_device.return_value = _make_binding(
+            status=DeviceBindingStatus.STOPPED.value,
+        )
+        svc._device_service_provider = lambda: mock_device_service
+
+        result = svc.stop_bot(bot_id="bot001", user_id="user001")
+
+        mock_device_service.release_device.assert_called_once()
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001", "user001",
+            {"status": "PENDING", "binding_id": None, "device_id": None},
+        )
+        assert result is True
+
     def test_returns_true_when_no_binding(self):
         """没有 binding_id 时跳过释放，直接重置状态，返回 True。"""
         svc = _make_service()

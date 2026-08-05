@@ -11,7 +11,7 @@ import time
 import zipfile
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.dependencies import (
@@ -79,9 +79,21 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     VersionListResponse,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+    BotRepository,
+)
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
+from agentclaw.community.core.skill_center.errors import (
+    SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
+)
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditGuard,
+    SkillsPoolEditPausedError,
+)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
@@ -99,11 +111,17 @@ from agentclaw.community.core.config_compose.teclaw_paths import to_local_skill_
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceNotBoundError,
+)
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
+    InterceptedResponse,
+    InterceptorContext,
     with_interceptors,
 )
 from agentclaw.community.core.bot_collaborator.interceptor.extractors import PermissionParams
@@ -297,6 +315,25 @@ def _get_skill_by_id_or_link_name(service, skill_id: str, *bolt_ids: str | None)
     return None
 
 
+def _require_pool_runtime_sync_success(
+    service,
+    sync_result,
+    *,
+    detail: str,
+) -> None:
+    """Fail closed when a Pool-owned CRUD could not reach runtime state.
+
+    Legacy bots retain their historical best-effort behavior. Pool-owned I/O
+    cannot do that safely: its DB locator, canonical files and active mapping
+    must describe one committed layout.
+    """
+
+    if getattr(service, "runtime_uses_pool_paths", False) is not True:
+        return
+    if not isinstance(sync_result, dict) or sync_result.get("success") is not True:
+        raise HTTPException(status_code=502, detail=detail)
+
+
 # ==================== Core CRUD APIs ====================
 
 @router.post("/upload", response_model=UploadSkillResponse)
@@ -318,6 +355,7 @@ async def upload_skill(
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
+    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> UploadSkillResponse:
     """Upload a new skill from files.
 
@@ -336,6 +374,12 @@ async def upload_skill(
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
     if not bot:
         return UploadSkillResponse(success=False, message="Bot not found.")
+    bot_owner_id = str(bot.get("owner_id") or "")
+    if not bot_owner_id:
+        return UploadSkillResponse(
+            success=False,
+            message="Bot ownership metadata is incomplete.",
+        )
 
     # 状态闸门:桌面 bot 的 DB 状态(ac_bots.status)有延迟 —— BaaS 上 VM 已
     # ACTIVE 但 ac_bots 还停旧值会误拒上传。桌面 bot 先用 BaaS 实时状态覆盖;
@@ -375,6 +419,9 @@ async def upload_skill(
         repo_dir=repo_dir,
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     logger.info(f"[skills.upload_skill] Processing {len(files)} files")
@@ -418,11 +465,27 @@ async def upload_skill(
 
         logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
 
-        # Use user_id from query param if provided, otherwise fall back to ctx.user_id
-        effective_user_id = user_id or ctx.user_id
+        # ``ctx.user_id`` is the authenticated actor used by the collaborator
+        # interceptor and audit trail.  Local Skill metadata follows the
+        # historical product contract and belongs to the Bot owner, resolved
+        # from the persisted Bot rather than a caller-controlled parameter.
 
         # Call the service method (async)
-        skill = await service.upload_skill(uploaded_files, user_id=effective_user_id, bolt_id=effective_bot_id)
+        edit_lease = edit_guard.acquire_for_edit(
+            scope=BotSkillLayoutScope(
+                env=str(bot["env"]),
+                entity_id=str(bot["entity_id"]),
+                bot_id=effective_bot_id,
+            )
+        )
+        try:
+            skill = await service.upload_skill(
+                uploaded_files,
+                user_id=bot_owner_id,
+                bolt_id=effective_bot_id,
+            )
+        finally:
+            edit_guard.release(edit_lease)
 
         logger.info(f"[skills.upload_skill] Success: skill_id={skill.get('id')}, name={skill.get('name')}")
 
@@ -449,6 +512,8 @@ async def upload_skill(
             ),
             message="Skill uploaded successfully"
         )
+    except SkillsPoolEditPausedError as e:
+        return UploadSkillResponse(success=False, message=str(e))
     except ValueError as e:
         error_msg = str(e)
         logger.error(f"[skills.upload_skill] Validation error: {error_msg}")
@@ -554,7 +619,12 @@ async def create_skill(
     repo_dir = path_factory.get_bot_skills_repo_dir(
         entity_id, bot_id, engine_type, entity_type, is_desktop=is_desktop
     )
-    service = skill_service_factory.create(repo_dir=repo_dir)
+    service = skill_service_factory.create(
+        repo_dir=repo_dir,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        engine_type=engine_type,
+    )
     try:
         skill = service.create_skill(
             name=request.name,
@@ -621,6 +691,9 @@ async def get_active_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     active_skills = service.get_active_skills()
@@ -910,6 +983,9 @@ async def activate_skill(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     actual_skill_id = request.relative_path if request.relative_path else skill_id
@@ -948,6 +1024,17 @@ async def activate_skill(
         logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skill] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize activated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize activated skills to runtime",
+        )
 
     logger.info(f"[skills.activate_skill] Success: skill_id={actual_skill_id}, link_name={link_name}")
     return ActivateResponse(success=True, message="Skill activated successfully", link_name=link_name)
@@ -985,6 +1072,9 @@ async def deactivate_skill(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # deactivate_skill is async — must await; previously a direct sync call
@@ -1018,6 +1108,17 @@ async def deactivate_skill(
         logger.info(f"[skills.deactivate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.deactivate_skill] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize deactivated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize deactivated skills to runtime",
+        )
 
     logger.info(f"[skills.deactivate_skill] Success: skill_id={skill_id}")
     return DeactivateResponse(success=True, message="Skill deactivated successfully")
@@ -1115,6 +1216,9 @@ async def get_skill_readme(
         repo_dir=initial_repo_dir,
         local_dir=initial_local_dir,
         local_skill_path_adapter=None,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     skill = _get_skill_by_id_or_link_name(service, skill_id, effective_bot_id, ctx.bot_id)
@@ -1138,31 +1242,73 @@ async def get_skill_readme(
             logger.warning(f"[skills.get_skill_readme] SkillCenter file-content failed: {e}")
         raise HTTPException(status_code=404, detail="Skill or README not found")
 
-    # The DB row is the source of truth for the bot/owner that owns local files.
-    # Keep this explicit so README reads do not regress to request-context-only
-    # resolution after REL20260710 rebases.
-    # This is especially important for TEClaw requests whose HTTP context can be
-    # default/openclaw even though the local skill belongs to a TEClaw bot.
+    # A Skill may be read while the caller is operating another Bot.  Its DB
+    # ``bolt_id`` is the authoritative target; derive owner, entity type and
+    # engine from that Bot instead of trusting the caller's route parameters.
+    # ``skill.user_id`` is metadata ownership, but historical rows may contain
+    # a collaborator ID; device ownership must still come from the Bot row.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
-    read_owner_id = (skill or {}).get("user_id") or effective_entity_id
-    read_entity_type = effective_entity_type
+    target_bot = None
+    # ``default`` is shared by many owners.  Resolve an explicitly supplied
+    # owner against the server-side environment so a same-named default Bot
+    # can never select an arbitrary user's workspace.
+    owner_hint = entity_id or (ctx.user_id if read_bot_id == "default" else None)
+    try:
+        if owner_hint:
+            matches = bot_repo.get_live_by_id_owner_and_env(
+                bot_id=read_bot_id,
+                owner_id=owner_hint,
+                env=get_current_env(),
+            )
+            if len(matches) > 1:
+                raise HTTPException(status_code=409, detail="Skill's owning bot is ambiguous")
+            if matches:
+                target_bot = matches[0]
+
+        if not target_bot and read_bot_id != "default":
+            # Service Bot IDs are normally globally unique.  Fail closed if
+            # they are not, rather than using repository ``.first()``.
+            target_bot = bot_repo.get_unique_by_id(read_bot_id)
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
+        logger.warning(
+            "[skills.get_skill_readme] target bot lookup failed for bot_id=%s: %s",
+            read_bot_id,
+            e,
+        )
+
+    # A persisted local Skill must always be read from the Bot that owns it.
+    # Do not fall back to the caller's workspace when that Bot has disappeared:
+    # doing so can turn a stale record into a read against an unrelated device.
+    if skill and skill.get("bolt_id") and not target_bot:
+        raise HTTPException(status_code=404, detail="Skill's owning bot was not found")
+
+    read_owner_id = (target_bot or {}).get("owner_id") or effective_entity_id
+    read_entity_type = (target_bot or {}).get("entity_type") or effective_entity_type
+    # Do not honour a caller-provided engine override for a Skill owned by a
+    # different Bot: it points at a different on-device workspace.
     read_engine = resolve_engine_for_bot(
         bot_id=read_bot_id,
         owner_id=read_owner_id,
-        override=engine_type,
         bot_repo=bot_repo,
     )
-    read_is_desktop = False
-    try:
-        bot = bot_repo.get_by_id_and_owner(read_bot_id, read_owner_id)
-        if bot and bot.get("bot_type") == "desktop":
-            read_is_desktop = True
-    except Exception as e:
+    if target_bot and (
+        (entity_id and entity_id != read_owner_id)
+        or (bot_id and bot_id != read_bot_id)
+        or (engine_type and engine_type != read_engine)
+    ):
         logger.warning(
-            "[skills.get_skill_readme] bot_type lookup failed for bot_id=%s "
-            "owner=%s: %s — defaulting is_desktop=False",
-            read_bot_id, read_owner_id, e,
+            "[skills.get_skill_readme] Ignoring mismatched caller context: "
+            "skill_id=%s target_bot_id=%s target_owner_id=%s target_engine=%s",
+            skill_id,
+            read_bot_id,
+            read_owner_id,
+            read_engine,
         )
+    read_is_desktop = False
+    if target_bot:
+        read_is_desktop = target_bot.get("bot_type") == "desktop"
 
     read_is_teclaw, read_local_skill_adapter = _resolve_teclaw_local_skill(
         resolver, read_bot_id, read_owner_id
@@ -1195,6 +1341,9 @@ async def get_skill_readme(
         repo_dir=read_repo_dir,
         local_dir=read_local_dir,
         local_skill_path_adapter=read_local_skill_adapter,
+        entity_id=read_owner_id,
+        bot_id=read_bot_id,
+        engine_type=read_engine,
     )
 
     # Default: local://, git://, or repo lookup via service.
@@ -1203,7 +1352,12 @@ async def get_skill_readme(
         "skill_id=%s, user_id=%s, bot_id=%s",
         skill_id, read_owner_id, read_bot_id,
     )
-    readme = await read_service.get_skill_readme(skill_id, read_owner_id, read_bot_id)
+    readme = await read_service.get_skill_readme(
+        skill_id,
+        ctx.user_id,
+        read_bot_id,
+        device_owner_id=read_owner_id,
+    )
     if readme is None:
         raise HTTPException(status_code=404, detail="Skill or README not found")
     logger.info(f"[skills.get_skill_readme] Success: skill_id={skill_id}")
@@ -1282,6 +1436,9 @@ async def list_local_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     skills = service.get_skills_in_path("")
@@ -1317,6 +1474,9 @@ async def get_market_tree(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     tree = service.get_market_tree()
@@ -1362,6 +1522,9 @@ async def list_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # 从数据库查询 git_path 以 git:// 开头的技能 (marketplace 不区分 bolt_id)
@@ -1404,6 +1567,9 @@ async def activate_skills_batch(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # activate_skills_batch is async — direct await. run_in_threadpool over
@@ -1435,6 +1601,17 @@ async def activate_skills_batch(
         logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skills_batch] Device sync skipped or failed: {e}")
+        _require_pool_runtime_sync_success(
+            service,
+            None,
+            detail="Failed to synchronize activated skills to runtime",
+        )
+    else:
+        _require_pool_runtime_sync_success(
+            service,
+            sync_result,
+            detail="Failed to synchronize activated skills to runtime",
+        )
 
     logger.info(f"[skills.activate_skills_batch] Success: {len(results['success'])} activated, {len(results['failed'])} failed")
     return ActivateSkillsResponse(
@@ -1477,6 +1654,9 @@ async def search_market_skills(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # 使用缓存搜索市场技能（复用 list_git_skills 缓存，limit=100）
@@ -1523,6 +1703,9 @@ async def sync_market(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     # Step 1: Sync repository (git pull/clone)
@@ -1599,6 +1782,9 @@ async def get_sync_status(
         active_dir=skills_dir,
         repo_dir=repo_dir,
         local_dir=local_dir,
+        entity_id=effective_entity_id,
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
 
     status = service.get_sync_status()
@@ -1771,33 +1957,110 @@ async def update_skill_risk_tags(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def _extract_skill_mutation_permission(
+    skill_id: str,
+    ctx: InterceptorContext,
+) -> PermissionParams:
+    """Resolve the persisted Bot identity used for local Skill mutations."""
+    if not skill_id or ctx.injector is None:
+        return PermissionParams()
+    try:
+        service = ctx.injector.get(SkillServiceFactoryProtocol).create()
+        skill = service.get_skill(skill_id)
+    except Exception:
+        return PermissionParams()
+    if not skill:
+        return PermissionParams()
+    return PermissionParams(
+        bot_id=skill.get("bolt_id"),
+        owner_id=skill.get("user_id"),
+    )
+
+
+class _FailClosedSkillMutationPermissionInterceptor(
+    CollaboratorPermissionInterceptor,
+):
+    """Never turn a collaborator permission lookup failure into mutation access."""
+
+    def __init__(self, *args, authorization_state_key: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._authorization_state_key = authorization_state_key
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        actor_id = ctx.user.staffId if ctx.user else None
+        # Preserve the pre-existing global Skill admin capability; it is not a
+        # Bot-collaborator grant and therefore must not depend on that service.
+        if actor_id and actor_id in skill_admin():
+            ctx.metadata["permission_level"] = "SKILL_ADMIN"
+            return ctx
+
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if actor_id != owner_id:
+            if not ctx.metadata.get("permission_level"):
+                ctx.response = InterceptedResponse(
+                    success=False,
+                    message="协作者权限服务暂不可用",
+                    error_code=503,
+                )
+                return None
+            if ctx.request is not None:
+                setattr(ctx.request.state, self._authorization_state_key, True)
+            for value in ctx.route_kwargs.values():
+                if isinstance(value, RequestContext):
+                    value.metadata[self._authorization_state_key] = True
+        return result
+
+
 @router.post("/{skill_id}/mcp-dependencies", response_model=SkillDetailResponse)
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
+    params_extractor=_extract_skill_mutation_permission,
+    extractor_params={"skill_id": "$skill_id"},
+    persist_audit_log=True,
+    authorization_state_key="skill_mcp_collaborator_authorized",
+))
 async def update_skill_mcp_dependencies(
     skill_id: str,
     request: UpdateMCPDependenciesRequest,
     user: AuthenticatedUser = Depends(get_current_user),
+    http_request: Request = None,
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
 ) -> SkillDetailResponse:
     """Update skill MCP dependencies by ID.
 
     权限控制：只有技能的创建者或管理员可以修改 MCP 依赖。
     """
-    # 管理员名单校验：非管理员只能修改自己创建的技能
-    if user.staffId not in skill_admin():
-        service = skill_service_factory.create()
+    service = skill_service_factory.create()
+    try:
         existing = service.get_skill(skill_id, user_id=user.staffId)
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
         skill_owner = str(existing.get("user_id", ""))
-        if skill_owner and skill_owner != user.staffId:
-            logger.warning(
-                f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} "
-                f"尝试修改非自己创建的 skill_id={skill_id} (owner={skill_owner}) 的MCP依赖"
+        is_local_skill = str(existing.get("git_path") or "").startswith("local://")
+        collaborator_authorized = bool(
+            http_request
+            and getattr(
+                http_request.state,
+                "skill_mcp_collaborator_authorized",
+                False,
             )
-            raise HTTPException(status_code=403, detail="无权修改此技能的MCP依赖，仅技能创建者或管理员可操作")
-
-    service = skill_service_factory.create()
-    try:
+        )
+        if (
+            user.staffId not in skill_admin()
+            and skill_owner
+            and skill_owner != user.staffId
+            and not (is_local_skill and collaborator_authorized)
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="无权修改此技能的MCP依赖，仅技能创建者、已授权协作者或管理员可操作",
+            )
         # 使用认证用户ID替代请求体中的user_id，防止越权
         if request.user_id and request.user_id != user.staffId:
             logger.warning(f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} 尝试以 user_id={request.user_id} 修改 skill_id={skill_id} 的MCP依赖，已使用认证用户ID")
@@ -1883,10 +2146,11 @@ async def extract_from_skill_id(skill_id: str, ctx) -> PermissionParams:
 
 
 @router.delete("/{skill_id}", response_model=MessageResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
     params_extractor=extract_from_skill_id,
     extractor_params={"skill_id": "$skill_id"},  # 表达式：从路由参数取值
     persist_audit_log=True,  # 记录操作审计日志
+    authorization_state_key="skill_delete_collaborator_authorized",
 ))
 async def delete_skill(
     skill_id: str,
@@ -1894,12 +2158,17 @@ async def delete_skill(
     entity_id: str | None = Query(None, description="Entity ID (pure ID, no prefix needed)"),
     entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: str | None = Query(None, description="Bot ID"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None,
+        description="Legacy compatibility hint; when provided it must match the Bot active_engine",
+    ),
     ctx: RequestContext = Depends(get_request_context),
+    skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
+    edit_guard: SkillsPoolEditGuard = Injected(SkillsPoolEditGuard),
 ) -> MessageResponse:
     """Delete a skill.
 
@@ -1909,35 +2178,100 @@ async def delete_skill(
     - 协作者（member 角色）返回 403
     - 管理员可直接删除（Service 层双重保障）
     """
-    # 优先使用传入的 user_id 参数，否则使用认证上下文的 user_id
-    current_user_id = user_id or ctx.user_id
-
-    if entity_id and bot_id:
-        effective_entity_id = entity_id
-        effective_entity_type = entity_type if entity_type else "staff"
-        effective_bot_id = bot_id
-    elif current_user_id:
-        effective_entity_id = current_user_id
-        effective_entity_type = "staff"
-        effective_bot_id = "default"
-    else:
+    # 删除的物理上下文必须以已持久化 Skill 所属 Bot 为准。历史客户端
+    # 不传 bot_id/entity_id，不能因此回退到 default/openclaw 并删错路径。
+    # ``user_id`` is a legacy compatibility hint supplied by the caller and
+    # must never override the authenticated actor.  In particular, shared
+    # market Skills have no owner row, so trusting the query parameter here
+    # would let any authenticated caller impersonate a configured Skill admin.
+    current_user_id = ctx.user_id
+    if not current_user_id:
         raise HTTPException(status_code=401, detail="未认证用户无法删除技能")
+    if not skill_id.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid skill ID")
 
-    owner_id_for_lookup = entity_id if entity_id else (current_user_id or "")
-
-    effective_engine = resolve_engine_for_bot(
-        bot_id=effective_bot_id,
-        owner_id=owner_id_for_lookup,
-        override=engine_type,
-        bot_repo=bot_repo,
+    skill = skill_repo.get_by_id(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    persisted_git_path = str(skill.get("git_path") or "")
+    is_shared_source = (
+        not skill.get("user_id")
+        and persisted_git_path.startswith(("git://", "center://"))
     )
-    is_desktop = False
+    if is_shared_source:
+        service = skill_service_factory.create()
+        try:
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+            )
+            if not success:
+                raise HTTPException(status_code=404, detail="Skill not found")
+            return MessageResponse(
+                success=True,
+                message="Skill deleted successfully",
+            )
+        except SkillReferencedBySkillSetError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                    "message": "请先从所有技能集中移除该技能，再删除技能",
+                    "skill_set_ids": e.skill_set_ids,
+                },
+            ) from e
+        except ValueError as e:
+            error_msg = str(e)
+            if "无权删除" in error_msg or "Permission denied" in error_msg:
+                raise HTTPException(status_code=403, detail=error_msg) from e
+            raise HTTPException(status_code=400, detail=error_msg) from e
+
+    effective_bot_id = str(skill.get("bolt_id") or "")
+    if not effective_bot_id:
+        raise HTTPException(status_code=409, detail="Skill is missing its Bot identity")
+    if bot_id and bot_id != effective_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Skill 持久化归属的 Bot",
+                "bot_id": effective_bot_id,
+            },
+        )
+
     try:
-        _bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
-        if _bot and _bot.get("bot_type") == "desktop":
-            is_desktop = True
-    except Exception:
-        pass
+        bot = (
+            bot_repo.get_by_id_and_entity(effective_bot_id, entity_id)
+            if entity_id
+            else bot_repo.get_unique_by_id(effective_bot_id)
+        )
+    except BotLookupAmbiguousError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_AMBIGUOUS",
+                "message": "历史 Bot ID 不唯一，请提供 entity_id 精确定位",
+                "bot_id": effective_bot_id,
+            },
+        ) from e
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    effective_entity_id = str(
+        bot.get("entity_id") or bot.get("owner_id") or ""
+    )
+    effective_entity_type = str(bot.get("entity_type") or "staff")
+    effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+    if engine_type and engine_type != effective_engine:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Bot 当前的生效引擎",
+                "active_engine": effective_engine,
+            },
+        )
+    is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw deletes the skill files from the (draft) container; resolve provider
     # so the device-fs path is the workspace-namespace form.
@@ -1952,12 +2286,49 @@ async def delete_skill(
         repo_dir=repo_dir,
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=effective_entity_id,
+        bot_owner_id=str(bot.get("owner_id") or ""),
+        bot_id=effective_bot_id,
+        engine_type=effective_engine,
     )
     try:
-        success = await service.delete_skill(skill_id, user_id=current_user_id)
+        edit_lease = edit_guard.acquire_for_edit(
+            scope=BotSkillLayoutScope(
+                env=str(bot["env"]),
+                entity_id=str(bot["entity_id"]),
+                bot_id=effective_bot_id,
+            )
+        )
+        try:
+            # 路由已先通过 CollaboratorPermissionInterceptor；仍把持久化
+            # Bot owner 显式传给 Service 做 scope 双重校验，不能把协作者当成
+            # Skill metadata owner。
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+                authorized_bot_owner_id=str(bot.get("owner_id") or ""),
+                collaborator_authorization_verified=bool(
+                    ctx.metadata.get("skill_delete_collaborator_authorized")
+                ),
+            )
+        finally:
+            edit_guard.release(edit_lease)
         if not success:
             raise HTTPException(status_code=404, detail="Skill not found")
         return MessageResponse(success=True, message="Skill deleted successfully")
+    except SkillsPoolEditPausedError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillDeleteConsistencyError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillReferencedBySkillSetError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                "message": "请先从所有技能集中移除该技能，再删除技能",
+                "skill_set_ids": e.skill_set_ids,
+            },
+        ) from e
     except ValueError as e:
         error_msg = str(e)
         # 权限错误返回 403
@@ -1969,13 +2340,147 @@ async def delete_skill(
 
 # ==================== Skill Parameters Endpoints (设备文件版) ====================
 
+
+class _SkillParameterPermissionInterceptor(CollaboratorPermissionInterceptor):
+    """Fail closed for owner-backed parameter access when auth is unavailable."""
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if (
+            actor_id != owner_id
+            and not ctx.metadata.get("permission_level")
+        ):
+            ctx.response = InterceptedResponse(
+                success=False,
+                message="协作者权限服务暂不可用",
+                error_code=503,
+            )
+            return None
+        return result
+
+
+def _resolve_parameter_bot(
+    *,
+    skill: dict[str, Any],
+    requested_bot_id: str,
+    requested_entity_id: str,
+    bot_repo: BotRepository,
+) -> dict[str, Any]:
+    """Resolve the trusted Bot identity that owns a Skill parameter file.
+
+    ``SkillParameterServiceFactory`` uses its ``user_id`` argument to locate the
+    Bot's active device binding.  That identity must therefore be the Bot owner,
+    not the authenticated actor (who may be an ADMIN collaborator).
+
+    The requested Bot ID is used only as a lookup key; ownership always comes
+    from the Bot row. Historical ``Skill.user_id`` values may contain a
+    collaborator, so they must never participate in device-owner resolution.
+    Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
+    no Bot binding and remain usable across Bots.
+    """
+
+    bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
+    if not isinstance(bot, dict):
+        raise HTTPException(status_code=404, detail="Bot not found")
+    bot_owner_id = str(bot.get("owner_id") or "")
+    if not bot_owner_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot ownership metadata is incomplete",
+        )
+
+    skill_bot_id = str(skill.get("bolt_id") or "")
+    is_shared_git_skill = (
+        str(skill.get("git_path") or "").startswith("git://")
+        and not skill_bot_id
+    )
+    if is_shared_git_skill:
+        return bot
+
+    if not skill_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Skill Bot metadata is incomplete",
+        )
+    if requested_bot_id != skill_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail="Skill does not belong to the requested Bot",
+        )
+    return bot
+
+
+async def _extract_parameter_permission(
+    *,
+    bot_id: str,
+    entity_id: str,
+    ctx,
+):
+    """Resolve parameter authorization from the exact Bot identity scope."""
+
+    from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
+        PermissionParams,
+    )
+
+    bot_repo = ctx.injector.get(BotRepository) if ctx.injector is not None else None
+    bot = (
+        bot_repo.get_by_id_and_entity(bot_id, entity_id)
+        if bot_repo is not None
+        else None
+    )
+    owner_id = (
+        str(bot.get("owner_id") or "")
+        if isinstance(bot, dict)
+        else ""
+    )
+    # A non-empty sentinel prevents the generic interceptor from falling back
+    # to its bot_id-only legacy lookup. The route will return the precise 404.
+    return PermissionParams(
+        bot_id=bot_id,
+        owner_id=owner_id or "__parameter_bot_not_found__",
+    )
+
+
+async def _create_skill_parameter_service(
+    *,
+    parameter_service_factory: SkillParameterServiceFactoryProtocol,
+    bot_id: str,
+    owner_id: str,
+):
+    """Create the device-backed parameter service with a structured no-binding error."""
+
+    try:
+        return await parameter_service_factory.create(
+            bot_id=bot_id,
+            user_id=owner_id,
+        )
+    except DeviceNotBoundError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Bot has no active device",
+        ) from exc
+
+
 @router.get("/{skill_id}/parameters", response_model=SkillParametersResponse)
+@with_interceptors(_SkillParameterPermissionInterceptor(
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+    persist_audit_log=False,
+))
 async def get_skill_parameters(
     skill_id: str,
     entity_id: str = Query(..., description="Entity ID (e.g., staff_xxx, proj_xxx)"),
     bot_id: str = Query(..., description="Bot ID"),
     engine_type: str = Query(..., description="Engine type (openclaw)"),
     ctx: RequestContext = Depends(get_request_context),
+    bot_repo: BotRepository = Injected(BotRepository),
     skill_repo: SkillRepository = Injected(SkillRepository),
     parameter_service_factory: SkillParameterServiceFactoryProtocol = Injected(SkillParameterServiceFactoryProtocol),
 ) -> SkillParametersResponse:
@@ -1985,11 +2490,19 @@ async def get_skill_parameters(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    bot = _resolve_parameter_bot(
+        skill=skill,
+        requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
+        bot_repo=bot_repo,
+    )
     skill_name = skill.get('link_name') or skill.get('name')
 
     # 使用异步工厂函数获取参数服务
-    parameter_service = await parameter_service_factory.create(
-        bot_id=bot_id, user_id=ctx.user_id
+    parameter_service = await _create_skill_parameter_service(
+        parameter_service_factory=parameter_service_factory,
+        bot_id=str(bot["bot_id"]),
+        owner_id=str(bot["owner_id"]),
     )
     parameters = parameter_service.get_skill_parameters(skill_name)
 
@@ -1997,6 +2510,13 @@ async def get_skill_parameters(
 
 
 @router.post("/{skill_id}/parameters", response_model=SkillParametersResponse)
+@with_interceptors(_SkillParameterPermissionInterceptor(
+    params_extractor=_extract_parameter_permission,
+    extractor_params={"bot_id": "$bot_id", "entity_id": "$entity_id"},
+    # Keep edit-lock enforcement and audit metadata, but never serialize
+    # credential-bearing parameter values.
+    audit_excluded_params={"request"},
+))
 async def save_skill_parameters(
     skill_id: str,
     request: SaveSkillParametersRequest,
@@ -2004,6 +2524,7 @@ async def save_skill_parameters(
     bot_id: str = Query(..., description="Bot ID"),
     engine_type: str = Query(..., description="Engine type (openclaw)"),
     ctx: RequestContext = Depends(get_request_context),
+    bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
     skill_repo: SkillRepository = Injected(SkillRepository),
@@ -2016,25 +2537,65 @@ async def save_skill_parameters(
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
+    bot = _resolve_parameter_bot(
+        skill=skill,
+        requested_bot_id=bot_id,
+        requested_entity_id=entity_id,
+        bot_repo=bot_repo,
+    )
+    trusted_bot_id = str(bot["bot_id"])
+    trusted_owner_id = str(bot["owner_id"])
+    trusted_entity_id = str(bot.get("entity_id") or trusted_owner_id)
+    trusted_engine_type = str(bot.get("active_engine") or engine_type)
+    trusted_entity_type = str(bot.get("entity_type") or "staff")
     skill_name = skill.get('link_name') or skill.get('name')
 
     # Resolve is_desktop for path construction
-    _, _, _, _, is_desktop = _get_path_params(ctx, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type)
+    is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw owns its local-skill files: parse SKILL.md from the container via
     # device_fs; non-teclaw keeps the host-FS read (byte-identical).
-    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(resolver, bot_id, entity_id)
+    is_teclaw, local_skill_adapter = _resolve_teclaw_local_skill(
+        resolver,
+        trusted_bot_id,
+        trusted_owner_id,
+    )
 
     # 从 SKILL.md 实时解析 parameters 定义
     parameter_schema = []
     service = skill_service_factory.create(
-        active_dir=path_factory.get_bot_skills_dir(entity_id, bot_id, engine_type),
-        repo_dir=path_factory.get_bot_skills_repo_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop),
-        local_dir=path_factory.get_bot_skills_local_dir(entity_id, bot_id, engine_type, is_desktop=is_desktop, is_teclaw=is_teclaw),
+        active_dir=path_factory.get_bot_skills_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+        ),
+        repo_dir=path_factory.get_bot_skills_repo_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+            is_desktop=is_desktop,
+        ),
+        local_dir=path_factory.get_bot_skills_local_dir(
+            trusted_entity_id,
+            trusted_bot_id,
+            trusted_engine_type,
+            trusted_entity_type,
+            is_desktop=is_desktop,
+            is_teclaw=is_teclaw,
+        ),
         local_skill_path_adapter=local_skill_adapter,
+        entity_id=trusted_entity_id,
+        bot_id=trusted_bot_id,
+        engine_type=trusted_engine_type,
     )
     if is_teclaw:
-        skill_info = await service.parse_local_skill_config(skill.get('git_path', ''), bot_id, entity_id)
+        skill_info = await service.parse_local_skill_config(
+            skill.get('git_path', ''),
+            trusted_bot_id,
+            trusted_owner_id,
+        )
     else:
         skill_info = service._parse_skill_from_git(skill.get('git_path', ''))
     if skill_info:
@@ -2050,8 +2611,10 @@ async def save_skill_parameters(
                 )
 
     # 使用异步工厂函数获取参数服务
-    parameter_service = await parameter_service_factory.create(
-        bot_id=bot_id, user_id=ctx.user_id
+    parameter_service = await _create_skill_parameter_service(
+        parameter_service_factory=parameter_service_factory,
+        bot_id=trusted_bot_id,
+        owner_id=trusted_owner_id,
     )
     await parameter_service.save_skill_parameters(skill_name, request.parameters)
 

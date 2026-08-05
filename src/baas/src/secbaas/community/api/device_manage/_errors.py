@@ -38,6 +38,11 @@ class ErrorCode(StrEnum):
 
     Template errors:
         TEMPLATE_NOT_FOUND: Device template not found
+
+    File transfer errors:
+        FILE_TRANSFER_NOT_FOUND: File transfer not found
+        FILE_TRANSFER_STATE_CONFLICT: File transfer state conflict
+        FILE_TRANSFER_FAILED: File transfer operation failed (download/upload)
     """
 
     DEVICE_NOT_FOUND = "DEVICE_NOT_FOUND"
@@ -61,6 +66,11 @@ class ErrorCode(StrEnum):
     RELAY_SESSION_NOT_FOUND = "RELAY_SESSION_NOT_FOUND"
     RELAY_STATE_CONFLICT = "RELAY_STATE_CONFLICT"
     INVALID_STATUS = "INVALID_STATUS"
+
+    # File transfer errors (Phase 67)
+    FILE_TRANSFER_NOT_FOUND = "FILE_TRANSFER_NOT_FOUND"
+    FILE_TRANSFER_STATE_CONFLICT = "FILE_TRANSFER_STATE_CONFLICT"
+    FILE_TRANSFER_FAILED = "FILE_TRANSFER_FAILED"
 
 
 class PaasError(Exception):
@@ -266,6 +276,10 @@ DEVICE_CREATION_ERROR_TO_HTTP_STATUS: dict[str, int] = {
     "RELAY_SETUP_FAILED": 502,
     "RELAY_STATE_CONFLICT": 409,  # Phase 65
     "RELAY_TIMEOUT": 502,
+    # File transfer errors (Phase 67)
+    "FILE_TRANSFER_NOT_FOUND": 404,
+    "FILE_TRANSFER_STATE_CONFLICT": 409,
+    "FILE_TRANSFER_FAILED": 502,
     "RESTART_FAILED": 500,
     "RESOURCE_EXHAUSTED": 503,
     "TIMEOUT": 502,

@@ -30,6 +30,7 @@ from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.repository.bot_run import BotRunRepository
 from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.logger import get_logger
+from secbaas.community.tracer import get_tracer_plugin
 
 if TYPE_CHECKING:
     from secbaas.community.api.config_manage import SystemConfigManageService
@@ -276,7 +277,7 @@ class QueueTaskMessageDispatcher:
 
                 # 4. 检查 run 是否已终结（Worker 可能已崩溃）
                 run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status in ("FAILED", "TIMEOUT"):
+                if run and run.status in ("FAILED", "TIME_OUT"):
                     yield StreamChunk(
                         type="error",
                         content=f"run terminated with status {run.status}",
@@ -354,6 +355,12 @@ class QueueTaskMessageDispatcher:
         meta: dict | None = None,
     ) -> None:
         """把队列工作项写入 ``baas_bot_run_queue``。"""
+        trace_carrier: dict[str, str] = {}
+        get_tracer_plugin().inject_context(trace_carrier)
+        if trace_carrier:
+            if meta is None:
+                meta = {}
+            meta["traceparent"] = trace_carrier
         self._queue_repository.insert_queue(
             run_id=run_id, bot_id=bot_id, session_id=session_id, meta=meta
         )
@@ -376,8 +383,8 @@ class QueueTaskMessageDispatcher:
         if session_id:
             metadata["session_id"] = session_id
         if context:
-            metadata.setdefault("app_id", context.app_id)
-            metadata.setdefault("app_type", context.app_type)
-            metadata.setdefault("tenant", context.tenant)
+            metadata["app_id"] = context.app_id
+            metadata["app_type"] = context.app_type
+            metadata["tenant"] = context.tenant
         metadata["request_type"] = request_type
         return metadata

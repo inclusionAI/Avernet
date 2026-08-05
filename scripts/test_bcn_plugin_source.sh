@@ -226,6 +226,59 @@ test_stack_script_has_npm_branch() {
   assert_contains "$src" '[ "$BCN_PLUGIN_SOURCE" != "npm" ]'
 }
 
+test_session_bot_uuid_requires_usable_session() {
+  local tmp; tmp="$(mktemp -d)"
+  local funcs="${tmp}/stack-session-functions.sh"
+  local profile_root="${tmp}/profiles"
+  local session_file="${profile_root}/.openclaw-ceo/.bcs/session.json"
+
+  awk '
+    /^profile_dir_for\(\)/ {emit=1}
+    /^workspace_dir_for\(\)/ {emit=0}
+    emit {print}
+  ' "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh" > "$funcs"
+  mkdir -p "$(dirname "$session_file")"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"saved-token","bcs_url":"ws://127.0.0.1:21000/ws/bot"}
+JSON
+  local bot_uuid
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "default:545716" "usable session should preserve bot identity"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"","bcs_url":"ws://127.0.0.1:21000/ws/bot"}
+JSON
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "" "session without token must not pin bot identity"
+
+  cat > "$session_file" <<JSON
+{"bot_uuid":"default:545716","token":"saved-token","bcs_url":"ws://127.0.0.1:29999/ws/bot"}
+JSON
+  bot_uuid="$(
+    OPENCLAW_PROFILE_ROOT="$profile_root"
+    OPENCLAW_PROFILE_PREFIX=".openclaw-"
+    BCS_URL="ws://127.0.0.1:21000/ws/bot"
+    . "$funcs"
+    session_bot_uuid_for ceo
+  )"
+  assert_eq "$bot_uuid" "" "session for a different BCS URL must not pin bot identity"
+
+  rm -rf "$tmp"
+}
+
 test_stack_config_allows_plugin_path_refresh() {
   local tmp; tmp="$(mktemp -d)"
   local funcs="${tmp}/stack-match-functions.sh"
@@ -354,7 +407,7 @@ JSON
     . "${SCRIPT_DIR}/modules/bcs.sh"
     . "${SCRIPT_DIR}/modules/bots.sh"
     bots_bcn_plugin_load_dir() { printf '%s\n' "$npm_plugin"; }
-    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production"; }
+    bots_dynamic_specs() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "CEO" "ceo" "30001" "ceo" "CEO summary" "strategy" "routing" "production" "openclaw"; }
     bots_dynamic_copy_profile_files() { return 0; }
     bots_dynamic_setup_bcs_skill() { return 0; }
     bots_dynamic_model_source_has_fields() { return 1; }
@@ -373,6 +426,7 @@ test_load_dir_source_mode
 test_load_dir_npm_mode
 test_stack_script_forwards_mode
 test_stack_script_has_npm_branch
+test_session_bot_uuid_requires_usable_session
 test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path
 

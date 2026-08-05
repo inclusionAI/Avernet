@@ -10,10 +10,11 @@
 # fallback above.
 /.github/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
 /docs/arch/ @carolynli @xianmuyq @dxwinux @archer910517-ctrl @yuyiming
+/scripts/ @carolynli @vzvince @FreddieSun @totalfrank @pfmiles @cassiuscai @xxxxpenny @phoenixliu
 /src/bcs/ @carolynli @vzvince @questchaos @RaymondHX
-/src/plugin/ @RaymondHX @vzvince @carolynli @questchaos @zoii
 /src/frontend/ @zoii @ClaaaaaaaaaireR @greenishzyy
 /src/bcsfuse/ @archer910517-ctrl @wienyang
 /src/backend/ @totalfrank @xianmuyq @FreddieSun
 /src/engine/ @totalfrank @xianmuyq @FreddieSun
 /src/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
+/src/gateway/ @cassiuscai @xxxxpenny @totalfrank @liveandevil @vzvince

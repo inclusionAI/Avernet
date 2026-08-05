@@ -1,0 +1,520 @@
+"""Sessions group — ``/openapi/v1/bots/sessions/{bot_id}``.
+
+Wraps the engine's ``/api/sessions`` surface. **Private personal bots only** —
+see :func:`_require_private_personal_bot`.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Query, Request
+
+from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    Deleted,
+    Envelope,
+    PageParamsDep,
+)
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    Principal,
+    require_principal,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
+    Message,
+    MessagePage,
+    Session,
+    SessionCreate,
+    SessionPage,
+    SessionUpdate,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.responses import (
+    created,
+    deleted,
+    envelope,
+    envelope_errors,
+    page as page_envelope,
+)
+from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.errors import (
+    EngineBotTypeNotSupportedError,
+    EngineHistoryDepthExceededError,
+    EngineResourceNotFoundError,
+)
+from agentclaw.community.core.engine_runtime.models import BotFacts
+from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
+
+router = APIRouter(prefix="/openapi/v1/bots/sessions", tags=["sessions"])
+
+PrincipalDep = Annotated[Principal, Depends(require_principal)]
+
+#: The only bot type this group serves. A ``service`` bot's device is reached by
+#: many callers and the engine's session list is not scoped per caller, so
+#: listing there would show the bot's owner other people's conversations.
+#:
+#: Necessary but **not** sufficient — see :func:`_require_private_personal_bot`.
+_SUPPORTED_BOT_TYPE = "personal"
+
+#: One extra item is requested beyond the page, purely to learn whether more
+#: exist. Neither engine route reports a total, and ``Page.total`` is required —
+#: so for this group the total is derived from the window rather than invented,
+#: and both paged routes answer with :class:`BoundedPage` to say so.
+_LOOKAHEAD = 1
+
+#: How far back message history is served, in messages. The history fetch is
+#: tail-limited and its cost is the whole window, not the page — see
+#: :func:`_history_window` — so without a ceiling the page number alone
+#: multiplies into an arbitrarily large upstream request. A page reaching past
+#: this depth is refused rather than served short; see
+#: :func:`_require_within_depth` for why an empty page could not be used.
+#: Generous for a conversation; bounded enough that a page number cannot be
+#: turned into device load.
+_MAX_HISTORY_DEPTH = 5000
+
+
+async def _require_private_personal_bot(
+    relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str
+) -> BotFacts:
+    """Resolve the caller's bot and reject anything more than one caller reaches.
+
+    Runs **before** any device call, deliberately: a filter applied to what the
+    device returned would already have fetched every caller's sessions. This
+    also performs the owner-scoped resolve, so a foreign ``bot_id`` raises
+    ``BotNotFoundError`` here — before a device is touched. The resolved facts
+    are returned so the forward can reuse them instead of resolving again.
+
+    Two conditions, because the hazard is *multi-caller*, not *bot type*. A
+    ``service`` bot is the obvious case. But ``personal`` is single-caller only
+    by default: the bot can be made public, and a coding app can take
+    collaborators, and ``ExpertChatService`` then creates those callers'
+    sessions on this same binding. Since the engine's collection is not scoped
+    per caller (see :attr:`BotFacts.is_shared`), serving this group for such a
+    bot would let its owner list, read, rename and delete other people's
+    conversations. Both refusals are the same 501: what the surface cannot
+    serve, rather than something the caller may retry or fix.
+    """
+    facts = await relay.resolve_bot_off_loop(bot_id, owner_id)
+    if facts.bot_type != _SUPPORTED_BOT_TYPE:
+        raise EngineBotTypeNotSupportedError(
+            f"sessions are not served for bot_type={facts.bot_type!r}"
+        )
+    if facts.is_shared:
+        raise EngineBotTypeNotSupportedError(
+            "sessions are not served for a shared bot: the engine's session "
+            "collection is not scoped per caller"
+        )
+    return facts
+
+
+def _map_session(data: dict[str, Any]) -> Session:
+    """Engine session dict → public :class:`Session`.
+
+    Source: ``_session_to_dict`` in ``src/engine/.../api/session/router.py``.
+    ``user_id`` is dropped (it is the caller) and ``ext_info`` is dropped
+    (engine-specific opaque payload with no public contract).
+    """
+    return Session(
+        session_id=str(data.get("id", "")),
+        title=str(data.get("title") or ""),
+        agent_id=str(data.get("agent_id") or ""),
+        model=str(data.get("model") or ""),
+        permission_mode=str(data.get("permission_mode") or ""),
+        cwd=str(data.get("cwd") or ""),
+        runtime=str(data.get("runtime") or ""),
+        message_count=int(data.get("message_count") or 0),
+        gmt_create=str(data.get("gmt_created") or ""),
+        gmt_modified=str(data.get("gmt_modified") or ""),
+    )
+
+
+def _map_message(data: dict[str, Any], session_id: str) -> Message:
+    """Engine message dict → public :class:`Message`.
+
+    ``metadata`` is dropped: a free-form engine bag with no public contract,
+    and therefore a leak risk on a surface whose messages are otherwise fixed.
+    An unrecognised ``role`` falls back to ``system`` rather than raising —
+    ``MessageRole`` mirrors a Literal in the engine's model, but a stub or a
+    newer engine returning something else must not 500 a read.
+    """
+    raw_role = str(data.get("role") or "")
+    try:
+        role = Message.model_fields["role"].annotation(raw_role)  # type: ignore[misc]
+    except ValueError:
+        logger.warning("[engine_runtime] unknown message role %r", raw_role)
+        from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+            MessageRole,
+        )
+
+        role = MessageRole.SYSTEM
+    return Message(
+        message_id=str(data.get("id", "")),
+        session_id=str(data.get("session_id") or session_id),
+        role=role,
+        content=str(data.get("content") or ""),
+        gmt_create=str(data.get("gmt_created") or ""),
+    )
+
+
+def _as_list(data: Any) -> list[dict[str, Any]]:
+    """Engine list payloads are bare lists; tolerate a wrapped ``items`` too."""
+    if isinstance(data, list):
+        raw = data
+    elif isinstance(data, dict):
+        raw = data.get("items") or []
+    else:
+        raw = []
+    return [d for d in raw if isinstance(d, dict)]
+
+
+def _window(page_params: Any) -> dict[str, int]:
+    """The engine query for exactly the requested page, plus one lookahead item.
+
+    Asking the engine for the caller's window — rather than always fetching from
+    offset 0 and slicing locally — is what makes pages past the first few
+    hundred work at all. Fetching a fixed prefix left every later page empty and
+    capped the reported total at the prefix length.
+
+    This is the **session list**'s window, and it is the straightforward one: the
+    engine paginates a fully-materialised list
+    (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
+    so ``offset``/``limit`` mean what they say. Message history does not — see
+    :func:`_history_window`.
+    """
+    return {
+        "offset": (page_params.page - 1) * page_params.page_size,
+        "limit": page_params.page_size + _LOOKAHEAD,
+    }
+
+
+def _history_window(page_params: Any) -> dict[str, int]:
+    """The engine query for a page of message history.
+
+    The history route does not paginate — it **tail-limits**. ``limit`` selects
+    the *newest* N messages, both in the bundled providers
+    (``local/openclaw/plugin_impl.py``, ``local/claude_code/plugin_impl.py``:
+    ``items[-limit:]``) and in the ``chat.history`` RPC they mirror, whose only
+    windowing parameter is ``limit``. The adapter then applies ``offset`` *to
+    that tail* (``messages[offset : offset+limit]``).
+
+    Those two compose badly. Growing ``limit`` to cover the offset moves the
+    tail's start back by exactly the offset, and skipping the offset walks
+    forward to the same place: with 100 messages and ``page_size=20``, page 1
+    and page 2 both return messages 79–98. Sending a page-sized limit instead
+    just makes every page past the first empty.
+
+    So the offset is not sent at all. We ask for the newest
+    ``offset + page_size + 1`` messages and cut the page out of that tail
+    ourselves in :func:`_history_page`, which is the one shape the engine's
+    "newest N" contract can serve exactly.
+
+    That request grows with the page number, and ``page`` has no upper bound —
+    ``page_size`` is capped at 100 but the page index is only ``ge=1``. Since
+    both bundled adapters forward ``limit`` upstream *before* slicing, an
+    unclamped window would let ``page=1000000`` ask a tenant's device for a
+    hundred million messages to answer with at most a hundred. The window is
+    therefore clamped to :data:`_MAX_HISTORY_DEPTH`, which is also the depth
+    the endpoint documents itself as serving.
+    """
+    offset = (page_params.page - 1) * page_params.page_size
+    want = offset + page_params.page_size + _LOOKAHEAD
+    return {"offset": 0, "limit": min(want, _MAX_HISTORY_DEPTH + _LOOKAHEAD)}
+
+
+def _require_within_depth(page_params: Any) -> None:
+    """Refuse a page that would reach past the served history depth.
+
+    The derived total is a lower bound while full pages keep coming and exact
+    once a short page arrives — that is the contract ``MessagePage.total``
+    publishes, and it is what makes the bound usable. A page clipped by
+    :data:`_MAX_HISTORY_DEPTH` breaks it: the window stops at the cap rather
+    than at the oldest message, so the page comes back short while more history
+    exists, and the caller reads the cap as an exact count. With 50 000
+    messages and ``page_size=100``, page 51 returned nothing and reported
+    ``total=5001``.
+
+    Serving those pages honestly is not possible here. "Truncated" cannot be
+    expressed in a required ``int``, and neither engine route exposes a count to
+    put there instead. Refusing is the one answer that is true: the request is
+    outside what this endpoint serves, which is a property of the endpoint
+    rather than of the data, so it is rejected before the device is touched and
+    the same page is rejected whatever the history holds.
+
+    The bound is the window's *end*, not its start. Rejecting only
+    ``offset >= depth`` would still admit a page straddling the cap —
+    ``page_size=3``, page 1667 starts at 4998 and returns two messages of three,
+    short, and therefore exact-looking for the same reason.
+
+    422 matches the surface: ``page_size=101`` is already a 422 from FastAPI's
+    own parameter validation, and this is the same class of out-of-range page
+    argument.
+    """
+    offset = (page_params.page - 1) * page_params.page_size
+    if offset + page_params.page_size > _MAX_HISTORY_DEPTH:
+        raise EngineHistoryDepthExceededError(
+            f"page window ends at {offset + page_params.page_size}, past the "
+            f"{_MAX_HISTORY_DEPTH}-message depth served"
+        )
+
+
+def _page(
+    items: list[Any], page_params: Any, *, reported: int | None
+) -> tuple[int, list[Any]]:
+    """The requested page, plus the best total the engine allows.
+
+    ``reported`` is the engine's own count where it supplies one. Both bundled
+    engines return ``total=None`` for message history and the session list has
+    no total field at all, so in practice this is the derived branch — but a
+    corp engine that fills it is preferred over anything computed here.
+
+    Derived: exact once the caller reaches the end (a short page proves it), and
+    a lower bound while full pages keep coming. Neither engine route exposes a
+    count, and the only way to compute one would be to fetch every record —
+    which for sessions fans out a ``chat.history`` RPC per session. A bound that
+    is honest about being a bound beats advertising pages that return nothing;
+    the endpoints document it on the field.
+    """
+    offset = (page_params.page - 1) * page_params.page_size
+    has_more = len(items) > page_params.page_size
+    visible = items[: page_params.page_size]
+    if reported is not None:
+        return reported, visible
+    return offset + len(visible) + (1 if has_more else 0), visible
+
+
+def _history_page(
+    items: list[Any], page_params: Any, *, reported: int | None
+) -> tuple[int, list[Any]]:
+    """The requested page cut out of a "newest N" tail. See :func:`_history_window`.
+
+    ``items`` is the newest ``offset + page_size + 1`` messages in chronological
+    order, so the page is measured from the *end*: page 1 is the most recent
+    ``page_size`` messages, page 2 the ``page_size`` before those. Paging a chat
+    history backwards is the only direction a tail-limited fetch can serve —
+    reaching the oldest page directly would mean fetching the whole history,
+    which has no count to size the request from.
+
+    Messages stay in chronological order *within* a page; it is the pages that
+    run newest-first.
+
+    The total falls out of the same window and is stronger than the session
+    list's: when the tail comes back short, it is the whole history, so the
+    count is exact. While it comes back full, it is a lower bound — the same
+    contract ``MessagePage.total`` documents. That equivalence only holds for
+    pages within the depth cap, which is why :func:`_require_within_depth`
+    rejects the rest rather than letting a clipped page look like the end.
+    """
+    size = page_params.page_size
+    skip = (page_params.page - 1) * size
+    n = len(items)
+    end = n - skip
+    # The lookahead item exists to prove more history remains; it must never be
+    # served as content. _require_within_depth keeps every served page a whole
+    # page below the cap, so this floor no longer has a page to trim — it stays
+    # as the invariant's backstop, and still binds if a device ever returns more
+    # than the limit asked for.
+    floor = max(0, n - _MAX_HISTORY_DEPTH)
+    visible = items[max(floor, end - size) : end] if end > floor else []
+    if reported is not None:
+        return reported, visible
+    return n, visible
+
+
+@router.get("/{bot_id}", response_model=Envelope[SessionPage])
+@envelope_errors
+async def list_sessions(
+    bot_id: str,
+    page: PageParamsDep,
+    principal: PrincipalDep,
+    request: Request,
+    agent_id: Annotated[
+        str | None, Query(description="Only sessions belonging to this agent.")
+    ] = None,
+    session_key: Annotated[
+        str | None,
+        Query(
+            description="Only the session with this key. Pass the value "
+            "verbatim; no encoding is required."
+        ),
+    ] = None,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[SessionPage]:
+    """List the bot's sessions."""
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    params: dict[str, Any] = _window(page)
+    if agent_id:
+        params["agent_id"] = agent_id
+    # Both filters are applied upstream, *before* the engine paginates — so
+    # they have to travel with the window rather than being applied to what
+    # came back, or the page boundaries would not line up with the filter.
+    if session_key:
+        params["session_key"] = session_key
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET", path="/api/sessions",
+        params=params,
+    )
+    mapped = [_map_session(d) for d in _as_list(result.data)]
+    # The session list reports no total; derive it from the window.
+    total, items = _page(mapped, page, reported=result.total)
+    return page_envelope(total, items, request)
+
+
+@router.post("/{bot_id}", status_code=201, response_model=Envelope[Session])
+@envelope_errors
+async def create_session(
+    bot_id: str,
+    body: SessionCreate,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[Session]:
+    """Create a session."""
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST", path="/api/sessions",
+        body={
+            "title": body.title,
+            "model": body.model,
+            # Filled from the principal, never accepted from the caller.
+            "user_id": owner_id,
+        },
+    )
+    if not isinstance(result.data, dict):
+        raise EngineResourceNotFoundError("engine returned no session")
+    return created(_map_session(result.data), request)
+
+
+@router.get("/{bot_id}/{session_id}", response_model=Envelope[Session])
+@envelope_errors
+async def get_session(
+    bot_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[Session]:
+    """Get one session.
+
+    Pass the `session_id` exactly as the list endpoint returned it. The value
+    may contain colons; no encoding is required.
+    """
+    # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
+    # containing "/" would not be addressable, but no engine id format has one.
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
+        path=f"/api/sessions/{session_id}",
+    )
+    if not isinstance(result.data, dict):
+        raise EngineResourceNotFoundError(f"no session {session_id}")
+    return envelope(_map_session(result.data), request)
+
+
+@router.patch("/{bot_id}/{session_id}", response_model=Envelope[Session])
+@envelope_errors
+async def update_session(
+    bot_id: str,
+    session_id: str,
+    body: SessionUpdate,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[Session]:
+    """Update a session. Omitted fields are left unchanged."""
+    # Publicly a PATCH on the resource; the engine models the same operation as
+    # a POST to an /update sub-path.
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="POST",
+        # QUERY params, not a body. The engine declares this route's fields as
+        # bare scalar arguments, which FastAPI binds from the query string —
+        # there is no Body(...) on it. Sending a body is silently discarded and
+        # the endpoint answers 200 with the unchanged session: a no-op that
+        # looks like success.
+        path=f"/api/sessions/{session_id}/update", params=payload,
+    )
+    if not isinstance(result.data, dict):
+        raise EngineResourceNotFoundError(f"no session {session_id}")
+    return envelope(_map_session(result.data), request)
+
+
+@router.delete("/{bot_id}/{session_id}", response_model=Envelope[Deleted])
+@envelope_errors
+async def delete_session(
+    bot_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[Deleted]:
+    """Delete a session."""
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
+        path=f"/api/sessions/{session_id}",
+    )
+    return deleted(request)
+
+
+@router.get("/{bot_id}/{session_id}/messages", response_model=Envelope[MessagePage])
+@envelope_errors
+async def list_session_messages(
+    bot_id: str,
+    session_id: str,
+    page: PageParamsDep,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[MessagePage]:
+    """Read a session's message history, newest page first.
+
+    Page 1 is the most recent messages; paging forward walks back through the
+    history. Messages are chronological within a page.
+
+    History is served to a depth of 5000 messages. A page reaching past that
+    depth is rejected with 422 rather than returned empty, so an end of history
+    is never confused with the limit of what this endpoint serves.
+    """
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    _require_within_depth(page)
+    result = await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="GET",
+        path=f"/api/sessions/{session_id}/messages",
+        # The history route tail-limits rather than paginating, so the offset is
+        # applied here instead of being sent. See ``_history_window``.
+        params=_history_window(page),
+    )
+    mapped = [_map_message(d, session_id) for d in _as_list(result.data)]
+    # The engine's envelope carries a total field, so it is used when filled —
+    # but both bundled adapters return None for history, so this is normally the
+    # derived value. See ``_history_page``.
+    total, items = _history_page(mapped, page, reported=result.total)
+    return page_envelope(total, items, request)
+
+
+@router.delete("/{bot_id}/{session_id}/messages", response_model=Envelope[Deleted])
+@envelope_errors
+async def clear_session_messages(
+    bot_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    request: Request,
+    relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+) -> Envelope[Deleted]:
+    """Clear a session's message history, keeping the session."""
+    owner_id = caller_owner_id(principal)
+    facts = await _require_private_personal_bot(relay, bot_id, owner_id)
+    await relay.call(
+        bot_id=bot_id, owner_id=owner_id, facts=facts, method="DELETE",
+        path=f"/api/sessions/{session_id}/messages",
+    )
+    return deleted(request)

@@ -21,12 +21,17 @@ from secbaas.community.core.repository.device_template import (
 from secbaas.community.core.repository.distributed_lock import (
     OrmDistributedLockRepository,
 )
+from secbaas.community.core.repository.file_transfer_ticket import OrmTicketRepository
 from secbaas.community.core.repository.local_user_machine import (
     OrmLocalUserMachineRepository,
 )
 from secbaas.community.core.repository.publish import OrmPublishRepository
 from secbaas.community.core.repository.publish_batch import OrmPublishBatchRepository
 from secbaas.community.core.repository.publish_record import OrmPublishRecordRepository
+from secbaas.community.core.repository.resource_key import OrmResourceKeyRepository
+from secbaas.community.core.repository.session_file_ticket import (
+    OrmSessionTicketRepository,
+)
 from secbaas.community.core.repository.system_config import OrmSystemConfigRepository
 from secbaas.community.core.repository.tenant import OrmTenantRepository
 from secbaas.community.core.repository.ws_relay_session import (
@@ -139,6 +144,11 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         ZDAS_ORM=_orm_repo(OrmPublishRecordRepository),
         SQLITE_ORM=_orm_repo(OrmPublishRecordRepository),
     )
+    resource_key_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmResourceKeyRepository),
+        SQLITE_ORM=_orm_repo(OrmResourceKeyRepository),
+    )
     system_config_repository = providers.Selector(
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmSystemConfigRepository),
@@ -153,4 +163,15 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmWsRelaySessionRepository),
         SQLITE_ORM=_orm_repo(OrmWsRelaySessionRepository),
+    )
+    ticket_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmTicketRepository),
+        SQLITE_ORM=_orm_repo(OrmTicketRepository),
+    )
+
+    session_ticket_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmSessionTicketRepository),
+        SQLITE_ORM=_orm_repo(OrmSessionTicketRepository),
     )

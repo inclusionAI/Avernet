@@ -15,6 +15,11 @@ path = "src/main.rs"
 # Async runtime
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 
+# OAuth extension point (link-time provider resolution; public builds link no
+# Ant SDK, so these are neutral crates available to both OSS and internal builds)
+inventory = { workspace = true }
+async-trait = { workspace = true }
+
 # Error handling
 anyhow    = { workspace = true }
 
@@ -35,8 +40,16 @@ tracing-subscriber = { workspace = true }
 # HTTP client
 reqwest = { workspace = true }
 
+# Async utilities
+futures = { workspace = true }
+tokio-util = { workspace = true, features = ["io"] }
+
 # URL encoding
 urlencoding = "2"
+
+# Charset detection for text uploads (see guess_charset helper).
+chardetng = { workspace = true }
+encoding_rs = { workspace = true }
 
 # UUID
 uuid = { workspace = true }

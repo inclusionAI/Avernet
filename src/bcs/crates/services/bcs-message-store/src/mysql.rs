@@ -10,6 +10,7 @@ use bcs_domain::{
     MessageOwnerFilter, MessagePage, MessageQuery, NewMessage, PersistedMessage, PersistedMessageStatus, SenderType,
 };
 use bcs_service_api::port::repo::{MessageRepoError, MessageRepoPort};
+use bcs_service_api::{ServiceError, ServiceResult};
 
 // ---------------------------------------------------------------------------
 // SQL constants
@@ -309,6 +310,10 @@ impl MessageRepoPort for MySqlMessageStore {
                 conditions.push("owner_bot_id = ?".to_string());
                 params.push(DbValue::from(owner_bot_id.clone()));
             }
+            MessageOwnerFilter::PublicOrOwner(owner_bot_id) => {
+                conditions.push("(owner_bot_id IS NULL OR owner_bot_id = ?)".to_string());
+                params.push(DbValue::from(owner_bot_id.clone()));
+            }
         }
 
         if let Some(ref keyword) = query.keyword {
@@ -352,7 +357,7 @@ impl MessageRepoPort for MySqlMessageStore {
         }
 
         let next_cursor = if has_more {
-            messages.last().map(|m| m.created_at)
+            messages.last().map(|m| (m.created_at, m.session_seq))
         } else {
             None
         };
@@ -410,6 +415,117 @@ impl MessageRepoPort for MySqlMessageStore {
         } else {
             Ok(0)
         }
+    }
+
+    /// Direct-read session history with full visibility predicates + cursor
+    /// pagination. Sort is the legacy `created_at DESC, session_seq DESC`
+    /// (newest first); `before` is an exclusive composite
+    /// `(created_at, session_seq)` cursor so tied `created_at` rows are not
+    /// skipped at a page boundary (VYQHI). SQL uses the
+    /// `created_at < ? OR (created_at = ? AND session_seq < ?)` compound
+    /// predicate because SQLite (used by the conformance test harness) does
+    /// not support MySQL row-constructor comparison `(a, b) < (?, ?)`.
+    ///
+    /// VUlao: filters reads by the store's own `env` so one env cannot leak
+    /// another env's messages (matches the INSERT-time env tagging).
+    async fn list_session_history(
+        &self,
+        session_id: &str,
+        owner_filter: MessageOwnerFilter,
+        visible_from_seq: Option<i64>,
+        before: Option<(u64, i64)>,
+        limit: u32,
+    ) -> ServiceResult<MessagePage> {
+        let limit = limit as usize;
+
+        let mut params: Vec<DbValue> = vec![
+            DbValue::from(session_id.to_string()),
+            DbValue::from(self.env.clone()),
+        ];
+        let mut conditions = vec![
+            "session_id = ?".to_string(),
+            "env = ?".to_string(),
+        ];
+
+        match &owner_filter {
+            MessageOwnerFilter::Any => {}
+            MessageOwnerFilter::IsNull => {
+                conditions.push("owner_bot_id IS NULL".to_string());
+            }
+            MessageOwnerFilter::Eq(owner) => {
+                conditions.push("owner_bot_id = ?".to_string());
+                params.push(DbValue::from(owner.clone()));
+            }
+            MessageOwnerFilter::PublicOrOwner(owner) => {
+                conditions.push("(owner_bot_id IS NULL OR owner_bot_id = ?)".to_string());
+                params.push(DbValue::from(owner.clone()));
+            }
+        }
+
+        if let Some(visible_from) = visible_from_seq {
+            conditions.push("session_seq >= ?".to_string());
+            params.push(DbValue::from(visible_from));
+        }
+
+        // VYQHI: composite (created_at, session_seq) strict-less bound. The
+        // compound `created_at < ? OR (created_at = ? AND session_seq < ?)`
+        // is equivalent to the row-constructor `(created_at, session_seq) <
+        // (?, ?)` and runs on both MySQL and SQLite.
+        if let Some((cursor_ts, cursor_seq)) = before {
+            conditions.push(
+                "(created_at < ? OR (created_at = ? AND session_seq < ?))".to_string(),
+            );
+            params.push(DbValue::from(cursor_ts));
+            params.push(DbValue::from(cursor_ts));
+            params.push(DbValue::from(cursor_seq));
+        }
+
+        // Fetch limit+1 to detect has_more.
+        let fetch_limit = (limit + 1) as u64;
+        let sql = format!(
+            "SELECT {SELECT_COLS} FROM bcs_messages WHERE {} ORDER BY created_at DESC, session_seq DESC LIMIT ?",
+            conditions.join(" AND ")
+        );
+        params.push(DbValue::from(fetch_limit));
+
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!("list_session_history query: {e}"))
+            })?;
+
+        let has_more = rows.len() > limit;
+        let rows = if has_more { &rows[..limit] } else { &rows[..] };
+
+        let mut messages = Vec::with_capacity(rows.len());
+        for row in rows {
+            messages.push(row_to_message(row).map_err(|e| {
+                ServiceError::InternalError(format!("list_session_history row: {e}"))
+            })?);
+        }
+
+        let next_cursor = if has_more {
+            messages.last().map(|m| (m.created_at, m.session_seq))
+        } else {
+            None
+        };
+
+        info!(
+            session_id = %session_id,
+            count = messages.len(),
+            has_more,
+            visible_from_seq = ?visible_from_seq,
+            owner_filter = ?owner_filter,
+            backend = %self.backend_label(),
+            "session history listed"
+        );
+        Ok(MessagePage {
+            messages,
+            next_cursor,
+            has_more,
+        })
     }
 }
 

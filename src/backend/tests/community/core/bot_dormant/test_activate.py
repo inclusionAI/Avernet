@@ -1,18 +1,33 @@
 """Tests for ActivateBotService (Task 6).
 
-Five scenarios:
+Six scenarios:
   1. reject_active_bot          — ACTIVE → InvalidBotStateError
   2. reactivating_friendly      — REACTIVATING → friendly dict (no update_status call)
   3. recycled_kicks_async       — RECYCLED → update_status(REACTIVATING) + start_bot called
   4. rollback_on_passport_error — passport unfreeze raises → status=RECYCLED,
                                    start_bot NOT called
   5. rollback_on_start_bot_fail — start_bot raises → passport freeze + status=RECYCLED
+  6. missing_token_after_unfreeze — token absent → freeze + RECYCLED before start
 """
 from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
+from agentclaw.community.core.bot_dormant.activate_service import (
+    ActivateBotService,
+    BotNotFoundError,
+    InvalidBotStateError,
+)
+
+
+def test_activate_reports_missing_bot_through_dormant_contract():
+    """A protocol implementation returning no bot raises the stable service error."""
+    bot_service = MagicMock()
+    bot_service.get_bot.return_value = None
+    svc = ActivateBotService(bot_service, passport_plugin=MagicMock())
+
+    with pytest.raises(BotNotFoundError):
+        svc.activate(bot_id="missing", user_id="u1")
 
 
 def test_activate_rejects_active_bot():
@@ -41,6 +56,7 @@ def test_activate_recycled_kicks_async(monkeypatch):
     bot_service.get_bot.return_value = {"bot_id": "b1", "status": "RECYCLED"}
     passport_mock = MagicMock()
     passport_mock.unfreeze_agent_passport.return_value = None
+    passport_mock.query_token.return_value = "token-b1"
 
     svc = ActivateBotService(bot_service, passport_plugin=passport_mock)
 
@@ -69,6 +85,10 @@ def test_activate_recycled_kicks_async(monkeypatch):
         bot_id="b1",
         owner_workno="u1",
         reason="manual reactivate",
+    )
+    passport_mock.query_token.assert_called_once_with(
+        bot_id="b1",
+        owner_workno="u1",
     )
     bot_service.start_bot.assert_called_once()
     # Return value is REACTIVATING
@@ -136,6 +156,7 @@ def test_rollback_on_start_bot_failure(monkeypatch):
     """start_bot raises → passport freeze (rollback) + update_status(RECYCLED)."""
     passport_mock = MagicMock()
     passport_mock.unfreeze_agent_passport.return_value = None
+    passport_mock.query_token.return_value = "token-b1"
     passport_mock.freeze_agent_passport.return_value = None
 
     svc, bot_service = _make_svc_with_passport("RECYCLED", passport_mock)
@@ -165,4 +186,35 @@ def test_rollback_on_start_bot_failure(monkeypatch):
         bot_id="b1", user_id="u1", status="RECYCLED"
     )
     # Caller still gets REACTIVATING
+    assert result["status"] == "REACTIVATING"
+
+
+def test_missing_token_after_unfreeze_rolls_back_before_start(monkeypatch):
+    """Online success without a queryable token must not start the bot."""
+    passport_mock = MagicMock()
+    passport_mock.unfreeze_agent_passport.return_value = None
+    passport_mock.query_token.return_value = None
+    passport_mock.freeze_agent_passport.return_value = None
+
+    svc, bot_service = _make_svc_with_passport("RECYCLED", passport_mock)
+    monkeypatch.setattr(
+        "agentclaw.community.core.bot_dormant.activate_service.threading.Thread",
+        _SyncThread,
+    )
+
+    result = svc.activate(bot_id="b1", user_id="u1")
+
+    passport_mock.query_token.assert_called_once_with(
+        bot_id="b1",
+        owner_workno="u1",
+    )
+    bot_service.start_bot.assert_not_called()
+    passport_mock.freeze_agent_passport.assert_called_once_with(
+        bot_id="b1",
+        owner_workno="u1",
+        reason="reactivate rollback",
+    )
+    bot_service.update_status.assert_called_with(
+        bot_id="b1", user_id="u1", status="RECYCLED"
+    )
     assert result["status"] == "REACTIVATING"

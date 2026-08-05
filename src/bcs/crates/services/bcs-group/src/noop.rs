@@ -122,6 +122,7 @@ impl SessionManagementService for EmptySessionManagementService {
                 created_at: 0,
                 updated_at: 0,
                 completed_at: None,
+                collected_at: None,
                 meta: cmd.params.meta,
             },
             created: true,

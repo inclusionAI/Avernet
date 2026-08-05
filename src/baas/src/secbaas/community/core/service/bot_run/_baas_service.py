@@ -353,7 +353,7 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         wait_result: bool = True,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         chat_metadata: dict[str, str] | None = None,
     ) -> BotResponse:
         """Send a message and get response via ChatClient.
@@ -397,26 +397,18 @@ class BaasBotService(BotService):
         try:
             auth_token = context.build_auth_token() if context else None
             app_id = context.app_id if context else None
-            content, state = await client.send_message(
+            content, agent_events = await client.send_message(
                 message=message,
                 session_key=session_id,
                 wait_result=wait_result,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
                 chat_metadata=chat_metadata,
             )
-
-            if state == "error":  # type: ignore[comparison-overlap]
-                self._mark_session_failed(baas_session_id, err_msg=content)
-                raise BotServiceError(content)
-
             self._mark_session_completed(baas_session_id, result={"content": content})
             return BotResponse(content=content)
-
-        except BotServiceError:
+        except TimeoutError:
             raise
         except ConcurrentSessionError as e:
             self._mark_session_failed(
@@ -439,7 +431,7 @@ class BaasBotService(BotService):
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
     ) -> AsyncIterator[StreamChunk]:
         """流式发送消息，逐 chunk 产出 StreamChunk。
 
@@ -470,17 +462,21 @@ class BaasBotService(BotService):
         app_id = context.app_id if context else None
 
         try:
+            stream_error = False
             async for chunk in client.send_message_stream(
                 message=message,
                 session_key=session_id,
-                timeout=timeout
-                if timeout is not None
-                else self._config.request_timeout,
+                timeout=timeout,
                 auth_token=auth_token,
                 app_id=app_id,
             ):
+                if chunk.type == "error":
+                    stream_error = True
                 yield replace(chunk, engine_type=engine_type)
-            self._mark_session_completed(baas_session_id)
+            if stream_error:
+                self._mark_session_failed(baas_session_id)
+            else:
+                self._mark_session_completed(baas_session_id)
         except ConcurrentSessionError as e:
             self._mark_session_failed(
                 baas_session_id, err_msg=f"Concurrent request: {e}"
@@ -667,6 +663,63 @@ class BaasBotService(BotService):
             logger.warning("Failed to get session: %s", e)
             raise BotServiceError(
                 f"Failed to get session: {_safe_client_msg(e)}"
+            ) from e
+
+    async def list_sessions(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        context: BotChatContext | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot binding (read-only).
+
+        通过 AsyncSessionClient 从 adapter 侧查询会话列表，不创建新会话。
+
+        Args:
+            binding_info: Binding info for HTTP connection.
+            context: Optional request context for tenant extraction.
+            limit: Maximum number of sessions to return.
+            offset: Number of sessions to skip.
+
+        Returns:
+            List of SessionInfo objects.
+
+        Raises:
+            BotServiceError: 请求失败
+        """
+        try:
+            conn_info = await self._resolve_ws_connection_for_binding(
+                binding_info, context
+            )
+        except Exception as e:
+            logger.warning("Failed to resolve WS connection: %s", e)
+            raise BotServiceError(
+                f"Failed to resolve WS connection: {_safe_client_msg(e)}"
+            ) from e
+
+        session_client = self._create_session_client(
+            conn_info, binding_info.engine_type
+        )
+        try:
+            async with session_client:
+                adapter_sessions = await session_client.list_sessions(
+                    agent_id=binding_info.bot_id,
+                    limit=limit,
+                    offset=offset,
+                    engine=binding_info.engine_type,
+                )
+                return [
+                    _map_adapter_session_info(s, binding_info.bot_id)
+                    for s in adapter_sessions
+                ]
+        except BotServiceError:
+            raise
+        except Exception as e:
+            logger.warning("Failed to list sessions: %s", e)
+            raise BotServiceError(
+                f"Failed to list sessions: {_safe_client_msg(e)}"
             ) from e
 
     # ── 私有方法 ─────────────────────────────────────────────────────────────

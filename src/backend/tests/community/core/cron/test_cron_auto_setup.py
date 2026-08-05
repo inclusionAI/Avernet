@@ -416,6 +416,26 @@ class TestCronAutoSetupService:
         assert "runtime" not in body
 
     @pytest.mark.asyncio
+    async def test_create_cron_timeout_secs_is_one_hour_default(self):
+        """autoInitiate 任务超时写入 payload.timeout_secs，默认 1 小时，不再写死 86400。
+
+        cron_auto_setup 是自动创建路径，无前端下发 timeout_secs，统一用
+        DEFAULT_CRON_TIMEOUT_SECS；ext 中的 timeout_secs 不读取（ext 不持有该字段）。
+        """
+        service, mock_repo, mock_relay = self._create_service(
+            template_data={
+                "name": "TestBot",
+                "ext": {"is_hosted_24x7": 1, "dima_space_id": "W123", "timeout_secs": 86400},
+            }
+        )
+        result = await service.auto_setup_cron_for_bot("bot1", "user1", "nick1")
+
+        assert result is not None
+        body = mock_relay.forward_request.call_args.kwargs["body"]
+        # 统一 1 小时；ext.timeout_secs 即便存在也不读取
+        assert body["timeout_secs"] == DEFAULT_CRON_TIMEOUT_SECS == 3600
+
+    @pytest.mark.asyncio
     async def test_create_cron_with_model_from_config(self):
         """template ext 带 model → adapter_body 透传外部配置的 model。"""
         service, mock_repo, mock_relay = self._create_service(

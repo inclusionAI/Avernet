@@ -90,12 +90,14 @@ def _seed_provider_bot(
                 "INSERT INTO ac_bots ("
                 "bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id, owner_id, "
                 "owner_name, engine_types, active_engine, status, binding_id, device_id, "
-                "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type"
+                "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, "
+                "call_type, caller_config_revision"
                 ") VALUES ("
                 ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                 ":owner_id, :engine_types, :active_engine, 'ACTIVE', "
                 "(SELECT id FROM ac_entity_device_binding WHERE device_id = :device_id), "
-                ":device_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'personal'"
+                ":device_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, 'personal', "
+                "'owner', 0"
                 ")"
             ),
             "params": {
@@ -136,12 +138,13 @@ def _seed_plain_bot(
                     "INSERT INTO ac_bots ("
                     "bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id, owner_id, "
                     "owner_name, engine_types, active_engine, status, binding_id, device_id, "
-                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, template_type"
+                    "gmt_create, gmt_modified, is_delete, public, ext, env, bot_type, template_type, "
+                    "call_type, caller_config_revision"
                     ") VALUES ("
                     ":bot_id, :bot_name, :bot_desc, :owner_id, 'staff', :owner_id, :owner_id, "
                     ":owner_id, :engine_types, :active_engine, :status, :binding_id, :device_id, "
                     "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, '0', :ext, :env, "
-                    ":bot_type, :template_type"
+                    ":bot_type, :template_type, 'owner', 0"
                     ")"
                 ),
                 "params": {
@@ -677,12 +680,14 @@ def test_bot_management_boundary_paths(live_backend):
             bot_name="BotMgmt default guard",
             status="ACTIVE",
         )
+        # T4: delete protection is now count-based (keep >=1 bot), not bot_id=="default".
+        # This owner has exactly one bot, so deleting it must be rejected.
         delete_default = client.delete(f"/api/bots/{default_bot_id}")
         assert delete_default.status_code == 200, delete_default.text
         delete_default_body = delete_default.json()
         assert delete_default_body["success"] is False, delete_default_body
         assert delete_default_body["error_code"] == 500, delete_default_body
-        assert "default bot" in delete_default_body["message"], delete_default_body
+        assert "至少保留一个 Bot" in delete_default_body["message"], delete_default_body
 
         desktop_device_id = f"BOT-{fresh_id('desktop_guard')}"
         binding_id = _seed_desktop_binding(

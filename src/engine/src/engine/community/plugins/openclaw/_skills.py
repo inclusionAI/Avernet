@@ -2,15 +2,38 @@
 
 Also contains _SkillsEnsureError (relocated from engines/openclaw/skills.py).
 """
+
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import Any
 
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
+from engine.community.plugin_api.openclaw.skills import (
+    PoolLayoutActivationPortResult,
+)
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
+from engine.community.plugins.openclaw.layout_activation import (
+    MappingSourceLayout,
+    activate_openclaw_pool,
+    publish_pool_mappings,
+    rollback_openclaw_pool,
+    verify_skill_mappings,
+)
+from engine.community.plugins.openclaw.layout_probe import inspect_runtime_layout
+from engine.community.plugins.skills_pool.layout_quarantine import (
+    cleanup_quarantine,
+)
+from engine.community.plugins.skills_pool.mapping_contract import (
+    ResolvedMappingPayload,
+    resolve_mapping_payload,
+)
 
 log = logging.getLogger("openclaw-port")
 
@@ -36,6 +59,133 @@ class _SkillsPortMixin:
         workspace_root() / "skills" / "skills-center"
     )
 
+    @staticmethod
+    def _pool_mappings(
+        params: dict[str, Any],
+        *,
+        source_layout: MappingSourceLayout,
+        key: str = "mappings",
+    ) -> ResolvedMappingPayload:
+        return resolve_mapping_payload(
+            engine="openclaw",
+            source_layout=source_layout,
+            payload=params.get(key, []),
+            mapping_contract_version=params.get("mapping_contract_version"),
+        )
+
+    async def activate_pool_layout(
+        self, params: dict[str, Any]
+    ) -> PoolLayoutActivationPortResult:
+        result = await asyncio.to_thread(
+            activate_openclaw_pool,
+            migration_generation=params["migration_generation"],
+            preparation_id=params["preparation_id"],
+            registered_local_names=list(params.get("registered_local_names", [])),
+            mappings=list(
+                self._pool_mappings(
+                    params,
+                    source_layout=MappingSourceLayout.POOL,
+                ).mappings
+            ),
+        )
+        return PoolLayoutActivationPortResult(**result.to_data())
+
+    async def rollback_pool_layout(
+        self, params: dict[str, Any]
+    ) -> PoolLayoutActivationPortResult:
+        result = await asyncio.to_thread(
+            rollback_openclaw_pool,
+            rollback_generation=params["rollback_generation"],
+            registered_local_names=list(params.get("registered_local_names", [])),
+        )
+        return PoolLayoutActivationPortResult(**result.to_data())
+
+    async def cleanup_pool_quarantine(self, params: dict[str, Any]) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            cleanup_quarantine,
+            engine="openclaw",
+            home=Path("/home/admin"),
+            migration_generation=params["migration_generation"],
+        )
+        return result.to_data()
+
+    async def probe_pool_layout(self, params: dict[str, Any]) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            inspect_runtime_layout,
+            engine="openclaw",
+            expected_contract_version=params["layout_contract_version"],
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
+        )
+        return result.to_data()
+
+    async def publish_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
+        retired = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            key="retired_mappings",
+        )
+        publish_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            publish_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            publish_pool_mappings,
+            **publish_kwargs,
+        )
+        data = result.to_data()
+        if result.published and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
+        return data
+
+    async def verify_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
+        retired = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            key="retired_mappings",
+        )
+        verify_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            verify_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            verify_skill_mappings,
+            **verify_kwargs,
+        )
+        data = result.to_data()
+        if result.valid and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
+        return data
+
     def _skills_resolve_base_dir(self) -> Path:
         """Resolve SKILLS_LINK_BASE_DIR from env, or default.
 
@@ -43,7 +193,8 @@ class _SkillsPortMixin:
         ``engines/openclaw/skills.py:OpenClawSkillsService._resolve_base_dir``.
         """
         base = os.getenv(
-            self._SKILLS_LINK_BASE_DIR_ENV, self._DEFAULT_SKILLS_LINK_BASE_DIR,
+            self._SKILLS_LINK_BASE_DIR_ENV,
+            self._DEFAULT_SKILLS_LINK_BASE_DIR,
         ).strip()
         if not base:
             base = self._DEFAULT_SKILLS_LINK_BASE_DIR
@@ -51,13 +202,12 @@ class _SkillsPortMixin:
 
     # Per-key asyncio locks (in-process; single-process deployment, isolated per bot).
     @classmethod
-    def _get_ensure_lock(cls, key: str) -> "Any":
-        import asyncio as _asyncio  # noqa: PLC0415
-        from collections import defaultdict  # noqa: PLC0415
+    def _get_ensure_lock(cls, key: str) -> Any:
+        import asyncio as _asyncio
+        from collections import defaultdict
+
         if not hasattr(cls, "_skills_ensure_locks_store"):
-            cls._skills_ensure_locks_store: "dict[str, Any]" = defaultdict(
-                _asyncio.Lock
-            )
+            cls._skills_ensure_locks_store: dict[str, Any] = defaultdict(_asyncio.Lock)
         return cls._skills_ensure_locks_store[key]
 
     @staticmethod
@@ -118,13 +268,14 @@ class _SkillsPortMixin:
         Relocated intact from
         ``engines/openclaw/skills.py:OpenClawSkillsService._rsync_dir``.
         """
-        import subprocess as _sp  # noqa: PLC0415
+        import subprocess as _sp
 
         result = _sp.run(
             ["rsync", "-rltD", "--delete", f"{src}/", f"{dst}/"],
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         if result.returncode != 0:
             raise _SkillsEnsureError(
@@ -160,7 +311,7 @@ class _SkillsPortMixin:
         operating on plain dicts.  Raises ``RuntimeError`` on NAS-source-
         missing or rsync failure.
         """
-        import asyncio as _asyncio  # noqa: PLC0415
+        import asyncio as _asyncio
 
         skill_uuid = item["skill_uuid"]
         version_dir_name = str(item["version"])
@@ -199,12 +350,17 @@ class _SkillsPortMixin:
         ``engines/openclaw/skills.py:OpenClawSkillsService.ensure_center_skills``.
         """
         log.info("[skills.ensure] start")
-        nas_root = Path(os.environ.get(
-            self._SKILLS_CENTER_NAS_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_NAS_ROOT
-        ))
-        local_root = Path(os.environ.get(
-            self._SKILLS_CENTER_LOCAL_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_LOCAL_ROOT
-        ))
+        nas_root = Path(
+            os.environ.get(
+                self._SKILLS_CENTER_NAS_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_NAS_ROOT
+            )
+        )
+        local_root = Path(
+            os.environ.get(
+                self._SKILLS_CENTER_LOCAL_ROOT_ENV,
+                self._DEFAULT_SKILLS_CENTER_LOCAL_ROOT,
+            )
+        )
 
         ok: list[dict[str, Any]] = []
         failed: list[dict[str, Any]] = []
@@ -219,17 +375,23 @@ class _SkillsPortMixin:
                 # (→ HTTP 500) rather than being silently logged as failures.
                 log.warning(
                     "[skills.ensure] failed uuid=%s ver=%s: %s",
-                    item.get("skill_uuid"), item.get("version"), e,
+                    item.get("skill_uuid"),
+                    item.get("version"),
+                    e,
                 )
-                failed.append({
-                    "skill_uuid": item.get("skill_uuid", ""),
-                    "version": item.get("version", ""),
-                    "reason": str(e),
-                })
+                failed.append(
+                    {
+                        "skill_uuid": item.get("skill_uuid", ""),
+                        "version": item.get("version", ""),
+                        "reason": str(e),
+                    }
+                )
 
         log.info(
             "[skills.ensure] done total=%d ok=%d failed=%d",
-            len(params.get("items", [])), len(ok), len(failed),
+            len(params.get("items", [])),
+            len(ok),
+            len(failed),
         )
         return {"ok": ok, "failed": failed}
 
@@ -296,7 +458,11 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.symlink] sync done total=%d created=%d updated=%d kept=%d removed=%d",
-            len(desired), len(created), len(updated), len(kept), len(removed),
+            len(desired),
+            len(created),
+            len(updated),
+            len(kept),
+            len(removed),
         )
         return {
             "total": len(desired),
@@ -321,7 +487,8 @@ class _SkillsPortMixin:
         clean_target_dir = params.get("clean_target_dir", True)
         log.info(
             "[skills.bindpath] start sync requested_count=%d clean_target_dir=%s",
-            len(requested), clean_target_dir,
+            len(requested),
+            clean_target_dir,
         )
 
         desired: dict[Path, Path] = {}
@@ -338,7 +505,10 @@ class _SkillsPortMixin:
             target = _convert_path(str(target_raw))
             log.info(
                 "[skills.bindpath] item source_raw=%s → %s target_raw=%s → %s",
-                source_raw, source, target_raw, target,
+                source_raw,
+                source,
+                target_raw,
+                target,
             )
             if target in desired:
                 raise ValueError(f"target 重复: {target}")
@@ -349,6 +519,19 @@ class _SkillsPortMixin:
         updated: list[str] = []
         removed: list[str] = []
         to_recreate: set[Path] = set()
+
+        # Validate the complete desired set before mutating any target. This
+        # boundary is shared by direct CRUD sync and restart reconciliation;
+        # rejecting here prevents both paths from creating dangling active
+        # links. The source can disappear after this check, but that unavoidable
+        # filesystem race is narrower than committing a known-missing source.
+        missing_sources = sorted(
+            {str(source) for source in desired.values() if not source.exists()}
+        )
+        if missing_sources:
+            raise RuntimeError(
+                "bindpath source does not exist: " + ", ".join(missing_sources)
+            )
 
         for target, source in desired.items():
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -366,11 +549,14 @@ class _SkillsPortMixin:
 
         if clean_target_dir:
             target_dirs = {t.parent for t in desired}
+            reserved_layout_bridges = {"skills-local", "skills-repo"}
             for d in target_dirs:
                 if not d.is_dir():
                     continue
                 for entry in d.iterdir():
                     if not entry.is_symlink():
+                        continue
+                    if entry.name in reserved_layout_bridges:
                         continue
                     if entry not in desired:
                         entry.unlink()
@@ -378,7 +564,11 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.bindpath] sync done total=%d created=%d updated=%d kept=%d removed=%d",
-            len(desired), len(created), len(updated), len(kept), len(removed),
+            len(desired),
+            len(created),
+            len(updated),
+            len(kept),
+            len(removed),
         )
         return {
             "total": len(desired),
@@ -408,7 +598,8 @@ class _SkillsPortMixin:
             dir_path = _convert_path(str(dir_raw))
             log.info(
                 "[skills.clean] dir_raw=%s → %s",
-                dir_raw, dir_path,
+                dir_raw,
+                dir_path,
             )
             if not dir_path.is_dir():
                 continue
@@ -420,6 +611,7 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.clean] scanned=%d removed=%d",
-            directories_scanned, len(removed),
+            directories_scanned,
+            len(removed),
         )
         return {"directories_scanned": directories_scanned, "removed": removed}

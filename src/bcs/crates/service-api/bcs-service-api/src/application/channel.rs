@@ -11,7 +11,9 @@ use bcs_domain::{
 };
 
 use crate::core::ServiceError;
-use crate::port::channel_delivery::{ChannelOutboundEventKind, ChannelRenderHint};
+use crate::port::channel_delivery::{
+    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
+};
 
 /// Channel use-case 错误。
 #[derive(Debug, thiserror::Error)]
@@ -140,9 +142,12 @@ pub struct OutboundMessage {
     /// 发送者显示名(用于 "[name]" 前缀)。
     pub sender_label: String,
     pub kind: ChannelOutboundEventKind,
+    pub purpose: ChannelOutboundPurpose,
     pub text: Option<String>,
     pub raw_payload: serde_json::Value,
     pub render_hint: ChannelRenderHint,
+    /// Original IM message id when this run was started by a channel message.
+    pub source_im_message_id: Option<String>,
     /// 该消息是否来自 IM(防回环:来自 IM 的不再转发回去)。
     pub source_is_channel: bool,
 }

@@ -52,6 +52,7 @@ from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
@@ -160,11 +161,12 @@ class SkillRepository:
 
     @inject
     def __init__(self, db: DatabasePlugin):
-        from agentclaw.community.core.models import Skill, SkillSet
+        from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
 
         self._db = db
         self.Skill = Skill
         self.SkillSet = SkillSet
+        self.SkillSetSkill = SkillSetSkill
 
     def get_by_id(self, skill_id: str) -> Optional[dict]:
         with self._db.orm_session() as db:
@@ -335,6 +337,225 @@ class SkillRepository:
             query = query.order_by(self.Skill.gmt_created.desc())
             return [_skill_to_dict(s) for s in query.all()]
 
+    def get_bot_local_by_name(
+        self,
+        *,
+        bot_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> dict | None:
+        """精确命中 Bot-owned local 行，禁止回退到 ``bolt_id IS NULL``。"""
+
+        with self._db.orm_session() as db:
+            query = db.query(self.Skill).filter(
+                self.Skill.env == get_current_env(),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.name == name,
+                self.Skill.git_path.like("local://%"),
+            )
+            if user_id is not None:
+                query = query.filter(
+                    self.Skill.user_id == _normalize_user_id(user_id)
+                )
+            row = query.order_by(self.Skill.gmt_created.desc()).first()
+            return _skill_to_dict(row) if row is not None else None
+
+    def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
+        """Return all exact same-name Local rows; never hide legacy duplicates."""
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.env == get_current_env(),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.name == name,
+                    self.Skill.git_path.like("local://%"),
+                )
+                .order_by(self.Skill.id.asc())
+                .all()
+            )
+            return [_skill_to_dict(row) for row in rows]
+
+    @staticmethod
+    def _public_local_skill(row, active: bool) -> dict:
+        data = _skill_to_dict(row)
+        data["active"] = bool(active)
+        return data
+
+    def list_bot_local_skills(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        page: int,
+        page_size: int,
+        active: bool | None,
+        keyword: str | None,
+    ) -> tuple[int, list[dict]]:
+        """Page exact Bot-owned ``local://`` rows by desired active state."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+
+        with self._db.orm_session() as db:
+            excluded = (
+                db.query(DefaultSkillsetSkillExclusion.id)
+                .filter(
+                    DefaultSkillsetSkillExclusion.user_id
+                    == _normalize_user_id(user_id),
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                )
+                .exists()
+            )
+            query = db.query(self.Skill, (~excluded).label("active")).filter(
+                self.Skill.env == get_current_env(),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.user_id == _normalize_user_id(user_id),
+                self.Skill.git_path.like("local://%"),
+            )
+            if keyword and keyword.strip():
+                term = f"%{keyword.strip().lower()}%"
+                query = query.filter(
+                    or_(
+                        func.lower(self.Skill.name).like(term),
+                        func.lower(func.coalesce(self.Skill.description, "")).like(
+                            term
+                        ),
+                    )
+                )
+            if active is not None:
+                query = query.filter((~excluded) == active)
+            total = query.count()
+            rows = (
+                query.order_by(self.Skill.gmt_modified.desc(), self.Skill.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+                .all()
+            )
+            return total, [
+                self._public_local_skill(row, is_active) for row, is_active in rows
+            ]
+
+    def get_bot_local_skill(
+        self, *, skill_id: str, bot_id: str, user_id: str
+    ) -> dict | None:
+        """Return one exact Bot-owned ``local://`` row or no row."""
+        from agentclaw.community.plugins.local.sqlite_models import (
+            DefaultSkillsetSkillExclusion,
+        )
+
+        with self._db.orm_session() as db:
+            excluded = (
+                db.query(DefaultSkillsetSkillExclusion.id)
+                .filter(
+                    DefaultSkillsetSkillExclusion.user_id
+                    == _normalize_user_id(user_id),
+                    DefaultSkillsetSkillExclusion.bot_id == bot_id,
+                    DefaultSkillsetSkillExclusion.skill_id == self.Skill.id,
+                )
+                .exists()
+            )
+            row = (
+                db.query(self.Skill, (~excluded).label("active"))
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.user_id == _normalize_user_id(user_id),
+                    self.Skill.git_path.like("local://%"),
+                )
+                .one_or_none()
+            )
+            return self._public_local_skill(*row) if row else None
+
+    def list_bot_local_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+    ):
+        """列出精确 Bot 范围内的全部 local 来源行，不包含全局记录。"""
+
+        from agentclaw.community.core.skills_pool.models import (
+            RegisteredSkillAsset,
+        )
+
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.env == env,
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.git_path.like("local://%"),
+                )
+                .order_by(self.Skill.id)
+                .all()
+            )
+            return [
+                RegisteredSkillAsset(
+                    skill_id=row.id,
+                    name=row.name,
+                    git_path=row.git_path,
+                )
+                for row in rows
+            ]
+
+    def list_bot_active_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ):
+        """返回普通 active sets 与该引擎默认 set 的完整、去重来源。"""
+
+        from agentclaw.community.core.skills_pool.models import (
+            RegisteredSkillAsset,
+        )
+
+        skill_sets = SkillSetRepository(self._db)
+        active_sets = skill_sets.get_all_active_skill_sets_for_env(
+            user_id=user_id,
+            bolt_id=bot_id,
+            engine_type=engine,
+            env=env,
+        )
+        seen: set[str] = set()
+        assets: list[RegisteredSkillAsset] = []
+        for skill_set in active_sets:
+            rows = skill_sets.get_skills_in_set_for_env(
+                str(skill_set["id"]),
+                env=env,
+            )
+            if skill_set.get("is_default"):
+                excluded = set(
+                    skill_sets.get_excluded_skills(
+                        user_id=user_id,
+                        bot_id=bot_id,
+                        skill_set_id=int(skill_set["id"]),
+                    )
+                )
+                rows = [
+                    row
+                    for row in rows
+                    if int(row.get("id", 0)) not in excluded
+                ]
+            for row in rows:
+                git_path = str(row.get("git_path") or "")
+                if not git_path or git_path in seen:
+                    continue
+                seen.add(git_path)
+                assets.append(
+                    RegisteredSkillAsset(
+                        skill_id=int(row["id"]),
+                        name=str(row["name"]),
+                        git_path=git_path,
+                    )
+                )
+        return assets
+
     def create(self, skill_data: dict) -> dict:
         with self._db.orm_session() as db:
             tags = skill_data.get("tags")
@@ -452,7 +673,19 @@ class SkillRepository:
         return self.get_by_id(skill_id)
 
     def delete(self, skill_id: str) -> bool:
-        with self._db.orm_session() as db:
+        """Delete one Skill and its set associations as one transaction.
+
+        This remains a bulk-delete repository method, so SQLAlchemy cannot
+        apply ``Skill.skill_sets``' ORM cascade. Remove matching association
+        rows explicitly before deleting the Skill. A real transaction keeps
+        association cleanup and the Skill-row delete atomic and propagates
+        every database error to the caller.
+        """
+        with self._db.transactional_orm_session() as db:
+            db.query(self.SkillSetSkill).filter(
+                self.SkillSetSkill.skill_id == int(skill_id),
+                self.SkillSetSkill.env == get_current_env(),
+            ).delete(synchronize_session=False)
             rowcount = (
                 db.query(self.Skill)
                 .filter(
@@ -604,6 +837,41 @@ class SkillRepository:
                 ).delete(synchronize_session=False)
             return count
 
+    def list_skill_set_references(
+        self,
+        skill_id: str,
+        skill_uuid: str | None = None,
+    ) -> list[dict]:
+        """List live SkillSet associations, regardless of activation state."""
+        from agentclaw.community.core.models import SkillSetSkill
+
+        identity_filter = SkillSetSkill.skill_id == int(skill_id)
+        if skill_uuid:
+            identity_filter = or_(
+                identity_filter,
+                SkillSetSkill.skill_uuid == skill_uuid,
+            )
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(SkillSetSkill.skill_set_id)
+                .join(
+                    self.SkillSet,
+                    SkillSetSkill.skill_set_id == self.SkillSet.id,
+                )
+                .filter(
+                    identity_filter,
+                    SkillSetSkill.env == get_current_env(),
+                    or_(
+                        self.SkillSet.env == get_current_env(),
+                        self.SkillSet.env.is_(None),
+                    ),
+                )
+                .distinct()
+                .order_by(SkillSetSkill.skill_set_id)
+                .all()
+            )
+            return [{"skill_set_id": str(row[0])} for row in rows]
+
     def get_active_skills_by_bot(
         self,
         bot_id: str,
@@ -740,12 +1008,14 @@ class SkillSetRepository:
     @inject
     def __init__(self, db: DatabasePlugin):
         from agentclaw.community.core.models import (
+            Skill,
             SkillSet,
             SkillSetMCPServer,
             SkillSetSkill,
         )
 
         self._db = db
+        self.Skill = Skill
         self.SkillSet = SkillSet
         self.SkillSetSkill = SkillSetSkill
         self.SkillSetMCPServer = SkillSetMCPServer
@@ -788,6 +1058,8 @@ class SkillSetRepository:
                 query = query.filter(
                     self.SkillSet.engine_type == engine_type
                 )
+            if bolt_id is not None:
+                query = query.filter(self.SkillSet.bolt_id == bolt_id)
             ss = query.limit(1).first()
             return _skill_set_to_dict(ss) if ss else None
 
@@ -994,6 +1266,24 @@ class SkillSetRepository:
         user_id: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            skill = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                )
+                .one_or_none()
+            )
+            if skill_set is None or skill is None:
+                return False
             db.add(
                 self.SkillSetSkill(
                     skill_set_id=int(skill_set_id),
@@ -1022,9 +1312,19 @@ class SkillSetRepository:
             return rowcount > 0
 
     def get_skills_in_set(self, skill_set_id: str) -> list[dict]:
+        return self.get_skills_in_set_for_env(
+            skill_set_id,
+            env=get_current_env(),
+        )
+
+    def get_skills_in_set_for_env(
+        self,
+        skill_set_id: str,
+        *,
+        env: str,
+    ) -> list[dict]:
         from agentclaw.community.core.models import Skill
 
-        env = get_current_env()
         with self._db.orm_session() as db:
             # non-center: join by skill_id
             non_center = (
@@ -1148,6 +1448,17 @@ class SkillSetRepository:
         env: Optional[str] = None,
     ) -> bool:
         with self._db.orm_session() as db:
+            target_env = env or get_current_env()
+            skill_set = (
+                db.query(self.SkillSet)
+                .filter(
+                    self.SkillSet.id == int(skill_set_id),
+                    self.SkillSet.env == target_env,
+                )
+                .one_or_none()
+            )
+            if skill_set is None:
+                return False
             db.add(
                 self.SkillSetMCPServer(
                     skill_set_id=int(skill_set_id),
@@ -1247,6 +1558,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetMcpExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1265,6 +1577,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",
@@ -1383,6 +1696,7 @@ class SkillSetRepository:
             dialect = db.get_bind().dialect.name
             table = DefaultSkillsetSkillExclusion.__table__
             values = {
+                "avernet_tenant": get_current_avernet_tenant(),
                 "user_id": user_id,
                 "bot_id": bot_id,
                 "skill_set_id": skill_set_id,
@@ -1401,6 +1715,7 @@ class SkillSetRepository:
                 )
                 stmt = stmt.on_conflict_do_update(
                     index_elements=[
+                        "avernet_tenant",
                         "user_id",
                         "bot_id",
                         "skill_set_id",
@@ -1683,7 +1998,9 @@ class SkillSetRepository:
                 active_sets.append(_skill_set_to_dict(ss))
 
         default_set = self.get_default(
-            user_id=None, bolt_id=None, engine_type=engine_type
+            user_id=parsed if user_id is not None and bolt_id is not None else None,
+            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+            engine_type=engine_type,
         )
         if default_set:
             enabled = self._get_user_default_enabled(
@@ -1691,6 +2008,16 @@ class SkillSetRepository:
             )
             if enabled is None or enabled == 1:
                 active_sets.append(default_set)
+        global_default = self.get_default(
+            user_id=None,
+            bolt_id=None,
+            engine_type=engine_type,
+        )
+        if global_default and all(
+            skill_set["id"] != global_default["id"]
+            for skill_set in active_sets
+        ):
+            active_sets.append(global_default)
         return active_sets
 
     def get_all_active_skill_sets_for_env(
@@ -1719,14 +2046,25 @@ class SkillSetRepository:
                 query = query.filter(self.SkillSet.user_id.is_(None))
             active_sets.extend(_skill_set_to_dict(ss) for ss in query.all())
 
-        default_set = self.get_default(
+        bot_default = self.get_default(
+            user_id=parsed if user_id is not None and bolt_id is not None else None,
+            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+            engine_type=engine_type,
+            env=env,
+        )
+        if bot_default:
+            active_sets.append(bot_default)
+        global_default = self.get_default(
             user_id=None,
             bolt_id=None,
             engine_type=engine_type,
             env=env,
         )
-        if default_set:
-            active_sets.append(default_set)
+        if global_default and all(
+            skill_set["id"] != global_default["id"]
+            for skill_set in active_sets
+        ):
+            active_sets.append(global_default)
         return active_sets
 
     def _get_user_default_enabled(

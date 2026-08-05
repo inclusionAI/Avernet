@@ -15,7 +15,7 @@ logger = get_logger()
 # 定时任务默认配置
 DEFAULT_CRON_SCHEDULE = "0 10,14,18 * * *"  # 每天10点、14点、18点各一次
 DEFAULT_CRON_TIMEZONE = "Asia/Shanghai"
-DEFAULT_CRON_TIMEOUT_SECS = 86400  # 24小时
+DEFAULT_CRON_TIMEOUT_SECS = 3600  # 1小时
 DEFAULT_CRON_MODEL = None  # 使用引擎默认模型
 DEFAULT_MAX_TASK_NUM = 3  # 单次触发最多发起任务数，写死默认值 3
 
@@ -263,7 +263,7 @@ class CronAutoSetupService:
             "command": command,
             "timezone": DEFAULT_CRON_TIMEZONE,
             "enabled": True,
-            "timeout_secs": DEFAULT_CRON_TIMEOUT_SECS,
+            "timeout_secs": DEFAULT_CRON_TIMEOUT_SECS,  # 写入 payload.timeout_secs，默认 1 小时，不再 86400
             "kind": "autoInitiate",  # 显式传递 kind，供引擎设置 payload.kind
         }
         if model:

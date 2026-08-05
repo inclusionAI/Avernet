@@ -53,16 +53,28 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.access.repository       # UserInfoRecord — typed in user_service.py
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
+  - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
+  - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py
+  - agentclaw.community.core.caller_identity.protocols  # Caller collaborators — typed in caller_identity_service.py
   - agentclaw.community.core.channel.services.repositories  # ChannelRecord — typed in channel_service.py
   - agentclaw.community.core.economy.governance.domain.enums     # GovernanceStatus — typed in governance_service.py LifecycleServiceProtocol
   - agentclaw.community.core.economy.governance.domain.record    # GovernanceRecord — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.domain.ticket    # GovernanceTicket — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.services.admin_service  # TicketActionOutcome — typed in governance_service.py Protocol
   - agentclaw.community.core.economy.governance.services.service_protocols  # Admin/Whitelist/Lifecycle Protocol — 定义在 core,api re-export 供 router 注入
+  - agentclaw.community.core.engine_runtime.models    # EngineResult / BotFacts / ConnectionResult — typed in engine_runtime_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.quality.repositories    # QualityTaskRecord — typed in quality_service.py and task_processor_service.py
+  - agentclaw.community.core.service_bot.repository.models  # BotPublishRecord — typed in engine_config_service.py
+  - agentclaw.community.core.resources.models        # Resource / ResourceType — typed in resource_service.py (Protocol signatures mirror slim ResourceService verbatim; round-2 review #4)
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py
+  - agentclaw.community.core.skills_pool             # Skills Pool rollout/query/recovery domain DTOs used by operator Service API Protocols
+  - agentclaw.community.core.skill_center            # Local Skill desired-state query service DTOs
+  - agentclaw.community.core.skill_center            # Local Skill upload lifecycle contract
+  - agentclaw.community.core.skill_center            # Local Skill desired-state lifecycle contract
   - agentclaw.community.kernel.device_dto            # OutBoundOperationRule — typed in baas_service.py Protocol (B6)
+  - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
+  - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
 ```
 
 ### Change impact

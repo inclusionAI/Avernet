@@ -27,6 +27,7 @@ This module never branches on mode. Local / test boots layer
 ``TestingSkillCenterModule`` on top to override the database-mode-keyed
 plugin_api and repos.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -36,17 +37,37 @@ from injector import Binder, Injector, Module, inject, provider, singleton
 
 from agentclaw.community.api.git_sync_service import GitSyncServiceProtocol
 from agentclaw.community.api.skill_auth_service import SkillAuthServiceProtocol
-from agentclaw.community.api.skill_batch_sync_service import SkillBatchSyncServiceProtocol
-from agentclaw.community.api.skill_center_sync_service import SkillCenterSyncServiceProtocol
+from agentclaw.community.api.skill_batch_sync_service import (
+    SkillBatchSyncServiceProtocol,
+)
+from agentclaw.community.api.skill_center_sync_service import (
+    SkillCenterSyncServiceProtocol,
+)
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
-from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
-from agentclaw.community.api.skill_propagation_service import SkillPropagationServiceProtocol
+from agentclaw.community.api.skill_parameter_service_factory import (
+    SkillParameterServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_propagation_service import (
+    SkillPropagationServiceProtocol,
+)
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
-from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
-from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
-from agentclaw.community.api.skill_set_switcher_factory import SkillSetSwitcherFactoryProtocol
+from agentclaw.community.api.skill_set_activator_factory import (
+    SkillSetActivatorFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_service_factory import (
+    SkillSetServiceFactoryProtocol,
+)
+from agentclaw.community.api.skill_set_switcher_factory import (
+    SkillSetSwitcherFactoryProtocol,
+)
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -54,14 +75,19 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
-from agentclaw.community.core.skill_center.services.git_sync import GitSyncConfig, GitSyncService
+from agentclaw.community.core.skill_center.services.git_sync import (
+    GitSyncConfig,
+    GitSyncService,
+)
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillCategoryRepository,
     SkillMemberRepository,
     SkillRepository,
     SkillSetRepository,
 )
-from agentclaw.community.core.skill_center.services.skill_auth_service import SkillAuthService
+from agentclaw.community.core.skill_center.services.skill_auth_service import (
+    SkillAuthService,
+)
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import (
     SkillBatchSyncService,
 )
@@ -69,7 +95,9 @@ from agentclaw.community.core.skill_center.services.skill_center_sync_service im
     SkillCenterSyncService,
     SkillCenterSyncLogRepository,
 )
-from agentclaw.community.core.skill_center.services.skill_member_service import SkillMemberService
+from agentclaw.community.core.skill_center.services.skill_member_service import (
+    SkillMemberService,
+)
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
@@ -77,7 +105,9 @@ from agentclaw.community.core.skill_center.services.skill_propagation_service im
     SkillPropagationLogRepository,
     SkillPropagationService,
 )
-from agentclaw.community.core.skill_center.services.skill_publish_service import SkillPublishService
+from agentclaw.community.core.skill_center.services.skill_publish_service import (
+    SkillPublishService,
+)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.core.skill_center.factories import (
     SkillParameterServiceFactory,
@@ -89,13 +119,49 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetSwitcherFactory,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.core.skills_pool.repository.protocol import (
+    SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.reconcile_task import (
+    SkillsPoolReconcileWakeupListener,
+)
+from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
+from agentclaw.community.core.skills_pool.types import (
+    BotSkillLayoutScope,
+    SkillLayoutPhase,
+    runtime_uses_pool_paths,
+)
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
+)
+from agentclaw.community.core.skill_center.services.local_skill_query_service import (
+    LocalSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
+from agentclaw.community.plugin_api.local_skill_cleanup import (
+    LocalSkillCleanupRepository,
+)
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    BotCollabLogRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.core.devices.services.device_sync_dispatcher import (
+    DeviceSyncDispatcher,
+)
 from agentclaw.community.core.devices.services.device_filesystem_dispatcher import (
     DeviceFilesystemDispatcher,
     DeviceFileSystemResolver,
@@ -113,7 +179,9 @@ from agentclaw.community.plugins.skill_center_sync_log_repository import (
 from agentclaw.community.plugins.skill_propagation_log_repository import (
     SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
 )
-from agentclaw.community.utils.singlebox_coverage_proxy import wrap_for_singlebox_coverage
+from agentclaw.community.plugins.local_skill_cleanup_repository import (
+    SqlLocalSkillCleanupRepository,
+)
 
 
 logger = get_logger()
@@ -194,24 +262,7 @@ class SkillCenterModule(Module):
             SkillRepository as UnifiedSkillRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillRepository(db),
-            {
-                "get_by_id": "SkillRepository create/list/get/update/delete",
-                "get_by_uuid": "SkillRepository create/list/get/update/delete",
-                "get_by_git_path": "SkillRepository create/list/get/update/delete",
-                "get_by_link_name": "SkillRepository create/list/get/update/delete",
-                "list_skills": "SkillRepository create/list/get/update/delete",
-                "create": "SkillRepository create/list/get/update/delete",
-                "update": "SkillRepository create/list/get/update/delete",
-                "delete": "SkillRepository create/list/get/update/delete",
-                "delete_by_name_with_cascade": "SkillRepository create/list/get/update/delete",
-                "update_risk_tags": "SkillRepository create/list/get/update/delete",
-                "update_mcp_dependencies": "SkillRepository create/list/get/update/delete",
-                "delete_by_bot_id": "SkillRepository create/list/get/update/delete",
-                "get_active_skills_by_bot": "SkillRepository create/list/get/update/delete",
-            },
-        )
+        return UnifiedSkillRepository(db)
 
     @singleton
     @provider
@@ -221,24 +272,80 @@ class SkillCenterModule(Module):
             SkillSetRepository as UnifiedSkillSetRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillSetRepository(db),
-            {
-                "get_by_id": "SkillSetRepository create/list/get/update/delete",
-                "get_default": "SkillSetRepository create/list/get/update/delete",
-                "list_all": "SkillSetRepository create/list/get/update/delete",
-                "create": "SkillSetRepository create/list/get/update/delete",
-                "update": "SkillSetRepository create/list/get/update/delete",
-                "delete": "SkillSetRepository create/list/get/update/delete",
-                "add_skill_to_set": "SkillSetRepository create/list/get/update/delete",
-                "get_skills_in_set": "SkillSetRepository create/list/get/update/delete",
-                "remove_skill_from_set": "SkillSetRepository create/list/get/update/delete",
-                "delete_by_bot_id": "SkillSetRepository create/list/get/update/delete",
-                "set_active_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "activate_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "deactivate_skill_set": "SkillSetRepository create/list/get/update/delete",
-                "get_active_skill_set": "SkillSetRepository create/list/get/update/delete",
-            },
+        return UnifiedSkillSetRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_query_service(
+        self,
+        skill_repo: SkillRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+    ) -> LocalSkillQueryServiceProtocol:
+        """Bind the public Local-Skill desired-state query service."""
+        return LocalSkillQueryService(
+            skill_repo=skill_repo,
+            bot_repo=bot_repo,
+            collaborator_service=collaborator_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_upload_service(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_service_factory: SkillServiceFactory,
+        skill_set_service_factory: SkillSetServiceFactory,
+        audit_log_repo: BotCollabLogRepositoryProtocol,
+        edit_guard: SkillsPoolEditGuard,
+        cleanup_repo: LocalSkillCleanupRepository,
+        injector: Injector,
+    ) -> LocalSkillUploadServiceProtocol:
+        return LocalSkillUploadService(
+            skill_repo,
+            skill_set_repo,
+            bot_repo,
+            collaborator_service,
+            skill_service_factory,
+            skill_set_service_factory,
+            audit_log_repo,
+            edit_guard,
+            cleanup_repo,
+            lambda: injector.get(DeviceContextResolver),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_cleanup_repository(
+        self, db: DatabasePlugin
+    ) -> LocalSkillCleanupRepository:
+        return SqlLocalSkillCleanupRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_state_service(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_set_service_factory: SkillSetServiceFactory,
+        edit_guard: SkillsPoolEditGuard,
+    ) -> LocalSkillStateServiceProtocol:
+        return LocalSkillStateService(
+            skill_repo,
+            skill_set_repo,
+            bot_repo,
+            collaborator_service,
+            skill_set_service_factory,
+            edit_guard,
         )
 
     @singleton
@@ -249,20 +356,7 @@ class SkillCenterModule(Module):
             SkillMemberRepository as UnifiedSkillMemberRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillMemberRepository(db),
-            {
-                "get_members_by_skill_uuid": "SkillMemberRepository add/list/update/delete",
-                "get_member": "SkillMemberRepository add/list/update/delete",
-                "add_member": "SkillMemberRepository add/list/update/delete",
-                "remove_member": "SkillMemberRepository add/list/update/delete",
-                "update_member_role": "SkillMemberRepository add/list/update/delete",
-                "is_member": "SkillMemberRepository add/list/update/delete",
-                "get_member_role": "SkillMemberRepository add/list/update/delete",
-                "get_skill_uuids_by_user_id": "SkillMemberRepository add/list/update/delete",
-                "has_admin_role": "SkillMemberRepository add/list/update/delete",
-            },
-        )
+        return UnifiedSkillMemberRepository(db)
 
     @singleton
     @provider
@@ -272,19 +366,7 @@ class SkillCenterModule(Module):
             SkillCategoryRepository as UnifiedSkillCategoryRepository,
         )
 
-        return wrap_for_singlebox_coverage(
-            UnifiedSkillCategoryRepository(db),
-            {
-                "list_active": "SkillCategoryRepository create/list/update/delete",
-                "get_by_code": "SkillCategoryRepository create/list/update/delete",
-                "get_by_path": "SkillCategoryRepository create/list/update/delete",
-                "create": "SkillCategoryRepository create/list/update/delete",
-                "update_by_path": "SkillCategoryRepository create/list/update/delete",
-                "update": "SkillCategoryRepository create/list/update/delete",
-                "list_descendant_codes": "SkillCategoryRepository create/list/update/delete",
-                "get_skills_by_category": "SkillCategoryRepository create/list/update/delete",
-            },
-        )
+        return UnifiedSkillCategoryRepository(db)
 
     @singleton
     @provider
@@ -335,7 +417,8 @@ class SkillCenterModule(Module):
         # LOCAL → permissive; community → CommunitySecretResolver, unregistered →
         # permissive.)
         _bound_modes = {
-            entry.mode for entry in IMPL_REGISTRY
+            entry.mode
+            for entry in IMPL_REGISTRY
             if entry.cls is secret_resolver.__class__
         }
         allow_missing_repo_url = Mode.PROD not in _bound_modes
@@ -424,7 +507,33 @@ class SkillCenterModule(Module):
         device_fs_dispatcher: DeviceFilesystemDispatcher,
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
+        bot_repo: BotRepository,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        path_factory: WorkspacePathFactory,
     ) -> SkillServiceFactory:
+        def resolve_pool_paths(
+            owner_id: str,
+            bot_id: str,
+            _requested_engine: str,
+        ) -> tuple[str, str, str] | None:
+            bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
+            if bot is None:
+                return None
+            engine = bot.get("active_engine")
+            if not isinstance(engine, str):
+                return None
+            state = layout_repository.get(
+                BotSkillLayoutScope(
+                    env=str(bot["env"]),
+                    entity_id=str(bot["entity_id"]),
+                    bot_id=str(bot["bot_id"]),
+                )
+            )
+            if not runtime_uses_pool_paths(state):
+                return None
+            paths = pool_paths_for_engine(engine)
+            return paths.active, paths.pool_local, paths.pool_repo
+
         return SkillServiceFactory(
             skill_repo=skill_repo,
             skill_repo_sync=skill_repo_sync,
@@ -432,6 +541,8 @@ class SkillCenterModule(Module):
             device_fs_dispatcher=device_fs_dispatcher,
             market_cache=market_cache,
             git_sync_service_factory=git_sync_service_factory,
+            path_factory=path_factory,
+            pool_layout_paths=resolve_pool_paths,
         )
 
     @singleton
@@ -450,9 +561,6 @@ class SkillCenterModule(Module):
         path_factory: WorkspacePathFactory,
         injector: Injector,
     ) -> SkillSetServiceFactory:
-        # resolver / device_sync_dispatcher 走 lazy thunk:防止构造期 DI 循环
-        # ``BotService → SkillSetServiceFactory → DeviceContextResolver
-        # → ArcaConnInfoBuilder → DeviceService → BotService``。
         return SkillSetServiceFactory(
             skill_repo=skill_repo,
             skill_set_repo=skill_set_repo,
@@ -465,6 +573,7 @@ class SkillCenterModule(Module):
             bot_repo=bot_repo,
             device_plugin=device_plugin,
             path_factory=path_factory,
+            pool_layout_paths=skill_service_factory.resolve_pool_paths,
         )
 
     @singleton
@@ -626,12 +735,39 @@ class SkillCenterModule(Module):
         skill_set_factory: SkillSetServiceFactory,
         resolver: DeviceContextResolver,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        skills_pool_wakeup: SkillsPoolReconcileWakeupListener,
     ) -> SkillSymlinkListener:
+        def desktop_layout_authority(bot: dict) -> str | None:
+            if bot.get("bot_type") != "desktop":
+                return None
+            env = bot.get("env")
+            entity_id = bot.get("entity_id")
+            bot_id = bot.get("bot_id")
+            if not all(
+                isinstance(value, str) and value for value in (env, entity_id, bot_id)
+            ):
+                return None
+            state = layout_repository.get(
+                BotSkillLayoutScope(
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                )
+            )
+            if state.phase is SkillLayoutPhase.POOL_ACTIVE:
+                return "pool"
+            if runtime_uses_pool_paths(state):
+                return "transition"
+            return "legacy"
+
         return SkillSymlinkListener(
             bot_repo=bot_repo,
             skill_set_factory=skill_set_factory,
             resolver=resolver,
             device_sync_dispatcher=device_sync_dispatcher,
+            desktop_layout_authority=desktop_layout_authority,
+            desktop_reconcile_wakeup=skills_pool_wakeup.handle,
         )
 
     # ── Service API Protocol aliases ────────────────────────────────────
@@ -648,7 +784,9 @@ class SkillCenterModule(Module):
     @singleton
     @provider
     @inject
-    def _skill_auth_service_protocol(self, svc: SkillAuthService) -> SkillAuthServiceProtocol:
+    def _skill_auth_service_protocol(
+        self, svc: SkillAuthService
+    ) -> SkillAuthServiceProtocol:
         return svc
 
     @singleton

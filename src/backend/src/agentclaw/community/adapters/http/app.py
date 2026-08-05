@@ -37,7 +37,7 @@ from agentclaw.community.di import (
     validate_deploy_environment,
 )
 from agentclaw.community.di.config_bootstrap import register_config_provider
-from agentclaw.community.di.modules_bootstrap import register_corp_modules
+from agentclaw.community.di.modules_bootstrap import register_corp_modules, resolve_extra_modules
 
 # Single mandatory switch: read the deploy profile once, here at the
 # composition root. ``detect()`` errors out if ``DEPLOY_PROFILE`` is unset
@@ -55,7 +55,7 @@ register_config_provider(_deploy_profile)  # noqa: FLA010 — composition root, 
 # community / test / singlebox (B8).
 register_corp_modules(_deploy_profile)  # noqa: FLA010 — composition root, before build_injector
 
-injector = build_injector(profile=_deploy_profile)
+injector = build_injector(profile=_deploy_profile, extra_modules=resolve_extra_modules(_deploy_profile))
 
 # Startup integrity check: resolve a small set of critical bindings
 # now so misconfiguration surfaces at boot instead of on first request.
@@ -105,13 +105,16 @@ from agentclaw.community.adapters.http.token_exchange import router as token_exc
 from agentclaw.community.adapters.http.yuque import router as yuque_router  # noqa: E402
 from agentclaw.community.adapters.http.devices.router import router as device_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import access_router as whitelist_router  # noqa: E402
+from agentclaw.community.adapters.http.access.router import user_list_router  # noqa: E402
 from agentclaw.community.adapters.http.access.router import user_router  # noqa: E402
 from agentclaw.community.adapters.http.expert_chat import router as expert_chats_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat import router as bot_chat_router  # noqa: E402
+from agentclaw.community.adapters.http.bot_chat.open_router import router as bot_chat_open_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.otel_router import router as bot_chat_otel_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_chat.relation_router import router as bot_chat_relation_router  # noqa: E402
 from agentclaw.community.adapters.http.system_config.router import router as system_config_router  # noqa: E402
 from agentclaw.community.adapters.http.common_config.router import router as common_config_router  # noqa: E402
+from agentclaw.community.adapters.http.skills_pool import router as skills_pool_ops_router  # noqa: E402
 from agentclaw.community.adapters.http.beta_quota.router import router as beta_quota_router  # noqa: E402
 from agentclaw.community.adapters.http.channel.router import router as channel_router  # noqa: E402
 from agentclaw.community.adapters.http.quality.router import router as quality_router  # noqa: E402
@@ -133,11 +136,17 @@ from agentclaw.community.adapters.http.aicoding.data_proxy_router import router 
 from agentclaw.community.adapters.http.aicoding.workitem_noauth_router import router as workitem_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.enums.router import router as enums_router  # noqa: E402
 from agentclaw.community.adapters.http.resources import router as resources_router  # noqa: E402
+from agentclaw.community.adapters.http.session_resources import (  # noqa: E402
+    internal_router as session_resources_internal_router,
+    router as session_resources_router,
+)
 from agentclaw.community.adapters.http.mcp import router as mcp_router  # noqa: E402
 from agentclaw.community.adapters.http.cron import router as cron_router  # noqa: E402
 from agentclaw.community.adapters.http.cron.cron_noauth_router import router as cron_noauth_router  # noqa: E402
 from agentclaw.community.adapters.http.aicoding import notify_router  # noqa: E402
+from agentclaw.community.adapters.http.aicoding.architect_rebind_router import router as architect_rebind_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_management import router as bot_management_router  # noqa: E402
+from agentclaw.community.adapters.http.caller_identity.router import router as caller_identity_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant import router as bot_dormant_router  # noqa: E402
 from agentclaw.community.adapters.http.bot_dormant.router import internal_router as bot_dormant_internal_router  # noqa: E402
 from agentclaw.community.adapters.http.service_bot.router_build import router as service_bot_router  # noqa: E402
@@ -236,9 +245,30 @@ attach_injector(app, injector)
 # Middleware (delegated to api/middleware.py)
 # =============================================================================
 from agentclaw.community.adapters.http.middleware import install_middleware  # noqa: E402
-from agentclaw.community.di.config import CorsConfig  # noqa: E402
+from agentclaw.community.di.config import CorsConfig, SecretNamesConfig  # noqa: E402
 from agentclaw.community.plugin_api.auth import AuthPlugin  # noqa: E402
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver  # noqa: E402
 from agentclaw.community.plugin_api.tracer import TracerPlugin  # noqa: E402
+from agentclaw.community.utils.gateway_principal_config import (  # noqa: E402
+    init_principal_verifier_config,
+)
+
+# Resolve the key the gateway signs /openapi/v1 principals with. Done here
+# because AvernetTenantMiddleware reads the verifier config from the raw ASGI
+# layer, before any route and outside the injector — so the composition root
+# pushes it in rather than the middleware pulling it out.
+#
+# Strict in ``pre``/``prod``, matching the eager binding check above and gated
+# on the same SERVER_ENV: a deployment that serves the public API without a
+# signing key answers 401 to every request while looking healthy, so it must
+# fail the rollout instead. Local, dev, and singlebox legitimately have no key
+# (singlebox ships it empty on purpose), so there it degrades to deny-everything
+# rather than refusing to boot.
+init_principal_verifier_config(
+    injector.get(SecretResolver),
+    injector.get(SecretNamesConfig).gateway_principal_signing_key,
+    strict=get_current_env() in ("pre", "prod"),
+)
 
 install_middleware(
     app,
@@ -273,6 +303,12 @@ if os.environ.get("SINGLEBOX_COVERAGE") == "1":
 # (tests/architecture/test_domain_error_status_map_complete.py) asserts
 # every concrete DomainError subclass has an entry here.
 from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.exceptions import RequestValidationError  # noqa: E402
+from fastapi.exception_handlers import (  # noqa: E402
+    http_exception_handler,
+    request_validation_exception_handler,
+)
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 from agentclaw.community.core.aicoding.services.data_proxy_service import (  # noqa: E402
     DataProxyError,
     EngineUnreachable,
@@ -288,6 +324,23 @@ from agentclaw.community.core.errors import (  # noqa: E402
     Unauthorized,
     ValidationError,
 )
+from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
+    MissingPrincipalError,
+)
+from agentclaw.community.core.gateway_principal import (  # noqa: E402
+    PrincipalVerificationError,
+)
+from agentclaw.community.core.caller_identity.contracts import (  # noqa: E402
+    CallerCallTypeInvalidError,
+    CallerIdentityAmbiguousError,
+    CallerIdentityIrreversibleError,
+    CallerIdentityNotFoundError,
+    CallerIdentityPermissionError,
+    CallerIdentityReadOnlyError,
+    CallerLockEpochError,
+    CallerMcpNotFoundError,
+    CallerMcpSyncError,
+)
 
 _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     ValidationError:       400,
@@ -297,6 +350,15 @@ _DOMAIN_ERROR_STATUS_MAP: dict[type[DomainError], int] = {
     NotFound:              404,
     Conflict:              409,
     InternalError:         500,
+    CallerIdentityPermissionError: 403,
+    CallerIdentityAmbiguousError: 409,
+    CallerIdentityIrreversibleError: 409,
+    CallerIdentityNotFoundError: 404,
+    CallerIdentityReadOnlyError: 409,
+    CallerLockEpochError: 409,
+    CallerMcpNotFoundError: 404,
+    CallerMcpSyncError: 500,
+    CallerCallTypeInvalidError: 500,
 }
 
 _DATA_PROXY_ERROR_STATUS_MAP: dict[type[DataProxyError], int] = {
@@ -316,6 +378,39 @@ def _trace_headers(request: Request) -> dict[str, str]:
     return {"X-Trace-ID": trace_id} if trace_id else {}
 
 
+def _is_public_api(request: Request) -> bool:
+    """Whether this request belongs to the public surface's envelope contract."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import is_public_api
+
+    return is_public_api(request)
+
+
+def _public_error_envelope(
+    status: int, request: Request, headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    """Envelope a public-surface failure that reached an app-level handler."""
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        unmapped_error_response,
+    )
+
+    return unmapped_error_response(status, request, headers=headers)
+
+
+def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | None:
+    """The public envelope for ``exc`` if this surface maps it, else ``None``.
+
+    ``None`` for every internal ``/api`` request too: those keep the
+    ``{"detail": ...}`` shape their existing clients parse.
+    """
+    if not _is_public_api(request):
+        return None
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        mapped_error_response,
+    )
+
+    return mapped_error_response(exc, request)
+
+
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
@@ -327,11 +422,62 @@ async def _domain_error_handler(request: Request, exc: DomainError) -> JSONRespo
             "[DomainError 5xx] %s on %s %s: %s",
             type(exc).__name__, request.method, request.url.path, exc.detail,
         )
+    if _is_public_api(request):
+        return _public_error_envelope(status, request)
     return JSONResponse(
         status_code=status,
         content={"detail": exc.detail},
         headers=_trace_headers(request),
     )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(
+    request: Request, exc: StarletteHTTPException,
+) -> JSONResponse:
+    """Envelope routing-level HTTP errors on the public surface.
+
+    Starlette raises these *before* any router is reached — an unknown
+    ``/openapi/v1/...`` path (404) or a wrong method on a known one (405) — and
+    its built-in handler answers them, so neither ``@envelope_errors`` nor the
+    generic catch-all ever sees them. They are among the most common failures a
+    new integrator hits, so leaving them as ``{"detail": ...}`` breaks the
+    contract exactly where it is first tested.
+
+    Scoped by path like the other public translations; internal ``/api`` routes
+    keep FastAPI's default shape, including any ``HTTPException`` they raise
+    themselves.
+
+    ``exc.headers`` is forwarded because the protocol headers on these responses
+    carry the actionable part: a 405 without its ``Allow`` list tells the caller
+    they got it wrong but not what would be right.
+    """
+    if _is_public_api(request):
+        return _public_error_envelope(exc.status_code, request, exc.headers)
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error_handler(
+    request: Request, exc: RequestValidationError,
+) -> JSONResponse:
+    """Answer public-surface validation failures with the standard Envelope.
+
+    FastAPI raises this *before* the handler runs, so the public routers'
+    ``@envelope_errors`` decorator never sees it. Without this translation a
+    malformed public request (missing field, bad ``cluster_name`` enum,
+    out-of-range page size) would return FastAPI's ``{"detail": [...]}`` and
+    break the uniform-envelope contract that surface promises.
+
+    Scoped by path: internal ``/api`` routes keep FastAPI's default shape, so
+    existing clients are unaffected.
+    """
+    from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
+    from agentclaw.community.adapters.http.openapi_v1.responses import error_response
+
+    if request.url.path.startswith(PUBLIC_API_PREFIX):
+        return error_response(422, "Invalid request", request)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.exception_handler(DataProxyError)
@@ -359,17 +505,106 @@ async def _data_proxy_error_handler(
     )
 
 
+@app.exception_handler(MissingPrincipalError)
+@app.exception_handler(PrincipalVerificationError)
+async def _principal_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Answer an unverifiable caller with a 401 — and *only* a 401.
+
+    Both errors are raised in a **dependency** (``require_principal``, which
+    every public route declares), so they surface inside
+    ``solve_dependencies`` before the handler runs and ``@envelope_errors``
+    never sees them. The catch-all below already mapped them to the right
+    status via ``ENVELOPE_ERRORS``, so this handler exists for a different
+    reason: *where* it is registered.
+
+    Starlette splits registered handlers by key. ``Exception`` becomes
+    ``ServerErrorMiddleware``'s handler, and that middleware sends the response
+    and then unconditionally re-raises ("We always continue to raise the
+    exception", ``starlette/middleware/errors.py``) so the server can log a
+    crash. The result was a correct 401 on the wire followed by a hundred-odd
+    lines of ASGI traceback per request — precisely what the catch-all's
+    warning-without-a-traceback was written to avoid, and ruinous on this path
+    because an auth misconfiguration makes *every* request take it.
+
+    Registering the concrete types instead puts them in the inner
+    ``ExceptionMiddleware``, which answers and does not re-raise. The status
+    and body still come from ``ENVELOPE_ERRORS`` via ``_public_mapped_error``,
+    so this adds a route out of the stack, not a second opinion on the answer.
+    """
+    # ``exc`` carries the operator-facing diagnosis on the verification path —
+    # the token's ``alg``/``kid`` and the fingerprint of the key we judged it
+    # against. It is logged, never returned: the response is the same fixed
+    # "Unauthorized" the table gives every failure here, so a forger still
+    # cannot tell which part of a token was rejected.
+    logger.warning(
+        "[Public 401] %s on %s %s: %s",
+        type(exc).__name__, request.method, request.url.path, exc,
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    # Raised off the public surface — an internal ``/api`` route reaching the
+    # verifier directly. Those keep the ``{"detail": ...}`` shape their clients
+    # parse rather than being handed an Envelope they do not expect.
+    return JSONResponse(
+        status_code=401,
+        content={"detail": "Unauthorized"},
+        headers=_trace_headers(request),
+    )
+
+
 # Catch-all for unhandled non-DomainError exceptions. Returns the same
 # {"detail": ...} JSON shape (status 500) instead of Starlette's default
 # plain-text "Internal Server Error" body, so the wire format is uniform
-# across every error path. Always logs the traceback — by definition we
-# didn't expect this exception, so the trace is the only debug signal.
+# across every error path. Logs the traceback for anything genuinely
+# unexpected — by definition we didn't expect it, so the trace is the only
+# debug signal.
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # A mapped public error can still land here: @envelope_errors only wraps the
+    # handler, so an ENVELOPE_ERRORS type raised in a **dependency** is raised
+    # before the handler runs and arrives as an "unhandled" exception.
+    # Consulting the same table here is what makes such a request its mapped
+    # status rather than a 500, wherever the error was raised. One table, two
+    # entry points.
+    #
+    # The auth seam's two errors no longer reach this handler — they have their
+    # own registration above, so that a routine 401 does not pay for
+    # ServerErrorMiddleware's re-raise. Everything else mapped still arrives
+    # here, and the traceback note below is why that is tolerable for the rest:
+    # they are rare, where an unverifiable caller is not.
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        # Expected client-side flow (missing/invalid credentials, bad input).
+        # A traceback per unauthenticated request would bury the real 5xx ones,
+        # so log at warning without one — matching how the DomainError handler
+        # treats 4xx.
+        if mapped.status_code < 500:
+            logger.warning(
+                "[Public %s] %s on %s %s",
+                mapped.status_code, type(exc).__name__, request.method,
+                request.url.path,
+            )
+            return mapped
+        logger.exception(
+            "[Public %s] %s on %s %s",
+            mapped.status_code, type(exc).__name__, request.method,
+            request.url.path,
+        )
+        return mapped
+
     logger.exception(
         "[Unhandled exception] %s on %s %s",
         type(exc).__name__, request.method, request.url.path,
     )
+    # The public surface guarantees the Envelope on every response, including
+    # the ones nobody anticipated. Enumerating each new escapee in
+    # ENVELOPE_ERRORS is whack-a-mole — services keep growing error types, and
+    # transport failures (httpx, socket) are not domain errors at all. This
+    # backstop closes the class: a specific mapping still gives a precise
+    # status, and anything else at least stays in the contract.
+    if _is_public_api(request):
+        return _public_error_envelope(500, request)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error"},
@@ -395,12 +630,15 @@ app.include_router(yuque_router)
 app.include_router(device_router)
 app.include_router(expert_chats_router)  # 新增：用户与专家Bot对话管理
 app.include_router(bot_chat_router)  # 个人对话（Langfuse trace 查询）
+app.include_router(bot_chat_open_router)  # embed 精确日志查询（不按 owner 过滤）
 app.include_router(bot_chat_otel_router)  # bot-chat OTLP 日志写入
 app.include_router(bot_chat_relation_router)  # bot-chat 业务任务关系写入
 app.include_router(whitelist_router)
+app.include_router(user_list_router)
 app.include_router(user_router)
 app.include_router(system_config_router)
 app.include_router(common_config_router)
+app.include_router(skills_pool_ops_router)
 app.include_router(beta_quota_router)
 app.include_router(channel_router)
 app.include_router(quality_router)
@@ -413,8 +651,8 @@ app.include_router(antprocess_router)
 app.include_router(antcode_router)  # AntCode 集成
 app.include_router(bot_public_auth_router)
 app.include_router(bot_public_router)
-app.include_router(bot_public_noauth_router)  # 免鉴权版本（与鉴权版本并存）
-app.include_router(workitem_noauth_router)  # 工作项免鉴权接口 (route URL still /api/public/dima)
+app.include_router(bot_public_noauth_router)  
+app.include_router(workitem_noauth_router)  # 工作项接口 (route URL still /api/public/dima)
 app.include_router(oss_to_nas_router)
 app.include_router(system_health_router)
 app.include_router(system_readiness_router)
@@ -427,6 +665,8 @@ app.include_router(desktop_bot_router)
 # - AgentClaw: /api/v1/devices
 # - OpenClaw: /api/resources, /api/sessions, /api/chat, /api/skills, /api/skillsets
 app.include_router(resources_router)
+app.include_router(session_resources_router)
+app.include_router(session_resources_internal_router)
 app.include_router(skills.router)
 app.include_router(skillsets.router)
 app.include_router(approvals_router)
@@ -434,7 +674,9 @@ app.include_router(mcp_router)
 app.include_router(identity_router)
 app.include_router(aicoding_router)
 app.include_router(aicoding_data_proxy_router)
+app.include_router(architect_rebind_router)
 app.include_router(bot_management_router.router)
+app.include_router(caller_identity_router)
 app.include_router(bot_dormant_router.router)
 app.include_router(bot_dormant_internal_router)
 app.include_router(service_bot_router)
@@ -447,7 +689,7 @@ app.include_router(verify.router)
 app.include_router(sync.router)
 app.include_router(batch_sync.router)
 app.include_router(cron_router)
-app.include_router(cron_noauth_router)  # Cron 免鉴权接口
+app.include_router(cron_noauth_router) 
 app.include_router(notify_router)
 # Harness Engineering: patch template management & diagnosis
 app.include_router(harness_router)
@@ -463,3 +705,9 @@ app.include_router(enums_router)
 from agentclaw.community.di.optional_routers import OptionalRouters  # noqa: E402
 for _r in injector.get(OptionalRouters).routers:
     app.include_router(_r)
+
+# 3. Public /openapi/v1/bots surface — new, definition-only routers for the
+# redesigned external contract (not a re-mount of the handlers above; see
+# adapters/http/openapi_v1). Handlers are stubs until the implementation lands.
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router  # noqa: E402
+app.include_router(build_public_router())

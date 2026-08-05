@@ -1,21 +1,32 @@
 //! E2E tests for `bcs-cli list-groups`.
 
-use crate::common::{assert_output_contains, assert_success, TestContext};
+use crate::common::{assert_failure, assert_output_contains, assert_success, TestContext};
 use wiremock::{
-    matchers::{bearer_token, method, path},
+    matchers::{bearer_token, method, path, query_param, query_param_is_missing},
     Mock, ResponseTemplate,
 };
 
 #[tokio::test]
-async fn list_groups_mine_uses_current_bot_from_session() {
+async fn list_groups_uses_authenticated_actor_without_local_bot_uuid() {
     let ctx = TestContext::new().await.expect("Failed to create test context");
-    let bot_groups_path = format!("/bots/{}/groups", ctx.session.bot_uuid);
+    std::fs::write(
+        ctx.session_path(),
+        serde_json::to_vec(&serde_json::json!({
+            "token": ctx.session.token,
+            "bcs_url": ctx.session.bcs_url,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
 
     Mock::given(method("GET"))
-        .and(path(bot_groups_path))
+        .and(path("/groups/my"))
         .and(bearer_token(&ctx.session.token))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "20"))
+        .and(query_param_is_missing("include_session_groups"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "bot_uuid": ctx.session.bot_uuid,
+            "actor_id": "bot-current",
             "items": [{
                 "group_id": "group-for-current-bot",
                 "coordinator_bot": "current-bot",
@@ -26,6 +37,116 @@ async fn list_groups_mine_uses_current_bot_from_session() {
             }],
             "total": 1,
             "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute command");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["items"][0]["group_id"], "group-for-current-bot");
+    assert_eq!(json["offset"], 0);
+    assert_eq!(json["returned"], 1);
+    assert_eq!(json["total"], 1);
+    assert_eq!(json["has_more"], false);
+    assert!(json.get("next_offset").is_none());
+    assert!(json.get("next_command").is_none());
+}
+
+#[tokio::test]
+async fn list_groups_uses_offset_and_returns_readable_next_command() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "2"))
+        .and(query_param("limit", "2"))
+        .and(query_param_is_missing("include_session_groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [
+                {"group_id": "group-3"},
+                {"group_id": "group-4"}
+            ],
+            "total": 5,
+            "offset": 2,
+            "limit": 2
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--offset")
+        .arg("2")
+        .arg("--batch-size")
+        .arg("2")
+        .output()
+        .expect("Failed to execute offset page");
+
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["offset"], 2);
+    assert_eq!(json["next_offset"], 4);
+    assert_eq!(
+        json["next_command"],
+        "bcs-cli list-groups --offset 4 --batch-size 2"
+    );
+}
+
+#[tokio::test]
+async fn list_groups_rejects_zero_batch_size() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--batch-size")
+        .arg("0")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "batch size must be greater than 0");
+}
+
+#[tokio::test]
+async fn list_groups_rejects_malformed_page_envelope() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": []
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+    assert_failure(&output, None);
+    assert_output_contains(&output, "invalid current actor groups response");
+}
+
+#[tokio::test]
+async fn list_groups_accepts_server_capped_limit() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "20"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [{"group_id": "group-1"}],
+            "total": 2,
+            "offset": 0,
             "limit": 10
         })))
         .mount(&ctx.mock_server)
@@ -34,15 +155,247 @@ async fn list_groups_mine_uses_current_bot_from_session() {
     let output = ctx
         .cmd()
         .arg("list-groups")
-        .arg("--mine")
         .output()
-        .expect("Failed to execute command");
-
+        .expect("Failed to execute list-groups");
     assert_success(&output);
-    assert_output_contains(&output, "Groups for current bot");
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["returned"], 1);
+    assert_eq!(json["has_more"], true);
+    assert_eq!(json["next_offset"], 1);
+}
+
+#[tokio::test]
+async fn list_groups_rejects_mismatched_page_offset() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [],
+            "total": 0,
+            "offset": 1,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+    assert_failure(&output, None);
+    assert_output_contains(&output, "requested offset=0");
+    assert_output_contains(&output, "received offset=1");
+}
+
+#[tokio::test]
+async fn list_groups_rejects_zero_progress_page_with_records_remaining() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [],
+            "total": 2,
+            "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--all")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "pagination made no progress");
+}
+
+#[tokio::test]
+async fn list_groups_rejects_empty_actor_id() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "",
+            "items": [],
+            "total": 0,
+            "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "did not identify the authenticated actor");
+}
+
+#[tokio::test]
+async fn list_groups_human_output_includes_readable_next_command() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [{"group_id": "group-1"}],
+            "total": 2,
+            "offset": 0,
+            "limit": 20
+        })))
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("--no-json")
+        .arg("list-groups")
+        .output()
+        .expect("Failed to execute human list-groups");
+    assert_success(&output);
+    assert_output_contains(&output, "Has more: true");
     assert_output_contains(
         &output,
-        "group-for-current-bot [chat] driver=current-bot",
+        "Next: bcs-cli list-groups --offset 1 --batch-size 20",
     );
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("unknown"));
+}
+
+#[tokio::test]
+async fn list_groups_rejects_removed_continue_flag() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--continue")
+        .arg("20")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, Some(2));
+    assert_output_contains(&output, "unexpected argument '--continue'");
+}
+
+#[tokio::test]
+async fn list_groups_rejects_removed_mine_flag() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--mine")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, Some(2));
+    assert_output_contains(&output, "unexpected argument '--mine'");
+}
+
+#[tokio::test]
+async fn list_groups_all_collects_remaining_pages_from_offset() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "1"))
+        .and(query_param("limit", "2"))
+        .and(query_param_is_missing("include_session_groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [{"group_id": "group-2"}, {"group_id": "group-3"}],
+            "total": 4,
+            "offset": 1,
+            "limit": 2
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "3"))
+        .and(query_param("limit", "2"))
+        .and(query_param_is_missing("include_session_groups"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-current",
+            "items": [{"group_id": "group-4"}],
+            "total": 4,
+            "offset": 3,
+            "limit": 2
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--all")
+        .arg("--offset")
+        .arg("1")
+        .arg("--batch-size")
+        .arg("2")
+        .output()
+        .expect("Failed to execute all-pages listing");
+    assert_success(&output);
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["items"].as_array().unwrap().len(), 3);
+    assert_eq!(json["offset"], 1);
+    assert_eq!(json["returned"], 3);
+    assert_eq!(json["total"], 4);
+    assert_eq!(json["has_more"], false);
+    assert!(json.get("next_offset").is_none());
+    assert!(json.get("next_command").is_none());
+}
+
+#[tokio::test]
+async fn list_groups_all_rejects_actor_change_between_pages() {
+    let ctx = TestContext::new().await.expect("Failed to create test context");
+
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "0"))
+        .and(query_param("limit", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-first",
+            "items": [{"group_id": "group-1"}],
+            "total": 2,
+            "offset": 0,
+            "limit": 1
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/groups/my"))
+        .and(query_param("offset", "1"))
+        .and(query_param("limit", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "actor_id": "bot-second",
+            "items": [{"group_id": "group-2"}],
+            "total": 2,
+            "offset": 1,
+            "limit": 1
+        })))
+        .expect(1)
+        .mount(&ctx.mock_server)
+        .await;
+
+    let output = ctx
+        .cmd()
+        .arg("list-groups")
+        .arg("--all")
+        .arg("--batch-size")
+        .arg("1")
+        .output()
+        .expect("Failed to execute list-groups");
+
+    assert_failure(&output, None);
+    assert_output_contains(&output, "current actor changed during pagination");
 }

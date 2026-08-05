@@ -11,13 +11,11 @@ from datetime import datetime
 
 from .test_admin_service import (  # noqa: E402  (relative import within test package)
     _build_svc,
-    _make_notification,
 )
 
 from agentclaw.community.core.economy.governance.domain.enums import AuditAction
 from agentclaw.community.core.economy.governance.repositories.orm import (
     AuditLogOrm,
-    GovernanceNotificationOrm,
     GovernanceTicketOrm,
 )
 
@@ -63,20 +61,20 @@ class TestIsPaused:
     def test_paused_when_action_pause(self, session, engine):
         """Cache holds action=pause → paused (JSON string branch)."""
         svc, _, cache = _build_svc(engine)
-        cache.set(svc._emergency_key, json.dumps({"action": "pause"}))
+        cache.set(svc._brake_key, json.dumps({"action": "pause"}))
         assert svc.is_paused() is True
 
     def test_not_paused_for_other_action(self, session, engine):
         """Cache holds a non-pause action → not paused."""
         svc, _, cache = _build_svc(engine)
-        cache.set(svc._emergency_key, json.dumps({"action": "resume"}))
+        cache.set(svc._brake_key, json.dumps({"action": "resume"}))
         assert svc.is_paused() is False
 
     def test_handles_non_str_raw(self, session, engine):
         """Non-str cached value goes through the ``isinstance`` else branch."""
         svc, _, cache = _build_svc(engine)
         # Bypass _FakeCache.set typing by injecting a dict directly.
-        cache._store[svc._emergency_key] = ({"action": "pause"}, 0)
+        cache._store[svc._brake_key] = ({"action": "pause"}, 0)
         assert svc.is_paused() is True
 
     def test_swallows_read_error(self, session, engine):
@@ -97,12 +95,12 @@ class TestPause:
     """Cover pause (lines 109-123) — cache write + audit."""
 
     def test_pause_writes_cache_and_audit(self, session, engine):
-        """pause sets the emergency key and records an audit row."""
+        """pause sets the brake key and records an audit row."""
         svc, db, cache = _build_svc(engine)
 
         svc.pause(reason="overload", operator="admin-1")
 
-        raw = cache.get(svc._emergency_key)
+        raw = cache.get(svc._brake_key)
         assert raw is not None
         payload = json.loads(raw)
         assert payload["action"] == "pause"
@@ -110,9 +108,10 @@ class TestPause:
         assert payload["operator"] == "admin-1"
         assert payload["paused_at"]
 
-        # TTL propagated to the cache layer.
-        stored_value, ttl = cache._store[svc._emergency_key]
-        assert ttl == 7 * 24 * 3600
+        # No TTL — brake never auto-expires (fail-closed: avoids silent
+        # expiry re-enabling governance and surprising users).
+        stored_value, ttl = cache._store[svc._brake_key]
+        assert ttl == 0
 
         # is_paused now reflects the write.
         assert svc.is_paused() is True
@@ -124,6 +123,30 @@ class TestPause:
             ]
             assert len(audits) == 1
             assert audits[0].actor_id == "admin-1"
+
+    def test_pause_brake_never_auto_expires(self, session, engine):
+        """Brake pause writes the cache key with no TTL — it must not
+        auto-expire after any fixed window (regression: the old 7-day TTL
+        silently evicted the key, letting governance resume and surprise
+        users with notifications an admin believed were still suspended).
+        """
+        svc, _, cache = _build_svc(engine)
+
+        svc.pause(reason="long incident", operator="admin-2")
+
+        # Stored entry carries ttl=0 (never expire) — FakeCache records
+        # (value, ttl) and ttl=0 means no expiry across all cache backends.
+        assert svc._brake_key in cache._store
+        stored_value, ttl = cache._store[svc._brake_key]
+        assert ttl == 0
+        payload = json.loads(stored_value)
+        assert payload["action"] == "pause"
+        assert payload["reason"] == "long incident"
+        assert payload["operator"] == "admin-2"
+        assert payload["paused_at"]
+
+        # Brake stays paused (no TTL to wear it off).
+        assert svc.is_paused() is True
 
 
 # ── resume ───────────────────────────────────────────────────────
@@ -140,7 +163,7 @@ class TestResume:
 
         svc.resume(reason="recovered", operator="admin-2")
 
-        assert cache.get(svc._emergency_key) is None
+        assert cache.get(svc._brake_key) is None
         assert svc.is_paused() is False
 
         with db.orm_session() as s:
@@ -183,77 +206,6 @@ class TestResume:
             assert len(audits) == 1
 
 
-# ── bulk_whitelist ───────────────────────────────────────────────
-
-
-class TestBulkWhitelist:
-    """Cover bulk_whitelist — cancels pending notifications for specified bots."""
-
-    def test_whitelists_and_cancels_pending(self, session, engine):
-        """Bots with pending notifications → whitelisted + cancelled."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-1",
-            bot_id="bot-a", owner_id="owner-a", governance_status="open",
-            ticket_id="t-1",
-        )
-        _make_notification(
-            session, notification_id="n-2",
-            bot_id="bot-b", owner_id="owner-b", governance_status="open",
-            ticket_id="t-2",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-a", "bot-b"], reason="cleanup", operator="admin",
-        )
-
-        # Two distinct (bot, owner) pairs → 2 whitelisted.
-        assert result["whitelisted"] == 2
-        assert result["cancelled"] == 2
-
-        with db.orm_session() as s:
-            notif_rows = s.query(GovernanceNotificationOrm).all()
-            for n in notif_rows:
-                assert n.notify_status == "cancelled"
-                assert n.governance_status == "closed"
-
-    def test_no_matching_bots_skips_whitelist(self, session, engine):
-        """Unknown bot ids → no owner pairs → whitelisted=0, cancelled=0."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-1",
-            bot_id="bot-known", owner_id="owner-1", governance_status="open",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-unknown"], reason="x", operator="admin",
-        )
-
-        assert result["whitelisted"] == 0
-        assert result["cancelled"] == 0
-
-    def test_skips_already_closed_notifications(self, session, engine):
-        """Already-closed/sent notifications are not affected by bulk_whitelist."""
-        svc, db, _ = _build_svc(engine)
-        _make_notification(
-            session, notification_id="n-open",
-            bot_id="bot-x", owner_id="owner-x", governance_status="open",
-            ticket_id="t-open",
-        )
-        _make_notification(
-            session, notification_id="n-closed",
-            bot_id="bot-x", owner_id="owner-x", governance_status="closed",
-            ticket_id="t-closed", notify_status="sent",
-        )
-
-        result = svc.bulk_whitelist(
-            bot_ids=["bot-x"], reason="x", operator="admin",
-        )
-
-        # Only the open/pending notification is cancelled.
-        assert result["cancelled"] == 1
-
-
 # ── _read_pause_info non-str + error branches ────────────────────
 
 
@@ -263,7 +215,7 @@ class TestReadPauseInfo:
     def test_get_state_reads_dict_pause_info(self, session, engine):
         """Non-str cached pause info flows through the dict branch of _read_pause_info."""
         svc, _, cache = _build_svc(engine)
-        cache._store[svc._emergency_key] = (
+        cache._store[svc._brake_key] = (
             {"action": "pause", "reason": "r", "operator": "op",
              "paused_at": "2026-01-01"},
             0,

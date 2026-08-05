@@ -10,7 +10,11 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.domain.enums import AuditAction
+from agentclaw.community.core.economy.governance.domain.enums import (
+    AuditAction,
+    CloseReason,
+    GovernanceStatus,
+)
 from agentclaw.community.core.economy.governance.repositories.orm import (
     WhitelistEntryOrm,
     AuditLogOrm,
@@ -59,8 +63,9 @@ def _build_svc(engine):
     # task_record subjects). lifecycle_service no longer depends on a whitelist
     # service (the accept_feedback whitelist-add is owned by feedback_service),
     # so the construction cycle is gone — build the driver directly.
+    task_repo = TaskRecordRepository(db=db)
     lifecycle_svc = GovernanceLifecycleService(
-        task_repo=TaskRecordRepository(db=db),
+        task_repo=task_repo,
         notify_repo=notify_repo,
         audit_repo=audit_repo,
     )
@@ -70,6 +75,7 @@ def _build_svc(engine):
         audit_repo=audit_repo,
         config=config,
         lifecycle_svc=lifecycle_svc,
+        task_repo=task_repo,
     ), db
 
 
@@ -168,7 +174,7 @@ class TestBulkWhitelist:
             for n in notif_rows:
                 assert n.notify_status == "cancelled"
                 assert n.governance_status == "closed"
-                assert n.close_reason == "emergency_closed"
+                assert n.close_reason == "admin_closed"
                 assert n.cooldown_until is not None
 
         # Verify whitelist entries exist
@@ -179,22 +185,48 @@ class TestBulkWhitelist:
             assert bot_ids == {"bot-a", "bot-b"}
 
     def test_audit_written(self, session, engine):
-        """bulk_whitelist writes a governance audit entry."""
+        """bulk_whitelist writes per-entity audit rows + a batch summary.
+
+        旧口径写 1 条孤儿审计行(bot_id=None, run_id='admin' 公共桶),按被治理
+        实体查不到。新口径:逐 (bot_id, owner_id) 对写带实体的审计行 + 1 条批次
+        摘要行,全部共享唯一 run_id(可聚合同一次加白)。摘要行 error_msg 含真实
+        处置计数(whitelisted/skipped/cancelled/closed)。
+        """
         svc, db = _build_svc(engine)
+        audit_repo = GovernanceAuditRepository(db=db)
         _make_notification(
             session, notification_id="n-1",
             bot_id="bot-x", owner_id="owner-x", governance_status="open",
         )
 
-        svc.bulk_whitelist(
+        result = svc.bulk_whitelist(
             bot_ids=["bot-x"], reason="test", operator="admin-1",
         )
 
         with db.orm_session() as s:
             audits = s.query(AuditLogOrm).all()
             wl_audits = [a for a in audits if a.action_taken == AuditAction.ADMIN_WHITELIST]
-            assert len(wl_audits) >= 1
-            assert wl_audits[0].actor_id == "admin-1"
+            actor_audits = [a for a in wl_audits if a.actor_id == "admin-1"]
+            # Per-entity row carries the governed entity, not an orphan None row.
+            entity_rows = [a for a in actor_audits if a.bot_id == "bot-x" and a.owner_id == "owner-x"]
+            assert len(entity_rows) == 1, "expected one per-entity audit row for bot-x/owner-x"
+            # One batch-summary row (bot_id=None / owner_id=None) carrying real counts.
+            summary_rows = [a for a in actor_audits if a.bot_id is None and a.owner_id is None]
+            assert len(summary_rows) == 1, "expected one batch-summary audit row"
+            summary = summary_rows[0]
+            assert "whitelisted=" in (summary.error_msg or "")
+            assert f"whitelisted={result['whitelisted']}" in (summary.error_msg or "")
+            assert f"cancelled={result['cancelled']}" in (summary.error_msg or "")
+            audit_run_ids = {a.run_id for a in actor_audits}
+            assert len(audit_run_ids) == 1, "all audit rows of one bulk call share one run_id"
+            assert "admin" not in audit_run_ids or next(iter(audit_run_ids)) != "admin", \
+                "run_id must be a unique batch id, not the legacy 'admin' public bucket"
+
+        # Closing the loop with Task 1: the audit row must be retrievable by bot
+        # (the original symptom — bulk-add audit "查不到" by governed entity).
+        rows, total = audit_repo.list_by_subject(bot_id="bot-x")
+        assert total >= 1
+        assert any(r.bot_id == "bot-x" and r.owner_id == "owner-x" for r in rows)
 
     def test_no_matching_bots(self, session, engine):
         """No notifications for requested bots → whitelisted=0, cancelled=0."""
@@ -295,7 +327,11 @@ class TestBulkWhitelistTicketAlignment:
     bot_id IN (...) 且 response IS NULL 口径精确:已反馈的通知/工单不动。"""
 
     def test_closes_task_record_subjects_for_unresponded(self, session, engine):
-        """unresponded open 通知对应工单 → CLOSED(emergency_closed)。"""
+        """unresponded open 通知对应工单 → OBSERVED(whitelist_approved)。
+
+        加白语义:批量加白把活跃单转 OBSERVED(持续观察画像,非 CLOSED)。
+        通知侧 close_reason 仍 admin_closed(通知关停原因,独立列)。
+        """
         svc, db = _build_svc(engine)
         _make_notification(
             session, notification_id="n-a", bot_id="bot-a", owner_id="owner-a",
@@ -308,8 +344,11 @@ class TestBulkWhitelistTicketAlignment:
 
         with db.orm_session() as s:
             ticket = s.query(GovernanceTicketOrm).one()
-            assert ticket.governance_status == "closed"
-            assert ticket.close_reason == "emergency_closed"
+            assert ticket.governance_status == GovernanceStatus.OBSERVED.value
+            assert ticket.close_reason == CloseReason.WHITELIST_APPROVED.value
+            # 通知侧 close_reason 独立(通知关停原因 ≠ 工单转态原因)
+            notify = s.query(GovernanceNotificationOrm).one()
+            assert notify.close_reason == CloseReason.ADMIN_CLOSED.value
 
     def test_preserves_responded_ticket_subject(self, session, engine):
         """已反馈通知(bot 命中但 response 非 None)不在 cancel scope,
@@ -384,3 +423,175 @@ class TestDeleteWhitelistEntry:
             wl_audits = [a for a in audits if a.action_taken == AuditAction.WHITELIST_REMOVED]
             assert len(wl_audits) >= 1
             assert wl_audits[0].actor_id == "admin-1"
+
+    def test_delete_closes_observed_ticket(self, session, engine):
+        """删白收尾:该 worker 现存 OBSERVED 观察单转 CLOSED(终态归档)。
+
+        契约(白名单观察态删白路径):删白 → OBSERVED 单 OBSERVED→CLOSED,
+        close_reason=WHITELIST_APPROVED;不设 cooldown;下次 off-batch 走
+        正常 Step6 重建新 OPEN 单(由 test_whitelist_remove_restores 覆盖)。
+        """
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
+        _make_ticket(
+            session, ticket_id="tkt-obs-1",
+            bot_id="bot-a", owner_id="user-1",
+            governance_status=GovernanceStatus.OBSERVED.value,
+        )
+
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
+
+        assert result["deleted"] is True
+        assert result["observed_closed"] is True
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="tkt-obs-1",
+            ).one()
+            assert t.governance_status == GovernanceStatus.CLOSED.value
+            assert t.close_reason == CloseReason.WHITELIST_APPROVED.value
+            assert t.closed_at is not None
+            assert t.cooldown_until is None  # 删白不设 cooldown
+
+    def test_delete_no_observed_ticket_skips_close(self, session, engine):
+        """删白时无 OBSERVED 单 → observed_closed=False(幂等跳过,不报错)。"""
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-a", owner_id="user-1")
+        # 只有一条 closed 历史单(非 OBSERVED)→ 不该被删白收尾碰
+        _make_ticket(
+            session, ticket_id="tkt-closed-1",
+            bot_id="bot-a", owner_id="user-1",
+            governance_status=GovernanceStatus.CLOSED.value,
+        )
+
+        result = svc.delete_whitelist_entry(
+            bot_id="bot-a", owner_id="user-1",
+            reason="cleanup", operator="admin-1",
+        )
+
+        assert result["deleted"] is True
+        assert result["observed_closed"] is False
+        with db.orm_session() as s:
+            t = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="tkt-closed-1",
+            ).one()
+            assert t.governance_status == GovernanceStatus.CLOSED.value  # 未被误改
+
+
+class TestListAllWithTicketMeta:
+    """list_all_with_ticket_meta: 白单 + 最近工单维度字段叠加。"""
+
+    @staticmethod
+    def _make_ticket_meta(
+        session, *, ticket_id, bot_id, owner_id, gmt_create,
+        token_baseline=100, expected_token_saving=50, hit_dimensions="ctx",
+        saving_ratio=0.5, latest_decision="actionable",
+        governance_status="closed",
+    ):
+        """插一条带治理快照字段的工单(worker_id=owner_id:bot_id)。"""
+        worker = f"{owner_id}:{bot_id}"
+        row = GovernanceTicketOrm(
+            ticket_id=ticket_id,
+            worker_id=worker,
+            active_worker=worker if governance_status != "closed" else None,
+            bot_id=bot_id,
+            bot_name=f"Bot-{bot_id}",
+            owner_id=owner_id,
+            dt_version="20260629",
+            governance_decision="actionable",
+            governance_status=governance_status,
+            latest_decision=latest_decision,
+            hit_dimensions=hit_dimensions,
+            expected_token_saving=expected_token_saving,
+            saving_ratio=saving_ratio,
+            token_baseline=token_baseline,
+            last_sync_at=datetime.now(),
+            gmt_create=gmt_create,
+        )
+        session.add(row)
+        session.commit()
+        return row
+
+    def test_overlays_latest_ticket_fields(self, session, engine):
+        """白单有对应工单 → 叠加最近一条工单维度字段。"""
+        from agentclaw.community.core.economy.governance.repositories.orm import (
+            GovernanceTicketOrm,
+        )  # noqa: F401 — already imported above, kept for clarity
+        svc, db = _build_svc(engine)
+        now = datetime.now()
+        _make_whitelist(session, bot_id="bot-a", owner_id="owner-a")
+        # 该 worker 两条工单,gmt_create 新的应胜出
+        self._make_ticket_meta(
+            session, ticket_id="tkt-a-old", bot_id="bot-a", owner_id="owner-a",
+            gmt_create=now - timedelta(days=2), token_baseline=80,
+            expected_token_saving=20, saving_ratio=0.2,
+        )
+        self._make_ticket_meta(
+            session, ticket_id="tkt-a-new", bot_id="bot-a", owner_id="owner-a",
+            gmt_create=now, token_baseline=120,
+            expected_token_saving=60, saving_ratio=0.5, hit_dimensions="ctx,mem",
+        )
+
+        items, total = svc.list_all_with_ticket_meta(
+            whitelist_type="governance",
+        )
+        assert total == 1
+        assert len(items) == 1
+        item = items[0]
+        # 白单元数据保留
+        assert item["bot_id"] == "bot-a"
+        assert item["owner_id"] == "owner-a"
+        assert item["source"] == "manual"
+        # 工单维度叠加 = 最近那条(tkt-a-new)
+        assert item["bot_name"] == "Bot-bot-a"
+        assert item["token_baseline"] == 120
+        assert item["expected_token_saving"] == 60
+        assert item["hit_dimensions"] == "ctx,mem"
+        assert item["saving_ratio"] == 0.5
+        assert item["latest_decision"] == "actionable"
+        assert item["latest_ticket_gmt_create"] is not None
+
+    def test_no_ticket_degrades_to_none(self, session, engine):
+        """白单无对应工单 → 工单维度字段 None,条目不丢。"""
+        svc, db = _build_svc(engine)
+        _make_whitelist(session, bot_id="bot-b", owner_id="owner-b")
+
+        items, total = svc.list_all_with_ticket_meta(
+            whitelist_type="governance",
+        )
+        assert total == 1
+        item = items[0]
+        assert item["bot_id"] == "bot-b"
+        assert item["source"] == "manual"
+        # 无工单 → 工单维度全 None,条目保留
+        assert item["bot_name"] is None
+        assert item["owner_name"] is None
+        assert item["token_baseline"] is None
+        assert item["expected_token_saving"] is None
+        assert item["hit_dimensions"] is None
+        assert item["saving_ratio"] is None
+        assert item["latest_decision"] is None
+        assert item["latest_ticket_gmt_create"] is None
+
+    def test_no_key_collision_whitelist_vs_ticket(self, session, engine):
+        """白单元数据(source/reason)与工单维度字段无命名冲突,各用原名。"""
+        svc, db = _build_svc(engine)
+        now = datetime.now()
+        _make_whitelist(
+            session, bot_id="bot-c", owner_id="owner-c",
+            source="admin", reason="manual override",
+        )
+        self._make_ticket_meta(
+            session, ticket_id="tkt-c", bot_id="bot-c", owner_id="owner-c",
+            gmt_create=now,
+        )
+        items, _ = svc.list_all_with_ticket_meta(whitelist_type="governance")
+        item = items[0]
+        # 白单 source/reason 原样保留,不被工单维度覆盖
+        assert item["source"] == "admin"
+        assert item["reason"] == "manual override"
+        # 工单维度叠加键存在
+        assert item["bot_name"] == "Bot-bot-c"
+        assert item["token_baseline"] == 100

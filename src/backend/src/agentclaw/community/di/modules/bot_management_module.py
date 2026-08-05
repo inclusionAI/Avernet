@@ -30,6 +30,9 @@ from injector import (
 )
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.create_bot_for_others_service import (
+    CreateBotForOthersServiceProtocol,
+)
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.api.default_bot_passport_repair_service import (
     DefaultBotPassportRepairServiceProtocol,
@@ -52,6 +55,9 @@ from agentclaw.community.core.bot_management.repository.template_repository_prot
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
+from agentclaw.community.core.bot_management.services.create_bot_for_others_service import (
+    CreateBotForOthersService,
+)
 from agentclaw.community.core.bot_management.services.data_init_service import DataInitService
 from agentclaw.community.core.bot_management.services.default_bot_passport_repair_service import (
     DefaultBotPassportRepairService,
@@ -65,6 +71,7 @@ from agentclaw.community.core.bot_management.services.teclaw_publish_task_handle
 )
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
 from agentclaw.community.core.devices.repository.protocol import (
     DeviceBindingRepository,
@@ -111,7 +118,6 @@ from agentclaw.community.plugins.render_screen_repository import (
 from agentclaw.community.plugins.template_repository import (
     TemplateRepository as UnifiedTemplateRepository,
 )
-from agentclaw.community.utils.singlebox_coverage_proxy import wrap_for_singlebox_coverage
 
 
 logger = get_logger()
@@ -189,32 +195,7 @@ class BotManagementModule(Module):
     @provider
     @inject
     def bot_repository(self, db: DatabasePlugin) -> BotRepository:
-        return wrap_for_singlebox_coverage(
-            UnifiedBotRepository(db),
-            {
-                "insert": "BotRepository create/read/search/update/delete",
-                "get_by_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_live_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "update_ext_by_id_owner_and_env": "BotRepository explicit-env passport repair",
-                "get_by_id": "BotRepository create/read/search/update/delete",
-                "list_by_owner": "BotRepository create/read/search/update/delete",
-                "list_by_owner_or_collaborator": "BotRepository create/read/search/update/delete",
-                "list_by_entity": "BotRepository create/read/search/update/delete",
-                "list_by_conditions": "BotRepository create/read/search/update/delete",
-                "list_by_search": "BotRepository create/read/search/update/delete",
-                "list_domain_bots": "BotRepository create/read/search/update/delete",
-                "update_by_owner": "BotRepository create/read/search/update/delete",
-                "soft_delete_by_owner": "BotRepository create/read/search/update/delete",
-                "count_by_owner": "BotRepository create/read/search/update/delete",
-                "exists_by_owner_and_bot_id": "BotRepository create/read/search/update/delete",
-                "exists_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_bot_name": "BotRepository create/read/search/update/delete",
-                "get_by_binding_id": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id_and_owner": "BotRepository create/read/search/update/delete",
-                "get_device_provider_by_bot_id": "BotRepository create/read/search/update/delete",
-                "search_bots": "BotRepository create/read/search/update/delete",
-            },
-        )
+        return UnifiedBotRepository(db)
 
     @singleton
     @provider
@@ -228,6 +209,25 @@ class BotManagementModule(Module):
     ) -> DefaultBotPassportRepairServiceProtocol:
         return DefaultBotPassportRepairService(
             repository=repository,
+            passport_plugin=passport_plugin,
+            auth_relationship_plugin=auth_relationship_plugin,
+            skill_set_factory=skill_set_factory,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def create_bot_for_others_service(
+        self,
+        repository: BotRepository,
+        bot_service: BotService,
+        passport_plugin: PassportPlugin,
+        auth_relationship_plugin: AuthRelationshipPlugin,
+        skill_set_factory: SkillSetServiceFactory,
+    ) -> CreateBotForOthersServiceProtocol:
+        return CreateBotForOthersService(
+            repository=repository,
+            bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_relationship_plugin=auth_relationship_plugin,
             skill_set_factory=skill_set_factory,
@@ -271,6 +271,7 @@ class BotManagementModule(Module):
         system_config_service: SystemConfigService,
         drm_reader: DRMReaderPlugin,
         task_queue_service: TaskQueueService,
+        common_config_service: CommonConfigService,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -308,6 +309,7 @@ class BotManagementModule(Module):
             # Lazy (cycle-safe): baas bot 原地重启走 BaaSService.restart_bot。
             baas_service_provider=lambda: injector.get(BaasService),
             task_queue_service=task_queue_service,
+            common_config_service=common_config_service,
         )
 
     @singleton
@@ -389,11 +391,13 @@ class BotManagementModule(Module):
         registry: HandlerRegistry,
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
+        passport_plugin: PassportPlugin,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
             device_binding_repo=device_binding_repo,
+            passport_plugin=passport_plugin,
         )
 
     @singleton

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_friend_store::MemoryFriendRepo;
 use bcs_service_api::{
-    FriendCoreService, FriendRepoPort, RelationCoreService, ServiceError, ServiceResult,
+    FriendCoreService, FriendRepoPort, RelationCoreService, ServiceError, ServiceResult, Friendship,
 };
 use tracing::{error, info, warn};
 
@@ -68,6 +68,10 @@ impl FriendCoreService for FriendCore {
         }
     }
 
+    async fn try_are_friends(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        self.repo.are_friends(bot_a, bot_b).await
+    }
+
     async fn are_all_friends(&self, bot_id: &str, others: &[String]) -> ServiceResult<()> {
         let mut non_friends = Vec::new();
         for other in others {
@@ -127,6 +131,42 @@ impl FriendCoreService for FriendCore {
             }
         }
 
+        Ok(removed)
+    }
+
+    async fn list_friendships_paginated(
+        &self,
+        bot_id: &str,
+        offset: u64,
+        limit: u64,
+    ) -> ServiceResult<(Vec<Friendship>, u64)> {
+        self.repo
+            .list_friendships_paginated(bot_id, offset, limit)
+            .await
+    }
+
+    async fn remove_friendship(&self, bot_a: &str, bot_b: &str) -> ServiceResult<bool> {
+        let removed = self.repo.remove_friendship(bot_a, bot_b).await?;
+
+        // Mirror remove_all_friendships: best-effort relation-graph cleanup.
+        // The repo already removed the friendship row; a relation-graph failure
+        // is logged and surfaced for reconciliation rather than failing the call.
+        if let Some(ref relation) = self.relation {
+            let env = bcs_config::resolve_env_str();
+            if let Err(err) = relation.remove_friend_edges(bot_a, bot_b, &env).await {
+                warn!(
+                    left_bot = %bot_a,
+                    right_bot = %bot_b,
+                    env = %env,
+                    error = %err,
+                    "F.2: relation.remove_friend_edges failed; friendship repo already removed, relation graph is inconsistent"
+                );
+            }
+        }
+
+        if removed {
+            info!(left_bot = %bot_a, right_bot = %bot_b, "Friendship removed");
+        }
         Ok(removed)
     }
 }

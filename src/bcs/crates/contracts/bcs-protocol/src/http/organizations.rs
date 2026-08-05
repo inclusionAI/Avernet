@@ -106,7 +106,15 @@ pub struct OrganizationMemberListResponse {
 pub struct OrganizationCandidateBotResponse {
     pub bot_uuid: String,
     pub provider_id: String,
-    pub capabilities: BotCapabilities,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrganizationCandidateBotDetailResponse {
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub is_member: bool,
+    pub bot: OrganizationMemberBotResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

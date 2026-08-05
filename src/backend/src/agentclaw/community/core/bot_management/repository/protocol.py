@@ -8,6 +8,10 @@ from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 
 
+class BotLookupAmbiguousError(RuntimeError):
+    """A caller-specific Bot lookup matched more than one live row."""
+
+
 @runtime_checkable
 class BotRepository(Protocol):
     """Protocol for bot repository implementations.
@@ -21,8 +25,22 @@ class BotRepository(Protocol):
         """Create a new bot record."""
         ...
 
-    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> Optional[Dict[str, Any]]:
-        """Get bot by bot_id and owner_id."""
+    def get_by_id_and_owner(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        execution_options: dict | None = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Get bot by bot_id and owner_id.
+
+        ``execution_options`` is forwarded to the SQLAlchemy query via
+        ``Query.execution_options`` so callers can opt out of cross-cutting
+        guards (e.g. ``{"skip_avernet_tenant_guard": True}`` for the
+        refresh-token callback, which is served under ``/api`` and thus runs
+        under the DEFAULT tenant but must resolve an external-tenant bot).
+        ``None`` means no override — preserves existing behavior.
+        """
         ...
 
     def get_live_by_id_owner_and_env(
@@ -50,10 +68,26 @@ class BotRepository(Protocol):
         """
         ...
 
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by exact bot and entity identifiers in this env."""
+        ...
+
+    def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Get one live Bot by id or raise when the caller scope is ambiguous."""
+        ...
+
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
-        """List bots by owner_id with pagination."""
+        """List bots by owner_id with pagination.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard). Callers that key semantics off this — ``is_first_bot``,
+        ``delete_bot`` earliest-protection, ``create_bot_for_others`` owner
+        lookup — must be aware the result reflects only the current tenant.
+        """
         ...
 
     def list_by_owner_or_collaborator(
@@ -78,10 +112,19 @@ class BotRepository(Protocol):
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
-        """List bots by conditions with pagination."""
+        """List bots by conditions with pagination.
+
+        ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
+        active engine (exact), ``status`` filters on lifecycle status (exact).
+        All are optional and additive — omitting them reproduces the prior
+        result set and count exactly.
+        """
         ...
 
     def list_by_search(
@@ -92,6 +135,12 @@ class BotRepository(Protocol):
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots with pagination and search."""
+        ...
+
+    def list_public_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """Live public bots matching any ``(bot_id, owner_id)`` pair, this env."""
         ...
 
     def list_domain_bots(
@@ -120,6 +169,9 @@ class BotRepository(Protocol):
 
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         """Count bots by owner_id.
+
+        Scoped by current env AND tenant (via the ``BotModel`` avernet_tenant
+        guard); see :meth:`list_by_owner`.
 
         Args:
             owner_id: Owner user ID.

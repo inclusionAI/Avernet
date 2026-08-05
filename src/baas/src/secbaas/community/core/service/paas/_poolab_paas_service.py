@@ -14,6 +14,7 @@ from secbaas.community.api.device_manage import (
     CommandResult,
     DeviceCreateConfig,
     OutBoundOperationRule,
+    OutBoundOperationRuleUpdatedMode,
     PoolabCreateConfig,
     PoolabCreationResult,
     PoolabCredentials,
@@ -86,6 +87,7 @@ class PoolabPaasService(PaasService):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         raise NotImplementedError(
             "Poolab platform does not support outbound operation rules"
@@ -160,3 +162,43 @@ class PoolabPaasService(PaasService):
 
     async def close(self) -> None:
         await self._plugin.close()
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Poolab platform does not support file transfer.
+
+        Args:
+            paas_device_id: Poolab device ID.
+            source_url: URL to download from.
+            device_path: Destination path on device.
+            timeout_seconds: Maximum download time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Poolab.
+        """
+        raise NotImplementedError("File transfer not supported on Poolab platform")
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Poolab platform does not support file transfer.
+
+        Args:
+            paas_device_id: Poolab device ID.
+            device_path: Source path on device.
+            target_url: URL to upload to.
+            timeout_seconds: Maximum upload time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Poolab.
+        """
+        raise NotImplementedError("File transfer not supported on Poolab platform")

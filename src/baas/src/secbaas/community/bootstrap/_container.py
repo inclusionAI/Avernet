@@ -129,7 +129,10 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bot_qpm_repository=repository.bot_qpm_repository,
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
+        file_transfer_backend=plugins.file_transfer_backend,
         ws_relay_session_repo=repository.ws_relay_session_repository,
+        ticket_repository=repository.ticket_repository,
+        session_ticket_repository=repository.session_ticket_repository,
     )
 
     tasks = providers.Container(
@@ -139,6 +142,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
         device_binding_repo=repository.device_binding_repository,
         sandbox_device_router=services.sandbox_device_router,
         bot_run_queue_repository=repository.bot_run_queue_repository,
+        ticket_repository=repository.ticket_repository,
+        paas_service_facade=services.paas_facade,
+        file_transfer_backend=services.file_transfer_backend,
     )
 
     cron_lifecycle = providers.Singleton(
@@ -147,6 +153,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         tasks=providers.List(
             tasks.device_ttl_timer_task,
             tasks.bot_run_recovery_task,
+            tasks.file_transfer_poller_task,
         ),
     )
 
@@ -264,3 +271,21 @@ def _log_config_summary(container: containers.DeclarativeContainer) -> None:
         return
     formatted = json.dumps(config_dict, indent=2, default=str, ensure_ascii=False)
     logger.info("Container config:\n%s", formatted)
+
+
+def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
+    """Inject enterprise plugin options into a container instance's Selectors.
+
+    Runs at instance level (not class level) so that only this container
+    is affected.  Called after every container creation.
+    """
+    try:
+        from secbaas.community.plugin_registry import (
+            has_enterprise_plugins,
+            inject_into_plugin_container,
+        )
+
+        if has_enterprise_plugins():
+            inject_into_plugin_container(container)
+    except ImportError:
+        pass

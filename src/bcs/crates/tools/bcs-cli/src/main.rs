@@ -9,17 +9,19 @@
 //! # Configuration
 //!
 //! BCS CLI can be configured via:
-//! 1. Command-line arguments (highest priority)
-//! 2. Environment variables: MOLTIS_BCS_URL, BCS_COOKIE
-//! 3. Session file: $BOT_DATA_DIR/.bcs/session.json
-//! 4. Default local URL (lowest priority)
+//! 1. `--url` (highest priority)
+//! 2. `BCS_API_BASE_URL`
+//! 3. `MOLTIS_BCS_URL`
+//! 4. Session file: `$BOT_DATA_DIR/.bcs/session.json`
+//! 5. Runtime-selected compiled distribution default
+//! 6. Default local URL (lowest priority)
 //!
 //! # Environment-Based Configuration
 //!
-//! Set `env` environment variable to switch between environments:
-//! - `env=dev` (default) - development environment
-//! - `env=pre` - pre-production environment
-//! - `env=prod` - production environment
+//! Distribution builds may compile both pre and production defaults into one
+//! binary. Runtime environment priority is `AGENTCLAW_ENV`, `env`, then the
+//! server environment chain. `pre`/`prepub` selects pre; every other value
+//! selects production. Public builds omit both compiled defaults.
 //!
 //! # Token Discovery
 //!
@@ -44,10 +46,16 @@
 //! env=pre bcs-cli health
 //! ```
 
+// `agentpass` is a bin-local module (dead code here: `AUTH_VIA_AGENT_PASS = false`).
+// It stays as `src/agentpass.rs` so the internal `#[path]` reuse of this file
+// resolves it identically.
 mod agentpass;
-mod oauth;
+// `oauth` is now a `pub mod` on the `bcs_cli` library (public extension point,
+// resolved via `inventory`). Public builds link no provider and fall back to a
+// stub; internal builds link an Ant provider that performs the real flow.
+use bcs_cli::oauth;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
@@ -56,14 +64,30 @@ use clap::ArgAction;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{Level, debug, info};
+use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-use bcs_cli::BcsClient;
+use bcs_cli::{
+    BcsClient, CreateCustomGroupOptions, RunSessionCollaborationOptions,
+};
 use bcs_protocol::{BCS_PROTOCOL_VERSION, BotConnectParams};
 
 // disable agentpass, agentpass token should be auto injected into the http headers
 const AUTH_VIA_AGENT_PASS: bool = false;
+const DEFAULT_GROUP_BATCH_SIZE: u64 = 20;
+
+#[derive(Debug, Serialize)]
+struct GroupListOutput {
+    items: Vec<serde_json::Value>,
+    offset: u64,
+    returned: u64,
+    total: u64,
+    has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_command: Option<String>,
+}
 
 #[derive(Debug, Serialize, Default)]
 struct StructuredResult {
@@ -100,6 +124,46 @@ fn emit_structured_result(result: &StructuredResult) {
         serde_json::to_string(result)
             .unwrap_or_else(|_| "{\"status\":\"request_failed\"}".to_string())
     );
+}
+
+fn render_discover_result(
+    result: &bcs_protocol::DiscoverBotsExtendedResponse,
+    json_output: bool,
+) -> Result<String> {
+    if json_output {
+        return Ok(serde_json::to_string_pretty(result)?);
+    }
+
+    let mut lines = vec![format!("Discovered {} bots:", result.count)];
+    for bot in &result.bots {
+        let name = bot.capabilities.name.as_deref().unwrap_or("unnamed");
+        let vis = &bot.visibility;
+        let friend_tag = match bot.is_friend {
+            Some(true) => " ★friend",
+            Some(false) | None => "",
+        };
+        let provider_tag = bot
+            .provider_info
+            .as_ref()
+            .map(|provider| {
+                format!(
+                    " provider={}/{}",
+                    provider.provider_name, provider.provider_id
+                )
+            })
+            .unwrap_or_default();
+        let agent_code_tag = bot
+            .agent_code
+            .as_ref()
+            .map(|agent_code| format!(" agent_code={agent_code}"))
+            .unwrap_or_default();
+        lines.push(format!(
+            "  - {} ({}) [{}]{}{}{}",
+            bot.bot_uuid, name, vis, friend_tag, provider_tag, agent_code_tag
+        ));
+    }
+
+    Ok(lines.join("\n"))
 }
 
 fn classify_auth_error_message(msg: &str) -> &'static str {
@@ -286,6 +350,10 @@ fn resolve_bcs_url(cli: &Cli) -> Result<String> {
     }
 
     if let Some(url) = resolve_session_bcs_url()? {
+        return Ok(url);
+    }
+
+    if let Some(url) = bcs_cli::resolve_compiled_distribution_default_url()? {
         return Ok(url);
     }
 
@@ -746,6 +814,113 @@ fn parse_skills_input(input: &str) -> Vec<bcs_protocol::Skill> {
         .collect()
 }
 
+fn parse_custom_group_bindings(
+    values: &[String],
+) -> Result<BTreeMap<String, bcs_protocol::ParticipantBindingInfo>> {
+    let mut bindings = BTreeMap::new();
+    for value in values {
+        let (raw_binding, raw_bot_id) = value.split_once('=').ok_or_else(|| {
+            anyhow!("Invalid --binding '{}'; expected ROLE=BOT_UUID", value)
+        })?;
+        let binding = raw_binding.trim();
+        let bot_id = raw_bot_id.trim();
+        if binding.is_empty() || bot_id.is_empty() {
+            return Err(anyhow!(
+                "Invalid --binding '{}'; role and bot UUID must not be empty",
+                value
+            ));
+        }
+        if bindings.contains_key(binding) {
+            return Err(anyhow!("Duplicate --binding role: {binding}"));
+        }
+        bindings.insert(
+            binding.to_string(),
+            bcs_protocol::ParticipantBindingInfo {
+                source: "manual".to_string(),
+                bot_ids: vec![bot_id.to_string()],
+            },
+        );
+    }
+    Ok(bindings)
+}
+
+fn validate_custom_group_bindings(
+    bindings: &BTreeMap<String, bcs_protocol::ParticipantBindingInfo>,
+    validation: &serde_json::Value,
+    driver: &str,
+) -> Result<()> {
+    let slots = validation
+        .get("participants")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow!("Validation response is missing participants"))?;
+    let declared = slots
+        .iter()
+        .filter_map(|slot| slot.get("binding").and_then(serde_json::Value::as_str))
+        .collect::<BTreeSet<_>>();
+    for binding in bindings.keys() {
+        if !declared.contains(binding.as_str()) {
+            return Err(anyhow!("--binding references undeclared participant role: {binding}"));
+        }
+    }
+    for slot in slots {
+        let Some(binding) = slot.get("binding").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let needs_binding = slot
+            .get("required")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+            || slot
+                .get("assigned")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+        if needs_binding && !bindings.contains_key(binding) {
+            return Err(anyhow!("Missing --binding for participant role: {binding}"));
+        }
+    }
+    if !bindings
+        .values()
+        .flat_map(|binding| &binding.bot_ids)
+        .any(|bot_id| bot_id == driver)
+    {
+        return Err(anyhow!(
+            "Driver bot must appear in at least one --binding: {driver}"
+        ));
+    }
+    Ok(())
+}
+
+fn emit_collaboration_validation(validation: &serde_json::Value, structured_mode: bool) {
+    if structured_mode {
+        println!(
+            "{}",
+            serde_json::to_string(validation).unwrap_or_else(|_| "{}".to_string())
+        );
+        return;
+    }
+    if validation.get("valid").and_then(serde_json::Value::as_bool) == Some(true) {
+        let summary = validation.get("summary").cloned().unwrap_or_default();
+        println!("VALID");
+        println!(
+            "  Participants: {}",
+            summary.get("participants").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        );
+        println!(
+            "  Nodes: {}",
+            summary.get("nodes").and_then(serde_json::Value::as_u64).unwrap_or(0)
+        );
+    } else if let Some(errors) = validation.get("errors").and_then(serde_json::Value::as_array) {
+        for error in errors {
+            println!(
+                "{} {}: {}",
+                error.get("code").and_then(serde_json::Value::as_str).unwrap_or("INVALID"),
+                error.get("path").and_then(serde_json::Value::as_str).unwrap_or("$"),
+                error.get("message").and_then(serde_json::Value::as_str).unwrap_or("validation failed")
+            );
+        }
+    }
+}
+
 /// Skill→BCS interactive debug
 macro_rules! skill_debug_request {
     ($debug:expr, $method:expr, $endpoint:expr, $body:expr) => {
@@ -851,9 +1026,9 @@ enum Commands {
         #[arg(short, long)]
         query: Option<String>,
 
-        /// Filter by skills (comma-separated)
-        #[arg(short, long, hide = true)]
-        skills: Option<String>,
+        /// Require an exact skill match (repeat for multiple required skills)
+        #[arg(long = "skill")]
+        skills: Vec<String>,
 
         /// Filter by visibility ("public" or "protected")
         #[arg(long)]
@@ -871,6 +1046,10 @@ enum Commands {
         /// Organization member role filter. Requires --organization-code.
         #[arg(long)]
         role: Option<String>,
+
+        /// Output discover results in human-readable text instead of JSON
+        #[arg(long)]
+        no_json: bool,
     },
 
     /// Update bot status
@@ -928,9 +1107,13 @@ enum Commands {
         #[arg(short, long, hide = true)]
         id: Option<String>,
 
-        /// Driver bot ID
-        #[arg(long)]
-        driver: String,
+        /// Driver bot ID for a regular chat group (required unless --manager is used)
+        #[arg(long, required_unless_present = "manager", conflicts_with = "manager")]
+        driver: Option<String>,
+
+        /// Manager bot ID for a manager-worker group (required unless --driver is used)
+        #[arg(long, required_unless_present = "driver", conflicts_with = "driver")]
+        manager: Option<String>,
 
         /// Participants (comma-separated bot UUIDs, e.g. "bot1,20260412_abc:100005")
         #[arg(short, long)]
@@ -943,6 +1126,17 @@ enum Commands {
         /// Group topic (sets the group label)
         #[arg(long)]
         topic: Option<String>,
+    },
+
+    /// Validate, create, or run custom collaborations
+    #[command(visible_alias = "collaborate")]
+    Collaboration {
+        /// Authentication token (auto-discovered if not provided)
+        #[arg(short, long)]
+        token: Option<String>,
+
+        #[command(subcommand)]
+        command: CollaborationCommands,
     },
 
     /// Get group info
@@ -979,15 +1173,23 @@ enum Commands {
         focus: Option<String>,
     },
 
-    /// List groups, optionally limited to groups the current bot participates in
+    /// List groups the authenticated human or bot formally participates in
     ListGroups {
         /// Authentication token (auto-discovered if not provided)
         #[arg(short, long)]
         token: Option<String>,
 
-        /// List only groups that include the current bot from the session file
+        /// Maximum number of groups to return in this batch
+        #[arg(long, default_value_t = DEFAULT_GROUP_BATCH_SIZE)]
+        batch_size: u64,
+
+        /// Start listing at this zero-based group offset
+        #[arg(long, default_value_t = 0)]
+        offset: u64,
+
+        /// Fetch all groups by following every batch
         #[arg(long)]
-        mine: bool,
+        all: bool,
     },
 
     /// Add a member to an existing group
@@ -1028,10 +1230,11 @@ enum Commands {
         #[arg(short, long)]
         message: String,
 
-        /// Overall wait budget in milliseconds (up to 24 hours).
+        /// Local polling budget in milliseconds (up to 24 hours).
         ///
+        /// This never changes the BCS run or downstream bot execution timeout.
         /// Defaults to 30 minutes for the blocking flow, or 60 seconds when
-        /// `--detach` is set (the budget for waiting on the bot's first ack).
+        /// `--detach` is set (the local budget for observing the first ack).
         #[arg(long, value_parser = clap::value_parser!(u64).range(1..=86_400_000))]
         timeout_ms: Option<u64>,
 
@@ -1052,9 +1255,8 @@ enum Commands {
         #[arg(long, default_value_t = 15_000u64, hide = true)]
         poll_wait_ms: u64,
 
-        /// Detach after the bot acknowledges the message (first chat event).
-        /// The run keeps executing on the server; the CLI returns without
-        /// waiting for the full response.
+        /// Detach after BCS accepts and starts the run. The run keeps executing
+        /// on the server; the CLI returns without waiting for the full response.
         #[arg(long, default_value_t = false)]
         detach: bool,
 
@@ -1145,6 +1347,70 @@ enum Commands {
 
         #[command(subcommand)]
         command: ServiceCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollaborationCommands {
+    /// Query whether the authenticated Bot may run a state machine in a session
+    Permission {
+        /// Current BCS session ID
+        #[arg(long)]
+        session: String,
+    },
+
+    /// Submit YAML and role bindings once, then run it in the current session
+    Run {
+        /// YAML file containing the one-shot state-machine definition
+        file: PathBuf,
+
+        /// Current BCS session ID
+        #[arg(long)]
+        session: String,
+
+        /// Logical participant binding in ROLE=BOT_UUID form; repeat for each role
+        #[arg(long = "binding", value_name = "ROLE=BOT_UUID", required = true)]
+        bindings: Vec<String>,
+
+        /// Runtime input JSON, or @path/to/input.json
+        #[arg(long, default_value = "{}")]
+        input: String,
+    },
+
+    /// Validate a custom collaboration definition against the current BCS server
+    Validate {
+        /// YAML file to validate
+        file: PathBuf,
+    },
+
+    /// Create a custom collaboration group from a validated definition
+    Create {
+        /// YAML file containing the custom collaboration definition
+        file: PathBuf,
+
+        /// Group ID (optional, auto-generated if not provided)
+        #[arg(short, long)]
+        id: Option<String>,
+
+        /// Driver bot UUID; it must appear in at least one participant binding
+        #[arg(long)]
+        driver: String,
+
+        /// Logical participant binding in ROLE=BOT_UUID form; repeat for each role
+        #[arg(long = "binding", value_name = "ROLE=BOT_UUID", required = true)]
+        bindings: Vec<String>,
+
+        /// Group context describing the collaboration goal
+        #[arg(long)]
+        context: Option<String>,
+
+        /// Group topic
+        #[arg(long)]
+        topic: Option<String>,
+
+        /// Auto-start the workflow for later service invocations
+        #[arg(long, default_value_t = false)]
+        auto_start_on_service_invocation: bool,
     },
 }
 
@@ -1534,6 +1800,53 @@ enum SessionCommands {
         #[arg(long, value_name = "TTL")]
         ttl_seconds: Option<u64>,
     },
+
+    /// Manage the session shared file workspace (upload/download/share/list/delete).
+    File {
+        #[command(subcommand)]
+        command: SessionFileCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionFileCommands {
+    /// Upload a local file (auto three-stage: prepare -> PUT -> complete).
+    Upload {
+        #[arg(short, long)] session: String,
+        #[arg(long)] path: String,
+        #[arg(long)] name: Option<String>,
+        #[arg(long)] mime: Option<String>,
+    },
+    /// List files in the session workspace.
+    List {
+        #[arg(short, long)] session: String,
+        #[arg(long)] prefix: Option<String>,
+        #[arg(long)] status: Option<String>,
+        #[arg(long)] limit: Option<u32>,
+        #[arg(long)] offset: Option<u32>,
+    },
+    /// Download a file's bytes (follows presigned redirect or streams).
+    Download {
+        #[arg(short, long)] session: String,
+        #[arg(long)] file_id: String,
+        #[arg(long)] out: Option<String>,
+        #[arg(long)] ttl: Option<u64>,
+    },
+    /// Delete a file or cancel an in-progress upload.
+    Delete {
+        #[arg(short, long)] session: String,
+        #[arg(long)] file_id: String,
+    },
+    /// Generate a no-auth share link (valid until ttl expiry).
+    Share {
+        #[arg(short, long)] session: String,
+        #[arg(long)] file_id: String,
+        #[arg(long)] ttl: Option<u64>,
+    },
+    /// Query backend capabilities (storage / presign / max_size).
+    Capabilities {
+        #[arg(short, long)] session: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1607,8 +1920,22 @@ enum ServiceCommands {
     },
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Binary entry. Delegates to [`run`] so the internal overlay can reuse this
+/// module (`#[path]`) and call `run()` directly under its own runtime.
+fn main() -> Result<()> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(run())
+}
+
+/// Run the CLI.
+///
+/// Kept `pub` so an internal build can reuse this whole module (via `#[path]`)
+/// and link an Ant-side OAuth provider — see the ocb overlay crate
+/// `crates/tools/bcs-cli-internal`. The body is identical to the legacy
+/// `#[tokio::main] async fn main`; only the entry is split out.
+pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Setup logging
@@ -1646,7 +1973,7 @@ async fn main() -> Result<()> {
     // Get current environment (defaults to "dev")
     let env = get_current_env();
 
-    // Determine BCS URL: CLI arg > env var > session.json > default
+    // Determine BCS URL: CLI arg > env var > session.json > compiled default > local
     // Note: bcs_url resolution is deferred for commands that don't need it (e.g., --web mode).
     let bcs_url = resolve_bcs_url(&cli).unwrap_or_default();
 
@@ -1824,6 +2151,11 @@ async fn main() -> Result<()> {
             BcsClient::with_token(bcs_url, token)
         };
         client.set_client_identity(format!("bcs-cli/{}", env!("CARGO_PKG_VERSION")));
+        if let Ok(traceparent) = std::env::var("TRACEPARENT") {
+            if let Err(error) = client.set_traceparent(traceparent.trim()) {
+                warn!(error = %error, "Ignoring invalid TRACEPARENT from tool environment");
+            }
+        }
         client
     }
 
@@ -2251,11 +2583,12 @@ async fn main() -> Result<()> {
         Commands::Discover {
             token,
             query,
-            skills: _,
+            skills,
             visibility,
             collaborate_bot,
             organization_code,
             role,
+            no_json,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -2271,6 +2604,7 @@ async fn main() -> Result<()> {
                 "/bots/discover",
                 json!({
                     "q": &query,
+                    "skills": &skills,
                     "visibility": &visibility,
                     "collaborate_bot": &collaborate_bot,
                     "organization_code": &organization_code,
@@ -2281,6 +2615,7 @@ async fn main() -> Result<()> {
             let result = client
                 .discover_bots_extended(
                     query.as_deref(),
+                    &skills,
                     visibility.as_deref(),
                     collaborate_bot.as_deref(),
                     organization_code.as_deref(),
@@ -2296,35 +2631,10 @@ async fn main() -> Result<()> {
                 })
             );
 
-            println!("Discovered {} bots:", result.count);
-            for bot in &result.bots {
-                let name = bot.capabilities.name.as_deref().unwrap_or("unnamed");
-                let vis = &bot.visibility;
-                let friend_tag = match bot.is_friend {
-                    Some(true) => " ★friend",
-                    Some(false) => "",
-                    None => "",
-                };
-                let provider_tag = bot
-                    .provider_info
-                    .as_ref()
-                    .map(|provider| {
-                        format!(
-                            " provider={}/{}",
-                            provider.provider_name, provider.provider_id
-                        )
-                    })
-                    .unwrap_or_default();
-                let agent_code_tag = bot
-                    .agent_code
-                    .as_ref()
-                    .map(|agent_code| format!(" agent_code={agent_code}"))
-                    .unwrap_or_default();
-                println!(
-                    "  - {} ({}) [{}]{}{}{}",
-                    bot.bot_uuid, name, vis, friend_tag, provider_tag, agent_code_tag
-                );
-            }
+            println!(
+                "{}",
+                render_discover_result(&result, structured_mode && !no_json)?
+            );
         }
 
         Commands::UpdateStatus {
@@ -2452,7 +2762,8 @@ async fn main() -> Result<()> {
                     "mode": &result.mode,
                     "driver_bot": &result.driver_bot,
                     "participants": &result.participants,
-                    "chat_url": &result.chat_url
+                    "chat_url": &result.chat_url,
+                    "session_id": &result.session_id
                 })
             );
 
@@ -2469,6 +2780,9 @@ async fn main() -> Result<()> {
                 if let Some(ref chat_url) = result.chat_url {
                     println!("  Chat URL: {}", chat_url);
                 }
+                if let Some(ref session_id) = result.session_id {
+                    println!("  Session: {}", session_id);
+                }
             }
         }
 
@@ -2476,6 +2790,7 @@ async fn main() -> Result<()> {
             token,
             id: _,
             driver,
+            manager,
             participants,
             context,
             topic,
@@ -2488,16 +2803,42 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
+            let (driver, group_strategy) = match (driver, manager) {
+                (Some(driver), None) => (driver, None),
+                (None, Some(manager)) => (manager, Some("manager_worker")),
+                _ => return Err(anyhow!("Exactly one of --driver or --manager is required")),
+            };
+
             // Format: bot_uuid (may contain colons, e.g. "20260412_347nf7bz:100005")
-            // Comma-separated for multiple participants.
-            // Consistent with request-group-help which also passes bot_uuid as-is.
-            let participants: Vec<bcs_protocol::ParticipantInfo> = participants
+            // Comma-separated for multiple participants. In manager-worker groups,
+            // the manager role is derived from --manager and every other participant
+            // is a worker, so role suffixes do not conflict with bot UUID syntax.
+            let mut participants: Vec<bcs_protocol::ParticipantInfo> = participants
                 .split(',')
                 .map(|p| bcs_protocol::ParticipantInfo {
                     bot_uuid: p.trim().to_string(),
-                    role: None,
+                    role: group_strategy.map(|_| {
+                        if p.trim() == driver {
+                            "manager".to_string()
+                        } else {
+                            "worker".to_string()
+                        }
+                    }),
                 })
                 .collect();
+            if group_strategy.is_some()
+                && !participants
+                    .iter()
+                    .any(|participant| participant.bot_uuid == driver)
+            {
+                participants.insert(
+                    0,
+                    bcs_protocol::ParticipantInfo {
+                        bot_uuid: driver.clone(),
+                        role: Some("manager".to_string()),
+                    },
+                );
+            }
 
             debug_request!(
                 debug,
@@ -2505,16 +2846,18 @@ async fn main() -> Result<()> {
                 "/groups",
                 json!({
                     "driver_bot": &driver,
-                    "participants": &participants
+                    "participants": &participants,
+                    "group_strategy": group_strategy
                 })
             );
 
             let result = client
-                .create_group_with_context(
+                .create_group_with_strategy_and_context(
                     &driver,
                     participants,
                     context.as_deref(),
                     topic.as_deref(),
+                    group_strategy,
                 )
                 .await?;
 
@@ -2524,15 +2867,18 @@ async fn main() -> Result<()> {
                 json!({
                     "id": &result.id,
                     "driver_bot": &result.driver_bot,
-                    "participants": &result.participants
+                    "participants": &result.participants,
+                    "chat_url": &result.chat_url,
+                    "session_id": &result.session_id
                 })
             );
 
             // Surface the session the server auto-creates as part of group
-            // creation (see commit ddd6ca7b4 — group_management always seeds
-            // a "新会话"). Best-effort: a failed lookup must NOT unwind the
-            // successful group creation.
-            let auto_session: Option<serde_json::Value> = {
+            // creation. New servers return it directly; retain a best-effort
+            // lookup for compatibility with older servers.
+            let auto_session_id = if result.session_id.is_some() {
+                result.session_id.clone()
+            } else {
                 debug_request!(
                     debug,
                     "GET",
@@ -2548,7 +2894,13 @@ async fn main() -> Result<()> {
                         v.get("items")
                             .and_then(|x| x.as_array())
                             .and_then(|arr| arr.first())
-                            .cloned()
+                            .and_then(|session| {
+                                session
+                                    .get("session_id")
+                                    .or_else(|| session.get("id"))
+                                    .and_then(|value| value.as_str())
+                            })
+                            .map(str::to_string)
                     }
                     Err(e) => {
                         eprintln!(
@@ -2567,15 +2919,273 @@ async fn main() -> Result<()> {
             if let Some(chat_url) = &result.chat_url {
                 println!("  Chat URL: {}", chat_url);
             }
-            if let Some(sess) = auto_session {
-                let sid = sess
-                    .get("session_id")
-                    .or_else(|| sess.get("id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                println!("  Session: {}", sid);
+            if let Some(session_id) = auto_session_id {
+                println!("  Session: {}", session_id);
             }
         }
+
+        Commands::Collaboration { token, command } => match command {
+            CollaborationCommands::Permission { session } => {
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                debug_request!(
+                    debug,
+                    "GET",
+                    &format!("/sessions/{session}/state-machine-permission"),
+                    json!({})
+                );
+                let permission = client
+                    .get_session_state_machine_permission(&session)
+                    .await?;
+                debug_response!(debug, "200", &permission);
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&permission)?);
+                } else {
+                    println!(
+                        "State-machine permission: {}",
+                        if permission
+                            .get("allowed")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                        {
+                            "ALLOWED"
+                        } else {
+                            "DENIED"
+                        }
+                    );
+                    println!(
+                        "  Session: {}",
+                        permission
+                            .get("session_id")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(&session)
+                    );
+                    println!(
+                        "  Reason: {}",
+                        permission
+                            .get("reason_code")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown")
+                    );
+                    if let Some(message) =
+                        permission.get("message").and_then(serde_json::Value::as_str)
+                    {
+                        println!("  Message: {message}");
+                    }
+                }
+            }
+
+            CollaborationCommands::Run {
+                file,
+                session,
+                bindings,
+                input,
+            } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let participant_bindings = parse_custom_group_bindings(&bindings)?;
+                let input = parse_json_arg(&input)?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+                debug_request!(
+                    debug,
+                    "POST",
+                    &format!("/sessions/{session}/state-machine-runs"),
+                    json!({
+                        "definition_yaml": &definition_yaml,
+                        "participant_bindings": &participant_bindings,
+                        "input": &input,
+                    })
+                );
+                let result = client
+                    .run_session_collaboration(RunSessionCollaborationOptions {
+                        session_id: session,
+                        participant_bindings,
+                        definition_yaml,
+                        input,
+                    })
+                    .await?;
+                debug_response!(debug, "202", &result);
+                if structured_mode {
+                    println!("{}", serde_json::to_string(&result)?);
+                } else {
+                    println!("State-machine run started:");
+                    println!(
+                        "  Run: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("run_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                    println!(
+                        "  Session: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("session_id"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                    println!(
+                        "  Status: {}",
+                        result
+                            .get("run")
+                            .and_then(|run| run.get("status"))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("?")
+                    );
+                }
+            }
+
+            CollaborationCommands::Validate { file } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/collaboration/definitions/validate",
+                    json!({ "definition_yaml": &definition_yaml })
+                );
+                let validation = client
+                    .validate_collaboration_definition(&definition_yaml)
+                    .await?;
+                debug_response!(debug, "200", &validation);
+                let valid = validation
+                    .get("valid")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                emit_collaboration_validation(&validation, structured_mode);
+                if !valid {
+                    std::process::exit(1);
+                }
+            }
+
+            CollaborationCommands::Create {
+                file,
+                id,
+                driver,
+                bindings,
+                context,
+                topic,
+                auto_start_on_service_invocation,
+            } => {
+                let definition_yaml = std::fs::read_to_string(&file).map_err(|error| {
+                    anyhow!("Failed to read YAML file {}: {error}", file.display())
+                })?;
+                let participant_bindings = parse_custom_group_bindings(&bindings)?;
+                let token = get_token(token.as_deref())?;
+                let client = create_client(
+                    &bcs_url,
+                    &token,
+                    bcs_cookie.as_deref(),
+                    oauth_headers.as_ref(),
+                );
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/collaboration/definitions/validate",
+                    json!({ "definition_yaml": &definition_yaml })
+                );
+                let validation = client
+                    .validate_collaboration_definition(&definition_yaml)
+                    .await?;
+                debug_response!(debug, "200", &validation);
+                if validation
+                    .get("valid")
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                {
+                    emit_collaboration_validation(&validation, structured_mode);
+                    std::process::exit(1);
+                }
+                validate_custom_group_bindings(&participant_bindings, &validation, &driver)?;
+
+                debug_request!(
+                    debug,
+                    "POST",
+                    "/groups",
+                    json!({
+                        "id": &id,
+                        "driver_bot": &driver,
+                        "participant_bindings": &participant_bindings,
+                        "context": &context,
+                        "topic": &topic,
+                        "group_strategy": "state_machine",
+                        "auto_start_on_service_invocation": auto_start_on_service_invocation,
+                        "collaboration_definition_yaml": &definition_yaml
+                    })
+                );
+                let result = client
+                    .create_custom_group(CreateCustomGroupOptions {
+                        id,
+                        driver_bot: driver,
+                        participant_bindings,
+                        definition_yaml,
+                        context,
+                        topic,
+                        auto_start_on_service_invocation,
+                    })
+                    .await?;
+                debug_response!(
+                    debug,
+                    "200",
+                    json!({
+                        "id": &result.id,
+                        "driver_bot": &result.driver_bot,
+                        "participants": &result.participants,
+                        "chat_url": &result.chat_url,
+                        "session_id": &result.session_id
+                    })
+                );
+
+                if structured_mode {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "id": result.id,
+                            "driver_bot": result.driver_bot,
+                            "participants": result.participants,
+                            "chat_url": result.chat_url,
+                            "session_id": result.session_id,
+                            "group_kind": result.group_kind,
+                            "created": result.created
+                        }))?
+                    );
+                } else {
+                    println!("Custom collaboration group created:");
+                    println!("  ID: {}", result.id);
+                    println!("  Driver: {}", result.driver_bot);
+                    println!("  Participants: {}", result.participants.join(", "));
+                    if let Some(chat_url) = result.chat_url {
+                        println!("  Chat URL: {chat_url}");
+                    }
+                    if let Some(session_id) = result.session_id {
+                        println!("  Session: {session_id}");
+                    }
+                }
+            }
+        },
 
         Commands::GetGroup { token, id } => {
             let token = get_token(token.as_deref())?;
@@ -2648,7 +3258,12 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&result)?);
         }
 
-        Commands::ListGroups { token, mine } => {
+        Commands::ListGroups {
+            token,
+            batch_size,
+            offset: start_offset,
+            all,
+        } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
                 &bcs_url,
@@ -2657,52 +3272,118 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let (groups, current_bot_uuid) = if mine {
-                let bot_uuid = resolve_my_bot_uuid()?;
+            if batch_size == 0 {
+                return Err(anyhow!("Batch size must be greater than 0"));
+            }
+            let mut offset = start_offset;
+            let mut groups = Vec::new();
+            let mut actor_id = None;
+            let (next_offset, total) = loop {
                 debug_request!(
                     debug,
                     "GET",
-                    &format!("/bots/{}/groups", &bot_uuid),
-                    json!({})
+                    "/groups/my",
+                    json!({
+                        "offset": offset,
+                        "limit": batch_size,
+                    })
                 );
-                let groups = client.list_bot_groups(&bot_uuid).await?;
-                (groups, Some(bot_uuid))
+                let page = client.list_my_groups(offset, batch_size).await?;
+                if page.offset != offset {
+                    return Err(anyhow!(
+                        "Invalid current actor groups pagination response: requested offset={}, received offset={}",
+                        offset,
+                        page.offset
+                    ));
+                }
+                if page.actor_id.trim().is_empty() {
+                    return Err(anyhow!(
+                        "Current actor groups response did not identify the authenticated actor"
+                    ));
+                }
+                if let Some(current_actor_id) = actor_id.as_deref() {
+                    if current_actor_id != page.actor_id {
+                        return Err(anyhow!(
+                            "Current actor changed during pagination: expected {}, received {}",
+                            current_actor_id,
+                            page.actor_id
+                        ));
+                    }
+                } else {
+                    actor_id = Some(page.actor_id.clone());
+                }
+                let page_groups = page.items;
+                let total = page.total;
+                let page_returned = page_groups.len() as u64;
+                if page_returned == 0 && offset < total {
+                    return Err(anyhow!(
+                        "Current actor groups pagination made no progress at offset {} while total is {}",
+                        offset,
+                        total
+                    ));
+                }
+                groups.extend(page_groups);
+                let next_offset = offset.saturating_add(page_returned);
+                if !all || page_returned == 0 || next_offset >= total {
+                    break (next_offset, total);
+                }
+                offset = next_offset;
+            };
+            let actor_id = actor_id.ok_or_else(|| {
+                anyhow!("Current actor groups response did not identify the authenticated actor")
+            })?;
+            let returned = groups.len() as u64;
+            let has_more = !all && returned > 0 && next_offset < total;
+            let next_offset = if has_more {
+                Some(next_offset)
             } else {
-                debug_request!(debug, "GET", "/groups", json!({}));
-                (client.list_groups().await?, None)
+                None
+            };
+            let next_command = next_offset.map(|next_offset| {
+                format!(
+                    "bcs-cli list-groups --offset {} --batch-size {}",
+                    next_offset, batch_size
+                )
+            });
+            let output = GroupListOutput {
+                items: groups,
+                offset: start_offset,
+                returned,
+                total,
+                has_more,
+                next_offset,
+                next_command,
             };
 
-            debug_response!(
-                debug,
-                "200",
-                json!({
-                    "count": groups.len()
-                })
-            );
+            debug_response!(debug, "200", &output);
 
-            if let Some(bot_uuid) = current_bot_uuid {
-                println!("Groups for current bot {} ({}):", bot_uuid, groups.len());
+            if structured_mode {
+                println!("{}", serde_json::to_string(&output)?);
             } else {
-                println!("Groups ({}):", groups.len());
-            }
-            for group in groups {
-                let id = group
-                    .get("id")
-                    .or_else(|| group.get("group_id"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let mode = group
-                    .get("mode")
-                    .or_else(|| group.get("group_strategy"))
-                    .or_else(|| group.get("group_kind"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let driver = group
-                    .get("driver_bot")
-                    .or_else(|| group.get("coordinator_bot"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                println!("  - {} [{}] driver={}", id, mode, driver);
+                println!("Groups for current actor {} ({}/{}):", actor_id, returned, total);
+                for group in &output.items {
+                    let id = group
+                        .get("id")
+                        .or_else(|| group.get("group_id"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let mode = group
+                        .get("mode")
+                        .or_else(|| group.get("group_strategy"))
+                        .or_else(|| group.get("group_kind"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let driver = group
+                        .get("driver_bot")
+                        .or_else(|| group.get("coordinator_bot"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    println!("  - {} [{}] driver={}", id, mode, driver);
+                }
+                println!("Has more: {}", output.has_more);
+                if let Some(next_command) = output.next_command.as_deref() {
+                    println!("Next: {}", next_command);
+                }
             }
         }
 
@@ -2762,7 +3443,7 @@ async fn main() -> Result<()> {
                 oauth_headers.as_ref(),
             );
 
-            let effective_timeout_ms = timeout_ms.unwrap_or(if detach {
+            let client_wait_timeout_ms = timeout_ms.unwrap_or(if detach {
                 60_000
             } else {
                 1_800_000
@@ -2775,12 +3456,9 @@ async fn main() -> Result<()> {
                 json!({
                     "message": &message,
                     "from": serde_json::Value::Null,
-                    "timeout_ms": effective_timeout_ms,
                     "session_id": &session_id,
                     "tags": &tags,
                     "response_mode": &response_mode,
-                    "poll_wait_ms": poll_wait_ms,
-                    "detach": detach,
                     "organization_code": &organization_code,
                 })
             );
@@ -2793,7 +3471,7 @@ async fn main() -> Result<()> {
                         session_id.as_deref(),
                         &tags,
                         response_mode.as_deref(),
-                        Some(effective_timeout_ms),
+                        Some(client_wait_timeout_ms),
                         Some(poll_wait_ms),
                         organization_code.as_deref(),
                     )
@@ -2807,7 +3485,7 @@ async fn main() -> Result<()> {
                         session_id.as_deref(),
                         &tags,
                         response_mode.as_deref(),
-                        Some(effective_timeout_ms),
+                        Some(client_wait_timeout_ms),
                         Some(poll_wait_ms),
                         organization_code.as_deref(),
                     )
@@ -3680,6 +4358,183 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+
+                SessionCommands::File { command } => {
+                    match command {
+                        SessionFileCommands::Upload { session, path, name, mime } => {
+                            debug_request!(
+                                debug,
+                                "POST",
+                                &format!("/sessions/{}/files", &session),
+                                json!({ "path": &path, "name": &name, "mime": &mime })
+                            );
+
+                            let result = client
+                                .upload_session_file(&session, &path, name.as_deref(), mime.as_deref())
+                                .await?;
+
+                            debug_response!(debug, "200", &result);
+
+                            if cli.json {
+                                println!("{}", serde_json::to_string(&result)?);
+                            } else {
+                                let fid = result
+                                    .get("file_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?");
+                                let size = result
+                                    .get("size")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                println!("✓ Uploaded: {} ({})", fid, size);
+                            }
+                        }
+                        SessionFileCommands::List { session, prefix, status, limit, offset } => {
+                            debug_request!(
+                                debug,
+                                "GET",
+                                &format!("/sessions/{}/files", &session),
+                                json!({ "prefix": &prefix, "status": &status, "limit": &limit, "offset": &offset })
+                            );
+
+                            let result = client
+                                .list_session_files(&session, prefix.as_deref(), status.as_deref(), limit, offset)
+                                .await?;
+
+                            debug_response!(debug, "200", &result);
+
+                            if cli.json {
+                                println!("{}", serde_json::to_string(&result)?);
+                            } else {
+                                let items = result
+                                    .get("items")
+                                    .or_else(|| result.get("files"))
+                                    .and_then(|v| v.as_array())
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let total = result
+                                    .get("total")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(items.len() as u64);
+                                println!(
+                                    "Files in session {} ({} of {}):",
+                                    session,
+                                    items.len(),
+                                    total
+                                );
+                                for item in items {
+                                    let id = item
+                                        .get("file_id")
+                                        .or_else(|| item.get("id"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("?");
+                                    let name = item
+                                        .get("file_name")
+                                        .or_else(|| item.get("name"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    let size = item
+                                        .get("size")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(0);
+                                    let status = item
+                                        .get("status")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("?");
+                                    println!("  - {} \"{}\" ({} bytes) [{}]", id, name, size, status);
+                                }
+                            }
+                        }
+                        SessionFileCommands::Download { session, file_id, out, ttl } => {
+                            debug_request!(
+                                debug,
+                                "GET",
+                                &format!("/sessions/{}/files/{}/content", &session, &file_id),
+                                json!({ "out": &out, "ttl": &ttl })
+                            );
+
+                            let out_path = client
+                                .download_session_file(&session, &file_id, out.as_deref(), ttl)
+                                .await?;
+
+                            debug_response!(debug, "200", json!({ "out": &out_path }));
+
+                            if cli.json {
+                                println!("{}", json!({ "out": out_path }));
+                            } else {
+                                println!("✓ Downloaded to {}", out_path);
+                            }
+                        }
+                        SessionFileCommands::Delete { session, file_id } => {
+                            debug_request!(
+                                debug,
+                                "DELETE",
+                                &format!("/sessions/{}/files/{}", &session, &file_id),
+                                json!({})
+                            );
+
+                            let result = client
+                                .delete_session_file(&session, &file_id)
+                                .await?;
+
+                            debug_response!(debug, "200", &result);
+
+                            if cli.json {
+                                println!("{}", serde_json::to_string(&result)?);
+                            } else {
+                                println!("✓ Deleted: {}", file_id);
+                            }
+                        }
+                        SessionFileCommands::Share { session, file_id, ttl } => {
+                            debug_request!(
+                                debug,
+                                "POST",
+                                &format!("/sessions/{}/files/{}/share", &session, &file_id),
+                                json!({ "ttl": &ttl })
+                            );
+
+                            let result = client
+                                .share_session_file(&session, &file_id, ttl)
+                                .await?;
+
+                            debug_response!(debug, "200", &result);
+
+                            if cli.json {
+                                println!("{}", serde_json::to_string(&result)?);
+                            } else {
+                                if let Some(link) = result.get("share_url").and_then(|v| v.as_str()) {
+                                    println!("✓ Share link:");
+                                    println!("  {}", link);
+                                    if let Some(expires) = result.get("expires_at").and_then(|v| v.as_u64()) {
+                                        println!("  Expires: {} (Unix ms)", expires);
+                                    }
+                                } else {
+                                    println!("{}", serde_json::to_string_pretty(&result)?);
+                                }
+                            }
+                        }
+                        SessionFileCommands::Capabilities { session } => {
+                            debug_request!(
+                                debug,
+                                "GET",
+                                &format!("/sessions/{}/files/capabilities", &session),
+                                json!({})
+                            );
+
+                            let result = client
+                                .session_file_capabilities(&session)
+                                .await?;
+
+                            debug_response!(debug, "200", &result);
+
+                            if cli.json {
+                                println!("{}", serde_json::to_string(&result)?);
+                            } else {
+                                println!("{}", serde_json::to_string_pretty(&result)?);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -3853,6 +4708,224 @@ mod tests {
         let mut file = std::fs::File::create(session_file).unwrap();
         file.write_all(serde_json::to_string_pretty(&value).unwrap().as_bytes())
             .unwrap();
+    }
+
+    #[test]
+    fn test_create_group_accepts_manager_instead_of_driver() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--manager",
+            "manager-bot",
+            "--participants",
+            "worker-1,worker-2",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::CreateGroup {
+                driver,
+                manager,
+                participants,
+                ..
+            } => {
+                assert!(driver.is_none());
+                assert_eq!(manager.as_deref(), Some("manager-bot"));
+                assert_eq!(participants, "worker-1,worker-2");
+            }
+            _ => panic!("expected create-group command"),
+        }
+    }
+
+    #[test]
+    fn test_create_group_rejects_driver_and_manager_together() {
+        let error = match Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--driver",
+            "driver-bot",
+            "--manager",
+            "manager-bot",
+            "--participants",
+            "worker-1",
+        ]) {
+            Ok(_) => panic!("expected --driver and --manager to conflict"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn test_create_group_requires_driver_or_manager() {
+        let error = match Cli::try_parse_from([
+            "bcs-cli",
+            "create-group",
+            "--participants",
+            "worker-1",
+        ]) {
+            Ok(_) => panic!("expected create-group to require a lead bot"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn collaboration_validate_command_parses_yaml_path() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaboration",
+            "validate",
+            "/tmp/workflow.yaml",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: None,
+                command: CollaborationCommands::Validate { file },
+            } => assert_eq!(file, PathBuf::from("/tmp/workflow.yaml")),
+            _ => panic!("expected collaboration validate command"),
+        }
+    }
+
+    #[test]
+    fn collaborate_permission_alias_parses_current_session() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "permission",
+            "--session",
+            "group-1:abc12345",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: None,
+                command: CollaborationCommands::Permission { session },
+            } => assert_eq!(session, "group-1:abc12345"),
+            _ => panic!("expected collaborate permission command"),
+        }
+    }
+
+    #[test]
+    fn collaborate_run_alias_parses_yaml_session_bindings_and_input() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaborate",
+            "--token",
+            "test-token",
+            "run",
+            "/tmp/workflow.yaml",
+            "--session",
+            "group-1:abc12345",
+            "--binding",
+            "planner=bot-driver",
+            "--binding",
+            "writer=20260412_abc:100005",
+            "--input",
+            r#"{"question":"resolve it"}"#,
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: Some(token),
+                command:
+                    CollaborationCommands::Run {
+                        file,
+                        session,
+                        bindings,
+                        input,
+                    },
+            } => {
+                assert_eq!(token, "test-token");
+                assert_eq!(file, PathBuf::from("/tmp/workflow.yaml"));
+                assert_eq!(session, "group-1:abc12345");
+                assert_eq!(
+                    bindings,
+                    vec!["planner=bot-driver", "writer=20260412_abc:100005"]
+                );
+                assert_eq!(input, r#"{"question":"resolve it"}"#);
+            }
+            _ => panic!("expected collaborate run command"),
+        }
+    }
+
+    #[test]
+    fn collaboration_create_command_parses_repeated_bindings() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "collaboration",
+            "--token",
+            "test-token",
+            "create",
+            "/tmp/workflow.yaml",
+            "--driver",
+            "bot-driver",
+            "--binding",
+            "planner=bot-driver",
+            "--binding",
+            "writer=20260412_abc:100005",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Collaboration {
+                token: Some(token),
+                command:
+                    CollaborationCommands::Create {
+                        file,
+                        driver,
+                        bindings,
+                        ..
+                    },
+            } => {
+                assert_eq!(token, "test-token");
+                assert_eq!(file, PathBuf::from("/tmp/workflow.yaml"));
+                assert_eq!(driver, "bot-driver");
+                assert_eq!(
+                    bindings,
+                    vec!["planner=bot-driver", "writer=20260412_abc:100005"]
+                );
+            }
+            _ => panic!("expected collaboration create command"),
+        }
+    }
+
+    #[test]
+    fn custom_group_binding_parser_preserves_bot_uuid_colons() {
+        let bindings = parse_custom_group_bindings(&[
+            "planner=bot-driver".to_string(),
+            "writer=20260412_abc:100005".to_string(),
+        ])
+        .unwrap();
+
+        assert_eq!(bindings["planner"].bot_ids, vec!["bot-driver"]);
+        assert_eq!(bindings["writer"].bot_ids, vec!["20260412_abc:100005"]);
+    }
+
+    #[test]
+    fn custom_group_binding_validation_requires_assigned_slots_and_driver() {
+        let validation = serde_json::json!({
+            "participants": [
+                {"binding": "planner", "required": true, "assigned": true},
+                {"binding": "writer", "required": false, "assigned": true}
+            ]
+        });
+        let bindings = parse_custom_group_bindings(&[
+            "planner=bot-driver".to_string(),
+            "writer=bot-writer".to_string(),
+        ])
+        .unwrap();
+        validate_custom_group_bindings(&bindings, &validation, "bot-driver").unwrap();
+
+        let missing = parse_custom_group_bindings(&["planner=bot-driver".to_string()]).unwrap();
+        let error = validate_custom_group_bindings(&missing, &validation, "bot-driver")
+            .unwrap_err();
+        assert!(error.to_string().contains("writer"));
     }
 
     #[test]
@@ -4197,7 +5270,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local() {
+    fn test_resolve_bcs_url_uses_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4219,6 +5292,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4242,12 +5318,12 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     #[serial]
-    fn test_resolve_bcs_url_defaults_to_local_when_agentclaw_env_pre() {
+    fn test_resolve_bcs_url_uses_pre_distribution_default_or_local() {
         let original_data_dir = std::env::var("BOT_DATA_DIR").ok();
         let original_url = std::env::var("MOLTIS_BCS_URL").ok();
         let original_base_url = std::env::var("BCS_API_BASE_URL").ok();
@@ -4269,6 +5345,9 @@ mod tests {
             command: Commands::Health,
         };
         let result = resolve_bcs_url(&cli);
+        let expected = bcs_cli::resolve_compiled_distribution_default_url()
+            .unwrap()
+            .unwrap_or_else(|| "http://127.0.0.1:21000".to_string());
 
         if let Some(value) = original_data_dir {
             safe_set_var("BOT_DATA_DIR", value);
@@ -4292,7 +5371,7 @@ mod tests {
         }
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "http://127.0.0.1:21000");
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
@@ -4619,6 +5698,41 @@ mod tests {
             }
             _ => panic!("expected discover command"),
         }
+    }
+
+    #[test]
+    fn test_discover_command_accepts_repeated_skill_filters() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "discover",
+            "-q",
+            "deployment",
+            "--skill",
+            "code_review",
+            "--skill",
+            "sql",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Discover { query, skills, .. } => {
+                assert_eq!(query.as_deref(), Some("deployment"));
+                assert_eq!(
+                    skills,
+                    vec!["code_review".to_string(), "sql".to_string()]
+                );
+            }
+            _ => panic!("expected discover command"),
+        }
+    }
+
+    #[test]
+    fn test_discover_command_rejects_legacy_plural_skills_filter() {
+        let error = Cli::try_parse_from(["bcs-cli", "discover", "--skills", "sql"])
+            .err()
+            .expect("legacy --skills must be rejected");
+
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]

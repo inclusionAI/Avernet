@@ -2,16 +2,27 @@
 from __future__ import annotations
 
 
+from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    service_skills_env_from_ext,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    to_baas_request_id,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     enqueue_progress_poll,
@@ -104,18 +115,35 @@ class RollbackOpsMixin:
         # longer silently ship the raw artifact (the single-config-slot hazard).
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
-        upgrade_result = await self._build_service.upgrade_async(
+        skills_env = service_skills_env_from_ext(target_ext, bot)
+        image_pin = resolve_publish_image_pin(target_record)
+
+        # (#197) Crash-safe issuance via the operation runner (existing bot →
+        # adopt-by-query on resume, never a second rollback deploy).
+        op = self._operation_runner.open_operation(
+            publish_id=target_publish_id,
+            kind=PublishOperationKind.ROLLBACK_DEPLOY,
+            stage=PublishStage.ONLINE,
             bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            device_count=1,
-            migration_path=migration_path,
-            publish_stage=PublishStage.ONLINE,
-            version=version,
-            delivery=delivery,
+            operator=operator,
         )
 
-        baas_publish_id = upgrade_result.get("publish_id")
+        async def _issue():
+            return await self._build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot,
+                user_id=owner_id,
+                device_count=1,
+                migration_path=migration_path,
+                publish_stage=PublishStage.ONLINE,
+                version=version,
+                delivery=delivery,
+                extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
+            )
+
+        op = await self._operation_runner.acquire_workflow(op, _issue)
+        baas_publish_id = op.baas_publish_id
         if not baas_publish_id:
             raise PublishFlowServiceError("BaaS-layer upgrade did not return publish_id")
 
@@ -130,28 +158,20 @@ class RollbackOpsMixin:
             source_status=PublishStatus.SUCCESS,
             ext=target_ext,
         )
+        self._operation_runner.complete_operation(op)
 
-        # 7. Approve the BaaS publish record
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage="rollback",
-        )
-        self.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=PublishStage.ONLINE,
-            request_id=request_id,
-        )
+        # 7. All-auto approval (#197): the rollback deploy workflow is
+        # auto-approved server-side (upgrade payload sets auto_approve_publish) —
+        # no client approve.
 
-        # 8. Enqueue the durable progress poll on the TARGET record. Rollback parks
-        # the target at ONLINE_PUB with ext.publish.online set but never passes
+        # 8. Enqueue the durable progress poll on the TARGET record (#162). Rollback
+        # parks the target at ONLINE_PUB with ext.publish.online set but never passes
         # through verify_flow/online_release, so pre-#105 only user /sync polling
         # ever finished it. The poll's advance_publish_progress reads
         # ext.publish.online and drives ONLINE_PUB → SUCCESS (binding activation +
         # supersede via _handle_sync_success), so the rollback self-completes with
         # no user polling — and becomes crash-safe.
         enqueue_progress_poll(self._task_queue_service, publish_id=target_publish_id)
-
         logger.info(
             f"[PublishFlowService.execute_rollback] Rollback deployment initiated: "
             f"current_publish_id={current_publish_id}, target_publish_id={target_publish_id}, "
@@ -168,6 +188,78 @@ class RollbackOpsMixin:
             baas_publish_id=str(baas_publish_id),
             device_binding_id=online_binding_id,
         )
+
+    async def execute_offline_destroy(
+        self,
+        publish_id: int,
+        stage: str,
+        operator: str = "system",
+    ) -> dict:
+        """Durable offline destroy (#197): tear down the stage's bot idempotently.
+
+        NOT routed through the operation runner: BaaS ``/stop`` may not return a
+        trackable ``publish_id``, so adopt-by-query cannot fence it. Idempotency is
+        instead binding-status + stop-based:
+
+        * a binding already ``RELEASED`` means the destroy already ran → no-op (so a
+          re-enqueue, including ``offline_publish``'s crash-resume re-enqueue on a
+          RELEASED record, is a true no-op);
+        * ``stop_bot`` is idempotent server-side, so a duplicate delivery in the
+          narrow pre-release window is harmless.
+
+        Crucially this does NOT swallow BaaS failures — a ``stop_bot`` exception
+        propagates so the durable task retries (the earlier best-effort path masked
+        failures as done, stranding the online bot). Returns ``{success, ...}``."""
+        stage_enum = PublishStage(stage)
+        publish_record = self._publish_service.get_publish_by_id(publish_id)
+        if not publish_record:
+            return {"success": False, "message": f"Publish record not found: {publish_id}"}
+
+        ext = publish_record.ext or {}
+        binding_id = (ext.get("binding") or {}).get(stage_enum.value)
+        if not binding_id:
+            # Nothing bound for this stage → nothing to destroy (idempotent no-op).
+            return {"success": True, "message": f"No binding for stage {stage_enum.value}"}
+
+        binding = self._publish_service.get_device_binding_by_id(binding_id)
+        if not binding or not binding.device_id:
+            return {"success": True, "message": f"Binding missing device_id: {binding_id}"}
+
+        # Idempotent short-circuit: a RELEASED binding means the destroy already ran.
+        if binding.status == DeviceBindingStatus.RELEASED.value:
+            return {"success": True, "message": f"Already released: binding_id={binding_id}"}
+
+        bot_uuid = binding.device_id
+        # Deterministic, correlation-only request id (stable across retries),
+        # folded into BaaS's request_id contract (^[A-Za-z0-9_-]{32,64}$).
+        request_id = to_baas_request_id(
+            f"offline_destroy_pub_{publish_id}_{stage_enum.value}"
+        )
+
+        # stop_bot raises BaasServiceError on a real failure → propagates out of the
+        # handler's asyncio.run → the queue retries (no longer masked as done).
+        destroy_result = self._baas_service.stop_bot(
+            bot_uuid=bot_uuid,
+            operator=operator,
+            request_id=request_id,
+        )
+        destroy_publish_id = destroy_result.get("publish_id")
+
+        # DeviceBindingMixin owns the binding write; the RELEASED status is what the
+        # next run's short-circuit reads.
+        self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
+
+        logger.info(
+            "[PublishFlowService.execute_offline_destroy] destroy submitted: "
+            "publish_id=%s stage=%s bot_uuid=%s destroy_publish_id=%s",
+            publish_id, stage_enum.value, bot_uuid, destroy_publish_id,
+        )
+        return {
+            "success": True,
+            "message": f"Destroy submitted, stage={stage_enum.value}",
+            "bot_uuid": bot_uuid,
+            "baas_publish_id": destroy_publish_id,
+        }
 
     def _destroy_bot_by_stage(
         self,
@@ -233,18 +325,9 @@ class RollbackOpsMixin:
                 f"Bot destroy initiated: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
             )
 
-            # Approve the destroy workflow record
-            if destroy_publish_id:
-                self.approve_baas_publish(
-                    baas_publish_id=destroy_publish_id,
-                    operator="system",
-                    stage=stage,
-                    request_id=request_id,
-                )
-                logger.info(
-                    f"[PublishFlowService._destroy_bot_by_stage] "
-                    f"Bot destroy approved: bot_uuid={bot_uuid}, stage={stage.value}, destroy_publish_id={destroy_publish_id}"
-                )
+            # All-auto approval (#197): stop_bot's payload auto-approves the
+            # DESTROY workflow server-side (auto_approve_publish default True) —
+            # no client approve.
 
             # Update device_binding status to RELEASED (DeviceBindingMixin owns
             # the binding write).
@@ -255,5 +338,3 @@ class RollbackOpsMixin:
                 f"[PublishFlowService._destroy_bot_by_stage] "
                 f"Failed to destroy bot: binding_id={binding_id}, stage={stage.value}, error={e}"
             )
-
-

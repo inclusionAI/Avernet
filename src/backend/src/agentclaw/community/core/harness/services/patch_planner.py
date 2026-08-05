@@ -429,15 +429,14 @@ class PatchPlanner:
             logger.warning("[PatchPlanner] LLM returned empty content")
             return None
         if result.strip() == "[llm disabled]":
-            logger.warning("[PatchPlanner] LLM disabled")
-            # Fallback: 返回原始内容和一个简单描述
-            issues_list = issues.split("\n")[:2]  # 取前2个问题
-            short_desc = "修复: " + "; ".join(
-                line.strip("- ")[:40] for line in issues_list if line
+            # LLM unavailable (no token or retries exhausted). Do NOT fabricate a
+            # no-op patch (dst==src): skip this op so the template is dropped
+            # cleanly rather than persisting an empty diff that looks like a fix.
+            logger.warning(
+                "[PatchPlanner] LLM unavailable for %s, skipping fix generation",
+                file_type,
             )
-            if len(short_desc) > 100:
-                short_desc = short_desc[:97] + "..."
-            return src, short_desc
+            return None
 
         # 解析结果：分离 FIX_SUMMARY 和文件内容
         summary_match = re.search(r'<!-- FIX_SUMMARY:\s*(.+?)\s*-->', result, re.DOTALL)
@@ -478,9 +477,9 @@ class PatchPlanner:
 4. 确保修复后的文件是格式正确的 Markdown。
 5. 必须保留文件原有的合法结构和信息，只在有问题的部分做修改。
 6. **严格基于建议事实进行修改**：只能根据【诊断发现的问题】和【修复指导】中明确提供的内容进行修复，禁止自行编造、补充或推测任何未在建议中提供的信息（如MCP业务语义、具体参数值、示例内容等）。
-7. 如果建议中要求补充某类信息但没有提供具体内容，用 `<!-- TODO: 描述需要补充的内容 -->` 占位标记代替，而不是保持原有内容不变。确保每个被诊断出的问题都有对应的修改。
+7. 只应用诊断在【诊断发现的问题】和【修复指导】中**明确提供了具体内容**的修改；若某问题仅有"建议补充某类信息"而未给出具体内容，**保持该处原文不变，禁止插入 `<!-- TODO -->` 等占位注释**。
 8. 修复应当最小化：只修改与问题直接相关的部分，保留其他所有原始内容。
-9. **禁止原样返回**：输出必须与原始文件有所区别，否则视为修复失败。
+9. 若诊断未提供任何具体修复内容，原样返回是允许的（系统会据此判定无可生成补丁并跳过，不视为失败）。
 
 输出示例：
 ```
@@ -520,10 +519,10 @@ name: MyBot
             "后面紧跟修复后的文件完整内容。\n\n"
             "重要约束：\n"
             "- 只能基于【诊断发现的问题】和【修复指导】中**明确提供的信息**进行修改\n"
-            "- 如果建议要求补充某类信息但未提供具体内容，用 `<!-- TODO: 描述 -->` 占位标记代替，不要保持原内容不变\n"
-            "- 禁止自行补充MCP业务语义、示例值、占位符等未在建议中明确给出的内容\n"
-            "- 保持最小化修改原则：仅修复问题涉及的部分，其余内容原样保留\n"
-            "- 输出必须与原始文件有所区别，禁止原样返回"
+            "- **若某问题仅有\"建议补充 X\"而未提供具体内容，保持该处原文不变；禁止插入 `<!-- TODO: 描述 -->` 占位注释**\n"
+            "- 禁止自行补充MCP业务语义、示例值等未在建议中明确给出的内容\n"
+            "- 保持最小化修改：仅修复问题涉及的部分，其余内容原样保留\n"
+            "- 若诊断未提供任何具体修复内容，原样返回（系统会判定无可生成补丁并跳过）"
         )
         return "\n".join(parts)
 

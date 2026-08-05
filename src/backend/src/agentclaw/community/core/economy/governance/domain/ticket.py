@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
-from agentclaw.community.core.economy.governance.domain.base import _iso
+from agentclaw.community.core.economy.governance.domain.base import (
+    _iso,
+    _normalize_delivery_status,
+)
 from agentclaw.community.core.economy.governance.domain.enums import (
+    CloseReason,
     GovernanceStatus,
+    TicketAction,
 )
 
 
@@ -40,6 +46,7 @@ class MutableSnapshot:
       - severity                 ← orm.governance_max_priority
       - estimated_saving_tokens  ← orm.expected_token_saving
       - saving_ratio             ← orm.saving_ratio
+      - token_baseline          ← orm.token_baseline (guard: 非 None 才刷新, 见 lifecycle_service)
       - task_summary             ← orm.task_summary
       - notification_structured  ← orm.notification_structured
       - analysis_status          ← orm.analysis_status
@@ -64,6 +71,9 @@ class MutableSnapshot:
     last_decision_dt_version: str | None
     last_seen_at: datetime | None
     last_sync_at: datetime | None
+    delivery_status: str = "pending"  # 最近通知投递状态单值: pending/sent/failed/cancelled
+    last_notified_at: datetime | None = None  # 最近一次成功通知时间(首投/reminder sent时刷)
+    token_baseline: int | None = None
 
 
 # ── 状态机转换表(工单) ─────────────────────────
@@ -71,17 +81,147 @@ class MutableSnapshot:
 TICKET_TRANSITIONS: dict[GovernanceStatus, frozenset[GovernanceStatus]] = {
     GovernanceStatus.OPEN: frozenset({
         GovernanceStatus.SCHEDULED, GovernanceStatus.WAITING_REVIEW,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.SCHEDULED: frozenset({
-        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.CLOSED,
+        GovernanceStatus.WAITING_REVIEW, GovernanceStatus.OBSERVED,
+        GovernanceStatus.CLOSED,
     }),
     GovernanceStatus.WAITING_REVIEW: frozenset({
         GovernanceStatus.OPEN, GovernanceStatus.SCHEDULED,
-        GovernanceStatus.CLOSED,
+        GovernanceStatus.OBSERVED, GovernanceStatus.CLOSED,
     }),
+    # OBSERVED = 白名单观察态。仅可被删白收尾转 CLOSED;不回活跃态
+    # (删白后由 offline-batch 正常 Step6 重建新 OPEN 单,而非复活同单)。
+    GovernanceStatus.OBSERVED: frozenset({GovernanceStatus.CLOSED}),
     GovernanceStatus.CLOSED: frozenset(),
 }
+
+
+# ── feedback_verdict 纯函数(user⊗admin 成对派生,零跨层依赖) ──────
+# pair 表直接用 response 原值(optimized/dispute/whitelist/need_time),不做中间
+# 归一化翻译——系统别处不用的中间词只会增加理解负担。离线侧可直接 import 复用。
+
+# (response, review_decision) → verdict(双流齐备的成对结果)
+# review 四态:approve_close/approve_scheduled[新]/approve_whitelist/reject_for_reopen。
+# 命名贴合四反馈语义;need_time 同意走 approve_scheduled(→schedule_confirmed),
+# approve_close 对 need_time 不作正常路径(available_actions 不下发)落 other。
+_VERDICT_PAIR: dict[tuple[str, str], str] = {
+    ("optimized", "approve_close"): "confirmed",
+    ("optimized", "reject_for_reopen"): "optimized_rejected",
+    ("optimized", "approve_whitelist"): "admin_overroled_whitelist",
+    ("dispute", "approve_close"): "dispute_accepted",
+    ("dispute", "reject_for_reopen"): "dispute_rejected",
+    ("whitelist", "approve_whitelist"): "whitelist_confirmed",
+    ("whitelist", "reject_for_reopen"): "whitelist_denied",
+    ("whitelist", "approve_close"): "whitelist_dismissed",
+    ("need_time", "approve_scheduled"): "schedule_confirmed",
+    ("need_time", "reject_for_reopen"): "schedule_rejected",
+}
+
+# response → pending_review_* (review 缺席时,按用户决策细分)
+_VERDICT_PENDING: dict[str, str] = {
+    "optimized": "pending_review_optimized",
+    "whitelist": "pending_review_whitelist",
+    "dispute": "pending_review_dispute",
+    "need_time": "pending_review_need_time",
+}
+
+
+def compute_feedback_verdict(
+    response: str | None,
+    review_decision: str | None,
+    governance_status: GovernanceStatus | str | None,
+) -> str:
+    """用户反馈 ⊗ 管理员 review 的成对裁决结果(读时派生,纯函数,不落库)。
+
+    输入三个既有 task_record 字段,产出成对 verdict 字符串。review 缺席
+    (review_decision 空)走 ``pending_review_*``;用户未反馈走
+    ``awaiting_user_feedback``/``admin_only_*``;缺省落 ``other``。
+
+    纯函数:无 self/session/DB 依赖,在线自循环与离线侧 import 同源复用。
+
+    Args:
+        response: 用户原始反馈(optimized/need_time/dispute/whitelist),None=未反馈。
+        review_decision: 管理员审批(approve_close/approve_scheduled/approve_whitelist/
+                reject_for_reopen),None=未审。
+        governance_status: 工单状态(open/scheduled/waiting_review/closed)。
+
+    Returns:
+        verdict 字符串(见模块 ``_VERDICT_PAIR`` / ``_VERDICT_PENDING`` 系列)。
+    """
+    if review_decision:
+        if not response:
+            return f"admin_only_{review_decision}"
+        return _VERDICT_PAIR.get((response, review_decision), "other")
+    # review 缺席:待审或未到 review 阶段
+    if not response:
+        return "awaiting_user_feedback"
+    return _VERDICT_PENDING.get(response, "other")
+
+
+# ── available_actions 纯函数(按用户反馈下发可做 review 动作) ──────
+# review 覆盖四种反馈(need_time 改为进 waiting_review 待审)。按反馈给不同"同意"
+# 动作 + 通用 reject。加白(approve_whitelist)是 whitelist 反馈的同意裁决,与运维
+# 独立一键加白(/admin/whitelist)出发点不同、并存。label 按反馈差异化,后端下发。
+
+_REVIEW_ENDPOINT = "POST /api/economy/governance/workflow/tickets/review"
+
+# 同意动作的 label 按反馈差异化(避免笼统"批准关闭"丢语义)
+_APPROVE_LABEL: dict[str, str] = {
+    "optimized": "确认已优化",
+    "dispute": "采纳申诉",
+    "whitelist": "同意加白",
+    "need_time": "同意排期",
+}
+# 驳回 label 按反馈差异化
+_REJECT_LABEL: dict[str, str] = {
+    "optimized": "不认可,重开",
+    "dispute": "驳回申诉,重开",
+    "whitelist": "驳回加白,重开",
+    "need_time": "不认可,重开",
+}
+# 各反馈的"同意"动作
+_APPROVE_ACTION: dict[str, TicketAction] = {
+    "optimized": TicketAction.APPROVE_CLOSE,
+    "dispute": TicketAction.APPROVE_CLOSE,
+    "whitelist": TicketAction.APPROVE_WHITELIST,
+    "need_time": TicketAction.APPROVE_SCHEDULED,
+}
+
+
+def _action_info(
+    action: TicketAction, label: str, remark_required: bool,
+) -> dict[str, Any]:
+    """构造单个动作描述(前端动态渲染用)。"""
+    return {
+        "value": action.value,
+        "label": label,
+        "endpoint": _REVIEW_ENDPOINT,
+        "remark_required": remark_required,
+    }
+
+
+def compute_available_actions(user_feedback: str | None) -> list[dict[str, Any]]:
+    """按用户反馈类型返回可做的 review 动作列表(纯函数,在线/离线复用同源)。
+
+    Args:
+        user_feedback: 用户原始反馈(optimized/need_time/dispute/whitelist);
+            None 或未知值 → [](非 review 流程不发动作)。
+
+    Returns:
+        动作 dict 列表,每项含 value/label/endpoint/remark_required。 approve 类
+        动作在前(同意),reject_for_reopen 在后(驳回)。
+    """
+    approve = _APPROVE_ACTION.get(user_feedback)
+    if approve is None:
+        return []  # 无反馈或非四种反馈 → 不在 review 流程
+    approve_label = _APPROVE_LABEL[user_feedback]
+    reject_label = _REJECT_LABEL[user_feedback]
+    return [
+        _action_info(approve, approve_label, remark_required=False),
+        _action_info(TicketAction.REJECT_FOR_REOPEN, reject_label, remark_required=True),
+    ]
 
 
 @dataclass(slots=True)
@@ -105,6 +245,7 @@ class GovernanceTicket:
     worker_id: str
     bot_id: str | None
     owner_id: str | None
+    owner_name: str | None
     bot_name: str | None
     _snapshot: MutableSnapshot
 
@@ -130,8 +271,14 @@ class GovernanceTicket:
     feedback_payload: str | None
     actor_id: str | None
     # ── 基础元信息(只读,由 from_orm 从 sealed 列灌入) ───
+    id: int | None = None             # 自增主键(只读,from_orm 灌入;to_orm 不写回)
     gmt_create: datetime | None = None
     gmt_modified: datetime | None = None
+    # ── 关单结论(D2:管理員裁定,只 admin 关单路径有值,自动关单留 None) ──
+    close_conclusion: str | None = None
+    close_payload: str | None = None
+    # ── 通知收件人覆盖 (D1: 工单级临时, bot 转交/机器人 owner 代联) ──
+    override_owner: str | None = None  # ORM: override_owner; 非空=通知发给此人而非原 owner
 
     # ── 快照访问(只读) ──────────────────────────────
 
@@ -217,6 +364,23 @@ class GovernanceTicket:
         """最近一次离线同步时间 — 快照委托。"""
         return self._snapshot.last_sync_at
 
+    @property
+    def delivery_status(self) -> str:
+        """最近通知投递状态单值 — 快照委托。
+
+        活动4态: pending/sent/failed/cancelled。
+        none为列默认哨兵(历史遗留),读时经懒补全归一为pending。
+        """
+        return self._snapshot.delivery_status
+
+    @property
+    def last_notified_at(self) -> datetime | None:
+        """最近一次成功通知时间 — 快照委托。
+
+        首投/reminder 投递成功(sent)时刷新;失败/取消不动。
+        """
+        return self._snapshot.last_notified_at
+
     # ── 业务 property ──────────────────────────────
 
     @property
@@ -245,6 +409,30 @@ class GovernanceTicket:
     def can_accept_feedback(self) -> bool:
         """§7.4.1: 仅 open + 未反馈 才接受。"""
         return self.governance_status == GovernanceStatus.OPEN and self.user_feedback is None
+
+    @property
+    def feedback_verdict(self) -> str:
+        """用户反馈 ⊗ 管理员 review 的成对裁决结果(读时派生委托纯函数,不落库)。
+
+        委托模块级 :func:`compute_feedback_verdict`,输入既有 task_record 三字段
+        (``user_feedback``/``review_decision``/``governance_status``)。在线自循环与
+        离线侧复用同源规则。
+        """
+        return compute_feedback_verdict(
+            self.user_feedback,
+            self.review_decision,
+            self.governance_status,
+        )
+
+    @property
+    def available_actions(self) -> list[dict[str, Any]]:
+        """该工单当前可做的 review 动作(按用户反馈派生,读时算不落库)。
+
+        委托模块级 :func:`compute_available_actions`,按 ``user_feedback`` 返回对应
+        同意+驳回动作。前端据此动态渲染,后端成动作单一事实源。非 review 流程
+        (无反馈/非四种反馈)→ []。
+        """
+        return compute_available_actions(self.user_feedback)
 
     # ── 状态机行为 ──────────────────────────────────────
 
@@ -313,17 +501,25 @@ class GovernanceTicket:
         close_reason: str,
         closed_at: datetime,
         cooldown_until: datetime | None = None,
+        close_conclusion: str | None = None,
+        close_payload: str | None = None,
     ) -> None:
         """关闭工单。
 
         Args:
-            close_reason: 关闭原因。
+            close_reason: 关闭原因(机制/来源, ``CloseReason`` 值)。
             closed_at: 关闭时间。
             cooldown_until: 冷却截止时间。
+            close_conclusion: 管理员关单结论裁定(``AdminCloseConclusion`` 值);
+                仅 admin 关单路径有值,自动关单路径留 None。语义独立于 close_reason。
+            close_payload: 关单明细 JSON(当前 ``{"remark": ...}``),admin 关单手写说明。
 
         逐字段对齐 repo ``close_ticket`` L226-237:
         governance_status='closed' / close_reason / closed_at / remind_at=None /
         cooldown_until(仅当传入) / active_worker=None(closed 释放)。
+        close_conclusion / close_payload 是**附加存储**,在转态之后 set,
+        不进 ``transition_to`` 白名单、不改变状态机语义(对标 ``accept_feedback``
+        注入 feedback_payload 的同款模式)。
         """
         self.transition_to(GovernanceStatus.CLOSED)
         self.close_reason = close_reason
@@ -331,6 +527,34 @@ class GovernanceTicket:
         self.cooldown_until = cooldown_until
         self.assignee = None  # closed 释放 active_worker
         self.remind_at = None  # 对齐 repo L229,默认 None 清空
+        self.close_conclusion = close_conclusion  # 附加存储,不碰状态机
+        self.close_payload = close_payload
+
+    def enter_observed(self, *, close_reason: str | None = None) -> None:
+        """进入白名单观察态(OBSERVED)。
+
+        与 :meth:`close` 的关键差异:转 OBSERVED 而非 CLOSED、**不设
+        ``closed_at``(OBSERVED 非关闭,设了会被 ``find_latest_closed_by_worker``
+        误纳 cooldown 视野)、释放 ``active_worker``(观察不占治理人力)、
+        清 ``remind_at``。
+
+        本方法是"转 OBSERVED"状态机动作的**单一入口** —— 状态机动作(转态+
+        释放 assignee+清 remind_at+不设 closed_at+不碰 cooldown)是主职责,
+        ``close_reason`` 是附带语义:关单转态场景传值,建单场景传 None。
+
+        三路入口复用本方法(方案 A 链路同源):
+          - ``review(approve_whitelist)`` 审批加白 → 传 WHITELIST_APPROVED
+          - ``observe_for_whitelist`` scan 兜底关残留活跃单 → 传 SCAN_WHITELISTED
+          - ``open_observed_ticket`` off-batch 建观察单(非关单)→ 不传(None)
+
+        Args:
+            close_reason: 观察来源(WHITELIST_APPROVED / SCAN_WHITELISTED);
+                建单场景传 None(非关单,无关单原因)。
+        """
+        self.transition_to(GovernanceStatus.OBSERVED)
+        self.close_reason = close_reason
+        self.assignee = None  # 释放 active_worker(观察不占治理人力)
+        self.remind_at = None
 
     def pause(self, *, review_reason: str) -> None:
         """暂停工单 — 进入 waiting_review。
@@ -355,43 +579,68 @@ class GovernanceTicket:
         close_reason: str | None = None,
         cooldown_until: datetime | None = None,
     ) -> None:
-        """管理员审核 — WAITING_REVIEW → CLOSED(三态分支)。
+        """管理员审核 — WAITING_REVIEW → CLOSED/SCHEDULED(四态分支)。
 
         Args:
-            review_decision: 审核决策(approve_close / approve_whitelist /
-                reject_for_reopen)。
+            review_decision: 审核决策(approve_close / approve_scheduled /
+                approve_whitelist / reject_for_reopen)。
             reviewed_by: 审核人 ID。
             reviewed_at: 审核时间(None → 取 now)。
             review_remark: 审核备注。
             close_reason: 关闭原因(None 时按 review_decision 取默认)。
             cooldown_until: 冷却截止时间(仅 approve_close 可带)。
 
-        逐字段对齐 repo ``review_ticket`` L310-341:
-          - review_decision / reviewed_by / reviewed_at(默认 now) /
-            review_remark / remind_at=None(无条件清,L314)
-          - 三态分支:
-            approve_close    → close_reason=close_reason|'approve_close',
+        分支:
+          approve_close     → CLOSED,close_reason=close_reason|'approve_close',
                               可带 cooldown_until
-            approve_whitelist→ close_reason='whitelisted'
-            reject_for_reopen→ close_reason='review_rejected'(打回仍关闭,
+          approve_scheduled → SCHEDULED(同意排期,不关单),close_reason='schedule_approved',
+                              保留 repair_deadline;不释放 active_worker(仍 active 观察);
+                              设 resume_at=repair_deadline(→mute_until,cron 到期触发
+                              schedule_due 进 waiting_review②);repair_deadline 缺失则不设(防御)
+          approve_whitelist → OBSERVED,close_reason=WHITELIST_APPROVED(白名单观察态:
+                              释放 active_worker、不设 closed_at,由后续 off-batch
+                              持续刷新快照,不发通知、不占治理人力)
+          reject_for_reopen → CLOSED,close_reason='review_rejected'(打回仍关闭,
                               下个 scan 重建 open 单)
-          - 共性:closed_at=now、active_worker=None(释放,L320/327/336/341)
         """
-        self.transition_to(GovernanceStatus.CLOSED)
         now = datetime.now()
         self.review_decision = review_decision
         self.reviewed_by = reviewed_by
         self.reviewed_at = reviewed_at or now
         self.review_remark = review_remark
+        self.remind_at = None  # 无条件清
+
+        if review_decision == "approve_scheduled":
+            # 同意排期 → SCHEDULED(不关单,继续排期观察),不释放 active_worker
+            self.transition_to(GovernanceStatus.SCHEDULED)
+            self.close_reason = close_reason or "schedule_approved"
+            # 排期到期触发:mute_until = 纯 repair_deadline(不加 cooldown —
+            # cooldown 是关单概念,approve_close 时才设,叠到这会重复冷却)。
+            # cron list_scheduled_due 凭 mute_until<=now 触发 SCHEDULED→
+            # waiting_review②(schedule_due);不设则排期到期永不触发,卡死
+            # SCHEDULED。repair_deadline 理论必填(need_time 校验),None 时
+            # 静默不设(防御,不阻断审批);service 层兜 warn 可观测。
+            if self.repair_deadline is not None:
+                self.resume_at = self.repair_deadline
+            return
+
+        if review_decision == "approve_whitelist":
+            # 加白 → OBSERVED(白名单观察态):释放 active_worker、不设 closed_at、
+            # 清 remind_at(详见 enter_observed)。后续 off-batch 持续刷新快照,
+            # 不发通知、不占治理人力。
+            self.enter_observed(
+                close_reason=close_reason or CloseReason.WHITELIST_APPROVED,
+            )
+            return
+
+        # 其余两态(approve_close / reject_for_reopen)→ CLOSED
+        self.transition_to(GovernanceStatus.CLOSED)
         self.closed_at = now
-        self.remind_at = None  # 无条件清,对齐 repo L314
         self.assignee = None   # 释放 active_worker
         if review_decision == "approve_close":
             self.close_reason = close_reason or "approve_close"
             if cooldown_until is not None:
                 self.cooldown_until = cooldown_until
-        elif review_decision == "approve_whitelist":
-            self.close_reason = close_reason or "whitelisted"
         elif review_decision == "reject_for_reopen":
             self.close_reason = close_reason or "review_rejected"
         else:
@@ -411,6 +660,21 @@ class GovernanceTicket:
         """
         self._snapshot = replace(self._snapshot, **fields)
 
+    def update_token_baseline(self, value: int | None) -> None:
+        """覆盖 guard 更新 token_baseline — 仅当传入非 None 时刷新。
+
+        与 :meth:`refresh_snapshot` 的差异:refresh_snapshot 走 ``replace`` 会把
+        ``token_baseline=None`` 无条件 erase 既有值;该方法 guard 非 None 才更新,
+        保留既单(供 offline-batch 只在 有新基线数据 时覆盖,无则不动)。
+        服务层应调本方法而非直戳 ``_snapshot``(DDD 封装)。
+
+        Args:
+            value: 新 token_baseline;None 时 no-op(保持既有)。
+        """
+        if value is None:
+            return
+        self._snapshot = replace(self._snapshot, token_baseline=value)
+
     # ── 工厂 ─────────────────────────────────────────────
 
     @classmethod
@@ -421,6 +685,7 @@ class GovernanceTicket:
         worker_id: str,
         bot_id: str | None,
         owner_id: str | None,
+        owner_name: str | None,
         bot_name: str | None,
         snapshot: MutableSnapshot,
         assignee: str | None = None,
@@ -432,6 +697,7 @@ class GovernanceTicket:
             worker_id: owner_id:bot_id。
             bot_id: Bot ID。
             owner_id: 负责人 ID。
+            owner_name: 负责人显示名(展示用,可空)。
             bot_name: Bot 名称。
             snapshot: 可变快照(创建时一次性写入)。
             assignee: 工单持有人(active=worker_id; closed=None)。
@@ -444,6 +710,7 @@ class GovernanceTicket:
             worker_id=worker_id,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             bot_name=bot_name,
             _snapshot=snapshot,
             governance_status=GovernanceStatus.OPEN,
@@ -453,6 +720,7 @@ class GovernanceTicket:
             feedback_remark=None,
             feedback_source=None,
             close_reason=None,
+            close_conclusion=None,
             closed_at=None,
             cooldown_until=None,
             review_reason=None,
@@ -465,6 +733,8 @@ class GovernanceTicket:
             remind_at=None,
             remind_count=0,
             feedback_payload=None,
+            close_payload=None,
+            override_owner=None,
             actor_id=None,
             gmt_create=None,
             gmt_modified=None,
@@ -492,6 +762,7 @@ class GovernanceTicket:
             worker_id=obj.worker_id,
             bot_id=obj.bot_id,
             owner_id=obj.owner_id,
+            owner_name=obj.owner_name,
             bot_name=obj.bot_name,
             # 可变快照
             _snapshot=MutableSnapshot(
@@ -503,6 +774,7 @@ class GovernanceTicket:
                 severity=obj.governance_max_priority,
                 estimated_saving_tokens=obj.expected_token_saving,
                 saving_ratio=_saving_ratio,
+                token_baseline=obj.token_baseline,
                 task_summary=obj.task_summary,
                 notification_structured=obj.notification_structured,
                 analysis_status=obj.analysis_status,
@@ -510,6 +782,8 @@ class GovernanceTicket:
                 last_decision_dt_version=obj.last_decision_dt_version,
                 last_seen_at=obj.last_seen_at,
                 last_sync_at=obj.last_sync_at,
+                delivery_status=_normalize_delivery_status(getattr(obj, "delivery_status", None)),
+                last_notified_at=getattr(obj, "last_notified_at", None),
             ),
             # 生命周期态
             governance_status=GovernanceStatus(obj.governance_status or "open"),
@@ -519,6 +793,8 @@ class GovernanceTicket:
             feedback_remark=obj.response_remark,
             feedback_source=obj.response_source,
             close_reason=obj.close_reason,
+            close_conclusion=getattr(obj, "close_conclusion", None),
+            override_owner=getattr(obj, "override_owner", None),
             closed_at=obj.closed_at,
             cooldown_until=obj.cooldown_until,
             review_reason=obj.review_reason,
@@ -531,7 +807,9 @@ class GovernanceTicket:
             remind_at=obj.remind_at,
             remind_count=obj.remind_count or 0,
             feedback_payload=obj.feedback_payload,
+            close_payload=getattr(obj, "close_payload", None),
             actor_id=obj.actor_id,
+            id=getattr(obj, "id", None),
             gmt_create=getattr(obj, "gmt_create", None),
             gmt_modified=getattr(obj, "gmt_modified", None),
         )
@@ -558,6 +836,7 @@ class GovernanceTicket:
         row.worker_id = self.worker_id
         row.bot_id = self.bot_id
         row.owner_id = self.owner_id
+        row.owner_name = self.owner_name
         row.bot_name = self.bot_name
         # 可变快照
         s = self._snapshot
@@ -568,6 +847,7 @@ class GovernanceTicket:
         row.hit_dimensions_count = s.hit_dimensions_count
         row.governance_max_priority = s.severity
         row.expected_token_saving = s.estimated_saving_tokens
+        row.token_baseline = s.token_baseline
         row.saving_ratio = s.saving_ratio
         row.task_summary = s.task_summary
         row.notification_structured = s.notification_structured
@@ -584,19 +864,24 @@ class GovernanceTicket:
         row.response_remark = self.feedback_remark
         row.response_source = self.feedback_source
         row.close_reason = self.close_reason
+        row.close_conclusion = self.close_conclusion
         row.closed_at = self.closed_at
         row.cooldown_until = self.cooldown_until
         row.review_reason = self.review_reason
         row.review_decision = self.review_decision
         row.reviewed_by = self.reviewed_by
         row.reviewed_at = self.reviewed_at
+        row.override_owner = self.override_owner  # admin 后补设,可变,需写回(to_orm 全量 + apply_to 增量)
         row.review_remark = self.review_remark
         row.repair_deadline = self.repair_deadline
         row.mute_until = self.resume_at
         row.remind_at = self.remind_at
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
+        row.close_payload = self.close_payload
         row.actor_id = self.actor_id
+        row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
         return row
 
     def apply_to(self, row: object) -> None:
@@ -614,19 +899,24 @@ class GovernanceTicket:
         row.response_remark = self.feedback_remark
         row.response_source = self.feedback_source
         row.close_reason = self.close_reason
+        row.close_conclusion = self.close_conclusion
         row.closed_at = self.closed_at
         row.cooldown_until = self.cooldown_until
         row.review_reason = self.review_reason
         row.review_decision = self.review_decision
         row.reviewed_by = self.reviewed_by
         row.reviewed_at = self.reviewed_at
+        row.override_owner = self.override_owner  # admin 后补设,可变,需写回(to_orm 全量 + apply_to 增量)
         row.review_remark = self.review_remark
         row.repair_deadline = self.repair_deadline
         row.mute_until = self.resume_at
         row.remind_at = self.remind_at
         row.remind_count = self.remind_count
         row.feedback_payload = self.feedback_payload
+        row.close_payload = self.close_payload
         row.actor_id = self.actor_id
+        row.delivery_status = self.delivery_status
+        row.last_notified_at = self.last_notified_at
 
     def to_dict(self) -> dict:
         """API 序列化 — router 直接 ``data=[t.to_dict() for t in items]``。
@@ -642,6 +932,7 @@ class GovernanceTicket:
             "bot_id": self.bot_id,
             "bot_name": self.bot_name,
             "owner_id": self.owner_id,
+            "owner_name": self.owner_name,
             "dt_version": s.dt_version,
             "governance_decision": s.initial_decision,
             "latest_decision": s.current_decision,
@@ -649,6 +940,7 @@ class GovernanceTicket:
             "hit_dimensions_count": s.hit_dimensions_count,
             "governance_max_priority": s.severity,
             "expected_token_saving": s.estimated_saving_tokens,
+            "token_baseline": s.token_baseline,
             "saving_ratio": s.saving_ratio,
             "task_summary": s.task_summary,
             "notification_structured": s.notification_structured,
@@ -664,6 +956,8 @@ class GovernanceTicket:
             "response_remark": self.feedback_remark,
             "response_source": self.feedback_source,
             "close_reason": self.close_reason,
+            "close_conclusion": self.close_conclusion,
+            "override_owner": self.override_owner,
             "closed_at": _iso(self.closed_at),
             "cooldown_until": _iso(self.cooldown_until),
             "review_reason": self.review_reason,
@@ -676,6 +970,7 @@ class GovernanceTicket:
             "remind_at": _iso(self.remind_at),
             "remind_count": self.remind_count,
             "feedback_payload": self.feedback_payload,
+            "close_payload": self.close_payload,
             "actor_id": self.actor_id,
             "gmt_create": _iso(self.gmt_create),
             "gmt_modified": _iso(self.gmt_modified),

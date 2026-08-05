@@ -82,6 +82,44 @@ class BcnConfig:
 
 
 @dataclass(frozen=True)
+class GatewayConfig:
+    """Public API gateway host (the ``gateway`` user_config block).
+
+    ``base_url`` is the prod gateway and ``base_url_pre`` overrides it when
+    env=='pre'. Held as an ``https://`` origin; the one consumer rewrites the
+    scheme when it publishes a WebSocket URL.
+
+    This is the host an external tenant is given, which is why it is separate
+    from ``agentclawproxy``: the engine proxy stays the internal hop behind the
+    gateway, and every other caller keeps addressing it directly.
+
+    Neutral empty defaults — the community build fronts no gateway. Empty ⇒ the
+    connection endpoint reports that this deployment has no gateway rather than
+    publishing an address nothing serves.
+    """
+
+    base_url: str = ""
+    base_url_pre: str = ""
+
+
+@dataclass(frozen=True)
+class GatewayEndpoint:
+    """The gateway origin selected for the environment this process runs in.
+
+    :class:`GatewayConfig` holds both hosts; this holds the one that applies.
+    Separate because the choice is environment-driven wiring, which belongs to
+    the composition root — a core service reading ``SERVER_ENV`` for itself
+    would put deployment selection inside domain logic (``AGENTS.md``: raw
+    environment access belongs in configuration loading, bootstrap, composition
+    roots, or tests).
+
+    Empty when this deployment fronts no gateway.
+    """
+
+    base_url: str = ""
+
+
+@dataclass(frozen=True)
 class KbConfig:
     """Internal knowledge-base config for the D-TOOLS-002 diagnostic (the ``kb``
     user_config block).
@@ -106,9 +144,10 @@ class LLMHarnessConfig:
 
     Neutral defaults empty — the neutral shipped code embeds no LLM endpoint,
     secret name, or token. Each corp env overlay sets its own ``base_url`` /
-    ``secret_name``; a community deployment sets its own (or uses the
-    ``LLM_BASE_URL`` / ``LLM_SECRET_NAME`` / ``LLM_AUTH_TOKEN`` env vars). Empty
-    base_url = the harness LLM is disabled (feature-off).
+    ``secret_name`` via the ``llm`` yaml block; a community deployment sets its
+    own. The token is resolved from ``secret_name`` through the injected
+    ``SecretResolver``; with the defaults empty, no token resolves and the
+    harness LLM stays inert (``chat()`` returns ``[llm disabled]``).
     """
 
     base_url: str = ""
@@ -126,10 +165,20 @@ class SecretNamesConfig:
     them stay off / permissive, or fall back to the local path). This keeps
     the shipped source free of ``*_manual_*`` secret references while letting
     the name legitimately differ per deployment.
+
+    ``gateway_principal_signing_key`` is the exception, and deliberately so. It
+    defaults to a **generic** name rather than empty — not a corp registry key,
+    so it keeps the shipped source clean either way — because every profile
+    needs *some* name for the lookup to happen at all. With an empty default,
+    each profile had to register a name it would then never vary, so the value
+    and the name were two config entries for one secret. Defaulting it means a
+    deployment configures only the value, wherever its resolver reads that
+    from; corp env overlays still override the name with the real Mist key.
     """
 
     dormant_internal_token: str = ""
     aiworkbench_repo_url: str = ""
+    gateway_principal_signing_key: str = "gateway_principal_signing_key"
 
 
 def _default_cors_origins() -> list[str]:

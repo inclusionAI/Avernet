@@ -120,6 +120,7 @@ impl MySqlSessionStore {
             created_at: now,
             updated_at: now,
             completed_at: None,
+            collected_at: None,
         };
 
         let kind_str = kind_to_string(session_kind);
@@ -371,6 +372,15 @@ fn row_to_session(row: &DbRow) -> ServiceResult<Session> {
         created_at: column_u64(row, "gmt_create_ms"),
         updated_at: column_u64(row, "gmt_modified_ms"),
         completed_at,
+        // `collected_at_ms` is only selected by the collected-list query; other
+        // queries omit the column entirely (db_get_column_opt → Ok(None)). Be
+        // tolerant of decode failures too (e.g. a fractional datetime producing
+        // a DOUBLE on some backends) so a non-integer value never fails the
+        // whole row — collected_at is best-effort, not load-bearing.
+        collected_at: db_get_column_opt::<i64>(row, "collected_at_ms")
+            .ok()
+            .flatten()
+            .map(|v| v.max(0) as u64),
         meta: parse_json("meta", row)?,
         current_msg_seq: db_get_column_opt::<i64>(row, "current_msg_seq")
             .map_err(|e| ServiceError::InternalError(format!("current_msg_seq: {e}")))?
@@ -455,7 +465,9 @@ impl SessionRepoPort for MySqlSessionStore {
 
         // Auto-generate path: up to 3 retries on uk_session_id collision.
         for _ in 0..3 {
-            let id = new_session_id(group_id);
+            let id = new_session_id(group_id).map_err(|error| {
+                ServiceError::SessionInvalidParams(error.to_string())
+            })?;
             match self
                 .insert_session(id, group_id.to_string(), params.clone(), current_millis())
                 .await
@@ -734,6 +746,34 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Vec<Session> {
+        match self
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::warn!(%error, "list_by_group query failed");
+                Vec::new()
+            }
+        }
+    }
+
+    async fn try_list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<Vec<Session>> {
         let mut conditions: Vec<String> = vec![
             "s.env = ?".to_string(),
             "s.group_id = ?".to_string(),
@@ -773,20 +813,22 @@ impl SessionRepoPort for MySqlSessionStore {
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions s {join} \
              WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC LIMIT ? OFFSET ?",
+             ORDER BY s.gmt_create DESC, s.session_id ASC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             join = join_clause,
             where_clause = conditions.join(" AND "),
         );
 
-        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "list_by_group query failed");
-                return Vec::new();
-            }
-        };
-        rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "list sessions for Group '{group_id}': {error}"
+                ))
+            })?;
+        rows.iter().map(row_to_session).collect()
     }
 
     async fn latest_running(&self, group_id: &str) -> Option<Session> {
@@ -822,6 +864,80 @@ impl SessionRepoPort for MySqlSessionStore {
                     .map(|v| v.max(0) as u64)
             })
             .unwrap_or(0)
+    }
+
+    /// Mirrors [`SessionRepoPort::try_list_by_group`] filter conditions exactly
+    /// (env + group_id + optional status / title_contains / participant_id
+    /// JOIN) but runs `SELECT COUNT(*)` without LIMIT/OFFSET. Used by the V1
+    /// session list endpoint to compute `total`.
+    ///
+    /// Propagates DB failures as `ServiceResult::Err` rather than silently
+    /// returning `0`, so a nonempty page never pairs with `total=0`.
+    async fn count_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> ServiceResult<u64> {
+        let mut conditions: Vec<String> = vec![
+            "s.env = ?".to_string(),
+            "s.group_id = ?".to_string(),
+        ];
+        let mut params: Vec<DbValue> = vec![
+            DbValue::from(self.env.as_str()),
+            DbValue::from(group_id),
+        ];
+
+        if let Some(s) = status {
+            let status_str = match s {
+                SessionStatus::Running => "running",
+                SessionStatus::Completed => "completed",
+            };
+            conditions.push("s.status = ?".to_string());
+            params.push(DbValue::from(status_str));
+        }
+
+        if let Some(q) = title_contains {
+            conditions.push("s.session_title LIKE ?".to_string());
+            params.push(DbValue::from(format!("%{}%", q)));
+        }
+
+        let join_clause = if let Some(pid) = participant_id {
+            conditions.push("sp.bot_uuid = ?".to_string());
+            params.push(DbValue::from(pid));
+            "JOIN bcs_session_participants sp ON sp.env = s.env AND sp.session_id = s.session_id"
+        } else {
+            ""
+        };
+
+        let sql = format!(
+            "SELECT COUNT(*) AS cnt FROM bcs_group_sessions s {join} \
+             WHERE {where_clause}",
+            join = join_clause,
+            where_clause = conditions.join(" AND "),
+        );
+
+        let rows = self
+            .db
+            .query(DbStatement::with_params(&sql, params))
+            .await
+            .map_err(|e| {
+                ServiceError::InternalError(format!(
+                    "count sessions for Group '{group_id}': {e}"
+                ))
+            })?;
+        let total = rows
+            .into_iter()
+            .next()
+            .and_then(|row| {
+                db_get_column_opt::<i64>(&row, "cnt")
+                    .ok()
+                    .flatten()
+                    .map(|v| v.max(0) as u64)
+            })
+            .unwrap_or(0);
+        Ok(total)
     }
 
     async fn list_running_service(&self, offset: u64, limit: u64) -> Vec<Session> {
@@ -1112,11 +1228,37 @@ impl SessionRepoPort for MySqlSessionStore {
             .collect()
     }
 
+    async fn try_list_group_ids_by_session_participant(
+        &self,
+        bot_uuid: &str,
+    ) -> ServiceResult<Vec<String>> {
+        let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
+                   WHERE env = ? AND bot_uuid = ?";
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(bot_uuid),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+
+        rows.iter()
+            .map(|row| {
+                db_get_column::<String>(row, "group_id").map_err(|error| {
+                    ServiceError::InternalError(format!("session db row: {error}"))
+                })
+            })
+            .collect()
+    }
+
     async fn delete(&self, session_id: &str) -> ServiceResult<bool> {
         let del_participants = "DELETE FROM bcs_session_participants \
                                WHERE env = ? AND session_id = ?";
-        let _ = self
-            .db
+        self.db
             .execute(DbStatement::with_params(
                 del_participants,
                 vec![
@@ -1124,10 +1266,11 @@ impl SessionRepoPort for MySqlSessionStore {
                     DbValue::from(session_id),
                 ],
             ))
-            .await;
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
 
         let del_session = "DELETE FROM bcs_group_sessions WHERE env = ? AND session_id = ?";
-        match self
+        let result = self
             .db
             .execute(DbStatement::with_params(
                 del_session,
@@ -1137,10 +1280,8 @@ impl SessionRepoPort for MySqlSessionStore {
                 ],
             ))
             .await
-        {
-            Ok(result) => Ok(result.affected_rows > 0),
-            Err(_) => Ok(false),
-        }
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        Ok(result.affected_rows > 0)
     }
 
     async fn collect(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<()> {
@@ -1171,9 +1312,23 @@ impl SessionRepoPort for MySqlSessionStore {
                 "participant {bot_uuid} not in session {session_id}"
             )));
         }
-        let update_sql = "UPDATE bcs_session_participants \
-                          SET collected = 1 \
-                          WHERE env = ? AND session_id = ? AND bot_uuid = ?";
+        // First-collect-writes-time, repeat-collect-keeps-it (idempotent), expressed
+        // via the NULL-ness of collected_at itself: COALESCE writes `now` only when
+        // collected_at is NULL (never collected, or cleared by a prior uncollect) and
+        // preserves the existing value otherwise. This is dialect-portable: do NOT
+        // rewrite as `CASE WHEN collected = 0 THEN now ...` — MySQL evaluates a single
+        // UPDATE's SET left-to-right (so `collected` is already 1 by the time the CASE
+        // reads it) while SQLite evaluates all SET RHS against the pre-update row, so
+        // the CASE form silently never sets collected_at on MySQL while working on
+        // SQLite. Relying on collected_at's own NULL-ness avoids any cross-column
+        // old-value dependency.
+        let update_sql = format!(
+            "UPDATE bcs_session_participants \
+             SET collected = 1, \
+                 collected_at = COALESCE(collected_at, {}) \
+             WHERE env = ? AND session_id = ? AND bot_uuid = ?",
+            self.flavor.now()
+        );
         self.db
             .execute(DbStatement::with_params(
                 update_sql,
@@ -1192,8 +1347,9 @@ impl SessionRepoPort for MySqlSessionStore {
         // Idempotent: the only caller-facing error is session-not-found, which
         // the application layer checks via get() before calling. Here we run the
         // UPDATE regardless of whether a side-table row / collected flag exists.
+        // Clearing collected_at means a later re-collect records a fresh event time.
         let sql = "UPDATE bcs_session_participants \
-                   SET collected = 0 \
+                   SET collected = 0, collected_at = NULL \
                    WHERE env = ? AND session_id = ? AND bot_uuid = ?";
         self.db
             .execute(DbStatement::with_params(
@@ -1249,13 +1405,31 @@ impl SessionRepoPort for MySqlSessionStore {
         params.push(DbValue::U64(limit));
         params.push(DbValue::U64(offset));
 
-        let select_cols = self.select_cols_prefixed();
+        // Collected-list-specific column list: base prefixed columns plus the
+        // collect-event timestamp. We do NOT reuse select_cols_prefixed here
+        // (it omits collected_at); and we CAST the timestamp to an integer so
+        // MySQL's UNIX_TIMESTAMP(datetime(3)) — which returns a DOUBLE due to
+        // fractional seconds — decodes cleanly to i64 instead of failing
+        // row_to_session. SQLite's strftime already yields INTEGER.
+        let collected_at_expr = match self.flavor {
+            DbSqlFlavor::Mysql => format!(
+                "CAST((UNIX_TIMESTAMP(sp.collected_at))*1000 AS SIGNED)"
+            ),
+            DbSqlFlavor::Sqlite => format!(
+                "CAST(strftime('%s', sp.collected_at) AS INTEGER)*1000"
+            ),
+        };
+        let select_cols = format!(
+            "{}, {} AS collected_at_ms",
+            self.select_cols_prefixed(),
+            collected_at_expr,
+        );
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions s \
              JOIN bcs_session_participants sp \
                ON sp.env = s.env AND sp.session_id = s.session_id \
              WHERE {where_clause} \
-             ORDER BY s.gmt_create DESC LIMIT ? OFFSET ?",
+             ORDER BY COALESCE(sp.collected_at, s.gmt_create) DESC LIMIT ? OFFSET ?",
             select_cols = select_cols,
             where_clause = conditions.join(" AND "),
         );
@@ -1268,5 +1442,51 @@ impl SessionRepoPort for MySqlSessionStore {
             }
         };
         rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
+    }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Vec<(String, u64)> {
+        if session_ids.is_empty() {
+            return Vec::new();
+        }
+        // CAST the timestamp to an integer for the same reason as the
+        // collected-list query: UNIX_TIMESTAMP(datetime(3)) is a DOUBLE on
+        // MySQL and would not decode to i64. SQLite's strftime is already INTEGER.
+        let collected_at_expr = match self.flavor {
+            DbSqlFlavor::Mysql => "CAST((UNIX_TIMESTAMP(collected_at))*1000 AS SIGNED)",
+            DbSqlFlavor::Sqlite => "CAST(strftime('%s', collected_at) AS INTEGER)*1000",
+        };
+        let placeholders = vec!["?"; session_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT session_id, {ts} AS collected_at_ms FROM bcs_session_participants \
+             WHERE env = ? AND bot_uuid = ? AND collected = 1 \
+             AND session_id IN ({placeholders})",
+            ts = collected_at_expr,
+            placeholders = placeholders,
+        );
+        let mut params: Vec<DbValue> =
+            vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)];
+        for sid in session_ids {
+            params.push(DbValue::from(*sid));
+        }
+        let rows = match self.db.query(DbStatement::with_params(&sql, params)).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "collected_at_map query failed");
+                return Vec::new();
+            }
+        };
+        rows.iter()
+            .filter_map(|r| {
+                let sid: String = db_get_column(r, "session_id").ok()?;
+                let ts: i64 = db_get_column_opt::<i64>(r, "collected_at_ms")
+                    .ok()
+                    .flatten()?;
+                Some((sid, ts.max(0) as u64))
+            })
+            .collect()
     }
 }

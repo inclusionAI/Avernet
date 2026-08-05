@@ -44,6 +44,8 @@ class HarnessPatchRepository:
             advise=row.advise,
             is_applied=(row.is_applied == "Y"),
             env=row.env or "dev",
+            gmt_create=row.gmt_create,
+            gmt_modified=row.gmt_modified,
         )
 
     def create(self, patch: PatchDefinition) -> int:

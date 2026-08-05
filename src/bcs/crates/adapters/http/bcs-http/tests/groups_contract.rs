@@ -2,17 +2,21 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use bcs_auth_api::{AuthPluginChain, AuthPrincipal};
+use bcs_auth_api::{AuthConfig, AuthPluginChain, AuthPrincipal};
 use bcs_auth_local::StaticAuthPlugin;
 use bcs_bot::BotCore;
 use bcs_group::GroupStore;
+use bcs_group_store::MemoryGroupRepo;
 use bcs_http::{
     router::build_router,
     state::{ChainUserIdentityPort, HttpAppState},
 };
 use bcs_service_api::{
     ActorKind, BotCapabilities, BotGroupListCommand, BotRegistryCoreService,
-    CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
+    CancelStateMachineRunCommand, CollaborationDefinition,
+    CollaborationDefinitionGraphNode, CollaborationDefinitionGraphPreview,
+    CollaborationDefinitionParticipantSlot, CollaborationDefinitionValidationOutcome,
+    CollaborationDefinitionValidationSummary, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     DmCreateCommand, DmCreateResult, Group, GroupAddMemberCommand, GroupAddMemberResult,
     GroupCoreService, GroupCreateCommand, GroupDeleteCommand, GroupDeleteResult,
@@ -21,12 +25,22 @@ use bcs_service_api::{
     GroupQueryService, GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
     GroupUpdateWorkspaceCommand, GroupWorkspaceQueryCommand, GroupWorkspaceResult,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, Participant, ParticipantKind,
-    ParticipantMode, ParticipantRole, RoutingMode, RoutingPolicy, Skill,
-    SessionHistoryResult, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRunView, Workspace,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanResponseSource,
+    ListPendingHumanNodesCommand, Participant, ParticipantKind, ParticipantMode, ParticipantRole,
+    PendingHumanNodeView, RespondHumanNodeCommand, RespondHumanNodeOutcome, RoutingMode,
+    RoutingPolicy, SessionHistoryResult, SessionStateMachinePermissionCommand,
+    SessionStateMachinePermissionView, Skill, StartSessionStateMachineRunCommand,
+    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
+    StateMachineAssignee, StateMachineGraphMode, StateMachineNodeKind, StateMachineNodeRun,
+    StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus, StateMachineRunView, Workspace,
+    ValidateCollaborationDefinitionYamlCommand,
+};
+use bcs_service_api::{
+    CreateOrReactivateCommand, NewSessionParams, SessionKind, SessionManagementService,
 };
 use bcs_services_container::Services;
+use bcs_session::SessionManagementServiceImpl;
+use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
 use serde_json::Value;
 use std::sync::Arc;
@@ -40,12 +54,23 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
         user_name: Some(nick_name.to_string()),
         ..Default::default()
     };
+    Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]))
+}
+
+fn static_bot_auth_chain(bot_uuid: &str) -> Arc<AuthPluginChain> {
+    let principal = AuthPrincipal {
+        bot_uuid: Some(bot_uuid.to_string()),
+        ..Default::default()
+    };
     Arc::new(AuthPluginChain::new(vec![Box::new(StaticAuthPlugin::with_principal(principal))]))
 }
 
 #[derive(Default)]
 struct RecordingGroupManagement {
     create_calls: Mutex<Vec<GroupCreateCommand>>,
+    latest_running_session_id: Mutex<Option<String>>,
     create_dm_calls: Mutex<Vec<DmCreateCommand>>,
     status_calls: Mutex<Vec<GroupStatusCommand>>,
     add_member_calls: Mutex<Vec<GroupAddMemberCommand>>,
@@ -70,11 +95,56 @@ struct RecordingCollaborationRuntime {
     definitions: Mutex<Vec<CollaborationDefinition>>,
     configure_calls: Mutex<Vec<ConfigureGroupRuntimeCommand>>,
     start_commands: Mutex<Vec<StartStateMachineRunCommand>>,
+    permission_commands: Mutex<Vec<SessionStateMachinePermissionCommand>>,
+    session_start_commands: Mutex<Vec<StartSessionStateMachineRunCommand>>,
+    validation_calls: Mutex<Vec<ValidateCollaborationDefinitionYamlCommand>>,
+    pending_human_commands: Mutex<Vec<ListPendingHumanNodesCommand>>,
+    respond_human_commands: Mutex<Vec<RespondHumanNodeCommand>>,
     upsert_error: Mutex<Option<CollaborationRuntimeError>>,
 }
 
 #[async_trait::async_trait]
 impl CollaborationRuntimeService for RecordingCollaborationRuntime {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        self.validation_calls.lock().await.push(cmd);
+        Ok(CollaborationDefinitionValidationOutcome {
+            valid: true,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            summary: CollaborationDefinitionValidationSummary {
+                participants: 1,
+                nodes: 1,
+                initial_nodes: vec!["answer".to_string()],
+                final_output_node: Some("answer".to_string()),
+            },
+            participants: vec![CollaborationDefinitionParticipantSlot {
+                binding: "writer".to_string(),
+                display_name: Some("Writer".to_string()),
+                description: None,
+                required: true,
+                assigned: true,
+            }],
+            graph: Some(CollaborationDefinitionGraphPreview {
+                graph_mode: StateMachineGraphMode::Acyclic,
+                nodes: vec![CollaborationDefinitionGraphNode {
+                    node_id: "answer".to_string(),
+                    display_name: "Answer".to_string(),
+                    kind: StateMachineNodeKind::BotTask,
+                    assignee: Some(StateMachineAssignee::BotBinding {
+                        binding: "writer".to_string(),
+                    }),
+                    final_output: true,
+                    judge: false,
+                }],
+                edges: Vec::new(),
+            }),
+            definition: None,
+        })
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
@@ -85,11 +155,118 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
         ))
     }
 
+    async fn get_session_state_machine_permission(
+        &self,
+        cmd: SessionStateMachinePermissionCommand,
+    ) -> Result<SessionStateMachinePermissionView, CollaborationRuntimeError> {
+        self.permission_commands.lock().await.push(cmd.clone());
+        Ok(SessionStateMachinePermissionView {
+            session_id: cmd.session_id,
+            group_id: "group-1".to_string(),
+            caller_bot_id: cmd.caller_bot_id,
+            allowed: true,
+            reason_code: "allowed".to_string(),
+            message: "caller may run a state machine in this session".to_string(),
+            policy_version: "session_state_machine_v1".to_string(),
+            group_strategy: "chat".to_string(),
+            group_owner_bot_id: "driver-bot".to_string(),
+            active_run_id: None,
+        })
+    }
+
+    async fn start_session_state_machine_run(
+        &self,
+        cmd: StartSessionStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        self.session_start_commands.lock().await.push(cmd.clone());
+        Ok(StartStateMachineRunOutcome {
+            view: StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "run-one-shot".to_string(),
+                    definition_id: "definition-one-shot".to_string(),
+                    definition_version: 1,
+                    group_id: "group-1".to_string(),
+                    group_version: 1,
+                    session_id: cmd.session_id,
+                    created_by: Some(cmd.caller_bot_id),
+                    status: StateMachineRunStatus::Running,
+                    input: cmd.input,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 1,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            },
+        })
+    }
+
     async fn get_state_machine_run(
         &self,
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         Ok(None)
+    }
+
+    async fn list_pending_human_nodes(
+        &self,
+        cmd: ListPendingHumanNodesCommand,
+    ) -> Result<Vec<PendingHumanNodeView>, CollaborationRuntimeError> {
+        self.pending_human_commands.lock().await.push(cmd);
+        Ok(vec![PendingHumanNodeView {
+            node_id: "human_review".to_string(),
+            display_name: "Human review".to_string(),
+            instruction: "Review the draft".to_string(),
+            response_ref: "run-1:human_review".to_string(),
+            judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+            timeout_deadline_ms: Some(1234),
+            upstream_artifacts: Vec::new(),
+        }])
+    }
+
+    async fn respond_human_node(
+        &self,
+        cmd: RespondHumanNodeCommand,
+    ) -> Result<RespondHumanNodeOutcome, CollaborationRuntimeError> {
+        self.respond_human_commands.lock().await.push(cmd.clone());
+        Ok(RespondHumanNodeOutcome {
+            node: StateMachineNodeRun {
+                run_id: cmd.run_id.clone(),
+                node_id: cmd.node_id,
+                status: StateMachineNodeStatus::Completed,
+                attempt: 0,
+                node_timeout_ms: Some(60_000),
+                timeout_deadline_ms: None,
+                max_attempts: 1,
+                assignee_bot_id: None,
+                outcome: Some("complete".to_string()),
+                responded_by: Some(cmd.caller_actor_id),
+                delivery_request_id: None,
+                bot_delivery_run_id: None,
+                artifact_text: Some(cmd.content),
+                error: None,
+                started_at: Some(1),
+                completed_at: Some(2),
+            },
+            run: StateMachineRun {
+                run_id: cmd.run_id,
+                definition_id: "definition-1".to_string(),
+                definition_version: 1,
+                group_id: "group-1".to_string(),
+                group_version: 1,
+                session_id: "session-1".to_string(),
+                created_by: Some("human_alice".to_string()),
+                status: StateMachineRunStatus::Completed,
+                input: Value::Null,
+                output: None,
+                error: None,
+                created_at: 1,
+                updated_at: 2,
+                completed_at: Some(2),
+            },
+        })
     }
 
     async fn get_state_machine_session_history(
@@ -153,6 +330,7 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
             group_id: cmd.group_id,
             default_definition: cmd.definition_ref,
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel: false,
         })
     }
 }
@@ -236,7 +414,8 @@ impl GroupManagementService for RecordingGroupManagement {
         &self,
         cmd: GroupCreateCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
-        let result = detail_from_create(&cmd);
+        let mut result = detail_from_create(&cmd);
+        result.latest_running_session_id = self.latest_running_session_id.lock().await.clone();
         self.create_calls.lock().await.push(cmd);
         Ok(result)
     }
@@ -427,7 +606,9 @@ impl GroupManagementService for RecordingGroupManagement {
         &self,
         _cmd: bcs_service_api::GroupUpdateVisibilityCommand,
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
-        Err(bcs_service_api::GroupUseCaseError::InvalidProposal("not yet implemented".to_string()))
+        Err(bcs_service_api::GroupUseCaseError::InvalidProposal(
+            "not yet implemented".to_string(),
+        ))
     }
 
     async fn update_workspace(
@@ -482,6 +663,174 @@ impl GroupManagementService for RecordingGroupManagement {
             ),
         ))
     }
+}
+
+#[tokio::test]
+async fn post_collaboration_definition_validate_delegates_to_runtime_service() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/collaboration/definitions/validate")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": "name: test"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["valid"], true);
+    assert_eq!(json["summary"]["nodes"], 1);
+    assert_eq!(json["participants"][0]["binding"], "writer");
+    assert_eq!(json["graph"]["graph_mode"], "acyclic");
+    assert_eq!(json["graph"]["nodes"][0]["node_id"], "answer");
+    assert_eq!(json["graph"]["edges"], serde_json::json!([]));
+    assert!(json.get("definition").is_none());
+
+    let calls = collaboration_runtime.validation_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].definition_yaml, "name: test");
+    assert!(!calls[0].judge_available);
+}
+
+#[tokio::test]
+async fn session_state_machine_permission_uses_authenticated_bot_identity() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/session-chat/state-machine-permission")
+                .header("authorization", "Bearer driver-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["allowed"], true);
+    assert_eq!(json["caller_bot_id"], "driver-bot");
+    assert_eq!(json["policy_version"], "session_state_machine_v1");
+
+    let commands = collaboration_runtime.permission_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].session_id, "session-chat");
+    assert_eq!(commands[0].caller_bot_id, "driver-bot");
+}
+
+#[tokio::test]
+async fn session_state_machine_start_forwards_yaml_and_transient_role_bindings() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+name: One Shot
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      write:
+        kind: bot_task
+        display_name: Write
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Write the final answer.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/sessions/session-chat/state-machine-runs")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": definition_yaml,
+                        "participant_bindings": {
+                            "writer": {
+                                "source": "manual",
+                                "bot_ids": ["target-bot"]
+                            }
+                        },
+                        "input": {"question": "draft it"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["run"]["run_id"], "run-one-shot");
+    assert_eq!(json["run"]["session_id"], "session-chat");
+    assert_eq!(json["run"]["created_by"], "driver-bot");
+
+    let commands = collaboration_runtime.session_start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].session_id, "session-chat");
+    assert_eq!(commands[0].caller_bot_id, "driver-bot");
+    assert_eq!(commands[0].definition_yaml, definition_yaml);
+    assert_eq!(commands[0].input, serde_json::json!({"question": "draft it"}));
+    assert_eq!(
+        commands[0]
+            .participant_bindings
+            .get("writer")
+            .map(|binding| (binding.source.as_str(), binding.bot_ids.as_slice())),
+        Some(("manual", &["target-bot".to_string()][..]))
+    );
+    assert!(!commands[0].judge_available);
+}
+
+#[tokio::test]
+async fn session_state_machine_routes_require_bot_authentication() {
+    let (app, _, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/session-chat/state-machine-permission")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(
+        collaboration_runtime
+            .permission_commands
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -683,6 +1032,153 @@ runtime:
 }
 
 #[tokio::test]
+async fn post_groups_auto_start_forwards_authenticated_human_to_runtime() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    register_bot(&registry, "driver-bot", "Driver").await;
+    let session_management = Arc::new(SessionManagementServiceImpl::new(
+        Arc::new(MemorySessionRepo::new()),
+        Arc::new(MemoryGroupRepo::new()),
+    ));
+    let session = session_management
+        .create_or_reactivate(CreateOrReactivateCommand {
+            group_id: "group-human-auto-start".to_string(),
+            session_id: None,
+            params: NewSessionParams {
+                session_kind: SessionKind::ServiceInvocation,
+                ..Default::default()
+            },
+        })
+        .await
+        .expect("seed service invocation session")
+        .session;
+    let recorder = Arc::new(RecordingGroupManagement::default());
+    *recorder.latest_running_session_id.lock().await = Some(session.id);
+    let collaboration_runtime = Arc::new(RecordingCollaborationRuntime::default());
+    let services = Services::builder()
+        .registry(registry)
+        .group(Arc::new(GroupStore::new()))
+        .group_management(recorder)
+        .session_management(session_management)
+        .collaboration_runtime(collaboration_runtime.clone())
+        .build_for_test();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("alice", "Alice")),
+    )));
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+name: Human Auto Start
+participants:
+  driver:
+    bot_id: driver-bot
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: human_input
+        display_name: Review
+        instruction: Review the input.
+        node_timeout_ms: 60000
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "id": "group-human-auto-start",
+                        "driver_bot": "driver-bot",
+                        "group_strategy": "state_machine",
+                        "auto_start_on_service_invocation": true,
+                        "collaboration_definition_yaml": definition_yaml
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let commands = collaboration_runtime.start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].caller_id.as_deref(), Some("human_alice"));
+    assert_eq!(
+        commands[0]
+            .authenticated_human
+            .as_ref()
+            .map(|human| (human.actor_id.as_str(), human.display_name.as_deref())),
+        Some(("human_alice", Some("Alice")))
+    );
+}
+
+#[tokio::test]
+async fn post_groups_can_defer_initial_state_machine_run() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+name: Deferred Initial Run
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      answer:
+        kind: bot_task
+        display_name: Answer
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Answer.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "id": "group-deferred-initial-run",
+                        "driver_bot": "driver-bot",
+                        "group_strategy": "state_machine",
+                        "start_initial_run": false,
+                        "participant_bindings": {
+                            "writer": {
+                                "source": "manual",
+                                "bot_ids": ["driver-bot"]
+                            }
+                        },
+                        "collaboration_definition_yaml": definition_yaml
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(collaboration_runtime.configure_calls.lock().await.len(), 1);
+    assert!(collaboration_runtime.start_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn post_groups_with_state_machine_yaml_rejects_judge_when_llm_disabled() {
     let (app, recorder, collaboration_runtime, _temp_dir) =
         test_app_with_collaboration_runtime().await;
@@ -745,20 +1241,77 @@ runtime:
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("state-machine judge requires llm.type to select an LLM provider"));
     assert!(recorder.create_calls.lock().await.is_empty());
     assert!(collaboration_runtime.definitions.lock().await.is_empty());
-    assert!(collaboration_runtime.configure_calls.lock().await.is_empty());
+    assert!(
+        collaboration_runtime
+            .configure_calls
+            .lock()
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn start_bot_only_state_machine_run_without_human_identity_reaches_runtime() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+id: bot_only
+version: 1
+name: Bot Only
+participants:
+  writer:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      write:
+        kind: bot_task
+        display_name: Write
+        assignee:
+          type: bot_binding
+          binding: writer
+        instruction: Write.
+        final_output: true
+"#;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-bot-only/state-machine-runs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "definition_yaml": definition_yaml,
+                        "input": {"question": "hello"}
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let commands = collaboration_runtime.start_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert!(commands[0].caller_id.is_none());
+    assert!(commands[0].authenticated_human.is_none());
 }
 
 #[tokio::test]
 async fn start_state_machine_run_rejects_inline_judge_yaml_when_llm_disabled() {
     let (app, _recorder, collaboration_runtime, _temp_dir) =
-        test_app_with_collaboration_runtime().await;
+        test_app_with_collaboration_runtime_and_human_identity().await;
     let definition_yaml = r#"
 api_version: bcs.collaboration/v1
 id: sm_inline_judge_disabled
@@ -811,12 +1364,107 @@ runtime:
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("state-machine judge requires llm.type to select an LLM provider"));
     assert!(collaboration_runtime.start_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn human_state_machine_routes_forward_authenticated_actor_and_output() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime_and_human_identity().await;
+
+    let pending_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/state-machine-runs/run-1/pending-human-nodes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pending_response.status(), StatusCode::OK);
+    let pending_body = to_bytes(pending_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let pending_json: Value = serde_json::from_slice(&pending_body).unwrap();
+    assert_eq!(pending_json[0]["node_id"], "human_review");
+    assert!(pending_json[0].get("response_state").is_none());
+
+    let respond_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/state-machine-runs/run-1/nodes/human_review/respond")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content":"looks good"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(respond_response.status(), StatusCode::OK);
+
+    let pending_commands = collaboration_runtime.pending_human_commands.lock().await;
+    assert_eq!(pending_commands.len(), 1);
+    assert_eq!(pending_commands[0].run_id, "run-1");
+    assert_eq!(pending_commands[0].caller_actor_id, "human_alice");
+    drop(pending_commands);
+    let respond_commands = collaboration_runtime.respond_human_commands.lock().await;
+    assert_eq!(respond_commands.len(), 1);
+    assert_eq!(respond_commands[0].run_id, "run-1");
+    assert_eq!(respond_commands[0].node_id, "human_review");
+    assert_eq!(respond_commands[0].caller_actor_id, "human_alice");
+    assert_eq!(respond_commands[0].content, "looks good");
+    assert_eq!(respond_commands[0].source, HumanResponseSource::Http);
+}
+
+#[tokio::test]
+async fn human_state_machine_routes_reject_requests_without_human_identity() {
+    let (app, _recorder, collaboration_runtime, _temp_dir) =
+        test_app_with_collaboration_runtime().await;
+
+    let pending_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/state-machine-runs/run-1/pending-human-nodes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(pending_response.status(), StatusCode::UNAUTHORIZED);
+
+    let respond_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/state-machine-runs/run-1/nodes/human_review/respond")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"content":"looks good"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(respond_response.status(), StatusCode::UNAUTHORIZED);
+    assert!(
+        collaboration_runtime
+            .pending_human_commands
+            .lock()
+            .await
+            .is_empty()
+    );
+    assert!(
+        collaboration_runtime
+            .respond_human_commands
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -873,16 +1521,20 @@ runtime:
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains(
-        "participant slot driver is assigned to a node and must resolve to exactly one bot in MVP"
+        "participant slot driver is assigned to a node and must resolve to exactly one bot in the current runtime"
     ));
     assert!(recorder.create_calls.lock().await.is_empty());
     assert!(collaboration_runtime.definitions.lock().await.is_empty());
-    assert!(collaboration_runtime.configure_calls.lock().await.is_empty());
+    assert!(
+        collaboration_runtime
+            .configure_calls
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -1070,9 +1722,9 @@ async fn post_groups_dm_delegates_to_create_dm_with_human_caller() {
         .group_management(recorder.clone())
         .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .clone()
@@ -1132,9 +1784,9 @@ async fn post_groups_dm_leaves_driver_bot_policy_to_group_management() {
         .group_management(recorder.clone())
         .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .oneshot(
@@ -1170,9 +1822,9 @@ async fn post_groups_dm_rejects_ambiguous_legacy_participants() {
         .group_management(recorder.clone())
         .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .oneshot(
@@ -1309,6 +1961,193 @@ async fn group_query_routes_delegate_to_group_query_service() {
 }
 
 #[tokio::test]
+async fn my_groups_resolves_bot_principal_and_preserves_query() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain("bot-current"), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?group_kind=normal&offset=4&limit=5&q=05&include_session_groups=true")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["actor_id"], "bot-current");
+    assert!(json.get("bot_uuid").is_none());
+    assert_eq!(json["items"][0]["group_id"], "bot-group-1");
+
+    let calls = query.bot_group_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].bot_id, "bot-current");
+    assert_eq!(calls[0].group_kind, Some(Default::default()));
+    assert_eq!(calls[0].q.as_deref(), Some("05"));
+    assert_eq!(calls[0].offset, 4);
+    assert_eq!(calls[0].limit, 5);
+}
+
+#[tokio::test]
+async fn my_groups_resolves_human_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?include_session_groups=false")
+                .header("authorization", "Bearer human-oauth-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["actor_id"], "human_alice");
+
+    let calls = query.bot_group_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].bot_id, "human_alice");
+}
+
+#[tokio::test]
+async fn my_groups_rejects_explicit_invalid_bot_token_instead_of_falling_back_to_human() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(chain),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "stale-bot-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(query.bot_group_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn my_groups_rejects_explicit_bot_token_when_container_validation_fails() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder()
+        .group_query(query.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain("bot-current"), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain)))
+            .with_strict_container_validation(true),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .header("x-agentclaw-bolt-id", "different-container")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(query.bot_group_calls.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn my_groups_rejects_empty_bot_actor_identity() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services)
+            .with_auth_chain(static_bot_auth_chain(""), AuthConfig::default())
+            .with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my")
+                .header("authorization", "Bearer human-oauth-token")
+                .header("X-BCS-Bot-Token", "valid-bot-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn my_groups_rejects_anonymous_without_shadowing_group_detail() {
+    let query = Arc::new(RecordingGroupQuery::default());
+    let services = Services::builder().group_query(query).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let my_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/groups/my?include_session_groups=false")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(my_response.status(), StatusCode::UNAUTHORIZED);
+
+    let detail_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/groups/group-1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(detail_response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn get_group_preserves_legacy_detail_payload_from_query_service() {
     let group_store = Arc::new(GroupStore::new());
     let query = Arc::new(bcs_group::GroupManagement::with_defaults(
@@ -1432,9 +2271,9 @@ async fn post_group_member_delegates_to_group_management_add_member() {
         .group_management(recorder.clone())
         .build_for_test();
     let chain = static_auth_chain("alice", "Alice");
-    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
-        ChainUserIdentityPort::new(chain),
-    )));
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
 
     let response = app
         .oneshot(
@@ -1721,8 +2560,7 @@ async fn patch_group_settings_writes_route_field_changes_to_store() {
 
 #[tokio::test]
 async fn patch_group_settings_rejects_private_baas_callback_base_url() {
-    let (app, _recorder, store, _temp_dir) =
-        test_app_with_service_spec_and_store(None).await;
+    let (app, _recorder, store, _temp_dir) = test_app_with_service_spec_and_store(None).await;
 
     let body = serde_json::json!({
         "service_spec": {
@@ -1856,6 +2694,26 @@ async fn test_app_with_collaboration_runtime() -> (
     Arc<RecordingCollaborationRuntime>,
     TempDir,
 ) {
+    test_app_with_collaboration_runtime_identity(false).await
+}
+
+async fn test_app_with_collaboration_runtime_and_human_identity() -> (
+    axum::Router,
+    Arc<RecordingGroupManagement>,
+    Arc<RecordingCollaborationRuntime>,
+    TempDir,
+) {
+    test_app_with_collaboration_runtime_identity(true).await
+}
+
+async fn test_app_with_collaboration_runtime_identity(
+    with_human_identity: bool,
+) -> (
+    axum::Router,
+    Arc<RecordingGroupManagement>,
+    Arc<RecordingCollaborationRuntime>,
+    TempDir,
+) {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     register_bot(&registry, "driver-bot", "Driver").await;
@@ -1874,7 +2732,15 @@ async fn test_app_with_collaboration_runtime() -> (
         .group_management(recorder.clone())
         .collaboration_runtime(collaboration_runtime.clone())
         .build_for_test();
-    let app = build_router(HttpAppState::new(services));
+    let state = HttpAppState::new(services);
+    let state = if with_human_identity {
+        state.with_user_identity(Arc::new(ChainUserIdentityPort::new(static_auth_chain(
+            "alice", "Alice",
+        ))))
+    } else {
+        state
+    };
+    let app = build_router(state);
     (app, recorder, collaboration_runtime, temp_dir)
 }
 
@@ -1921,7 +2787,7 @@ fn detail_from_create(cmd: &GroupCreateCommand) -> GroupDetailResult {
         service_mode: None,
         group_kind: Default::default(),
         dm_pair_key: None,
-        group_strategy: Default::default(),
+        group_strategy: cmd.group_strategy.unwrap_or_default(),
         created_at: 10,
         updated_at: 10,
         chat_url: None,

@@ -63,6 +63,40 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# ── 未回复换新去抖间隔(独立于 cooldown_days;两者都 7 只是巧合,语义不同):
+#    cooldown_days = 关单后重建冷却;本常量 = 未回复换新的去抖间隔。──
+_STALE_REPLACE_REFRESH_DAYS: int = 7
+
+# ── 上次反馈成对裁决(feedback_verdict)强信号 → 通知提示文案 ──────────
+# 建单时若上一工单 feedback_verdict 属强信号,通知带一句提示 + 审计带 verdict/remark,
+# 让在线自循环消费 user⊗admin 成对结果(§review-feedback-loop)。
+_STRONG_VERDICT_HINT: dict[str, str] = {
+    "whitelist_denied": "上次用户申请加白已被管理员驳回,本次继续按治理建议跟进。",
+    "dispute_accepted": "上次用户申诉已被管理员采纳关单,本次重新冒头请复核。",
+    "schedule_confirmed": "上次用户排期已被管理员批准,观察是否按期改善。",
+    "whitelist_confirmed": "上次用户加白已被管理员确认(误判),本次冒头请谨慎。",
+}
+
+
+def _build_last_feedback_audit(verdict: str, review_remark: str | None) -> str | None:
+    """构造建单审计的 last_feedback 片段:强信号 verdict + 非空 review_remark。
+
+    Args:
+        verdict: 上一工单 feedback_verdict(空串=无上一工单/无 verdict)。
+        review_remark: 上一工单管理员裁决备注(None=无)。
+
+    Returns:
+        审计片段(如 ``last_verdict=whitelist_denied; last_review_remark=...``),
+        verdict 非强信号且 remark 空 → None(不写入)。
+    """
+    if not verdict or verdict == "other":
+        return None
+    parts = [f"last_verdict={verdict}"]
+    if review_remark:
+        remark = review_remark if len(review_remark) <= 120 else review_remark[:119] + "…"
+        parts.append(f"last_review_remark={remark}")
+    return "; ".join(parts)
+
 
 # ── Result types ─────────────────────────────────────────────────────────
 
@@ -73,7 +107,7 @@ class RecordProcessResult:
 
     worker_key: str
     entered_governance_scope: bool = False
-    action: str = ""  # enqueued / would_create / still_actionable / whitelist_filtered / cooldown_filtered / whitelist_closed / invalid / error
+    action: str = ""  # enqueued / would_create / still_actionable / scan_whitelisted / cooldown_filtered / invalid / error
     reason: str = ""
     ticket_id: str | None = None
     notification_md_preview: str | None = None
@@ -92,10 +126,19 @@ class OfflineBatchResult:
     errors: int = 0
 
 
+# 白名单观察三路分发(路1 scan兜底 / 路2 刷新观察单 / 路3 建观察单)抽至 mixin
+# (R9 行门禁)。import 置于 RecordProcessResult/OfflineBatchResult 定义之后,
+# 避免 mixin 模块顶层回 import 本模块时的循环依赖(部分加载时此二 dataclass
+# 已就绪)。
+from agentclaw.community.core.economy.governance.services.record_process_whitelist import (  # noqa: E402
+    WhitelistObservationMixin,
+)
+
+
 # ── Service ──────────────────────────────────────────────────────────────
 
 
-class GovernanceRecordService:
+class GovernanceRecordService(WhitelistObservationMixin):
     """Single-record process and offline-batch processing.
 
     Follows §7.1.4 (process_record) and §7.2 (process_offline_batch)
@@ -189,9 +232,10 @@ class GovernanceRecordService:
                 worker_key=worker_key,
                 owner_id=owner_id,
                 bot_id=bot_id,
-                dt_version=dt_version,
+                record=record,
                 run_id=run_id,
                 dry_run=dry_run,
+                notify_source=notify_source,
             )
 
         # Step 4: Active ticket exists → refresh snapshot (§7.1.4 Step 4)
@@ -365,65 +409,9 @@ class GovernanceRecordService:
         return result
 
     # ------------------------------------------------------------------
-    # Internal: Whitelist handling (§7.1.4 Step 2)
+    # Whitelist 三路分发(_handle_whitelist_hit + 路2 刷新 + 路3 建单)已抽至
+    # WhitelistObservationMixin(R9 行门禁),见 record_process_whitelist.py。
     # ------------------------------------------------------------------
-
-    def _handle_whitelist_hit(
-        self,
-        *,
-        active_ticket: GovernanceTicket | None,
-        worker_key: str,
-        owner_id: str,
-        bot_id: str,
-        dt_version: str,
-        run_id: str,
-        dry_run: bool,
-    ) -> RecordProcessResult:
-        """Process whitelist-hit cases (§7.1.4 Step 2).
-
-        - No active ticket → audit whitelist_filtered, skip.
-        - Active ticket exists → close ticket (whitelist_filtered, §7.2.7),
-          cancel pending notify.
-        """
-        now = datetime.now()
-
-        if active_ticket is None:
-            # Whitelist hit, no active ticket → only audit
-            if not dry_run:
-                self._audit_repo.add_audit(
-                    run_id, bot_id, owner_id,
-                    check_result="actionable",
-                    action_taken=AuditAction.SCAN_SKIP_WHITELIST,
-                    dry_run=0,
-                )
-            return RecordProcessResult(
-                worker_key=worker_key,
-                entered_governance_scope=False,
-                action="whitelist_filtered",
-                reason="whitelist_hit_no_active_ticket",
-            )
-
-        # Whitelist hit + active ticket → close ticket (§7.2.7) via driver
-        # service (sole driver of the ticket machine). Driver orchestrates
-        # the close + cancel-pending-notify side effect atomically.
-        if not dry_run:
-            self._lifecycle_svc.close_for_whitelist_hit(
-                active_ticket.ticket_id, now=now,
-            )
-
-            self._audit_repo.add_audit(
-                run_id, bot_id, owner_id,
-                action_taken=AuditAction.WHITELIST_CLOSED,
-                dry_run=0,
-            )
-
-        return RecordProcessResult(
-            worker_key=worker_key,
-            entered_governance_scope=False,
-            action="whitelist_closed",
-            reason="whitelist_hit_active_ticket_closed",
-            ticket_id=active_ticket.ticket_id,
-        )
 
     # ------------------------------------------------------------------
     # Internal: Active ticket refresh (§7.1.4 Step 4)
@@ -475,6 +463,46 @@ class GovernanceRecordService:
                 ticket_id=ticket.ticket_id,
             )
 
+        # ── 未回复换新分流(§stale-replace):新数据进来 + open + 未回复 +
+        #    actionable + 工单开了 ≥ _STALE_REPLACE_REFRESH_DAYS(7)天 →
+        #    关老(stale_replaced,不设 cooldown_until)+ 建新单 first_send。
+        #    防 spam:新单 gmt_create=now,下次 <7天不换,≥7天再换。
+        #    与 cooldown 体系隔离(cooldown_until 是关单重建冷却,概念不同)。
+        if (
+            ticket.governance_status == GovernanceStatus.OPEN
+            and ticket.user_feedback is None
+            and (ticket.current_decision or "actionable") == "actionable"
+            and ticket.gmt_create is not None
+        ):
+            # gmt_create may be str on SQLite (TIMESTAMP not auto-parsed);
+            # normalize to datetime for the age check.
+            gmt = ticket.gmt_create
+            if isinstance(gmt, str):
+                try:
+                    gmt = datetime.strptime(gmt, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    gmt = None
+            if gmt is not None and (now - gmt).days >= _STALE_REPLACE_REFRESH_DAYS:
+                log.info(
+                    "[RecordProcess] Stale replace: ticket=%s open %d days (≥%d) "
+                    "unresponded, replacing with new ticket (worker=%s)",
+                    ticket.ticket_id,
+                    (now - gmt).days,
+                    _STALE_REPLACE_REFRESH_DAYS,
+                    worker_key,
+                )
+                return self._replace_with_new_ticket(
+                old_ticket=ticket,
+                record=record,
+                worker_key=worker_key,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                dt_version=dt_version,
+                run_id=run_id,
+                dry_run=dry_run,
+                now=now,
+            )
+
         if not dry_run:
             # Refresh snapshot fields via dedicated session
             # 等价原 record.get("governance_decision", "actionable"):
@@ -509,11 +537,13 @@ class GovernanceRecordService:
                 ticket.ticket_id,
                 dt_version=dt_version,
                 bot_name=record.bot_name,
+                owner_name=record.owner_name,
                 triggered_dimensions=record.hit_dimensions,
                 hit_dimensions_count=record.hit_dimensions_count,
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -560,6 +590,52 @@ class GovernanceRecordService:
     # Internal: New ticket creation (§7.1.4 Step 6)
     # ------------------------------------------------------------------
 
+    def _replace_with_new_ticket(
+        self,
+        *,
+        old_ticket: GovernanceTicket,
+        record: GovernanceRecord,
+        worker_key: str,
+        owner_id: str,
+        bot_id: str,
+        dt_version: str,
+        run_id: str,
+        dry_run: bool,
+        now: datetime,
+    ) -> RecordProcessResult:
+        """未回复换新:关老工单(stale_replaced)+ 用新数据建新单 + first_send。
+
+        关老不设 cooldown_until(去抖靠新单 gmt_create 节奏,与 cooldown 隔离)。
+        老工单 pending reminder 由 close_for_stale_replace 一并 cancel。
+        新单 first_send 复用 _create_new_ticket(传 latest_closed=old_ticket,
+        但 old 无 verdict 不触发强信号提示)。
+        """
+        if not dry_run:
+            self._lifecycle_svc.close_for_stale_replace(
+                old_ticket.ticket_id, now=now,
+            )
+            self._audit_repo.add_audit(
+                run_id, bot_id, owner_id,
+                check_result="actionable",
+                governance_decision=record.governance_decision,
+                hit_dimensions=record.hit_dimensions,
+                action_taken=AuditAction.STALE_REPLACED,
+                dry_run=0,
+                error_msg=f"old_ticket={old_ticket.ticket_id}; gmt_create={old_ticket.gmt_create}",
+            )
+
+        return self._create_new_ticket(
+            record=record,
+            worker_key=worker_key,
+            owner_id=owner_id,
+            bot_id=bot_id,
+            dt_version=dt_version,
+            run_id=run_id,
+            dry_run=dry_run,
+            notify_source="offline_batch",
+            latest_closed=old_ticket,
+        )
+
     def _create_new_ticket(
         self,
         *,
@@ -595,12 +671,27 @@ class GovernanceRecordService:
                 or latest_closed.closed_at
             )
 
+        # 上次反馈成对裁决(feedback_verdict):强信号时通知带一句"上次反馈提示"
+        # + 审计带 verdict/remark,让在线自循环消费 user⊗admin 成对结果。
+        last_verdict = latest_closed.feedback_verdict if latest_closed else ""
+        last_review_remark = (
+            latest_closed.review_remark if latest_closed else None
+        )
+        last_feedback_hint = _STRONG_VERDICT_HINT.get(last_verdict)
+
         # Render notification markdown
         notification_md = self._render_svc.render_first_notification_md(
             record,
             dt_version=dt_version,
             use_reopen_template=use_reopen_template,
             reopen_ref_time=reopen_ref_time,
+        )
+        if last_feedback_hint:
+            notification_md = f"{notification_md}\n\n> 💡 {last_feedback_hint}"
+
+        # 审计上下文:强信号 verdict + 非空 review_remark 进 error_msg(可追溯)
+        last_feedback_audit = _build_last_feedback_audit(
+            last_verdict, last_review_remark,
         )
 
         if dry_run:
@@ -611,6 +702,7 @@ class GovernanceRecordService:
                 governance_decision=record.governance_decision,
                 hit_dimensions=record.hit_dimensions,
                 action_taken=AuditAction.ENQUEUED,
+                error_msg=last_feedback_audit,
                 dry_run=1,
             )
             return RecordProcessResult(
@@ -631,6 +723,7 @@ class GovernanceRecordService:
             worker_id=worker_key,
             bot_id=bot_id,
             owner_id=owner_id_val,
+            owner_name=record.owner_name,
             bot_name=record.bot_name,
             snapshot=MutableSnapshot(
                 dt_version=dt_version,
@@ -641,6 +734,7 @@ class GovernanceRecordService:
                 severity=record.governance_max_priority,
                 estimated_saving_tokens=record.expected_token_saving,
                 saving_ratio=record.saving_ratio,
+                token_baseline=record.token_baseline,
                 task_summary=record.task_summary,
                 notification_structured=record.notification_structured,
                 analysis_status=record.analysis_status,
@@ -679,6 +773,11 @@ class GovernanceRecordService:
         )
         # env auto-filled by ORM default=get_current_env (not in constructor)
         self._notify_repo.add_notification(notify_row)
+        # 回写工单投递状态:pending(通知已建待发)
+        self._task_repo.update_delivery_status(
+            ticket_id,
+            "pending",
+        )
 
         # Audit enqueued (self-managed session)
         self._audit_repo.add_audit(
@@ -690,6 +789,7 @@ class GovernanceRecordService:
             expected_token_saving=record.expected_token_saving,
             saving_ratio=record.saving_ratio,
             action_taken=AuditAction.ENQUEUED,
+            error_msg=last_feedback_audit,
             dry_run=0,
         )
 

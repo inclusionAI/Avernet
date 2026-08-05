@@ -13,6 +13,7 @@ Implements the core `ChatService` by delegating to an injected
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -53,7 +54,15 @@ class OpenClawChatAdapter(ChatService):
                 "ChatRequest.sessionId is required (pre-composed OpenClaw session key)"
             )
 
-        log.info("[stream] session_key=%s, query=%s", session_key, request.query[:50])
+        # COSEC: hash session and prompt values before logging; the rewritten
+        # prompt can contain sensitive Bot absolute paths.
+        session_key_hash = hashlib.sha256(session_key.encode("utf-8")).hexdigest()[:16]
+        log.info(
+            "[stream] session_key_hash=%s query_len=%s query_hash=%s",
+            session_key_hash,
+            len(request.query),
+            hashlib.sha256(request.query.encode("utf-8")).hexdigest()[:16],
+        )
 
         # Extract idempotency_key and attachments from extraParams (adapter-side).
         idempotency_key: str | None = None
@@ -67,8 +76,8 @@ class OpenClawChatAdapter(ChatService):
                 attachments = raw_attachments
             elif raw_attachments is not None:
                 log.warning(
-                    "[attachments][adapter_extra_invalid] sessionKey=%s type=%s",
-                    session_key,
+                    "[attachments][adapter_extra_invalid] session_key_hash=%s type=%s",
+                    session_key_hash,
                     type(raw_attachments).__name__,
                 )
 

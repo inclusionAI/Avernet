@@ -143,6 +143,21 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    def list_active_caller_instance_bindings(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+    ) -> list[DeviceBindingRecord]:
+        """列出服务 Bot 在指定环境中的 ACTIVE caller 实例 binding。
+
+        caller 实例由 ``apply_reason=caller_instance:{bot_id}`` 标识，且
+        binding 的 ``entity_id`` 始终是服务 Bot owner；``applied_by`` 才是
+        caller。这里只返回 BaaS staff binding，并按 ``device_id`` 去重。
+        """
+        ...
+
     def count_non_released_bindings(
         self,
         *,

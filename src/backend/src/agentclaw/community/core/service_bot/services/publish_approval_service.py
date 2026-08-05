@@ -7,7 +7,7 @@ get Owner approval before publishing or unpublishing.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable, Dict, Literal
+from typing import TYPE_CHECKING, Any, Callable, Dict, Literal, Optional
 
 from agentclaw.community.api.publish_approval import ApprovalResult, PublishApprovalServiceProtocol
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 
 
@@ -39,6 +40,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         publish_flow_service_provider: Callable[[], "PublishFlowService"],
         process_service: "ApprovalWorkflowPlugin",
         bot_service: "BotService",
+        task_queue_service: "TaskQueueService",
     ):
         """Initialize the publish approval service.
 
@@ -47,11 +49,13 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             publish_flow_service_provider: Lazy provider for publish flow service (breaks circular dep)
             process_service: approval-workflow plugin for creating approvals
             bot_service: Bot service for reading bot configuration
+            task_queue_service: Durable queue for the AGREED-trigger task (#197)
         """
         self._publish_service = publish_service
         self._publish_flow_service_provider = publish_flow_service_provider
         self._process_service = process_service
         self._bot_service = bot_service
+        self._task_queue_service = task_queue_service
 
     def _is_approval_required(self, publish_record: BotPublishRecord) -> bool:
         """Check if approval is required for this publish record.
@@ -165,8 +169,6 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             )
 
         owner_id = publish_record.owner_id
-        owner_name = publish_record.owner_name or owner_id
-        publish_name = publish_record.name or publish_record.source_bot_id
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
         logger.info(
@@ -177,32 +179,19 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             owner_id,
         )
 
-        # Archive old approval if exists and is terminal state
-        ext = publish_record.ext or {}
-        approval = ext.get("approval")
-        current_status = approval.get("status") if approval else None
-        if current_status in ("AGREED", "DISAGREED", "CANCEL", "EXECUTED"):
-            self._archive_approval(publish_record)
-            # Refresh ext after archive
-            updated_record = self._publish_service.get_publish_by_id(publish_record.id)
-            if updated_record:
-                publish_record = updated_record
+        publish_record = self._archive_if_terminal(publish_record)
 
-        # Create approval via the workflow plugin
-        approval_result = self._process_service.start_approval(
-            applicant=operator,
-            biz_id=f"{publish_record.id}{action}{timestamp}",
-            process_code=SERVICE_BOT_PUBLISH_PROCESS_CODE,
-            biz_type=f"botpublish4{action}",
-            context={
-                "publish_id": str(publish_record.id),
-                "action": action,
-                "applicant": operator,
-                "publish_owner_audit": f"w[{owner_id}]",  # approval format for auditor
-                "owner_name": owner_name,
-                "publish_name": publish_name,
-                "content": f"{publish_name} 线上发布审批" if action == "online" else f"{publish_name} 下线审批",
-            },
+        # Approval does NOT go through the operation ledger: ``start_approval`` opens
+        # an antprocess approval instance (the approval-workflow plugin), not a BaaS
+        # workflow, so there is nothing to adopt-by-query and the ledger's crash-safe
+        # resolution does not apply. Idempotency here is the caller's PROCESSING
+        # guard (``check_and_process_*`` returns the existing approval) plus the puid
+        # persisted in ``ext.approval``. A crash after ``start_approval`` but before
+        # the ext write is a bounded orphan either way (a re-run opens a new approval
+        # instance); a ledger row would only observe it, not prevent it.
+        biz_id = f"{publish_record.id}{action}{timestamp}"
+        approval_result = self._start_approval_workflow(
+            publish_record, action=action, operator=operator, biz_id=biz_id
         )
 
         if not approval_result.get("success"):
@@ -219,13 +208,30 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
                 message=f"创建审批失败: {error_msg}",
             )
 
-        # Save approval info to ext
+        return self._finalize_new_approval(
+            publish_record,
+            approval_result=approval_result,
+            action=action,
+            operator=operator,
+        )
+
+    def _finalize_new_approval(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        approval_result: Dict[str, Any],
+        action: str,
+        operator: str,
+    ) -> ApprovalResult:
+        """Write ``ext.approval`` (with the puid) and return the PROCESSING result."""
+        puid = approval_result.get("puid")
+
         new_approval = {
-            "puid": approval_result.get("puid"),
+            "puid": puid,
             "action": action,
             "operator_id": operator,
             "status": "PROCESSING",
-            "owner_id": owner_id,
+            "owner_id": publish_record.owner_id,
             "approval_url": approval_result.get("approval_url"),
             "created_at": datetime.now().isoformat(),
         }
@@ -236,7 +242,7 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
         logger.info(
             "[_create_new_approval] created: publish_id=%s, puid=%s",
             publish_record.id,
-            approval_result.get("puid"),
+            puid,
         )
 
         return ApprovalResult(
@@ -244,6 +250,49 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
             status="PROCESSING",
             approval=new_approval,
             message="审批已创建，请等待审批结果",
+        )
+
+    def _archive_if_terminal(self, publish_record: BotPublishRecord) -> BotPublishRecord:
+        """Archive the current approval to history if it is in a terminal state,
+        returning the refreshed record (so the fresh approval writes onto clean
+        ext). A non-terminal / absent approval is left untouched."""
+        approval = (publish_record.ext or {}).get("approval")
+        current_status = approval.get("status") if approval else None
+        if current_status in ("AGREED", "DISAGREED", "CANCEL", "EXECUTED"):
+            self._archive_approval(publish_record)
+            updated_record = self._publish_service.get_publish_by_id(publish_record.id)
+            if updated_record:
+                return updated_record
+        return publish_record
+
+    def _start_approval_workflow(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        action: Literal["online", "offline"],
+        operator: str,
+        biz_id: str,
+    ) -> Dict[str, Any]:
+        """Call the approval-workflow plugin to open the approval instance,
+        assembling the auditor context. Returns the plugin's raw result dict
+        (carries ``success`` / ``puid`` / ``approval_url`` / ``error_msg``)."""
+        owner_id = publish_record.owner_id
+        owner_name = publish_record.owner_name or owner_id
+        publish_name = publish_record.name or publish_record.source_bot_id
+        return self._process_service.start_approval(
+            applicant=operator,
+            biz_id=biz_id,
+            process_code=SERVICE_BOT_PUBLISH_PROCESS_CODE,
+            biz_type=f"botpublish4{action}",
+            context={
+                "publish_id": str(publish_record.id),
+                "action": action,
+                "applicant": operator,
+                "publish_owner_audit": f"w[{owner_id}]",  # approval format for auditor
+                "owner_name": owner_name,
+                "publish_name": publish_name,
+                "content": f"{publish_name} 线上发布审批" if action == "online" else f"{publish_name} 下线审批",
+            },
         )
 
     async def check_and_process_should_approval(
@@ -480,34 +529,77 @@ class PublishApprovalService(PublishApprovalServiceProtocol):
 
         # 4. Trigger follow-up actions
         if new_status == "AGREED":
-            logger.info(
-                "[handle_approval_callback] triggering action: publish_id=%s, action=%s",
-                publish_id,
-                action,
+            early = self._enqueue_agreed_trigger(
+                publish_record, action=action, applicant=applicant, approval=approval
             )
-            # 从 approval 中获取 operator_id
-            operator_id = approval.get("operator_id", applicant)
-            # 校验发布单状态
-            if action == "online":
-                if publish_record.status != PublishStatus.VALIDATING:
-                    logger.warning(
-                        "[handle_approval_callback] invalid status for online: publish_id=%s, status=%s, expected=validating",
-                        publish_id,
-                        publish_record.status,
-                    )
-                    return {"success": True, "message": f"Approval {new_status} but status is {publish_record.status}"}
-                await self._trigger_online_release(publish_id, operator_id)
-            elif action == "offline":
-                if publish_record.status != PublishStatus.SUCCESS:
-                    logger.warning(
-                        "[handle_approval_callback] invalid status for offline: publish_id=%s, status=%s, expected=success",
-                        publish_id,
-                        publish_record.status,
-                    )
-                    return {"success": True, "message": f"Approval {new_status} but status is {publish_record.status}"}
-                await self._trigger_offline(publish_id, operator_id)
+            if early is not None:
+                return early
 
         return {"success": True, "message": f"Approval {new_status}"}
+
+    def _enqueue_agreed_trigger(
+        self,
+        publish_record: BotPublishRecord,
+        *,
+        action: str,
+        applicant: str,
+        approval: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """On an AGREED callback, enqueue the durable trigger for the follow-up
+        publish/offline. Returns an early-return response dict when the record's
+        status no longer matches the action (nothing to trigger), else None.
+
+        (#197) Enqueuing instead of awaiting inline lets the callback return fast;
+        an AGREED-then-crash still converges (the task retries) and a duplicate
+        callback is a no-op via the trigger's status-CAS-guarded process()/offline.
+        The status precheck here is only for fast feedback."""
+        publish_id = publish_record.id
+        logger.info(
+            "[handle_approval_callback] triggering action: publish_id=%s, action=%s",
+            publish_id,
+            action,
+        )
+        operator_id = approval.get("operator_id", applicant)
+        expected = {
+            "online": PublishStatus.VALIDATING,
+            "offline": PublishStatus.SUCCESS,
+        }.get(action)
+        if expected is not None and publish_record.status != expected:
+            logger.warning(
+                "[handle_approval_callback] invalid status for %s: publish_id=%s, status=%s, expected=%s",
+                action, publish_id, publish_record.status, expected,
+            )
+            return {"success": True, "message": f"Approval AGREED but status is {publish_record.status}"}
+
+        from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+            enqueue_approval_trigger,
+        )
+
+        enqueue_approval_trigger(
+            self._task_queue_service,
+            publish_id=publish_id,
+            action=action,
+            operator=operator_id,
+        )
+        return None
+
+    async def execute_approval_trigger(
+        self,
+        publish_id: int,
+        action: str,
+        operator: str,
+    ) -> dict:
+        """Durable AGREED-trigger work (#197): dispatch to the online-release or
+        offline trigger. Both re-validate the approval is AGREED and drive the
+        status-CAS-guarded publish op, so a re-run (duplicate callback / lease
+        re-claim) is a no-op. Returns ``{success, message}``."""
+        if action == "online":
+            await self._trigger_online_release(publish_id, operator)
+        elif action == "offline":
+            await self._trigger_offline(publish_id, operator)
+        else:
+            return {"success": False, "message": f"Unknown approval action: {action}"}
+        return {"success": True, "message": f"Approval trigger {action} executed"}
 
     async def _trigger_online_release(self, publish_id: int, applicant: str) -> None:
         """Trigger online release after approval is agreed.

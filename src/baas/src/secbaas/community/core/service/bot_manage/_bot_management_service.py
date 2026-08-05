@@ -32,7 +32,11 @@ from secbaas.community.api.bot_manage import (
     UpdateDevicesResponse,
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
-from secbaas.community.api.device_manage import DeviceInfo, DeviceListResponse
+from secbaas.community.api.device_manage import (
+    DeployConfig,
+    DeviceInfo,
+    DeviceListResponse,
+)
 from secbaas.community.api.health_check.bot import (
     BotHealthCheckerService as BotHealthCheckerServiceProtocol,
 )
@@ -98,6 +102,26 @@ def resolve_callback_timeout(
         "System config repo is not available, use the DEFAULT_CALLBACK_TIMEOUT_SECONDS"
     )
     return DEFAULT_CALLBACK_TIMEOUT_SECONDS
+
+
+def merge_deploy_config(
+    current: DeployConfig | None,
+    override: DeployConfig | dict,
+) -> DeployConfig:
+    """Merge override fields into current deploy_config at field level.
+
+    Only non-None fields from ``override`` replace corresponding fields
+    in ``current``. This prevents a partial override (e.g. only
+    docker_image) from zeroing out unrelated fields (envs, mount_points,
+    resource_spec, etc.) that already exist on the current config.
+    """
+    current_data = current.model_dump(exclude_none=True) if current else {}
+    override_data = (
+        override.model_dump(exclude_none=True)
+        if isinstance(override, DeployConfig)
+        else override
+    )
+    return DeployConfig.model_validate({**current_data, **override_data})
 
 
 class DefaultBotManagementService(BotManageService):
@@ -692,12 +716,17 @@ class DefaultBotManagementService(BotManageService):
         operator: str,
         request_id: str,
         auto_approve_publish: bool = False,
+        bot_config: BotConfig | None = None,
     ) -> ScaleBotResponse:
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN).
 
         Creates appropriate publish for capacity adjustment:
         - target_count > current: SCALE_UP adding devices
         - target_count < current: SCALE_DOWN removing devices
+
+        When ``bot_config`` is provided, its non-None fields are merged with
+        the bot's existing extra_config and consumed by the publish workflow
+        (not persisted to DB). This matches the update_devices merge pattern.
 
         Per D-03: Explicit tenant and env parameters
         Per D-04: Flat structure (not nested config)
@@ -711,6 +740,8 @@ class DefaultBotManagementService(BotManageService):
             operator: User performing the scaling operation
             auto_approve_publish: When True, auto-approve all publish stage gates
                                   without manual intervention (default: False)
+            bot_config: Optional bot configuration to merge with existing
+                        config for the scale publish workflow
 
         Returns:
             ScaleBotResponse with bot info, target_count and publish_id
@@ -763,12 +794,48 @@ class DefaultBotManagementService(BotManageService):
         else:
             publish_type = PublishType.SCALE_DOWN
 
+        # Resolve config for PublishConfig
+        # Pattern matches update_devices merge at lines 1133-1151:
+        # read existing extra_config → merge non-None fields from bot_config → build PublishConfig
+        record = self._get_bot_record_by_uuid(bot_uuid, tenant)
+        existing_config = (
+            BotConfig.model_validate(record.extra_config)
+            if record and record.extra_config
+            else BotConfig()
+        )
+
+        if bot_config is not None:
+            # Merge provided config fields into existing (non-None = override)
+            if bot_config.share_policy is not None:
+                existing_config.share_policy = bot_config.share_policy
+            if bot_config.deploy_config is not None:
+                existing_config.deploy_config = merge_deploy_config(
+                    existing_config.deploy_config,
+                    bot_config.deploy_config,
+                )
+            if bot_config.entity_id:
+                existing_config.entity_id = bot_config.entity_id
+            if bot_config.entity_type:
+                existing_config.entity_type = bot_config.entity_type
+            if bot_config.sla_grade:
+                existing_config.sla_grade = bot_config.sla_grade
+            if bot_config.auto_approve_publish is not None:
+                existing_config.auto_approve_publish = bot_config.auto_approve_publish
+            if bot_config.callback_timeout_seconds is not None:
+                existing_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
+
         # Create publish via PublishService
         scale_amount = abs(target_count - current_count)
         scale_config = PublishConfig(
             replica_desired=target_count,
             batch_capacity=min(10, scale_amount),
             auto_approve=auto_approve_publish,
+            deploy_config=existing_config.deploy_config,
+            callback_timeout_seconds=resolve_callback_timeout(
+                existing_config.callback_timeout_seconds, self._system_config_repo
+            ),
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -882,7 +949,10 @@ class DefaultBotManagementService(BotManageService):
             if bot_config.share_policy is not None:
                 stored_config.share_policy = bot_config.share_policy
             if bot_config.deploy_config is not None:
-                stored_config.deploy_config = bot_config.deploy_config
+                stored_config.deploy_config = merge_deploy_config(
+                    stored_config.deploy_config,
+                    bot_config.deploy_config,
+                )
             if bot_config.entity_id:
                 stored_config.entity_id = bot_config.entity_id
             if bot_config.entity_type:
@@ -891,6 +961,10 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = bot_config.sla_grade
             if bot_config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = bot_config.auto_approve_publish
+            if bot_config.callback_timeout_seconds is not None:
+                stored_config.callback_timeout_seconds = (
+                    bot_config.callback_timeout_seconds
+                )
 
             # Also update name on the current bot if provided
             update_kwargs_name: dict[str, Any] = {"modifier": operator}
@@ -1124,8 +1198,9 @@ class DefaultBotManagementService(BotManageService):
                 )
 
             # Merge with existing config
-            record = self._bot_repo.get_by_bot_uuid(
-                uuid=bot_uuid, tenant=tenant, env=env
+            record = self._get_bot_record_by_uuid(
+                bot_uuid=bot_uuid,
+                tenant=tenant,
             )
             stored_config = (
                 BotConfig.model_validate(record.extra_config)
@@ -1135,7 +1210,10 @@ class DefaultBotManagementService(BotManageService):
             if config.share_policy is not None:
                 stored_config.share_policy = config.share_policy
             if config.deploy_config is not None:
-                stored_config.deploy_config = config.deploy_config
+                stored_config.deploy_config = merge_deploy_config(
+                    stored_config.deploy_config,
+                    config.deploy_config,
+                )
             if config.entity_id:
                 stored_config.entity_id = config.entity_id
             if config.entity_type:
@@ -1144,6 +1222,8 @@ class DefaultBotManagementService(BotManageService):
                 stored_config.sla_grade = config.sla_grade
             if config.auto_approve_publish is not None:
                 stored_config.auto_approve_publish = config.auto_approve_publish
+            if config.callback_timeout_seconds is not None:
+                stored_config.callback_timeout_seconds = config.callback_timeout_seconds
 
             # Persist merged config to bot record
             bot_repo.update_bot(

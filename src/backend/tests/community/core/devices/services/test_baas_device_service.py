@@ -71,6 +71,7 @@ def _make_service(
     template_resolver=None,
     vault=None,
     task_queue_service=None,
+    template_service=None,
 ) -> BaasDeviceService:
     repo = repo or MagicMock()
     bot_query = bot_query or MagicMock()
@@ -94,6 +95,7 @@ def _make_service(
         template_resolver=template_resolver,
         vault=vault,
         task_queue_service=task_queue_service,
+        template_service=template_service,
     )
 
 
@@ -264,16 +266,58 @@ class TestUpdateDeviceHeaders:
         baas.list_devices_by_bot_uuid.assert_called_once_with("BOT-fallback")
         baas.update_device_outbound_rule.assert_not_called()
 
+    def test_batch_mode_active_only_updates_only_active_devices(self):
+        baas = MagicMock()
+        rule = MagicMock()
+        baas._build_outbound_operation_rule.return_value = rule
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "D-active", "provider_device_id": "P-active", "status": "ACTIVE"},
+            {"device_uuid": "D-failed", "provider_device_id": "P-failed", "status": "FAILED"},
+            {"device_uuid": "D-released", "provider_device_id": "P-released", "status": "RELEASED"},
+        ]
+        svc = _make_service(baas_service=baas)
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"bolt_id": "bot-1", "entity_id": "owner-1"},
+        )
+
+        result = svc.update_device_headers(device=device, active_only=True)
+
+        assert result == [
+            {"device_uuid": "D-active", "paas_device_id": "P-active"},
+        ]
+        baas.update_device_outbound_rule.assert_called_once_with("P-active", rule)
+
+    def test_batch_mode_active_only_returns_empty_when_no_active_devices(self):
+        baas = MagicMock()
+        baas._build_outbound_operation_rule.return_value = MagicMock()
+        baas.list_devices_by_bot_uuid.return_value = [
+            {"device_uuid": "D-failed", "provider_device_id": "P-failed", "status": "FAILED"},
+            {"device_uuid": "D-released", "provider_device_id": "P-released", "status": "RELEASED"},
+        ]
+        svc = _make_service(baas_service=baas)
+        device = AllocatedDevice(
+            device_id="BOT-caller",
+            device_provider=BAAS_DEVICE_PROVIDER,
+            device_props={"bolt_id": "bot-1", "entity_id": "owner-1"},
+        )
+
+        assert svc.update_device_headers(device=device, active_only=True) == []
+        baas.update_device_outbound_rule.assert_not_called()
+
 
 class TestGetDeviceConnection:
     def _ws_info(self):
         info = MagicMock()
+        info.ws_url = "wss://proxy.example/wsrelay/session-1"
         info.target = "BAAS_DEVICE@template:20003"
         info.token = "token-1"
         info.baas_base_url = "http://baas.local"
         info.bot_uuid = "BOT-1"
         info.tenant = "team_claw"
         info.engine_port = 20003
+        info.expires_at = "2099-01-01T00:00:00Z"
         return info
 
     def test_returns_baas_connection_with_bot_engine(self):
@@ -300,6 +344,71 @@ class TestGetDeviceConnection:
         assert result.token == "token-1"
         assert result.engine_type == "claude_code"
         assert result.bot_uuid == "BOT-1"
+        assert result.url == ""
+
+    def test_the_requested_socket_path_reaches_ws_info(self):
+        """BaaS builds ``ws_url`` around this path, so relay callers that need a
+        specific engine's socket must be able to ask for it. Its own default is
+        openclaw's."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), path="/api/claude_code/ws"
+        )
+
+        assert baas.get_ws_info.call_args.kwargs["path"] == "api/claude_code/ws"
+
+    def test_no_path_leaves_the_provider_default_alone(self):
+        """Passing None would blank the default rather than keep it."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(binding_id=7, operator=_operator("u001"))
+
+        assert "path" not in baas.get_ws_info.call_args.kwargs
+
+    def test_server_issued_expiry_is_passed_through(self):
+        """The ``ttl`` argument is ignored here — the server decides — so the
+        only truthful expiry for the returned token is the one ws-info states.
+        Dropping it leaves callers computing an expiry for a token that has a
+        different one."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        result = svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), ttl=60
+        )
+
+        assert result.expires_at == "2099-01-01T00:00:00Z"
+
+    def test_relay_mode_returns_baas_ws_url_in_compatible_url_field(self):
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "desktop-1",
+            "bot_type": "desktop",
+            "active_engine": "openclaw",
+        }
+        svc = _make_service(baas_service=baas, bot_query=bot_query)
+
+        result = svc.get_device_connection(
+            binding_id=8,
+            operator=_operator("u001"),
+            ws_conn_mode="relay",
+        )
+
+        baas.get_ws_info.assert_called_once_with(
+            bind_id=8,
+            device_affinity="u001",
+            device_uuid=None,
+            ws_conn_mode="relay",
+        )
+        assert result.url == "wss://proxy.example/wsrelay/session-1"
 
     def test_desktop_bot_returns_desktop_connection_type(self):
         baas = MagicMock()

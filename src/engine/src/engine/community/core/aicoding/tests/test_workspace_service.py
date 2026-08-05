@@ -9,7 +9,7 @@
      ``os.path.isdir`` 校验；不存在时抛 ``FileNotFoundError``，detail 含完整路径。
 
 2. 4 个实例方法 + ``_ensure_within_workspace`` 保护
-   - ``list_file_tree`` —— 调用 ``FileService.list_dir`` + ``build_file_tree``
+   - ``list_file_tree`` —— AICoding workspace 本地扫描、基础设施目录剪枝 + 建树
    - ``preview_file`` —— 校验 path/大小/路径穿越，读出 utf-8 文本
    - ``list_git_diff`` —— ``find .git`` + ``git status --porcelain`` 全流程
    - ``get_file_diff`` —— ``git diff HEAD`` 主路径 + untracked fallback
@@ -278,63 +278,300 @@ SESSION_ID = "sess-1"
 # ── list_file_tree ─────────────────────────────────────────────────────────
 
 
-async def test_list_file_tree_returns_filtered_sorted_tree(workspace_dir: Path) -> None:
-    """调用 FileService.list_dir(recursive=True, exclude_dirs=...) → build_file_tree → 排序。
-
-    过滤由 list_dir 的 exclude_dirs 参数完成（mock 模拟已过滤后的结果）；
-    目录优先 + 字母序排列。
-    """
-    file_plugin = FakeFilePlugin(
-        list_result=ListDirResult(
-            dir_path=str(workspace_dir),
-            recursive=True,
-            files=[
-                FileEntry(
-                    name="project-fe",
-                    path=str(workspace_dir / "project-fe"),
-                    relative_path="project-fe",
-                    is_dir=True,
-                    size=0,
-                ),
-                FileEntry(
-                    name="README.md",
-                    path=str(workspace_dir / "project-fe/README.md"),
-                    relative_path="project-fe/README.md",
-                    is_dir=False,
-                    size=42,
-                ),
-                FileEntry(
-                    name="src",
-                    path=str(workspace_dir / "project-fe/src"),
-                    relative_path="project-fe/src",
-                    is_dir=True,
-                    size=0,
-                ),
-                FileEntry(
-                    name="index.ts",
-                    path=str(workspace_dir / "project-fe/src/index.ts"),
-                    relative_path="project-fe/src/index.ts",
-                    is_dir=False,
-                    size=10,
-                ),
-            ],
-        )
+async def test_list_file_tree_prunes_mounts_and_returns_sorted_tree(
+    workspace_dir: Path,
+) -> None:
+    """The find result is sorted into a tree; command prunes infrastructure."""
+    file_plugin = FakeFilePlugin()
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "f\0project-fe/README.md\0"
+                "d\0project-fe/src\0"
+                "f\0project-fe/src/index.ts\0"
+                "d\0project-fe/skills\0"
+                "f\0project-fe/skills/SKILL.md\0"
+                "d\0project-fe\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
     )
-    service = _make_service(file_plugin=file_plugin)
+    service = _make_service(
+        file_plugin=file_plugin,
+        bash_plugin=bash_plugin,
+    )
+
     tree = await service.list_file_tree(SESSION_ID)
 
-    # 顶层只剩 project-fe
-    assert len(tree) == 1
-    project = tree[0]
-    assert project.name == "project-fe"
-    assert project.is_dir is True
-    # 目录优先 → src 在前，README.md 在后
-    assert [c.name for c in project.children] == ["src", "README.md"]
-    # FileService.list_dir 必须以 workspace 绝对路径 + recursive=True + exclude_dirs 调用
-    assert file_plugin.calls[0] == (
-        "list_dir",
-        {"dir_path": str(workspace_dir), "recursive": True, "exclude_dirs": {".git", "node_modules"}},
+    assert [node.name for node in tree] == ["project-fe"]
+    project_node = tree[0]
+    assert project_node.children is not None
+    assert [node.name for node in project_node.children] == [
+        "skills",
+        "src",
+        "README.md",
+    ]
+    assert project_node.children[0].children is not None
+    assert [node.name for node in project_node.children[0].children] == [
+        "SKILL.md"
+    ]
+    command, cwd, timeout = bash_plugin.calls[0]
+    assert cwd == str(workspace_dir)
+    assert timeout == 30
+    assert "-mindepth 1" in command
+    assert "-maxdepth 3" in command
+    assert "-name .git" in command
+    assert "-name node_modules" in command
+    assert "-path './skills'" in command
+    assert "-path './skills-repo'" in command
+    assert "-path './skills-pool'" in command
+    assert "-path './.repos'" in command
+    assert "%s" not in command
+    assert file_plugin.calls == []
+
+
+async def test_list_file_tree_preserves_directories_at_depth_limit(
+    workspace_dir: Path,
+) -> None:
+    """Directories emitted at maxdepth remain visible without loaded children."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "d\0modelha\0"
+                "d\0modelha/app\0"
+                "d\0modelha/app/bootstrap\0"
+                "d\0modelha/conf\0"
+                "d\0modelha/config\0"
+                "f\0modelha/README.md\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
     )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=3,
+    )
+
+    assert [node.name for node in tree] == ["modelha"]
+    modelha = tree[0]
+    assert modelha.children is not None
+    assert [node.name for node in modelha.children] == [
+        "app",
+        "conf",
+        "config",
+        "README.md",
+    ]
+
+    app = modelha.children[0]
+    assert app.children is not None
+    assert [node.name for node in app.children] == ["bootstrap"]
+    assert app.children[0].children is None
+    assert modelha.children[1].children is None
+    assert modelha.children[2].children is None
+
+
+@pytest.mark.parametrize("max_depth", [1, 2, 5])
+async def test_list_file_tree_applies_requested_max_depth(
+    workspace_dir: Path,
+    max_depth: int,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(stdout="", stderr="", exit_code=0),
+    )
+
+    await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=max_depth,
+    )
+
+    command = bash_plugin.calls[0][0]
+    assert f"-maxdepth {max_depth}" in command
+
+
+async def test_list_file_tree_zero_depth_means_unlimited(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(stdout="", stderr="", exit_code=0),
+    )
+
+    await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID,
+        max_depth=0,
+    )
+
+    command = bash_plugin.calls[0][0]
+    assert "-mindepth 1" in command
+    assert "-maxdepth" not in command
+
+
+async def test_list_file_tree_rejects_negative_max_depth(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+
+    with pytest.raises(
+        ValueError,
+        match="max_depth must be greater than or equal to 0",
+    ):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(
+            SESSION_ID,
+            max_depth=-1,
+        )
+
+    assert bash_plugin.calls == []
+
+
+async def test_list_file_tree_leaves_size_unset(
+    workspace_dir: Path,
+) -> None:
+    """find does not return size, so file nodes retain the None default."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="f\0README.md\0",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
+
+    assert len(tree) == 1
+    assert tree[0].name == "README.md"
+    assert tree[0].is_dir is False
+    assert tree[0].size is None
+
+
+async def test_list_file_tree_returns_symlinks_without_following_target(
+    workspace_dir: Path,
+) -> None:
+    """GNU find type ``l`` is exposed as a non-directory node."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "l\0link-file\0"
+                "l\0link-dir\0"
+                "l\0broken-link\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
+
+    assert [node.name for node in tree] == [
+        "broken-link",
+        "link-dir",
+        "link-file",
+    ]
+    assert all(node.is_dir is False for node in tree)
+    assert all(node.size is None for node in tree)
+    assert all(node.children is None for node in tree)
+
+
+async def test_list_file_tree_preserves_special_characters(
+    workspace_dir: Path,
+) -> None:
+    """NUL framing keeps spaces, Unicode and newlines in paths intact."""
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout=(
+                "d\0目录 with space\0"
+                "f\0目录 with space/line\nbreak.txt\0"
+            ),
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    tree = await _make_service(bash_plugin=bash_plugin).list_file_tree(
+        SESSION_ID
+    )
+
+    assert tree[0].name == "目录 with space"
+    assert tree[0].children is not None
+    assert tree[0].children[0].name == "line\nbreak.txt"
+    assert tree[0].children[0].path == "目录 with space/line\nbreak.txt"
+
+
+async def test_list_file_tree_raises_when_find_fails(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="",
+            stderr="find: Permission denied",
+            exit_code=1,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="file-tree find failed"):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(SESSION_ID)
+
+
+async def test_list_file_tree_rejects_malformed_find_output(
+    workspace_dir: Path,
+) -> None:
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(workspace_dir),
+        BashExecResult(
+            stdout="f\0missing-path-pair\0d",
+            stderr="",
+            exit_code=0,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="invalid file-tree find output"):
+        await _make_service(bash_plugin=bash_plugin).list_file_tree(SESSION_ID)
+
+
+@pytest.mark.parametrize(
+    ("session_id", "cwd"),
+    [(None, None), ("", None), ("  ", "\t")],
+)
+async def test_list_file_tree_requires_session_id_or_cwd(
+    session_id: str | None,
+    cwd: str | None,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="session_id and cwd cannot both be empty",
+    ):
+        await _make_service().list_file_tree(session_id, cwd)
 
 
 async def test_list_file_tree_raises_when_workspace_missing(
@@ -924,21 +1161,35 @@ def test_ensure_workspace_exists_cwd_none_falls_back(
 # ── 业务方法 cwd 直传透传 ─────────────────────────────────────────────────
 
 
-async def test_list_file_tree_forwards_cwd_as_workspace_root(
+async def test_list_file_tree_uses_cwd_as_workspace_root(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """cwd 直传时以 cwd 为 workspace 根列文件树（跳过 base/{sid} 拼接）。"""
+    """cwd-only requests scan cwd directly instead of deriving base/{sid}."""
     custom = tmp_path / "custom-cwd"
     custom.mkdir()
+    (custom / "cwd-only.txt").write_text("ok")
     monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
-    file_plugin = FakeFilePlugin(
-        list_result=ListDirResult(
-            dir_path=str(custom), recursive=True, files=[],
-        )
+    file_plugin = FakeFilePlugin()
+    bash_plugin = FakeBashPlugin()
+    bash_plugin.add(
+        "find -P .",
+        str(custom),
+        BashExecResult(
+            stdout="f\0cwd-only.txt\0",
+            stderr="",
+            exit_code=0,
+        ),
     )
-    service = _make_service(file_plugin=file_plugin)
-    await service.list_file_tree("sid", cwd=str(custom))
-    assert file_plugin.calls[0][1]["dir_path"] == str(custom)
+    service = _make_service(
+        file_plugin=file_plugin,
+        bash_plugin=bash_plugin,
+    )
+
+    tree = await service.list_file_tree("   ", cwd=str(custom))
+
+    assert [node.name for node in tree] == ["cwd-only.txt"]
+    assert bash_plugin.calls[0][1] == str(custom)
+    assert file_plugin.calls == []
 
 
 async def test_preview_file_forwards_cwd_as_workspace_root(

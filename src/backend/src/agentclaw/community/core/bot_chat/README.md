@@ -23,3 +23,27 @@ internal_dependencies:
 ### Change impact
 
 Local to the bot-chat flow. Changes here affect the single-user chat path; group chat lives separately.
+
+## Query contract
+
+`GET /api/v1/bot-chats` keeps exact matching and the existing 72-hour default
+window for backward compatibility. Optional product-query capabilities are:
+
+- `biz_scene` and `biz_task_id`: merge direct trace fields with relations
+  recorded by `POST /api/bot-chat/log-relations`;
+- `group_id`: resolve all BCS sessions for the group and normalize missing
+  `agent:main:` prefixes before querying traces;
+- `match_mode=contains`: fuzzy ID/business matching, limited to a 90-day range;
+- `include_output_match=true`: include trace output in keyword matching;
+- `time_scope=all`: allowed only for an exact identifier lookup.
+
+List and detail responses may include `bot_id`, `bot_name`, `group_id`, and
+`session_kind`. These are optional display fields; `session_kind` is not a
+filter. A missing/deleted Bot leaves `bot_name` null so clients can fall back
+to `bot_id`. Observation responses preserve raw metadata for detail rendering.
+
+Task relations with an explicit `user_id` are isolated to that user; legacy
+relations without identity remain readable for backward compatibility. ORM
+index declarations create indexes for new local databases only. Existing
+deployments must apply equivalent DDL through their normal database migration
+process.

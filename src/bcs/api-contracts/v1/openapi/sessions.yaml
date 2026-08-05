@@ -1,0 +1,645 @@
+CreateSessionRequest:
+  type: object
+  description: >-
+    Creates a new Session using the parent Group as the source of truth for
+    driver and participants. The request body does not accept driver_bot_uuid or
+    participants; the Session roster inherits all parent Group participants,
+    including both Bot and Human actors, and the parent driver Bot is ensured as
+    the Session driver.
+  additionalProperties: false
+  properties:
+    title:
+      type: string
+    input:
+      $ref: ../domain-models.yaml#/SessionInput
+
+SessionParticipantInput:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_uuid
+  properties:
+    bot_uuid:
+      type: string
+
+UpdateSessionRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    title:
+      type: string
+
+UpdateSessionParticipantRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    mode:
+      $ref: ../domain-models.yaml#/BotParticipantMode
+
+GroupSessionsPath:
+  post:
+    operationId: create_session
+    tags: ["Collaboration / Sessions"]
+    summary: Create a Session under a Group.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/CreateSessionRequest"
+    responses:
+      "201":
+        description: >-
+          Created session detail. Participants are inherited from the parent
+          Group roster, including Human participants, with the parent driver Bot
+          ensured as driver.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/CreatedSessionEnvelope
+      "400":
+        description: Invalid session definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: Principal cannot create a session in the group.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group or referenced Bot is missing or hidden.
+        x-error-codes:
+          - group_not_found
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Session conflicts with current group state.
+        x-error-codes:
+          - conflict
+          - non_public_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+  get:
+    operationId: list_sessions
+    tags: ["Collaboration / Sessions"]
+    summary: List Sessions under a Group for the selected View Actor.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/GroupIdPath
+      - $ref: ../shared.yaml#/ViewBotIdQuery
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: status
+        in: query
+        schema:
+          $ref: ../domain-models.yaml#/SessionStatus
+    responses:
+      "200":
+        description: >-
+          Sessions in which the selected View Actor is a Participant, ordered
+          by created_at descending (session_id ascending tie-breaker), then
+          paginated with offset/limit. Both items and total are scoped before
+          pagination. An authorized View Actor with no matching Session returns
+          an empty page.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionPageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The explicit View Actor is not the authenticated Human or a Bot
+          created by that Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Group is missing or hidden.
+        x-error-codes:
+          - group_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionPath:
+  get:
+    operationId: get_session
+    tags: ["Collaboration / Sessions"]
+    summary: Get session detail.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    responses:
+      "200":
+        description: Session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Neither the authenticated User's Human Actor nor a Bot created by
+          that Human is a Session Participant.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  patch:
+    operationId: update_session
+    tags: ["Collaboration / Sessions"]
+    summary: Update the explicitly mutable session properties.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateSessionRequest"
+    responses:
+      "200":
+        description: Updated session detail.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionDetailEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Session update conflicts with current state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: delete_session
+    tags: ["Collaboration / Sessions"]
+    summary: Delete a session using the authenticated Principal as caller.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/ActingBotIdQuery
+    responses:
+      "200":
+        description: Idempotent delete result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid session identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Principal cannot delete the session. A Human Principal may delete
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionMessagesPath:
+  get:
+    operationId: list_session_messages
+    tags: ["Collaboration / Sessions"]
+    summary: List session message history (cursor-based).
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - name: before
+        in: query
+        description: >-
+          Opaque composite cursor (`"created_at:session_seq"`, e.g.
+          `"1234567890:42"`) exclusive bound. When set, only messages strictly
+          before this (created_at, session_seq) lexicographic position are
+          returned, so messages sharing a created_at at a page boundary are
+          not skipped. Omit on the first page; pass the response's next_cursor
+          to fetch the next page.
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - $ref: ../shared.yaml#/ViewBotIdQuery
+    responses:
+      "200":
+        description: >-
+          Messages visible to the selected Session Participant, ordered by
+          created_at descending and session_seq descending (legacy behavior),
+          with cursor-based pagination. Omitting view_bot_id selects the
+          authenticated Human Participant; creator or manager status does not
+          create an implicit manager view.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionMessagePageEnvelope
+      "400":
+        description: Invalid filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          The View Actor is unauthorized or is not a Participant of the
+          requested Session.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or intentionally hidden.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+AddSessionParticipantPath:
+  post:
+    operationId: add_session_participant
+    tags: ["Collaboration / Sessions"]
+    summary: Add a Bot as a Session participant.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/SessionParticipantInput"
+    responses:
+      "200":
+        description: Added session participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
+      "400":
+        description: Invalid participant definition.
+        x-error-codes:
+          - invalid_request
+          - invalid_participant
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Principal cannot manage the session. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against these target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot. The
+          server does not enumerate every Bot created by the Human for this
+          authorization decision.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session or referenced Bot is missing or hidden.
+        x-error-codes:
+          - session_not_found
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Participant conflicts with session state.
+        x-error-codes:
+          - conflict
+          - participant_already_exists
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
+SessionParticipantPath:
+  patch:
+    operationId: update_session_participant
+    tags: ["Collaboration / Sessions"]
+    summary: Update a Session participant mode.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/UpdateSessionParticipantRequest"
+    responses:
+      "200":
+        description: Updated session participant.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/SessionParticipantEnvelope
+      "400":
+        description: Invalid patch.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Principal cannot manage the participant. A Human Principal may manage
+          when it can act as the Session creator or at least one parent Group
+          management actor: the driver, originator, or ManagerWorker manager participant.
+          Human-to-actor authority is checked only against those target actors:
+          direct human_{user.id}, a Bot whose created_by equals the Human user
+          id, or a creator relation edge from human_{user.id} to that Bot.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session or participant is missing or hidden.
+        x-error-codes:
+          - session_not_found
+          - participant_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Participant update conflicts with current state.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+  delete:
+    operationId: remove_session_participant
+    tags: ["Collaboration / Sessions"]
+    summary: Remove a Session participant or let a Bot leave.
+    x-avernet-security:
+      user: required
+    parameters:
+      - $ref: ../shared.yaml#/SessionIdPath
+      - $ref: ../shared.yaml#/BotUuidPath
+    responses:
+      "200":
+        description: Idempotent remove result.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/DeleteResultEnvelope
+      "400":
+        description: Invalid identifier encoding.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Principal cannot remove the participant. A Human Principal may remove
+          when it can act as the Session creator or at least one parent Group
+          management actor. Human-to-actor authority is checked only against
+          those target actors rather than by enumerating all Bots created by
+          the Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Session is missing or hidden; a missing participant removes idempotently.
+        x-error-codes:
+          - session_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "409":
+        description: Driver invariant prevents removal.
+        x-error-codes:
+          - conflict
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

@@ -18,6 +18,7 @@ Repo methods return domain GovernanceTicket objects (not dicts).
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine, event
@@ -172,6 +173,7 @@ class TestSaveTicket:
             worker_id="w:x",
             bot_id="b:x",
             owner_id="o:x",
+            owner_name=None,
             bot_name="X",
             snapshot=MutableSnapshot(
                 dt_version="v1", initial_decision="actionable",
@@ -257,6 +259,211 @@ class TestFindLatestClosedByWorker:
             s.commit()
 
         assert repo.find_latest_closed_by_worker("w:cls2") is None
+
+
+class TestFindLatestTicketsByWorkerKeys:
+    """find_latest_tickets_by_worker_keys(worker_keys) → dict[worker, latest ticket]"""
+
+    def test_picks_most_recent_per_worker(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            # w:wl1 有两条(含 closed),应取 gmt_create 最新那条
+            s.add(_make_ticket(
+                ticket_id="tkt-wl1-old", worker_id="w:wl1",
+                active_worker=None, governance_status="closed",
+                close_reason="user_close", gmt_create=now - timedelta(days=2),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-wl1-new", worker_id="w:wl1",
+                active_worker="w:wl1", governance_status="open",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-wl2", worker_id="w:wl2",
+                active_worker="w:wl2", governance_status="open",
+                gmt_create=now - timedelta(hours=1),
+            ))
+            s.commit()
+
+        result = repo.find_latest_tickets_by_worker_keys(["w:wl1", "w:wl2"])
+        assert set(result.keys()) == {"w:wl1", "w:wl2"}
+        assert result["w:wl1"].ticket_id == "tkt-wl1-new"  # gmt_create DESC 取最新
+        assert result["w:wl2"].ticket_id == "tkt-wl2"
+
+    def test_empty_worker_keys(self, repo):
+        assert repo.find_latest_tickets_by_worker_keys([]) == {}
+
+    def test_worker_without_ticket_absent(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-x", worker_id="w:x",
+                active_worker="w:x", gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.find_latest_tickets_by_worker_keys(["w:x", "w:nobody"])
+        assert "w:x" in result
+        assert "w:nobody" not in result  # 无工单的 worker 不在 dict
+
+
+class TestListRecentTicketsByWorker:
+    """list_recent_tickets_by_worker(...) → list[GovernanceTicket] (gmt_create DESC, 全状态)"""
+
+    def test_by_worker_id_returns_ordered(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            # 历史:closed 行(active_worker=None,UK active_worker 不约束 NULL);
+            # 至多一条 active(open)。三张同 worker 倒序溯源。
+            s.add(_make_ticket(
+                ticket_id="tkt-h1-old", worker_id="w:hw",
+                active_worker=None, governance_status="closed",
+                closed_at=now - timedelta(days=2),
+                gmt_create=now - timedelta(days=2),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-h1-mid", worker_id="w:hw",
+                active_worker=None, governance_status="closed",
+                closed_at=now - timedelta(days=1),
+                gmt_create=now - timedelta(days=1),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-h1-new", worker_id="w:hw",
+                active_worker="w:hw", governance_status="open",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-other", worker_id="w:other",
+                active_worker="w:other", gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(worker_id="w:hw")
+        assert [t.ticket_id for t in result] == [
+            "tkt-h1-new", "tkt-h1-mid", "tkt-h1-old",
+        ]
+
+    def test_limit_caps_result(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            # 全是 closed(active_worker=None),避免 UK active_worker 冲突。
+            for i in range(5):
+                s.add(_make_ticket(
+                    ticket_id=f"tkt-l{i}", worker_id="w:lim",
+                    active_worker=None, governance_status="closed",
+                    closed_at=now - timedelta(days=i),
+                    gmt_create=now - timedelta(days=i),
+                ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(worker_id="w:lim", limit=2)
+        assert [t.ticket_id for t in result] == ["tkt-l0", "tkt-l1"]
+
+    def test_by_owner_only(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-oa-b1", owner_id="o:a", bot_id="b:1",
+                worker_id="o:a:b:1", active_worker="o:a:b:1",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-oa-b2", owner_id="o:a", bot_id="b:2",
+                worker_id="o:a:b:2", active_worker="o:a:b:2",
+                gmt_create=now - timedelta(hours=1),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-ob-b1", owner_id="o:b", bot_id="b:1",
+                worker_id="o:b:b:1", active_worker="o:b:b:1",
+                gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(owner_id="o:a")
+        assert {t.ticket_id for t in result} == {"tkt-oa-b1", "tkt-oa-b2"}
+
+    def test_by_bot_only(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-oa-b1", owner_id="o:a", bot_id="b:1",
+                worker_id="o:a:b:1", active_worker="o:a:b:1",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-ob-b1", owner_id="o:b", bot_id="b:1",
+                worker_id="o:b:b:1", active_worker="o:b:b:1",
+                gmt_create=now - timedelta(hours=1),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-oa-b2", owner_id="o:a", bot_id="b:2",
+                worker_id="o:a:b:2", active_worker="o:a:b:2",
+                gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(bot_id="b:1")
+        assert {t.ticket_id for t in result} == {"tkt-oa-b1", "tkt-ob-b1"}
+
+    def test_owner_and_bot_is_and(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-ab-hit", owner_id="o:a", bot_id="b:1",
+                worker_id="o:a:b:1", active_worker="o:a:b:1",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-ab-miss-owner", owner_id="o:b", bot_id="b:1",
+                worker_id="o:b:b:1", active_worker="o:b:b:1",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-ab-miss-bot", owner_id="o:a", bot_id="b:2",
+                worker_id="o:a:b:2", active_worker="o:a:b:2",
+                gmt_create=now,
+            ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(owner_id="o:a", bot_id="b:1")
+        assert [t.ticket_id for t in result] == ["tkt-ab-hit"]
+
+    def test_all_params_none_returns_empty(self, repo):
+        # 防全表扫兜底:service 层已拦 400,repo 双保险返 []。
+        assert repo.list_recent_tickets_by_worker() == []
+
+    def test_does_not_filter_by_status(self, repo, engine):
+        now = datetime.now()
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(
+                ticket_id="tkt-st-open", worker_id="w:st",
+                active_worker="w:st", governance_status="open",
+                gmt_create=now,
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-st-closed", worker_id="w:st",
+                active_worker=None, governance_status="closed",
+                gmt_create=now - timedelta(days=1),
+            ))
+            s.add(_make_ticket(
+                ticket_id="tkt-st-observed", worker_id="w:st",
+                active_worker=None, governance_status="observed",
+                gmt_create=now - timedelta(days=2),
+            ))
+            s.commit()
+
+        result = repo.list_recent_tickets_by_worker(worker_id="w:st", limit=10)
+        assert {t.ticket_id for t in result} == {
+            "tkt-st-open", "tkt-st-closed", "tkt-st-observed",
+        }
 
 
 class TestListScheduledDue:
@@ -485,3 +692,50 @@ class TestInsertTicket:
         result = repo.find_by_ticket_id("tkt-ins")
         assert result is not None
         assert result.ticket_id == "tkt-ins"
+
+
+_TASK_ENV_PATCH = (
+    "agentclaw.community.core.economy.governance.repositories."
+    "task_record_repo.get_current_env"
+)
+
+
+class TestDeleteByTicketId:
+    """delete_by_ticket_id(ticket_id) -> int — ticket-cascade 数据层。
+
+    env-scoped 按 ticket_id 精确删单条工单;返回删除数(0/1);
+    不同 env 同 ticket_id 不交叉;空结果返回 0。
+    """
+
+    def test_delete_removes_ticket_and_returns_one(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-001"))
+            s.commit()
+
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("tkt-del-001") == 1
+            assert repo.find_by_ticket_id("tkt-del-001") is None
+
+    def test_delete_zero_when_no_match(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-002"))
+            s.commit()
+
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.delete_by_ticket_id("no-such-ticket") == 0
+            # 无关工单不受影响
+            assert repo.find_by_ticket_id("tkt-del-002") is not None
+
+    def test_delete_is_env_scoped(self, repo, engine):
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            s.add(_make_ticket(ticket_id="tkt-del-003"))  # 默认 dev
+            s.commit()
+
+        # 删 "pre" env → 命中 0 行(dev 行不受影响)
+        with patch(_TASK_ENV_PATCH, return_value="pre"):
+            assert repo.delete_by_ticket_id("tkt-del-003") == 0
+        with patch(_TASK_ENV_PATCH, return_value="dev"):
+            assert repo.find_by_ticket_id("tkt-del-003") is not None

@@ -1,4 +1,4 @@
-"""Endpoint tests for cron noauth routes.
+"""Endpoint tests for cron public routes.
 
 Covers:
 - POST /api/public/cron/auto-initiate/run (happy + error)

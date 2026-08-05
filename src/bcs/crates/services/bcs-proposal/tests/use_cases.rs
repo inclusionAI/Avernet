@@ -223,6 +223,8 @@ async fn confirm_proposal_consumes_the_token_and_creates_group() {
         .unwrap();
 
     assert!(confirmed.created);
+    assert!(confirmed.group_id.starts_with("bcs_grp_"));
+    assert_eq!(confirmed.group_id.chars().count(), 40);
     assert_eq!(confirmed.driver_bot_id, "driver");
     assert_eq!(confirmed.participant_bot_ids, ["driver", "dba"]);
     assert!(fixture.proposal.get("proposal-token").await.is_none());
@@ -319,6 +321,18 @@ async fn confirm_proposal_creates_initial_session_and_dispatches_session_context
         .unwrap();
 
     assert_eq!(confirmed.context_injected, 7);
+    assert_eq!(
+        confirmed.session_id,
+        format!("{}:initial", confirmed.group_id)
+    );
+    let expected_chat_url = format!(
+        "http://chat.example.test/bcn/chat/detail?id={}&bot_uuid=driver&session={}%3Ainitial",
+        confirmed.group_id, confirmed.group_id
+    );
+    assert_eq!(
+        confirmed.chat_url.as_deref(),
+        Some(expected_chat_url.as_str())
+    );
     let commands = fixture.session_management.commands.lock().await;
     assert_eq!(commands.len(), 1);
     let command = &commands[0];
@@ -343,6 +357,7 @@ async fn confirm_proposal_creates_initial_session_and_dispatches_session_context
             reason,
             session_input,
             task_ledger,
+            ..
         } => {
             assert_eq!(group_id, &confirmed.group_id);
             assert_eq!(session_id, &format!("{}:initial", confirmed.group_id));
@@ -1331,6 +1346,7 @@ fn test_session(
         updated_at: 1,
         completed_at: None,
         meta: None,
+        collected_at: None,
     }
 }
 

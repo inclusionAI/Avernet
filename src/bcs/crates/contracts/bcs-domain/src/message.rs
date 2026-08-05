@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const BCS_STATE_MACHINE_MESSAGE_SENDER: &str = "bcs_state_machine";
+pub const BCS_STATE_MACHINE_MESSAGE_SENDER_NAME: &str = "BCS State Machine";
+pub const STATE_MACHINE_PANEL_MESSAGE_TYPE: &str = "state_machine_panel";
+
 /// A task in the workspace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -101,7 +105,8 @@ pub enum GroupMessageType {
 /// Determines how the message should be delivered to the bot:
 /// - Send: Bot should respond (mentioned or coordinator for non-@ messages)
 /// - Inject: Bot should observe silently
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeliveryType {
     /// Bot should respond to this message.
     Send,
@@ -175,6 +180,10 @@ pub enum MessageOwnerFilter {
     Any,
     IsNull,
     Eq(String),
+    /// `owner_bot_id IS NULL OR owner_bot_id = <viewer>` — 公共消息 + 发给该
+    /// viewer 的系统消息副本。历史查询按 `view_bot_id` 回放"公共 + 自己的
+    /// 系统副本"，收窄的仅是他人新增的私有副本，是旧 `Any`/`IsNull` 的超集。
+    PublicOrOwner(String),
 }
 
 impl Default for MessageOwnerFilter {
@@ -199,9 +208,16 @@ pub struct MessageQuery {
 }
 
 /// Paginated message result page.
+///
+/// `next_cursor` is a composite `(created_at, session_seq)` tuple so that
+/// messages sharing a `created_at` at a page boundary are not permanently
+/// skipped on the next page (VYQHI). Legacy `query_messages` callers that
+/// surface only a `created_at` cursor to clients extract `.0` at the
+/// application/HTTP boundary; the V1 `list_session_history` path encodes the
+/// full tuple into an opaque string cursor.
 #[derive(Debug, Clone)]
 pub struct MessagePage {
     pub messages: Vec<PersistedMessage>,
-    pub next_cursor: Option<u64>,
+    pub next_cursor: Option<(u64, i64)>,
     pub has_more: bool,
 }

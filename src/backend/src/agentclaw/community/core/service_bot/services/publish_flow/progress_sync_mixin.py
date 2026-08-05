@@ -14,6 +14,7 @@ from typing import Dict, Literal
 
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
+    PublishOperationKind,
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
@@ -98,6 +99,10 @@ class ProgressSyncMixin:
         # together with ext under the optimistic lock (a separate status-then-ext
         # write would be a TOCTOU race against a concurrent transition).
         ext.pop("retry", None)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         self._update_publish_status(
             publish_id=publish_id,
             target_status=target_status,
@@ -122,6 +127,13 @@ class ProgressSyncMixin:
             bot_id=publish_record.source_bot_id,
         )
 
+        # All-auto approval (#197): teclaw's post-upgrade MCP outbound-rule
+        # refresh — formerly gated on the (now-removed) client approve return —
+        # triggers here, on observed deploy success. No-op for ARCA/baas;
+        # idempotent (a re-push) for teclaw, so running it for both first-release
+        # and upgrade successes is safe.
+        self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
         if stage == PublishStage.ONLINE:
             self._destroy_verify_bot_after_online_success(publish_id, publish_record)
 
@@ -131,6 +143,41 @@ class ProgressSyncMixin:
             message=f"Publish progress synced successfully, status: {baas_status}",
             data=progress,
         )
+
+    def _refresh_provider_mcp_after_success(
+        self,
+        publish_record: BotPublishRecord,
+        ext: dict,
+        stage: PublishStage,
+    ) -> None:
+        """Re-establish the provider's post-upgrade MCP outbound rule after a
+        BaaS publish reaches SUCCESS (teclaw re-pushes; ARCA/baas no-op).
+
+        Best-effort — a failure is logged and does not block the publish. This
+        replaces the former approve-gated refresh in ``upgrade_release`` (#197
+        all-auto): the refresh now keys off observed deploy success."""
+        binding_id = (ext.get("binding") or {}).get(stage.value)
+        if not binding_id:
+            return
+        binding = self._publish_service.get_device_binding_by_id(binding_id)
+        if not binding or not binding.device_id:
+            return
+        owner_id = self._get_owner_id(publish_record)
+        bot = self._bot_service.get_bot(
+            bot_id=publish_record.source_bot_id, user_id=owner_id
+        )
+        if not bot:
+            return
+        try:
+            self._provider_behavior(bot).refresh_after_upgrade(
+                bot_uuid=binding.device_id, bot=bot
+            )
+        except Exception as e:
+            logger.warning(
+                "[PublishFlowService._refresh_provider_mcp_after_success] "
+                "refresh failed: publish_id=%s stage=%s error=%s",
+                publish_record.id, stage.value, e,
+            )
 
     def _mark_previous_publish_superseded(
         self,
@@ -235,6 +282,7 @@ class ProgressSyncMixin:
         current_status: _FailureSourceStatus,
         ext: dict,
         progress: dict,
+        baas_publish_id: int,
         error_message: str | None = None,
     ) -> PublishFlowResult:
         """Handle a failed BaaS publish.
@@ -244,6 +292,9 @@ class ProgressSyncMixin:
             current_status: Current status
             ext: Extension fields
             progress: BaaS publish progress information
+            baas_publish_id: The failed BaaS workflow's id — its ledger op is
+                outcome-corrected to FAILED so liveness readers stop treating
+                the deploy as landed
             error_message: Custom error message; generated from the number of failed devices when not provided
 
         Returns:
@@ -253,7 +304,20 @@ class ProgressSyncMixin:
             failed_devices = progress.get("failed_devices", [])
             error_message = f"BaaS publish failed: {len(failed_devices)} device(s) failed"
 
+        # Outcome correction, before the record's FAILED write: the op's steps
+        # completed at bookkeeping time, but its workflow just terminally failed —
+        # without this, the failed deploy still reads as the live deployment, so
+        # the online-release gate would skip the re-issue on retry (a FAILED
+        # retry loop) and the deploy would wrongly supersede a live release.
+        self._publish_operation_repo.fail_by_workflow(
+            publish_id, baas_publish_id, error_message
+        )
+
         self._clear_retry_flag(ext)
+        # Clear restart in-progress marker
+        restart_ext = ext.get("restart")
+        if isinstance(restart_ext, dict):
+            restart_ext.pop("restarting", None)
         ext["error_message"] = error_message
         ext["source_status"] = current_status.value
         self._update_publish_status(
@@ -378,6 +442,7 @@ class ProgressSyncMixin:
                 current_status=current_status,
                 ext=ext,
                 progress=progress,
+                baas_publish_id=baas_publish_id,
             )
 
         else:
@@ -412,8 +477,17 @@ class ProgressSyncMixin:
 
         current_status = PublishStatus(publish_record.status)
         ext = publish_record.ext or {}
-        scale_info = ext.get("scale", {})
-        scale_publish_id = scale_info.get("publish_id")
+
+        # (#197) Prefer the ledger's scale op workflow id (source of truth);
+        # fall back to the dual-written ext.scale marker for pre-ledger records.
+        scale_publish_id = None
+        scale_op = self._publish_operation_repo.get_latest_by_kind(
+            publish_id, PublishOperationKind.SCALE.value, PublishStage.ONLINE.value
+        )
+        if scale_op is not None and scale_op.baas_publish_id is not None:
+            scale_publish_id = scale_op.baas_publish_id
+        if not scale_publish_id:
+            scale_publish_id = (ext.get("scale", {}) or {}).get("publish_id")
 
         if not scale_publish_id:
             logger.warning(
@@ -489,10 +563,20 @@ class ProgressSyncMixin:
                 message=f"Current status {current_status} does not support querying restart progress",
             )
 
-        # Step 3: Get the BaaS-layer restart publish record ID from ext
+        # Step 3: Get the BaaS-layer restart publish record ID.
+        # (#197) Prefer the ledger's restart op workflow id (source of truth); fall
+        # back to the dual-written ext.restart marker. execute_restart writes that
+        # marker best-effort, so a failed ext write must not leave restart status
+        # unqueryable when the ledger already holds the workflow id.
         ext = publish_record.ext or {}
-        restart_info = ext.get("restart", {})
-        restart_publish_id = restart_info.get(stage.value)
+        restart_publish_id = None
+        restart_op = self._publish_operation_repo.get_latest_by_kind(
+            publish_id, PublishOperationKind.RESTART.value, stage.value
+        )
+        if restart_op is not None and restart_op.baas_publish_id is not None:
+            restart_publish_id = restart_op.baas_publish_id
+        if not restart_publish_id:
+            restart_publish_id = (ext.get("restart", {}) or {}).get(stage.value)
 
         if not restart_publish_id:
             logger.warning(
@@ -539,8 +623,54 @@ class ProgressSyncMixin:
                     current_status=current_status,
                     ext=ext,
                     progress=progress,
+                    baas_publish_id=restart_publish_id,
                     error_message=f"Restart publish status: {baas_status}",
                 )
+
+            # A restart that RECREATED the target minted a NEW binding as PENDING
+            # (the normal in-place upgrade reuses the already-ACTIVE one, and
+            # ext.binding.<stage> now points at the new binding). The stable
+            # SUCCESS/VALIDATING record skips the status advance, but the recreated
+            # binding must still be activated on deploy success or it stays PENDING
+            # forever and binding consumers reject it. _activate_binding is
+            # idempotent — a no-op refresh for the in-place upgrade path.
+            if baas_status == "SUCCESS":
+                self._activate_binding(
+                    ext=ext,
+                    stage=stage,
+                    progress=progress,
+                    baas_status=baas_status,
+                    baas_publish_id=restart_publish_id,
+                    bot_id=publish_record.source_bot_id,
+                )
+                # _activate_binding writes device_props via reuse_binding, which
+                # REPLACES (not merges) the dict — dropping the teclaw status-read
+                # handle publish_id that execute_restart / _recreate_restart_target
+                # stored. Re-merge it (refresh_publish_handle merges) so teclaw
+                # consumers keep pointing at the current restart workflow.
+                binding_id = (ext.get("binding") or {}).get(stage.value)
+                if binding_id:
+                    self.refresh_publish_handle(binding_id, restart_publish_id)
+
+                # A restart that RECREATED a teclaw target minted a fresh container
+                # that needs the post-deploy MCP outbound/auth rule normal
+                # first-release success establishes (via _handle_sync_success). This
+                # stable-record branch bypasses that path, so apply it here. No-op
+                # for ARCA/baas; idempotent (a re-push) for teclaw, so it is safe on
+                # the in-place upgrade path too.
+                self._refresh_provider_mcp_after_success(publish_record, ext, stage)
+
+                # Clear the restart in-progress marker on success. The stable-state
+                # path bypasses _handle_sync_success (which normally clears this flag),
+                # so we must clear it here to prevent the marker from persisting.
+                # Use _mutate_and_update_ext to persist the ext change separately from
+                # status updates (the stable record must not change status).
+                def _clear_restarting_flag(latest_ext: dict) -> None:
+                    restart_ext = latest_ext.get("restart")
+                    if isinstance(restart_ext, dict):
+                        restart_ext.pop("restarting", None)
+
+                self._mutate_and_update_ext(publish_id=publish_id, mutator=_clear_restarting_flag)
 
             return PublishFlowResult(
                 publish_id=publish_id,
@@ -566,6 +696,7 @@ class ProgressSyncMixin:
                 current_status=current_status,
                 ext=ext,
                 progress=progress,
+                baas_publish_id=restart_publish_id,
             )
 
         else:

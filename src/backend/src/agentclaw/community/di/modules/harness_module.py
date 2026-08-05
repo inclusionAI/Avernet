@@ -8,6 +8,8 @@ repo/plugin is bound.
 """
 from __future__ import annotations
 
+from typing import Annotated
+
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.content_scanner_service import ContentScannerProtocol
@@ -24,6 +26,7 @@ from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
 from agentclaw.community.core.harness.services.llm import LLM
 from agentclaw.community.di.config import BcsFuseConfig, KbConfig, LLMHarnessConfig
+from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_GENERAL
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.core.harness.services.patch_engine import PatchEngine
 from agentclaw.community.core.harness.services.patch_library import PatchLibrary
@@ -84,22 +87,24 @@ class HarnessModule(Module):
 
     @singleton
     @provider
+    @inject
     def _llm(
-        self, llm_config: LLMHarnessConfig, secret_resolver: SecretResolver
+        self,
+        llm_config: LLMHarnessConfig,
+        secret_resolver: SecretResolver,
+        general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
     ) -> LLM:
-        """Construct the harness LLM. Source priority: LLM_* env vars >
-        injected LLMHarnessConfig (the ``llm`` yaml block) > neutral empty
-        (disabled). The neutral shipped code embeds no endpoint / secret name.
-
-        The API token is resolved through the injected ``SecretResolver`` seam
-        (corp → Mist, community → env), so the harness names no corp secret
-        client."""
-        import os
-
+        """Construct the harness LLM from the injected ``LLMHarnessConfig`` (the
+        ``llm`` yaml block). The API token is resolved through the injected
+        ``SecretResolver`` seam (corp → Mist, community → env) by the config's
+        ``secret_name``, so the harness names no corp secret client. HTTP goes
+        through the shared ``general`` ``HttpClient`` (sync, sofa_tracer-safe;
+        callers pass absolute URLs)."""
         return LLM(
-            base_url=os.getenv("LLM_BASE_URL") or llm_config.base_url or None,
-            secret_name=os.getenv("LLM_SECRET_NAME") or llm_config.secret_name or None,
+            base_url=llm_config.base_url,
+            secret_name=llm_config.secret_name,
             secret_resolver=secret_resolver,
+            http_client=general_http,
         )
 
     @singleton

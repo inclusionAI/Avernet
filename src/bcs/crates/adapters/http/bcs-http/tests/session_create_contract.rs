@@ -19,7 +19,8 @@ use bcs_http::{
     state::{HttpAppState, HttpUserIdentity, UserIdentityPort},
 };
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, CancelStateMachineRunCommand,
+    AuthenticatedHumanCaller, BotCapabilities, BotRegistryCoreService,
+    CancelStateMachineRunCommand,
     CollaborationDefinition, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
     CreateOrReactivateCommand, CreateOrReactivateOutcome, Group, GroupCoreService, GroupStrategy,
@@ -211,7 +212,11 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
                 .uri("/groups/group-1/sessions")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({"input": {"question": "hello"}}).to_string(),
+                    serde_json::json!({
+                        "created_by": "driver-bot",
+                        "input": {"question": "hello"}
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -228,6 +233,17 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     let session_commands = sessions.create_calls.lock().await;
     assert_eq!(session_commands[0].params.session_kind, SessionKind::ServiceInvocation);
     assert_eq!(session_commands[0].params.group_version, Some(7));
+    assert_eq!(session_commands[0].params.created_by.as_deref(), Some("driver-bot"));
+    let human = session_commands[0]
+        .params
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("authenticated Human must be added to the state-machine session");
+    assert!(human.is_human());
+    assert_eq!(human.role, ParticipantRole::Observer);
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
+    assert_eq!(human.bot_name.as_deref(), Some("Test"));
 
     let run_commands = collaboration.start_commands.lock().await;
     assert_eq!(run_commands.len(), 1);
@@ -238,6 +254,14 @@ async fn state_machine_group_session_creation_starts_run_with_created_session() 
     );
     assert!(run_commands[0].definition_yaml.is_none());
     assert!(run_commands[0].definition_ref.is_none());
+    assert_eq!(run_commands[0].caller_id.as_deref(), Some("human_alice"));
+    assert_eq!(
+        run_commands[0].authenticated_human,
+        Some(AuthenticatedHumanCaller {
+            actor_id: "human_alice".to_string(),
+            display_name: Some("Test".to_string()),
+        })
+    );
 }
 
 // ----- helpers -----
@@ -328,6 +352,7 @@ impl SessionManagementService for MockSessions {
             updated_at: 1,
             completed_at: None,
             meta: cmd.params.meta.clone(),
+            collected_at: None,
         };
         self.create_calls.lock().await.push(cmd);
         Ok(CreateOrReactivateOutcome {

@@ -10,7 +10,13 @@ from typing import TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.service_bot.repository.models import PublishStatus, BotPublishRecord
+from agentclaw.community.core.service_bot.repository.models import (
+    PublishStatus,
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishOperationRecord,
+    PublishOperationState,
+)
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -25,7 +31,10 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
 )
-from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.service_bot.types import (
+    OnlineDeployDecision,
+    PublishStage,
+)
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
@@ -71,14 +80,23 @@ from agentclaw.community.core.service_bot.services.publish_flow.eval_publish_mix
 from agentclaw.community.core.service_bot.services.publish_flow.upgrade_resolution_mixin import (
     UpgradeResolutionMixin,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.retry_ops_mixin import (
+    RetryOpsMixin,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.draft_restore_ops_mixin import (
+    DraftRestoreOpsMixin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.release_stage import (
     ONLINE_SPEC,
     VERIFY_SPEC,
     ReleaseStageRunner,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationRunner,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
+    enqueue_destroy,
     enqueue_online_release,
-    enqueue_progress_poll,
     enqueue_verify_flow,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import (
@@ -89,6 +107,9 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
+    from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
+        PublishOperationRepository,
+    )
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
     )
@@ -139,6 +160,8 @@ class PublishFlowService(
     PublishExtMixin,
     EvalPublishMixin,
     UpgradeResolutionMixin,
+    RetryOpsMixin,
+    DraftRestoreOpsMixin,
 ):
     """Bot publish flow processing service.
 
@@ -170,6 +193,7 @@ class PublishFlowService(
         device_binding_repo: "DeviceBindingRepository",
         channel_overrides_reader: "ChannelEngineOverridesReader",
         task_queue_service: TaskQueueService,
+        publish_operation_repo: PublishOperationRepository,
     ):
         """Initialize the flow processing service.
 
@@ -231,6 +255,15 @@ class PublishFlowService(
             bot_publish_service, channel_overrides_reader
         )
 
+        # Crash-safe operation ledger + step runner (#197): every BaaS mutation
+        # in the release/restart/offline/rollback/eval/approval paths goes through
+        # this so a crash-resume adopts an in-doubt workflow instead of re-issuing.
+        self._publish_operation_repo = publish_operation_repo
+        self._operation_runner = PublishOperationRunner(
+            ledger=publish_operation_repo,
+            baas_service=baas_service,
+        )
+
         # Stage-parameterized release runner: one first-release + one upgrade
         # implementation for both verify and online (was four near-duplicate
         # methods). The runners take their real dependencies explicitly; the
@@ -241,6 +274,7 @@ class PublishFlowService(
             baas_service=baas_service,
             provider_behaviors=self._provider_behaviors,
             ops=self,
+            operation_runner=self._operation_runner,
         )
         self._build_stage_runner = BuildStageRunner(
             ext_state=self._ext_state,
@@ -274,6 +308,13 @@ class PublishFlowService(
                 publish_id,
                 e,
             )
+
+    def release_binding(
+        self, binding_id: int, *, destroy_publish_id: int | None
+    ) -> None:
+        """Public ``ReleaseRecordOps`` seam: mark a superseded binding RELEASED
+        after its bot was retired. Delegates to ``DeviceBindingMixin``."""
+        self._release_binding(binding_id, destroy_publish_id=destroy_publish_id)
 
     async def process(
         self,
@@ -670,23 +711,53 @@ class PublishFlowService(
             if not bot:
                 raise PublishFlowServiceError(f"Bot does not exist: {bot_id}")
 
-            # ========== Core logic: determine whether this is an upgrade scenario ==========
-            if self._should_upgrade_online(publish_record):
-                # Upgrade release: reuse the existing Bot
+            # ===== Core logic: provider-aware reuse-vs-recreate decision =====
+            # One shared decision (see UpgradeResolutionMixin._decide_online_deploy):
+            # reuse the existing bot in place when it is live/rebuildable, else
+            # create a fresh one — retiring the superseded bot first when it would
+            # otherwise be orphaned (e.g. a teclaw container an UPDATE can't rebuild).
+            decision = self._decide_online_deploy(publish_record, bot)
+            if decision == OnlineDeployDecision.UPGRADE:
                 return await self._execute_upgrade_release(
                     publish_record=publish_record,
                     operator=operator,
                     migration_path=migration_path,
                     bot=bot,
                 )
-            else:
-                # First release: create a new Bot
+            if decision == OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE:
+                # Retire the superseded bot first (else the fresh create orphans
+                # it), then release its now-stale binding so it does not linger
+                # ACTIVE pointing at a destroyed bot, then fall into first-release.
+                candidate_bot_uuid, candidate_binding_id = (
+                    self._resolve_online_reuse_target(publish_record)
+                )
+                if candidate_bot_uuid:
+                    destroy_publish_id = self._build_service.retire_superseded_bot(
+                        candidate_bot_uuid, operator=operator
+                    )
+                    if candidate_binding_id:
+                        self._release_binding(
+                            candidate_binding_id,
+                            destroy_publish_id=destroy_publish_id,
+                        )
                 return await self._execute_first_release(
                     publish_record=publish_record,
                     operator=operator,
                     migration_path=migration_path,
                     bot=bot,
                 )
+            if decision == OnlineDeployDecision.FIRST_RELEASE:
+                return await self._execute_first_release(
+                    publish_record=publish_record,
+                    operator=operator,
+                    migration_path=migration_path,
+                    bot=bot,
+                )
+            # Exhaustive: every decision is handled explicitly above. A new enum
+            # value must fail loudly here rather than silently first-release.
+            raise PublishFlowServiceError(
+                f"Unhandled online deploy decision: {decision}"
+            )
 
         except Exception as e:
             logger.error(f"[PublishFlowService] Release failed: {e}")
@@ -732,38 +803,24 @@ class PublishFlowService(
     ) -> PublishFlowResult:
         """Run the online upgrade release (reuse the existing BaaS Bot).
 
-        First resolves the online binding / bot_uuid (online-specific) from last_pub_id, then delegates to the
-        unified ReleaseStageRunner.upgrade_release.
+        Resolves the reuse target via ``_resolve_online_reuse_target`` — this
+        record's own online binding first (so a retry of a failed first release
+        reuses the failed attempt's bot), else the previous record's — then
+        delegates to the unified ReleaseStageRunner.upgrade_release.
         """
         publish_id = publish_record.id
-        last_pub_id = publish_record.last_pub_id
 
-        # Resolve the previous publish record's online binding → bot_uuid (reuse the existing Bot, no new record).
-        last_publish = self._publish_service.get_publish_by_id(last_pub_id)
-        if not last_publish:
-            raise PublishFlowServiceError(f"Previous publish record does not exist: last_pub_id={last_pub_id}")
-
-        last_binding_info = (last_publish.ext or {}).get("binding", {})
-        online_binding_id = last_binding_info.get(PublishStage.ONLINE.value)
-        if not online_binding_id:
+        bot_uuid, online_binding_id = self._resolve_online_reuse_target(publish_record)
+        if not bot_uuid or not online_binding_id:
             raise PublishFlowServiceError(
-                f"Previous publish record has no online environment binding info: last_pub_id={last_pub_id}"
-            )
-
-        binding = self._publish_service.get_device_binding_by_id(online_binding_id)
-        if not binding:
-            raise PublishFlowServiceError(f"Device binding record does not exist: binding_id={online_binding_id}")
-
-        bot_uuid = binding.device_id
-        if not bot_uuid:
-            raise PublishFlowServiceError(
-                f"Device binding record has no device_id: binding_id={online_binding_id}"
+                f"No online reuse target resolved for upgrade: publish_id={publish_id}"
             )
 
         logger.info(
             f"[PublishFlowService._execute_upgrade_release] "
-            f"Upgrading bot: publish_id={publish_id}, last_pub_id={last_pub_id}, "
-            f"bot_uuid={bot_uuid}"
+            f"Upgrading bot: publish_id={publish_id}, "
+            f"last_pub_id={publish_record.last_pub_id}, bot_uuid={bot_uuid}, "
+            f"binding_id={online_binding_id}"
         )
 
         return await self._release_runner.upgrade_release(
@@ -777,159 +834,26 @@ class PublishFlowService(
             fallback=self._execute_first_release,
         )
 
-    async def retry(
-        self,
-        publish_id: int,
-        operator: str,
-    ) -> PublishFlowResult:
-        """Retry a failed publish flow.
-
-        Based on the pre-failure status (ext.source_status), roll back to the corresponding status and
-        re-advance the flow:
-        - building → roll back to BUILDING, rebuild + verify publish
-        - built → roll back to BUILT, re-run verify publish
-        - validate_pub → roll back to VALIDATE_PUB, call BaaS restart to retry
-        - online_pub → roll back to ONLINE_PUB; if the online release was already
-          recorded (BaaS-wait failure) call BaaS restart, otherwise re-run the
-          online release work via the online_release task
-
-        Args:
-            publish_id: Publish record ID
-            operator: Operator
-
-        Returns:
-            PublishFlowResult: Retry result
-
-        Raises:
-            PublishNotFoundError: Publish record does not exist
-            PublishFlowServiceError: Status does not support retry or rollback failed
-        """
-        logger.info(
-            f"[PublishFlowService.retry] called: publish_id={publish_id}, operator={operator}"
-        )
-
-        # Step 1: Query the publish record
-        publish_record = self._publish_service.get_publish_by_id(publish_id)
-        if not publish_record:
-            raise PublishNotFoundError(f"Publish order not found: {publish_id}")
-
-        current_status = PublishStatus(publish_record.status)
-
-        # Step 2: Verify the status is FAILED
-        if current_status != PublishStatus.FAILED:
-            raise PublishFlowServiceError(
-                f"Current status {current_status} does not support retry; only FAILED status can be retried"
-            )
-
-        # Step 3: Get the pre-failure status from ext
-        ext = self._get_latest_ext(publish_id)
-        source_status = ext.get("source_status")
-        if not source_status:
-            raise PublishFlowServiceError(
-                f"Publish record is missing pre-failure status info (source_status); cannot retry: publish_id={publish_id}"
-            )
-
-        # Step 4: Determine the rollback target status and retry action based on
-        # source_status. A build failure rolls back to BUILDING (not DRAFT): the
-        # user-driven DRAFT -> BUILDING advance already happened, and the verify_flow
-        # task rebuilds from BUILDING.
-        retry_map = {
-            PublishStatus.BUILDING.value: PublishStatus.BUILDING,
-            PublishStatus.BUILT.value: PublishStatus.BUILT,
-            PublishStatus.VALIDATE_PUB.value: PublishStatus.VALIDATE_PUB,
-            PublishStatus.VALIDATING.value: PublishStatus.VALIDATING,
-            PublishStatus.ONLINE_PUB.value: PublishStatus.ONLINE_PUB,
-            PublishStatus.SUCCESS.value: PublishStatus.SUCCESS,
-        }
-
-        rollback_status = retry_map.get(source_status)
-        if not rollback_status:
-            raise PublishFlowServiceError(
-                f"Unsupported retry scenario: source_status={source_status}, publish_id={publish_id}"
-            )
-
-        # Step 5: Roll back the status (FAILED -> rollback_status) and set the retry flag
-        ext["retry"] = True
-        try:
-            self._update_publish_status(
-                publish_id=publish_id,
-                target_status=rollback_status,
-                source_status=PublishStatus.FAILED,
-                ext=ext,
-            )
-        except Exception as e:
-            raise PublishFlowServiceError(
-                f"Status rollback failed: {rollback_status.value}, error={e}"
-            )
-
-        logger.info(
-            f"[PublishFlowService.retry] Status rolled back: "
-            f"publish_id={publish_id}, FAILED -> {rollback_status.value}"
-        )
-
-        # Step 6: Execute the retry action. Directly enqueue the corresponding task
-        # (no longer via process(), because /process is already read-only for BUILT;
-        # a BUILT retry must re-drive verify_flow).
-        #
-        # A BaaS-level restart applies when the release already reached the BaaS
-        # layer and *it* failed: the *_PUB wait states, SUCCESS, and an ONLINE_PUB
-        # whose online release was already recorded (poll failure). An ONLINE_PUB
-        # whose release was never recorded means the release *work* itself failed,
-        # so re-run it via the online_release task instead.
-        restart = rollback_status in (
-            PublishStatus.VALIDATE_PUB,
-            PublishStatus.SUCCESS,
-        ) or (
-            rollback_status == PublishStatus.ONLINE_PUB
-            and self.is_online_release_recorded(publish_id)
-        )
-        if restart:
-            # BaaS publish failed; call restart_bot to retry
-            restart_result = self.restart_bot(
-                publish_id=publish_id,
-                operator=operator,
-            )
-            success = restart_result.get("success", False)
-            if success:
-                # The BaaS-restart branch parks the record in its *_PUB wait state
-                # without passing through verify_flow/online_release, so pre-#105 it
-                # advanced only via user /sync polling (retry redirect) or an explicit
-                # /restart_status poll. Enqueue the durable poll so the retried
-                # restart self-drives: the poll's retry-flag redirect routes it
-                # through sync_restart_progress and leaves the *_PUB state.
-                enqueue_progress_poll(self._task_queue_service, publish_id=publish_id)
-            else:
-                self._mutate_and_update_ext(
-                    publish_id=publish_id,
-                    mutator=self._clear_retry_flag,
-                )
-            return PublishFlowResult(
-                publish_id=publish_id,
-                status=rollback_status,
-                action="restart",
-                message="Retry submitted (BaaS restart)" if success else f"Retry failed: {restart_result.get('message', 'Unknown error')}",
-            )
-        elif rollback_status in (PublishStatus.VALIDATING, PublishStatus.ONLINE_PUB):
-            # Online release retry: re-open ONLINE_PUB (idempotent if already there)
-            # and re-enqueue the online_release task, which re-runs the release work.
-            self._advance_status(
-                publish_id, PublishStatus.ONLINE_PUB, PublishStatus.VALIDATING
-            )
-            enqueue_online_release(
-                self._task_queue_service, publish_id=publish_id, operator=operator
-            )
-        else:
-            # BUILDING / BUILT: re-enqueue the verify_flow task (the build sub-step
-            # is skipped when already BUILT).
-            enqueue_verify_flow(
-                self._task_queue_service, publish_id=publish_id, operator=operator
-            )
-        return PublishFlowResult(
+    def enqueue_offline_destroy(self, publish_id: int, stage, operator: str) -> None:
+        """Enqueue the durable destroy task for an offline (#197) — replaces the
+        former fire-and-forget background destroy. ``stage`` is a PublishStage."""
+        enqueue_destroy(
+            self._task_queue_service,
             publish_id=publish_id,
-            status=rollback_status,
-            action="process",
-            message="Retry submitted, please check progress later",
+            stage=stage.value if hasattr(stage, "value") else str(stage),
+            operator=operator,
         )
+
+    def _abandon_inflight_operations(self, publish_id: int, reason: str) -> None:
+        """Abandon every non-terminal ledger op for a publish record (#197).
+
+        Used when the record is restarted from an earlier phase (rebuild) or
+        superseded by a new version — the in-flight ops are no longer the current
+        intent, so a fresh attempt must open new ops rather than resume these."""
+        terminal = {s.value for s in PublishOperationState.terminal()}
+        for op in self._publish_operation_repo.list_by_publish_id(publish_id):
+            if op.state not in terminal:
+                self._publish_operation_repo.abandon(op.id, reason)
 
     def _get_owner_id(self, publish_record: BotPublishRecord) -> str:
         return self._ext_state.owner_id(publish_record)
@@ -970,16 +894,95 @@ class PublishFlowService(
         """Fetch a publish record by id (``None`` if absent)."""
         return self._publish_service.get_publish_by_id(publish_id)
 
-    def is_online_release_recorded(self, publish_id: int) -> bool:
-        """True once this record's online BaaS publish is recorded in ext.
+    def is_current_online_deployment(self, publish_id: int) -> bool:
+        """True when this record's online release is the *current live* deployment
+        on its bot — i.e. the latest version-setting op that has landed on the
+        shared online bot belongs to this publish.
 
-        The online release runs *within* ONLINE_PUB (``process`` owns the
-        VALIDATING → ONLINE_PUB advance), so the live status alone can't tell a
-        not-yet-run release from a completed one. The presence of
-        ``ext.publish.online`` is the idempotency marker: a re-run of the
-        online_release task (crash-resume) skips a second BaaS create, and retry
-        uses it to choose BaaS-restart vs. re-running the release work."""
-        record = self.get_publish_record(publish_id)
-        ext = (record.ext or {}) if record else {}
-        return bool(ext.get("publish", {}).get(PublishStage.ONLINE.value))
+        Purely ledger-driven (#197): the ledger is the source of truth for what is
+        deployed. The question is answered from the bot's op timeline alone, in two
+        steps:
+
+        1. This record's own online release op (first-release / upgrade) must be
+           ``COMPLETED`` — a landed BaaS deploy whose workflow has not been
+           observed to fail (the progress-sync failure path outcome-corrects the
+           op to ``FAILED`` when its workflow fails). Anything short of that (no
+           op, an ``ID_RECORDED`` deploy still mid-flight, or a failed deploy) is
+           *not* current: the online_release gate must re-enter so the release
+           work re-runs — resuming the in-flight op or opening a fresh attempt —
+           never skipping work that has not actually landed.
+        2. That completed release must still be the latest deploy on the bot. A
+           ``COMPLETED`` op genuinely completed and is never rewritten; what makes it
+           stale is a *later* version-setting op landing on the same bot. Rollback
+           demotes this record to DRAFT and re-deploys the previous version onto the
+           bot (a ``ROLLBACK_DEPLOY`` with a higher, globally-monotonic
+           ``baas_publish_id``), so the demoted record's release is no longer the
+           latest deploy and a re-publish must run again. A restart / scale lands on
+           the bot too but does not set the version (``sets_deployed_version``), so
+           it never supersedes a release.
+
+        Sole consumer — the online_release gate (``tasks.py``): skip re-issuing
+        the release only when it is the current live deployment. Do NOT consult
+        this from ``retry`` or any restart path: retry re-drives the release
+        process (which decides run-vs-skip itself via this gate), and a restart
+        must always re-deploy via BaaS even when the release is current — a
+        skip-if-current check there would turn restart into a silent no-op."""
+        release_op = self._completed_online_release_op(publish_id)
+        if release_op is None or not release_op.bot_uuid:
+            return False
+
+        return not self._online_release_superseded(release_op)
+
+    def _completed_online_release_op(
+        self, publish_id: int
+    ) -> PublishOperationRecord | None:
+        """This record's completed online release op (first-release or upgrade),
+        or ``None`` if it has no completed online deploy yet.
+
+        Reads the latest attempt of each release kind and keeps the COMPLETED one.
+        An ``UPGRADE`` that hit ``BOT_NOT_FOUND`` is ABANDONED and a
+        ``FIRST_RELEASE`` fallback completes, so both kinds can coexist for one
+        publish; only the completed one is the record's real release. A still
+        in-flight (``ID_RECORDED``) or absent op yields ``None`` — the caller
+        treats that as not-yet-recorded (re-enter / re-run rather than skip)."""
+        completed = []
+        for kind in (PublishOperationKind.FIRST_RELEASE, PublishOperationKind.UPGRADE):
+            op = self._publish_operation_repo.get_latest_by_kind(
+                publish_id, kind, PublishStage.ONLINE.value
+            )
+            if (
+                op is not None
+                and op.state == PublishOperationState.COMPLETED.value
+                and op.baas_publish_id is not None
+            ):
+                completed.append(op)
+        if not completed:
+            return None
+        return max(completed, key=lambda o: o.baas_publish_id)
+
+    def _online_release_superseded(self, release_op: PublishOperationRecord) -> bool:
+        """True if a later version-setting deploy has landed on the same online bot
+        — i.e. ``release_op`` is no longer the live deployment.
+
+        Scans the shared bot's ledger timeline for a ``sets_deployed_version`` op
+        (a newer upgrade, or a rollback re-deploy of another version) whose workflow
+        landed after this release (higher, globally-monotonic ``baas_publish_id``).
+        A landed op is one that reached ``ID_RECORDED``/``COMPLETED`` (a workflow was
+        issued); ``FAILED``/``ABANDONED`` deploys never took, so they do not
+        supersede. Restart / scale are skipped — they do not set the version."""
+        landed = {
+            PublishOperationState.ID_RECORDED.value,
+            PublishOperationState.COMPLETED.value,
+        }
+        for op in self._publish_operation_repo.list_by_bot(
+            release_op.bot_uuid, release_op.env
+        ):
+            if (
+                op.baas_publish_id is not None
+                and op.baas_publish_id > release_op.baas_publish_id
+                and op.state in landed
+                and PublishOperationKind(op.operation_kind).sets_deployed_version
+            ):
+                return True
+        return False
 

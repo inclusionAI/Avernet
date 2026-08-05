@@ -1,0 +1,197 @@
+# 世界杯比赛前瞻内容生产协作模板。
+# 这个 YAML 只描述协同策略，不存储具体 bot id。
+# 创建群时，通过 CreateGroupRequest.participant_bindings 把下面的逻辑角色绑定到实际 bot。
+
+name: 世界杯比赛前瞻内容生产
+
+metadata:
+  description: 运营总监安排整体制作流程，内容主编整理任务简报，战术解说和赛事数据核查并发补齐内容依据，短视频编导生成口播文稿，增长运营包装发布，最后由内容主编验收交付。
+  labels:
+    scenario: world_cup_preview_content_production
+
+participants:
+  operations_director:
+    display_name: 世界杯运营总监
+    description: 负责明确选题目标、受众、平台、时长、调性和整体制作节奏。
+    required: true
+
+  content_editor:
+    display_name: 世界杯内容主编
+    description: 负责整理内容任务简报、把控内容主线、验收最终发布包。
+    required: true
+
+  tactics_analyst:
+    display_name: 世界杯战术解说
+    description: 负责设计比赛战术洞察、胜负手、关键球员和可视化表达角度。
+    required: true
+
+  script_director:
+    display_name: 世界杯短视频编导
+    description: 负责把战术洞察和事实核查结果创作成指定时长的短视频口播文稿。
+    required: true
+
+  fact_researcher:
+    display_name: 世界杯赛事数据核查
+    description: 负责核验赛程、球队、球员、历史交锋、数据口径和敏感事实。
+    required: true
+
+  growth_operator:
+    display_name: 世界杯增长运营
+    description: 负责生成标题、封面卖点、平台发布包装、评论区引导和扩散策略。
+    required: true
+
+runtime:
+  kind: state_machine
+  state_machine:
+    defaults:
+      node_timeout_ms: 120000
+      max_attempts: 2
+
+    nodes:
+      set_production_direction:
+        kind: bot_task
+        display_name: 安排整体制作流程
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: operations_director
+        instruction: |
+          你是世界杯运营总监。请根据用户输入，明确本次世界杯比赛前瞻内容生产的整体制作方向。
+
+          请输出：
+          1. 比赛主题、目标受众、发布平台、目标时长和内容调性。
+          2. 本次内容要服务的核心目标，例如涨粉、互动、赛前种草或热点承接。
+          3. 各角色后续需要补充的信息。
+          4. 不能触碰的表达边界，例如未经核实的伤病、歧视性表达、赌球暗示或确定性预测。
+        transitions:
+          complete:
+            targets:
+              - frame_content_brief
+
+      frame_content_brief:
+        kind: bot_task
+        display_name: 整理内容任务简报
+        node_timeout_ms: 90000
+        assignee:
+          type: bot_binding
+          binding: content_editor
+        instruction: |
+          你是世界杯内容主编。请基于用户需求和运营总监的制作方向，整理一份内容任务简报。
+
+          简报必须包含：
+          1. 这场比赛最适合普通观众理解的核心看点。
+          2. 内容主线、开场钩子方向和结尾互动方向。
+          3. 战术解说需要重点分析的问题。
+          4. 赛事数据核查需要重点确认的事实。
+          5. 给短视频编导和增长运营的交付标准。
+
+          请只输出任务简报，不要直接写最终内容。
+        transitions:
+          complete:
+            targets:
+              - design_tactical_insight
+              - verify_match_facts
+
+      design_tactical_insight:
+        kind: bot_task
+        display_name: 设计战术洞察
+        assignee:
+          type: bot_binding
+          binding: tactics_analyst
+        instruction: |
+          你是世界杯战术解说。请基于内容任务简报，设计这场比赛的战术洞察。
+
+          请输出：
+          1. 两队可能的阵型、攻防思路和比赛节奏。
+          2. 3 个普通观众也能听懂的关键看点。
+          3. 关键球员、关键对位和可能改变比赛走势的胜负手。
+          4. 适合短视频口播呈现的比喻、镜头提示或画面建议。
+          5. 哪些判断属于推测，不能写成确定事实。
+        transitions:
+          complete:
+            targets:
+              - create_two_minute_script
+
+      verify_match_facts:
+        kind: bot_task
+        display_name: 核验选题事实
+        assignee:
+          type: bot_binding
+          binding: fact_researcher
+        instruction: |
+          你是世界杯赛事数据核查。请基于内容任务简报，核验这次前瞻内容会用到的事实和数据口径。
+
+          请输出：
+          1. 比赛轮次、对阵双方、时间、阶段和背景信息。
+          2. 可用于文案的历史交锋、近期状态、进球/失球、核心球员等事实点。
+          3. 必须避免或需要模糊处理的未确认信息。
+          4. 对比分预测、球员状态、伤停和排名表达的安全口径。
+          5. 给短视频编导和增长运营可直接引用的事实素材。
+        transitions:
+          complete:
+            targets:
+              - create_two_minute_script
+              - package_distribution_assets
+
+      create_two_minute_script:
+        kind: bot_task
+        display_name: 创作指定时长口播
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: script_director
+        instruction: |
+          你是世界杯短视频编导。请综合内容任务简报、战术洞察和事实核查结果，创作一版适合短视频发布的比赛前瞻口播文稿。
+
+          请输出：
+          1. 适配用户要求时长的完整口播稿，默认按 2 分钟控制节奏。
+          2. 0-5 秒开场钩子、主体段落、转场句和结尾互动。
+          3. 适合抖音和 B 站的镜头/字幕/画面提示。
+          4. 对所有推测性内容使用谨慎表达，不要把预测写成事实。
+          5. 可供增长运营包装的标题关键词和爆点句。
+        transitions:
+          complete:
+            targets:
+              - package_distribution_assets
+
+      package_distribution_assets:
+        kind: bot_task
+        display_name: 生成发布包装
+        assignee:
+          type: bot_binding
+          binding: growth_operator
+        instruction: |
+          你是世界杯增长运营。请基于事实核查结果和短视频口播稿，生成面向发布的内容包装。
+
+          请输出：
+          1. 抖音标题、B 站标题各 3 个，风格偏流量但不标题党。
+          2. 封面文案、简介、话题标签和评论区引导。
+          3. 适合普通观众的卖点排序。
+          4. 发布时间、二次分发和评论区互动建议。
+          5. 需要主编二次确认的敏感表达。
+        transitions:
+          complete:
+            targets:
+              - accept_final_publish_package
+
+      accept_final_publish_package:
+        kind: bot_task
+        display_name: 验收并交付最终发布包
+        node_timeout_ms: 180000
+        max_attempts: 3
+        assignee:
+          type: bot_binding
+          binding: content_editor
+        instruction: |
+          你是世界杯内容主编。请综合上游所有结果，验收并交付最终的世界杯比赛前瞻内容发布包。
+
+          最终发布包必须包含：
+          1. 面向用户可直接使用的短视频口播稿。
+          2. 战术看点、事实依据和需要谨慎表达的内容。
+          3. 抖音和 B 站的标题、封面文案、简介、话题标签和评论区引导。
+          4. 推荐发布节奏和二次分发建议。
+          5. 如仍有事实缺口，请明确标注需要发布前确认。
+
+          请不要暴露内部协同过程，只输出最终发布包。
+        final_output: true

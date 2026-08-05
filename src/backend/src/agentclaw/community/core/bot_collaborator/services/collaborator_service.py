@@ -12,7 +12,11 @@ from agentclaw.community.core.bot_collaborator.models import (
     PermissionLevel,
 )
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.services.member_management_capability import (
+    MemberManagementCapabilityService,
+)
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
@@ -50,7 +54,9 @@ def _run_coro_blocking(coro: Any) -> Any:
         except BaseException as e:  # noqa: BLE001 - 透传给调用线程统一处理
             box["error"] = e
 
-    thread = threading.Thread(target=_runner, daemon=True)
+    thread = threading.Thread(
+        target=bind_current_avernet_tenant(_runner), daemon=True
+    )
     thread.start()
     thread.join()
 
@@ -142,6 +148,7 @@ class CollaboratorService:
         passport_plugin: PassportPlugin,
         resolver_provider: "Callable[[], DeviceContextResolver]",
         device_fs_dispatcher_provider: "Callable[[], DeviceFilesystemDispatcher]",
+        member_management_capability_service: MemberManagementCapabilityService | None = None,
     ) -> None:
         """初始化服务。
 
@@ -154,12 +161,16 @@ class CollaboratorService:
                 （device 图反向依赖 ``BotService``）。
             device_fs_dispatcher_provider: 惰性 thunk，返回 ``DeviceFilesystemDispatcher``
                 （按 ``DeviceContext`` 派发 per-bot 文件读写插件）。
+            member_management_capability_service: 成员管理能力服务，用于协调通用能力与各引擎定制逻辑。
         """
         self._collaborator_repo = collaborator_repo
         self._bot_repo = bot_repo
         self._passport_plugin = passport_plugin
         self._resolver_provider = resolver_provider
         self._device_fs_dispatcher_provider = device_fs_dispatcher_provider
+        self._member_management_capability_service = (
+            member_management_capability_service or MemberManagementCapabilityService()
+        )
 
     # ========================================================================
     # 权限检查
@@ -268,16 +279,15 @@ class CollaboratorService:
         if not bot:
             raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
 
-        # 2. 检查 Bot 类型
-        #    - service：Service Bot 协作者，走原逻辑。
-        #    - coding 应用（active_engine == "claude_code" 且 template_type ==
-        #      "applicationCoding"）：作为"应用成员"复用同一套协作者流程，放行。
-        is_coding_app = (
-            bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") == "applicationCoding"
-        )
-        if bot.get("bot_type") != "service" and not is_coding_app:
-            raise BotNotServiceTypeError(f"Bot 不是服务型且非 coding 应用: bot_id={bot_id}")
+        # 2. 检查 Bot 类型 / 成员管理能力
+        #    CollaboratorService 是 engine-agnostic 服务：
+        #    - service：Service Bot 协作者，走原逻辑；
+        #    - 非 service：通过 MemberManagementCapabilityService 协调模板开关和
+        #      各引擎自己的能力实现，避免在这里直接依赖某个 engine 的定制逻辑。
+        if not self._member_management_capability_service.can_manage_collaborators(bot, bot_id):
+            raise BotNotServiceTypeError(
+                f"Bot 不是服务型且未开启成员管理: bot_id={bot_id}"
+            )
 
         bot_pk = bot["id"]
         owner_id_from_bot = bot["owner_id"]
@@ -525,6 +535,68 @@ class CollaboratorService:
 
         # 6. 触发协作关系变更回调
         self.on_collaboration_changed(collaborator.bot_id, owner_id, env)
+
+        return success
+
+    def leave_collaboration(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> bool:
+        """当前成员主动退出 Bot 协作。
+
+        与 ``remove_collaborator`` 不同，退出协作只允许删除当前登录用户
+        自己的协作者记录，不需要 ADMIN 权限，也不允许用它删除其他成员。
+
+        Args:
+            bot_id: Bot ID
+            owner_id: Bot 拥有者工号
+            user_id: 当前登录用户工号
+            env: 环境标识
+
+        Returns:
+            是否成功退出
+
+        Raises:
+            BotNotFoundError: Bot 不存在
+            CollaboratorNotFoundError: 当前用户不是该 Bot 协作者
+        """
+        if env is None:
+            env = get_current_env()
+
+        # 1. 查询 Bot 信息，避免仅凭 owner_id/bot_id 删除跨 Bot 记录。
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
+
+        bot_pk = bot["id"]
+        owner_id_from_bot = bot["owner_id"]
+
+        # Owner 不是协作者记录，不能通过“退出协作”退出自己的 Bot。
+        if user_id == owner_id_from_bot:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 2. 只查当前用户自己的协作者记录。
+        collaborator = self._collaborator_repo.get_by_bot_and_user(bot_pk, user_id, env)
+        if not collaborator:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 3. 删除自己的协作者记录。
+        success = self._collaborator_repo.delete(collaborator.id)
+
+        logger.info(
+            "[leave_collaboration] Left: bot_id=%s, user_id=%s",
+            bot_id, user_id
+        )
+
+        # 4. 触发协作关系变更回调。
+        self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
 
         return success
 

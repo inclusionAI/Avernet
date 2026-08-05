@@ -161,6 +161,12 @@ pub struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<u64>,
 
+    /// 收藏事件时间（epoch ms）。仅在「已收藏列表」上下文中由 store 填充；
+    /// 其余查询路径保持 `None`，序列化时省略。
+    /// 排序语义：`COALESCE(collected_at, created_at)`，由近到远。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collected_at: Option<u64>,
+
     /// 调用方透传的元数据。
     /// 回调时作为 `instance_meta` 传给通道，可用于携带 `callback_target.user_id` 等动态参数。
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -193,6 +193,35 @@ class TestWithSessionTrace:
         client._on_chat({"sessionKey": "", "state": "final"})
         # Should not raise, state should be None
 
+    @pytest.mark.asyncio
+    async def test_wrapper_attaches_and_detaches_trace_context(self, mock_bot_ws):
+        """Cover lines 75/83: attach_context / detach_context are called
+        when the matched session has a non-None trace_context."""
+        sentinel_ctx = object()
+        sentinel_token = object()
+        mock_tracer = MagicMock()
+        mock_tracer.attach_context.return_value = sentinel_token
+        mock_tracer.detach_context = MagicMock()
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.trace_context = sentinel_ctx
+
+        with patch(
+            "secbaas.community.core.service.bot_run._async_chat_client.get_tracer_plugin",
+            return_value=mock_tracer,
+        ):
+            client._on_chat(
+                {
+                    "sessionKey": "sk1",
+                    "state": "final",
+                    "message": {"content": [{"text": "hi"}]},
+                }
+            )
+
+        mock_tracer.attach_context.assert_called_once_with(sentinel_ctx)
+        mock_tracer.detach_context.assert_called_once_with(sentinel_token)
+
 
 def _patch_decorator_test(fn):
     """Helper to verify decorator name-setting logic."""
@@ -528,6 +557,76 @@ class TestOnAgentAdditional:
         state.last_stream_is_assistant = True
         client._on_agent({"sessionKey": "sk1", "stream": "unknown", "data": {}})
         assert state.last_stream_is_assistant is False
+
+
+# ==================== _on_agent final state ====================
+
+
+class TestOnAgentFinal:
+    @pytest.mark.asyncio
+    async def test_on_agent_final_sets_complete_events(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {
+                    "content": [{"type": "text", "text": "agent done"}],
+                },
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == "agent done"
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == "agent done"
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_empty_content(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws")
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "message": {},
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == ""
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "final"
+        assert chunk.content == ""
+
+    @pytest.mark.asyncio
+    async def test_on_agent_final_verbose(self, mock_bot_ws):
+        client = AsyncChatClient(uri="ws://host/ws", verbose=True)
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_agent(
+            {
+                "sessionKey": "sk1",
+                "state": "final",
+                "stream": "lifecycle",
+                "message": {
+                    "content": [{"type": "text", "text": "final text"}],
+                },
+            }
+        )
+        assert state.state == "final"
+        assert state.agent_complete.is_set()
+        assert state.chat_complete.is_set()
+        assert state.content == "final text"
 
 
 # ==================== _on_error ====================

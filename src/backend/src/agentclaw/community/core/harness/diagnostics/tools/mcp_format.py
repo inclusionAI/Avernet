@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
-from agentclaw.community.core.harness.models import Finding
+from agentclaw.community.core.harness.models import Finding, Severity, score_to_result
+from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
 
 if TYPE_CHECKING:
     from agentclaw.community.di.config import KbConfig
@@ -252,13 +253,14 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - `server_code`: MCP 服务器全称
 - `name`: MCP 名称
 - `description`: 该 MCP 的功能描述
-- `tools`: 该 MCP 提供的工具名称列表
+- `tools`: 该 MCP 提供的工具列表，每项含 `name`、`description`、`inputSchema`（JSON Schema：参数 properties/required/types 等）
 - `verified_guide`（可选）：人工校验过的调用规范全文，可直接用于 TOOLS.md
 - `kb_context`（可选）：从内网知识库检索到的与 MCP 相关的术语与服务说明，可帮助更准确地理解 MCP 的定位和用途。**必须在"场景与工具映射速查"表格的"注意事项"列中充分利用这些信息**，例如将术语解释作为注意事项的一部分，帮助 Bot 更好地理解和使用该 MCP
 
-**关键规则：`verified_guide` 决定是否输出调用规范章节**
-- `verified_guide` 不为空 → 该 MCP 的调用规范已经过人工验证，内容准确可用。修复建议中应直接引用 verified_guide 的原文，建议用户粘贴到 TOOLS.md。同时在"场景与工具映射速查"表格中列出该 MCP。
-- `verified_guide` 为空/null → 该 MCP 尚无人工校验的调用规范。**只**在"场景与工具映射速查"表格中基于 description 和 tools 列出该 MCP 的映射行，**不得**为该 MCP 生成"##  MCP 调用规范"子章节，也不要编造调用示例或 mcporter call 命令。可在表格注意事项栏写"建议后续补充调用规范"。
+**关键规则：按"是否有可落地的调用规范来源"决定调用规范章节**
+- `verified_guide` 不为空 → 调用规范已经过人工验证，内容准确可用。修复建议中应直接引用 verified_guide 原文，建议用户粘贴到 TOOLS.md；同时在"场景与工具映射速查"表格中列出该 MCP。
+- `verified_guide` 为空、但该 MCP 的工具提供了 `inputSchema` → **可基于 `inputSchema` 转录**该工具的参数规格（参数名/类型/必填/格式/描述）写入"## MCP 调用规范"子章节。**仅转录 schema 明确给出的内容，禁止编造**调用示例值、`mcporter call` 命令、业务工作流或易错点等 schema 未提供的信息。同时仍在映射表中列出该 MCP。
+- `verified_guide` 为空、且工具也没有 `inputSchema`（取不到该 MCP 的工具 schema） → **只**在"场景与工具映射速查"表格列出该 MCP 的映射行，**不得**为其生成"##  MCP 调用规范"子章节，注意事项写"调用规范由平台补全中"。
 
 请充分利用这些信息，在修复建议中引用对应 MCP 的 description 和 tools，帮助用户快速补齐文档。
 
@@ -284,9 +286,9 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - 注意事项可结合 description、工具名称和常见调用约束来写，要求具体、可执行；如果提供了内网知识库参考，必须将相关术语说明融入注意事项中
 
 ##  MCP 调用规范
-- ⚠️ **此章节只允许包含 verified_guide 不为空的 MCP**。如果一个 MCP 的 verified_guide 为空/null，绝不可在此章节为其生成调用规范子章节。
-- ❌ 错误示例：在用户消息的「⛔ 未验证 MCP」部分中出现了某个 MCP，但在「## MCP 调用规范」中为它生成了 `### XXX (server_code)` 子章节和 `mcporter call` 示例 — 这是严格禁止的。
-- ✅ 正确做法：未验证 MCP 仅出现在「场景与工具映射速查」表格中，注意事项写"建议后续补充调用规范"。
+- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `inputSchema` 的 MCP（据 schema 转录参数规格）。
+- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成 `### XXX (server_code)` 子章节或 `mcporter call` 示例——这类 MCP 只能出现在映射表里。
+- ✅ schema 转录要求：基于 `inputSchema` 的 properties/required/types/description 如实转录参数；不要编造 schema 未提供的调用示例值、命令或业务流程。
 - 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md
 - 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，因此只补最关键、最缺失的部分即可
 
@@ -320,8 +322,8 @@ XX 为 0-100 的整数
 - 不得评价行为边界
 - 不得脱离已提供的 MCP 列表空泛发挥
 - 不得编造未出现在 tools 列表中的工具名称
-- **禁止为 verified_guide 为空的 MCP 生成" MCP 调用规范"子章节**；这些 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏可写"建议后续补充调用规范"
-- **禁止为未验证 MCP 编造 mcporter call 示例**，即使你知道它的工具名称，也不要生成调用命令
+- **禁止为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成"MCP 调用规范"子章节**；这类 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏写"调用规范由平台补全中"
+- **禁止编造 `mcporter call` 示例、调用示例值或业务工作流**——仅有 inputSchema 时只转录 schema 给出的参数规格，不得生成 schema 未提供的命令/示例
 
 【额外要求】
 如果发现问题，你的修复建议中应尽量让用户一眼就能复制到 TOOLS.md：
@@ -353,20 +355,27 @@ XX 为 0-100 的整数
             detail = mcp_center.get_mcp_detail(server_code)
             if detail:
                 tools = detail.get("tools", [])
-                tool_names = [
-                    t.get("name", "")
+                # Keep each tool's description + inputSchema (not just its name) so the
+                # diagnostic LLM can transcribe a real, non-fabricated ## MCP 调用规范
+                # from the JSON Schema (params/required/types) without a verified_guide.
+                tool_details = [
+                    {
+                        "name": t.get("name", ""),
+                        "description": t.get("description", ""),
+                        "inputSchema": t.get("inputSchema"),
+                    }
                     for t in tools
                     if isinstance(t, dict) and t.get("name")
                 ]
                 logger.info(
                     "[D-TOOLS-002] MCP detail enriched: server_code=%s tools=%d",
-                    server_code, len(tool_names),
+                    server_code, len(tool_details),
                 )
                 return {
                     "server_code": server_code,
                     "name": detail.get("name", server_code),
                     "description": detail.get("description", ""),
-                    "tools": tool_names,
+                    "tools": tool_details,
                     "verified_guide": None,
                 }
             logger.warning("[D-TOOLS-002] MCP detail empty for server_code=%s", server_code)
@@ -467,31 +476,46 @@ XX 为 0-100 的整数
         )
         kb_included = False
         if mcp_details:
-            # Split MCPs into verified and unverified groups.
-            # Unverified MCPs: strip tools list to prevent LLM from fabricating call specs.
+            # Bucket each MCP by what call-spec source is available:
+            #   verified    → verified_guide (human-verified, paste verbatim)
+            #   schema      → no verified_guide, but tools expose inputSchema (transcribe params)
+            #   unreachable → neither (platform must author; mapping-table row only, advisory)
             verified_mcps: list[dict] = []
-            unverified_mcps: list[dict] = []
+            schema_mcps: list[dict] = []
+            unreachable_mcps: list[dict] = []
             for mcp in mcp_details:
+                tools = mcp.get("tools") or []
+                has_schema = any(
+                    isinstance(t, dict) and t.get("inputSchema")
+                    for t in (tools if isinstance(tools, list) else [])
+                )
                 if mcp.get("verified_guide"):
                     verified_mcps.append(mcp)
+                elif has_schema:
+                    schema_mcps.append(mcp)
                 else:
-                    unverified_mcps.append({
+                    unreachable_mcps.append({
                         "server_code": mcp["server_code"],
                         "name": mcp.get("name", ""),
                         "description": mcp.get("description", ""),
                         "verified_guide": None,
-                        "注意": "此 MCP 尚无人工校验的调用规范，只能在「场景与工具映射速查」表格中列出，禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例",
+                        "注意": "该 MCP 既无人工校验调用规范也无工具 inputSchema，只能在「场景与工具映射速查」表格中列出，注意事项写「调用规范由平台补全中」；禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例",
                     })
 
             if verified_mcps:
                 user_msg += (
-                    "\n--- ✅ 已验证 MCP（verified_guide 不为空，可生成调用规范） ---\n"
+                    "\n--- ✅ 已验证 MCP（verified_guide 不为空，引用原文生成调用规范） ---\n"
                     f"{json.dumps(verified_mcps, ensure_ascii=False, indent=2)}\n"
                 )
-            if unverified_mcps:
+            if schema_mcps:
                 user_msg += (
-                    "\n--- ⛔ 未验证 MCP（无 verified_guide，只能写入映射表，禁止生成调用规范和示例） ---\n"
-                    f"{json.dumps(unverified_mcps, ensure_ascii=False, indent=2)}\n"
+                    "\n--- 🛠 可据 schema 转录 MCP（无 verified_guide，但工具含 inputSchema：可据参数 schema 转录调用规范，禁止编造示例/命令） ---\n"
+                    f"{json.dumps(schema_mcps, ensure_ascii=False, indent=2)}\n"
+                )
+            if unreachable_mcps:
+                user_msg += (
+                    "\n--- ⛔ 无 schema MCP（既无 verified_guide 又无 inputSchema，仅写入映射表，禁止生成调用规范/示例） ---\n"
+                    f"{json.dumps(unreachable_mcps, ensure_ascii=False, indent=2)}\n"
                 )
 
             # 查询内网知识库补充 MCP 上下文
@@ -505,6 +529,39 @@ XX 为 0-100 的整数
                 logger.warning("[D-TOOLS-002] KB context fetch failed for bot=%s", ctx.bot_id, exc_info=True)
         user_msg += "--- end ---"
 
-        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg)
+        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
         logger.info("[D-TOOLS-002] LLM response received: bot=%s response_len=%d", ctx.bot_id, len(response))
-        return self._analyze_response(response, ctx.bot_id)
+        findings = self._analyze_response(response, ctx.bot_id)
+
+        # Decide whether this run produced any concrete, patchable call-spec
+        # content: a human-verified guide, or at least one tool whose
+        # inputSchema we handed the LLM. If not, the finding is purely advisory
+        # (the platform must author the specs; the owner can't fix it) — mirror
+        # the D-SOUL B-mode treatment (`soul.py:295-297`): drop the auto-fix
+        # template and bump the finding to a non-depressing pass so it doesn't
+        # keep health_score stuck. The finding still surfaces in the report
+        # (message kept) with an explicit "平台补全中" note. LLM-down (LLM01)
+        # findings are left alone — that's an operational error, not advisory.
+        has_recoverable = any(
+            mcp.get("verified_guide")
+            or any(
+                isinstance(t, dict) and t.get("inputSchema")
+                for t in (mcp.get("tools") or [])
+            )
+            for mcp in mcp_details
+        )
+        if not has_recoverable:
+            for f in findings:
+                if f.rule_id == "LLM01":
+                    continue
+                f.suggested_template_ids = []
+                f.score = max(f.score, 85)
+                f.result = score_to_result(f.score)  # "pass"
+                f.severity = Severity.INFO
+                if "平台补全中" not in (f.message or ""):
+                    f.message = (f.message or "") + (
+                        "\n\n（注：这些 MCP 暂无可自动生成的调用规范，"
+                        "已登记，由平台补全中；本项不计入健康分。）"
+                    )
+
+        return findings

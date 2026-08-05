@@ -599,6 +599,30 @@ class TestSmokeMethods:
             await service.update_device_ttl("abc123")
 
     @pytest.mark.asyncio
+    async def test_pull_file_from_url_raises_not_implemented(self):
+        """WHEN pull_file_from_url is called, THEN NotImplementedError is raised with Docker message."""
+        plugin = make_mock_plugin()
+        service = StandalonePaasService(
+            plugin=plugin, credentials=make_docker_credentials()
+        )
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Docker platform"
+        ):
+            await service.pull_file_from_url("abc123", "http://src", "/dst")
+
+    @pytest.mark.asyncio
+    async def test_push_file_to_url_raises_not_implemented(self):
+        """WHEN push_file_to_url is called, THEN NotImplementedError is raised with Docker message."""
+        plugin = make_mock_plugin()
+        service = StandalonePaasService(
+            plugin=plugin, credentials=make_docker_credentials()
+        )
+        with pytest.raises(
+            NotImplementedError, match="File transfer not supported on Docker platform"
+        ):
+            await service.push_file_to_url("abc123", "/src", "http://dst")
+
+    @pytest.mark.asyncio
     async def test_get_platform_type_returns_docker(self):
         """WHEN get_platform_type is called, THEN TenantType.DOCKER is returned."""
         plugin = make_mock_plugin()

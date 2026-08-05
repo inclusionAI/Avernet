@@ -41,8 +41,11 @@ import json
 from typing import Any, Dict, List, Optional
 
 from injector import inject
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -132,11 +135,23 @@ class BotRepository:
     def _env(self):
         return self.Model.env == get_current_env()
 
+    @staticmethod
+    def _to_caller_identity_dict(bot: BotModel) -> Dict[str, Any]:
+        """Return the private Bot projection required by Caller services."""
+        result = bot.to_dict()
+        result["call_type"] = bot.call_type
+        result["caller_config_revision"] = bot.caller_config_revision
+        return result
+
     def get_by_id_and_owner(
-        self, bot_id: str, owner_id: str
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        execution_options: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._db.orm_session() as db:
-            bot = (
+            q = (
                 db.query(self.Model)
                 .filter(
                     self.Model.bot_id == bot_id,
@@ -144,8 +159,10 @@ class BotRepository:
                     self.Model.is_delete == 0,
                     self._env(),
                 )
-                .first()
             )
+            if execution_options:
+                q = q.execution_options(**execution_options)
+            bot = q.first()
             return bot.to_dict() if bot else None
 
     def get_live_by_id_owner_and_env(
@@ -215,6 +232,44 @@ class BotRepository:
                 .first()
             )
             return bot.to_dict() if bot else None
+
+    def get_by_id_and_entity(
+        self, bot_id: str, entity_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Query one live Bot by exact bot and entity identifiers in this env."""
+        with self._db.orm_session() as db:
+            # COSEC: SQLAlchemy binds both identifiers; never interpolate request
+            # values into a raw SQL expression.
+            bot = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.entity_id == entity_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .first()
+            )
+            return self._to_caller_identity_dict(bot) if bot else None
+
+    def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Return one live Bot by id or fail closed when callers are ambiguous."""
+        with self._db.orm_session() as db:
+            # COSEC: SQLAlchemy binds the request-derived identifier; never
+            # interpolate it into a raw SQL expression.
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.is_delete == 0,
+                    self._env(),
+                )
+                .limit(2)
+                .all()
+            )
+            if len(bots) > 1:
+                raise BotLookupAmbiguousError
+            return self._to_caller_identity_dict(bots[0]) if bots else None
 
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
@@ -300,6 +355,9 @@ class BotRepository:
         bot_name: Optional[str] = None,
         owner_name: Optional[str] = None,
         bot_id: Optional[str] = None,
+        owner_id: Optional[str] = None,
+        engine: Optional[str] = None,
+        status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -310,8 +368,12 @@ class BotRepository:
             if public:
                 query = query.filter(self.Model.public == public)
             if bot_name:
+                # autoescape=True escapes the caller's % and _ and emits the
+                # matching ESCAPE clause. Interpolating into LIKE directly makes
+                # those characters wildcards, so searching for a name containing
+                # a literal "%" matched everything and inflated the total.
                 query = query.filter(
-                    self.Model.bot_name.like(f"%{bot_name}%")
+                    self.Model.bot_name.contains(bot_name, autoescape=True)
                 )
             if owner_name:
                 query = query.filter(
@@ -319,6 +381,12 @@ class BotRepository:
                 )
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
+            if owner_id:
+                query = query.filter(self.Model.owner_id == owner_id)
+            if engine:
+                query = query.filter(self.Model.active_engine == engine)
+            if status:
+                query = query.filter(self.Model.status == status)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())
@@ -327,6 +395,41 @@ class BotRepository:
                 .all()
             )
             return total, [b.to_dict() for b in bots]
+
+    def list_public_bots_by_owner_bot_pairs(
+        self, pairs: List[tuple[str, str]]
+    ) -> List[Dict[str, Any]]:
+        """Live public bots matching any ``(bot_id, owner_id)`` pair, this env.
+
+        ORM-based replacement for a former raw ``cursor.execute("… FROM
+        ac_bots …")`` in ``bot_discover_service`` — raw SQL bypasses the
+        ``BotModel`` tenant guard (``do_orm_execute`` only fires for ORM
+        statements), so this read now goes through the ORM and is tenant-scoped
+        automatically. Returns ``to_dict()`` dicts (the search-interface shape
+        the caller wants).
+        """
+        if not pairs:
+            return []
+        with self._db.orm_session() as db:
+            bots = (
+                db.query(self.Model)
+                .filter(
+                    or_(
+                        *[
+                            and_(
+                                self.Model.bot_id == bot_id,
+                                self.Model.owner_id == owner_id,
+                            )
+                            for bot_id, owner_id in pairs
+                        ]
+                    ),
+                    self.Model.is_delete == 0,
+                    self._env(),
+                    self.Model.public == "1",
+                )
+                .all()
+            )
+            return [b.to_dict() for b in bots]
 
     def list_by_search(
         self,

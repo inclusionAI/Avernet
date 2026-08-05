@@ -40,6 +40,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-appender    = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
 
 # Async
 async-trait = { workspace = true }
@@ -123,9 +127,15 @@ bcs-friend      = { workspace = true }
 bcs-relation    = { workspace = true }
 bcs-system-message = { workspace = true }
 bcs-secret   = { workspace = true }
+bcs-secret-api = { workspace = true }
 bcs-secret-local = { workspace = true }
 ding-logger  = { workspace = true }
 bcs-http      = { workspace = true }
+bcs-api-http  = { workspace = true }
+bcs-app-bot = { workspace = true }
+bcs-app-group = { workspace = true }
+bcs-app-session = { workspace = true }
+bcs-app-invitation = { workspace = true }
 bcs-provider-http = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }
@@ -133,6 +143,11 @@ bcs-group-store = { workspace = true }
 bcs-relation-store = { workspace = true }
 bcs-session = { workspace = true }
 bcs-session-store = { workspace = true }
+bcs-session-file = { workspace = true }
+bcs-session-file-store = { workspace = true }
+bcs-storage-api = { workspace = true }
+bcs-storage-local = { workspace = true }
+bcs-storage-baas  = { path = "../../plugins/bcs-storage-baas" }
 bcs-message = { workspace = true }
 bcs-message-store = { workspace = true }
 bcs-callback = { workspace = true }
@@ -140,6 +155,8 @@ bcs-collaboration-template = { workspace = true }
 bcs-collaboration-runtime = { workspace = true }
 bcs-collaboration-store = { workspace = true }
 bcs-judge = { workspace = true }
+bcs-jwt = { workspace = true }
+bcs-llm-anthropic = { workspace = true }
 bcs-llm-openai-compatible = { workspace = true }
 
 # URL encoding
@@ -170,5 +187,8 @@ futures-util = "0.3"
 bcs = { path = ".", features = ["test-utils"] }
 bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
+bcs-test-support = { workspace = true }
 serial_test = "3"
 bcs-jwt = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }
+jsonwebtoken = { workspace = true }

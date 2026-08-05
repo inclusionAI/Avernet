@@ -6,6 +6,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
+from agentclaw.community.core.service_bot.services.publish_exceptions import (
+    BotPublishServiceError,
+    PublishNotFoundError,
+)
+from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -124,11 +129,6 @@ class PublishRollbackMixin:
             PublishStatusInvalidError: 发布单状态不支持回滚
             BotPublishServiceError: 回滚失败
         """
-        from agentclaw.community.core.service_bot.services.bot_publish_service import (
-            BotPublishServiceError,
-            PublishNotFoundError,
-        )
-
         logger.info(
             f"[PublishRollbackMixin.rollback_publish] called: publish_id={publish_id}, "
             f"operator={operator}, reason={reason}"
@@ -150,36 +150,46 @@ class PublishRollbackMixin:
                 f"Target publish record not found: last_pub_id={current_record.last_pub_id}"
             )
 
-        # 3. 当前版本状态改为 DRAFT，记录 ext.rollback
-        current_ext = current_record.ext or {}
-        current_ext["rollback"] = {
+        # 3+4. (#197) Atomically flip both records (one transaction) to avoid a
+        # "half-flip" that would leave can_rollback permanently refusing. The
+        # demoted (currently-live) record goes SUCCESS→DRAFT (recording
+        # ext.rollback); the restored (previous) record goes UPGRADED→SUCCESS
+        # (marking rollback_restored_from).
+        demoted_ext = current_record.ext or {}
+        demoted_ext["rollback"] = {
             "rolled_back_at": datetime.now().isoformat(),
             "rolled_back_by": operator,
             "rollback_reason": reason,
             "target_publish_id": current_record.last_pub_id,
         }
-        self.update_publish_status_with_ext(
-            publish_id=publish_id,
-            target_status=PublishStatus.DRAFT,
-            ext=current_ext,
-            source_status=PublishStatus.SUCCESS,
-        )
-        logger.info(
-            f"[rollback_publish] Current publish status changed to DRAFT: publish_id={publish_id}"
-        )
+        # Clear this version's online release refs before it re-enters DRAFT. The refs
+        # (ext.publish.online = BaaS publish id, ext.binding.online = device binding)
+        # must not leak across a later re-publish lifecycle.
+        for section in ("publish", "binding"):
+            refs = demoted_ext.get(section)
+            if isinstance(refs, dict):
+                refs.pop(PublishStage.ONLINE.value, None)
+        restored_ext = target_record.ext or {}
+        restored_ext["rollback_restored_from"] = publish_id
 
-        # 4. 目标版本状态恢复为 SUCCESS，标记 rollback_restored_from
-        target_ext = target_record.ext or {}
-        target_ext["rollback_restored_from"] = publish_id
-        self.update_publish_status_with_ext(
-            publish_id=current_record.last_pub_id,
-            target_status=PublishStatus.SUCCESS,
-            ext=target_ext,
-            source_status=PublishStatus.UPGRADED,
+        demoted_ok, restored_ok = self._repo.rollback_flip(
+            demoted_publish_id=publish_id,
+            demoted_ext=demoted_ext,
+            demoted_from_status=PublishStatus.SUCCESS.value,
+            demoted_to_status=PublishStatus.DRAFT.value,
+            restored_publish_id=current_record.last_pub_id,
+            restored_ext=restored_ext,
+            restored_from_status=PublishStatus.UPGRADED.value,
+            restored_to_status=PublishStatus.SUCCESS.value,
         )
+        if not (demoted_ok and restored_ok):
+            raise BotPublishServiceError(
+                f"回滚状态翻转失败（并发或状态不符）: demoted_ok={demoted_ok}, "
+                f"restored_ok={restored_ok}, publish_id={publish_id}"
+            )
         logger.info(
-            f"[rollback_publish] Target publish status changed to SUCCESS: "
-            f"publish_id={current_record.last_pub_id}, marked rollback_restored_from={publish_id}"
+            f"[rollback_publish] Atomically flipped: demoted({publish_id}) SUCCESS→DRAFT, "
+            f"restored({current_record.last_pub_id}) UPGRADED→SUCCESS"
         )
 
         # 5. 执行回滚部署（通过 PublishFlowService）

@@ -34,10 +34,10 @@ class SystemConfigKey(StrEnum):
     CALLBACK_TIMEOUT_SECONDS = "publish.callback_timeout_seconds"
     """System-level callback timeout in seconds.
 
-    Value: integer string (e.g., "900")
+    Value: integer string (e.g., "1800")
     Usage: Override for bot callback timeout at system level,
     applied when no user-specified value exists.
-    Falls back to DEFAULT_CALLBACK_TIMEOUT_SECONDS (900).
+    Falls back to DEFAULT_CALLBACK_TIMEOUT_SECONDS (1800).
     """
 
     # SessionKey matching configuration
@@ -63,3 +63,12 @@ class SystemConfigKey(StrEnum):
     """
 
     DISPATCHER_ROUTE = "bot_run.dispatcher_route"
+
+    BCN_QUEUE_DISPATCHER_ENABLED = "bot_run.bcn_queue_dispatcher_enabled"
+    """Whether BCN requests default to QueueTaskMessageDispatcher.
+
+    Value: "true" or "false" (default: "false")
+    Usage: When enabled, BCN requests (metadata.bot_options.from_bcn == "true")
+    use QueueTaskMessageDispatcher instead of TaskMessageDispatcher, unless
+    overridden by a more specific dispatcher_route config.
+    """

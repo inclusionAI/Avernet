@@ -44,11 +44,12 @@ def _seed_bot(world, *, bot_id: str, bot_name: str, entity_id: str) -> None:
             INSERT INTO ac_bots
               (bot_id, bot_name, bot_desc, entity_id, entity_type, creator_id,
                owner_id, engine_types, active_engine, status, gmt_create,
-               gmt_modified, is_delete, public, env)
+               gmt_modified, is_delete, public, env, call_type,
+               caller_config_revision)
             VALUES (:bot_id, :bot_name, :bot_desc, :entity_id, :entity_type,
                     :creator_id, :owner_id, :engine_types, :active_engine,
                     :status, :gmt_create, :gmt_modified, :is_delete,
-                    :public, :env)
+                    :public, :env, :call_type, :caller_config_revision)
         """), {
             "bot_id": bot_id,
             "bot_name": bot_name,
@@ -65,6 +66,8 @@ def _seed_bot(world, *, bot_id: str, bot_name: str, entity_id: str) -> None:
             "is_delete": 0,
             "public": "0",
             "env": "dev",
+            "call_type": "owner",
+            "caller_config_revision": 0,
         })
         s.commit()
 

@@ -106,7 +106,7 @@ Core downstream body fields:
 | `to_bot.provider_bot_ref` | Same as above | Provider-local bot identifier used to route to the Provider's bot runtime. |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | Session identifier. The Provider maintains context by this value. |
 | `message` | `chat.send` / `chat.inject` | Current downstream message. |
-| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | Timeout for BCS to wait for Provider acknowledgement or callback. |
+| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | Downstream operation timeout. For direct A2A `chat.send` submitted by `bcs-cli chat`, BCS sends a fixed 2-hour execution budget (`7200000` ms), independent of the CLI polling timeout. |
 
 ## Calling BCS back
 
@@ -148,6 +148,11 @@ Constraints:
 - `state` is fixed to `final`.
 - Send only one successful final event for the same `run_id`.
 - When retrying the same callback event, keep the same `X-BCN-Event-Id`.
+- BCS returns HTTP `200` after the event passes synchronous request validation,
+  authentication, and run-correlation checks. For a state-machine run, remaining processing,
+  including Judge evaluation, continues asynchronously in the current BCS
+  process. The response does not mean that the node or run has completed, and
+  in-flight processing is not recovered if that BCS process exits.
 
 ## Error responses
 

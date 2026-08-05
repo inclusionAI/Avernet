@@ -21,38 +21,31 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from opentelemetry import context as otel_context
-from opentelemetry import trace as otel_trace
-from opentelemetry.context import Context
-
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.logger import get_logger
+from secbaas.community.tracer import get_tracer_plugin
 
-from ._bot_websocket_client import BotWebSocketClient
+from ._bot_websocket_client import BotWebSocketClient, ChatRequestError
 from ._session_key_matcher import SessionKeyMatcher
 from ._session_state import _SessionState
 
 logger = get_logger("core-bot-run")
 
 
-def _capture_trace_context() -> Context | None:
-    """捕获当前 OTel context，供后续回调中恢复。
+def _capture_trace_context() -> Any:
+    """捕获当前 trace context，供后续回调中恢复。
 
     在 send_message 注册 session 时调用，保存当前请求的 trace context。
-    返回值是不透明的 context 对象，传给 _attach_trace_context 恢复。
+    返回值是不透明的 context 对象，传给 _with_session_trace 恢复。
     """
-    ctx = otel_context.get_current()
-    span = otel_trace.get_current_span(ctx)
-    if span is not None and span.get_span_context().is_valid:
-        return ctx
-    return None
+    return get_tracer_plugin().capture_context()
 
 
 def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
     """装饰器：从 payload 中查找 session state，恢复 trace context 后执行方法。
 
     适用于 _on_chat / _on_agent 等 WS 回调，这些回调在 _recv_loop 后台 Task
-    中执行，无 OTel span context。装饰器自动：
+    中执行，无 active trace context。装饰器自动：
       1. 从 payload.sessionKey 查找 _SessionState（支持模糊匹配）
       2. 恢复 state 中保存的 trace context，使日志 traceid 关联原始请求
       3. 将 state 作为关键字参数传入被装饰方法
@@ -76,17 +69,18 @@ def _with_session_trace(method_name: str = "_on_event") -> Callable[..., Any]:
             )
             state = match_result.state if match_result else None
 
-            otel_token = None
+            tracer = get_tracer_plugin()
+            token = None
             if state is not None and state.trace_context is not None:
-                otel_token = otel_context.attach(state.trace_context)
+                token = tracer.attach_context(state.trace_context)
             try:
                 if event_name is not None:
                     fn(self, event_name, payload, session_key=session_key, state=state)
                 else:
                     fn(self, payload, session_key=session_key, state=state)
             finally:
-                if otel_token is not None:
-                    otel_context.detach(otel_token)
+                if token is not None:
+                    tracer.detach_context(token)
 
         wrapper.__name__ = method_name
         wrapper.__qualname__ = f"AsyncChatClient.{method_name}"
@@ -100,6 +94,15 @@ class ConcurrentSessionError(Exception):
 
     AsyncChatClient 默认排队等待同一 sessionKey 的前一个请求完成，
     等待超过 session_key_timeout 后抛出此异常。
+    """
+
+
+class BotSessionError(Exception):
+    """WebSocket 会话以 error 状态终止时抛出。
+
+    当 agent/chat 事件回调收到 state=error 时，send_message 在
+    chat_complete 后检查 state.state 并抛出此异常，使上游调用方
+    （BaasBotService / executor）能将 bot_run 标记为 FAILED 而非 COMPLETED。
     """
 
 
@@ -277,7 +280,7 @@ class AsyncChatClient:
         message: str,
         session_key: str | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,  # noqa: ASYNC109
+        timeout: float | None = None,  # noqa: ASYNC109
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
@@ -297,6 +300,7 @@ class AsyncChatClient:
             timeout: 超时时间（秒），None 表示无限等待
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
             app_id: 应用标识，用于标识调用方应用
+            chat_metadata: chat metadata
 
         Returns:
             Tuple[content, agent_events]: 返回 (响应内容, agent事件列表)
@@ -366,14 +370,24 @@ class AsyncChatClient:
                     timeout,
                 )
                 assert self._client is not None
-                send_result = await self._client.chat_send(
-                    session_key=session_key,
-                    message=message,
-                    auth_token=auth_token,
-                    app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
-                    chat_metadata=chat_metadata,
-                )
+                try:
+                    send_result = await self._client.chat_send(
+                        session_key=session_key,
+                        message=message,
+                        auth_token=auth_token,
+                        app_id=app_id,
+                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        chat_metadata=chat_metadata,
+                    )
+                except ChatRequestError as e:
+                    logger.error(
+                        "[send] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
+                        session_key,
+                        e.error_code,
+                        e.error_message,
+                    )
+                    state.chat_complete.set()
+                    raise
 
                 logger.info(
                     "[send] Sent successfully: session_key=%s, result=%s",
@@ -386,31 +400,28 @@ class AsyncChatClient:
 
                 # 5. 等待主对话事件完成
                 if timeout:
-                    try:
-                        await asyncio.wait_for(
-                            state.chat_complete.wait(), timeout=timeout
-                        )
-                    except TimeoutError:
-                        logger.warning(
-                            "[send] timeout waiting for chat events, "
-                            "session_key=%s, returning anyway",
-                            session_key,
-                        )
+                    await asyncio.wait_for(state.chat_complete.wait(), timeout=timeout)
                 else:
                     # 无超时等待
                     await state.chat_complete.wait()
 
+                # 6. 检查是否以 error 状态终止
+                if state.state == "error":
+                    raise BotSessionError(
+                        f"session ended with error state: session_key={session_key}"
+                    )
+
                 return state.content, state.agent_payloads
 
             finally:
-                # 6. 清除 sessionKey 标记并唤醒等待者
+                # 7. 清除 sessionKey 标记并唤醒等待者
                 async with self._condition:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
 
         finally:
-            # 7. 释放并发信号量
+            # 8. 释放并发信号量
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
@@ -418,7 +429,7 @@ class AsyncChatClient:
         self,
         message: str,
         session_key: str | None = None,
-        timeout: int | None = None,  # noqa: ASYNC109
+        timeout: float | None = None,  # noqa: ASYNC109
         auth_token: str | None = None,
         app_id: str | None = None,
         chat_metadata: dict[str, str] | None = None,
@@ -484,14 +495,28 @@ class AsyncChatClient:
                     timeout,
                 )
                 assert self._client is not None
-                await self._client.chat_send(
-                    session_key=session_key,
-                    message=message,
-                    auth_token=auth_token,
-                    app_id=app_id,
-                    timeout_ms=timeout * 1000 if timeout else None,
-                    chat_metadata=chat_metadata,
-                )
+                try:
+                    await self._client.chat_send(
+                        session_key=session_key,
+                        message=message,
+                        auth_token=auth_token,
+                        app_id=app_id,
+                        timeout_ms=int(timeout * 1000) if timeout else None,
+                        chat_metadata=chat_metadata,
+                    )
+                except ChatRequestError as e:
+                    logger.error(
+                        "[send_stream] chat.send failed: session_key=%s, error_code=%s, error_message=%s",
+                        session_key,
+                        e.error_code,
+                        e.error_message,
+                    )
+                    state.chat_complete.set()
+                    yield StreamChunk(
+                        type="error",
+                        content=f"chat.send failed: {e.error_code} - {e.error_message}",
+                    )
+                    return
 
                 # 消费 stream_queue，逐 chunk 产出
                 async for chunk in self._drain_stream_queue(queue, timeout):
@@ -579,10 +604,10 @@ class AsyncChatClient:
             self._active_sessions.clear()
             self._condition.notify_all()
 
+    @staticmethod
     async def _drain_stream_queue(
-        self,
         queue: asyncio.Queue[StreamChunk],
-        timeout: int | None,
+        timeout: float | None,
     ) -> AsyncIterator[StreamChunk]:
         """从 stream_queue 消费 StreamChunk，遇到终止 chunk 后停止。
 
@@ -754,6 +779,23 @@ class AsyncChatClient:
             self._handle_terminal_error(
                 state, session_key, payload.get("errorMessage", ""), "agent"
             )
+            return
+
+        if agent_state and agent_state == "final":
+            # agent final 事件视为整个会话的结束标志：
+            # 设置 agent_complete + chat_complete 唤醒等待方，并 emit final chunk
+            # 让流式迭代器终止。
+            state.state = "final"
+            state.agent_complete.set()
+            state.chat_complete.set()
+            content = payload.get("message", {}).get("content", [])
+            text = content[0].get("text", "") if content else ""
+            state.content = text
+            self._emit_stream_chunk(state, StreamChunk(type="final", content=text))
+            if self.verbose:
+                logger.info(
+                    "[agent] final: sessionKey=%s, stream=%s", session_key, stream
+                )
             return
 
         if self.verbose:

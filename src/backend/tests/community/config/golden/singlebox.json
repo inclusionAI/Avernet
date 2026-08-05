@@ -136,6 +136,7 @@
       "base_url": "https://ecb-pre.teamclaw.com"
     },
     "economy_governance": {
+      "cooldown_days": 7,
       "dry_run": true,
       "iframe_callback_url": "http://localhost:8888/api/economy/governance/card-callback",
       "notify_channel": "tc_card",
@@ -150,6 +151,9 @@
       "enable_cache": true,
       "enable_metrics": false,
       "max_connections": 100
+    },
+    "gateway": {
+      "base_url": "http://127.0.0.1:9999"
     },
     "git_sync": {
       "bolt_shared_dir_name": "bolt_shared",
@@ -289,6 +293,10 @@
       "base_url": "https://ecb-pre.teamclaw.com",
       "base_url_pre": ""
     },
+    "gateway": {
+      "base_url": "http://127.0.0.1:9999",
+      "base_url_pre": ""
+    },
     "kb": {
       "base_url": "",
       "function_name": "",
@@ -310,7 +318,8 @@
     },
     "secret_names": {
       "aiworkbench_repo_url": "other_manual_agentclaw_aiworkbench_repo_url",
-      "dormant_internal_token": ""
+      "dormant_internal_token": "",
+      "gateway_principal_signing_key": "gateway_principal_signing_key"
     },
     "skill_scan": {
       "auth_app_key": "agentclaw",

@@ -32,6 +32,7 @@ from secbaas.community.core.service.bot_run import (
     ClawBotService,
     FixedMachineCountProvider,
     QueueTaskMessageDispatcher,
+    ResultGuardExecutor,
     SerializingExecutor,
     TaskConcurrencyPool,
     TaskMessageDispatcher,
@@ -39,6 +40,7 @@ from secbaas.community.core.service.bot_run import (
 from secbaas.community.core.service.bot_runtime.dispatcher import (
     DefaultBotCmdDispatcher,
     DefaultBotFetchStartProgressDispatcher,
+    DefaultBotFileTransferDispatcher,
     DefaultBotHttpConnInfoDispatcher,
     DefaultBotHttpDispatcher,
     DefaultBotOpenFolderDispatcher,
@@ -76,8 +78,11 @@ from secbaas.community.core.service.publish_manage import (
     DefaultPublishService,
 )
 from secbaas.community.core.service.scheduler import AppScheduler
+from secbaas.community.core.service.session_file_sharing import (
+    DefaultSessionFileSharingDispatcher,
+)
 from secbaas.community.core.service.sse import (
-    DefaultStreamConverter,
+    DefaultStreamConverter,  # noqa: F401  triggers side-effect registration of default SSE converter
     SseConverterFactory,
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
@@ -193,6 +198,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     distributed_lock_repository = providers.Dependency()
     cache_plugin = providers.Dependency()
     ws_relay_session_repo = providers.Dependency()
+    ticket_repository = providers.Dependency()
+    session_ticket_repository = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -279,6 +286,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         ws_relay_session_repository=ws_relay_session_repo,
     )
 
+    file_transfer_backend = providers.Dependency()
+
     paas_facade = providers.Singleton(
         PaasServiceFacade,
         device_repository=device_repo,
@@ -355,6 +364,21 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
     )
 
+    bot_file_transfer_dispatcher = providers.Singleton(
+        DefaultBotFileTransferDispatcher,
+        bot_repo=bot_repo,
+        device_repo=device_repo,
+        paas_facade=paas_facade,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=ticket_repository,
+    )
+
+    session_file_sharing_dispatcher = providers.Singleton(
+        DefaultSessionFileSharingDispatcher,
+        file_transfer_backend=file_transfer_backend,
+        ticket_repo=session_ticket_repository,
+    )
+
     bot_binding_resolver = providers.Singleton(
         BotBindingResolver,
         ac_bot_repo=ac_bot_repo,
@@ -379,11 +403,6 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     )
 
     # ── Service providers ─────────────────────────────────────────────────────
-
-    tenant_service = providers.Singleton(
-        DefaultTenantManageService,
-        tenant_repository=tenant_repo,
-    )
 
     device_template_service = providers.Singleton(
         DefaultDeviceTemplateService,
@@ -555,6 +574,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     http_callback = providers.Singleton(
         HttpCallback,
         run_repository=bot_run_repository,
+        origin=config.bot_runner.origin,
     )
 
     task_message_dispatcher = providers.Singleton(
@@ -603,6 +623,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
             task_message_dispatcher,
         ),
         system_config_service=system_config_service,
+        default_request_timeout=config.bot_runner.default_timeout,
     )
 
     bcn_downlink_service = providers.Singleton(
@@ -638,7 +659,12 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         SerializingExecutor,
         inner=bot_run_request_executor,
         lock_service=distributed_lock_service,
-        queue_repository=bot_run_queue_repository,
+    )
+
+    result_guard_executor = providers.Singleton(
+        ResultGuardExecutor,
+        inner=serializing_executor,
+        run_repository=bot_run_repository,
     )
 
     bot_request_worker_config = providers.Singleton(
@@ -661,9 +687,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     bot_request_worker = providers.Singleton(
         BotRequestWorker,
         queue_repository=bot_run_queue_repository,
-        run_repository=bot_run_repository,
         qpm_manager=bot_qpm_manager,
-        executor=serializing_executor,
+        executor=result_guard_executor,
         post_run_callback_factories=providers.Dict(
             {
                 "bcn_uplink": bcn_uplink_callback,

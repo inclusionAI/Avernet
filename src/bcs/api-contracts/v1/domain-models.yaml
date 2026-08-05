@@ -1,0 +1,1460 @@
+ActorKind:
+  type: string
+  enum:
+    - human
+    - bot
+
+Actor:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+
+# ---- Bot control-plane resources ------------------------------------------
+
+BotKind:
+  type: string
+  enum:
+    - bot
+    - human
+  description: >-
+    Persisted bcs_bots actor kind. Legacy rows without actor_kind are exposed
+    as bot.
+
+BotVisibility:
+  type: string
+  enum:
+    - public
+    - protected
+    - private
+  description: Discovery and collaboration visibility stored for the Bot.
+
+BotStatus:
+  type: string
+  enum:
+    - online
+    - hidden
+  description: >-
+    Raw persisted Bot status. This field does not express effective runtime
+    connectivity.
+
+BotReachability:
+  type: string
+  enum:
+    - reachable
+    - unreachable
+  description: >-
+    Effective runtime reachability computed with the existing BCN
+    online/downlink logic. It has no direct database column.
+
+BotSkill:
+  type: object
+  additionalProperties: false
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+    description:
+      type: string
+  description: One non-sensitive capability declared by a physical Bot.
+
+BotDescriptor:
+  type: object
+  additionalProperties: false
+  required:
+    - summary
+    - domains
+    - skills
+    - scopes
+  properties:
+    summary:
+      type: string
+      description: Empty when no legacy summary was persisted.
+    domains:
+      type: array
+      description: Empty when no legacy domains were persisted.
+      items:
+        type: string
+    skills:
+      type: array
+      description: Empty when no legacy skills were persisted.
+      items:
+        $ref: "#/BotSkill"
+    scopes:
+      type: array
+      description: Empty when no legacy scopes were persisted.
+      items:
+        type: string
+  description: >-
+    Public capability description of a physical Bot. It contains no provider,
+    credential, endpoint, or internal routing configuration.
+
+BotProvider:
+  type: object
+  additionalProperties: false
+  required:
+    - provider_id
+    - name
+  properties:
+    provider_id:
+      type: string
+      minLength: 1
+    name:
+      type: string
+      minLength: 1
+  description: Optional non-sensitive Provider projection; no slug is exposed.
+
+PhysicalBot:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - kind
+    - name
+    - visibility
+    - status
+    - env
+    - descriptor
+    - reachability
+    - created_at
+    - updated_at
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+      description: Authoritative BCN identifier.
+    kind:
+      const: bot
+    name:
+      type: string
+      minLength: 1
+    visibility:
+      $ref: "#/BotVisibility"
+    status:
+      $ref: "#/BotStatus"
+    env:
+      type: string
+      minLength: 1
+      description: Persisted environment boundary; never inferred from kind.
+    created_by:
+      type: string
+      minLength: 1
+      description: >-
+        Immutable creator staff_no. Omitted when a legacy row has no creator.
+    descriptor:
+      $ref: "#/BotDescriptor"
+    reachability:
+      $ref: "#/BotReachability"
+    provider:
+      $ref: "#/BotProvider"
+    agent_code:
+      type: string
+      description: Optional read-only external Agent identity.
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_create.
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_modified.
+  description: >-
+    A physical software Bot. descriptor and reachability are normalized even
+    when their legacy source columns are incomplete.
+
+HumanBot:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_id
+    - kind
+    - name
+    - visibility
+    - status
+    - env
+    - created_at
+    - updated_at
+  properties:
+    bot_id:
+      type: string
+      minLength: 1
+      description: Authoritative BCN identifier.
+    kind:
+      const: human
+    name:
+      type: string
+      minLength: 1
+    visibility:
+      $ref: "#/BotVisibility"
+    status:
+      $ref: "#/BotStatus"
+    env:
+      type: string
+      minLength: 1
+      description: Persisted environment boundary; never inferred from kind.
+    created_by:
+      type: string
+      minLength: 1
+      description: >-
+        Immutable creator staff_no. Omitted when a legacy row has no creator.
+    created_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_create.
+    updated_at:
+      type: integer
+      format: int64
+      minimum: 0
+      description: Unix milliseconds mapped from gmt_modified.
+  description: >-
+    A Human row stored in bcs_bots. Human participates in groups and sessions
+    but has no descriptor, reachability, Provider projection, or agent_code.
+
+Bot:
+  oneOf:
+    - $ref: "#/PhysicalBot"
+    - $ref: "#/HumanBot"
+  discriminator:
+    propertyName: kind
+    mapping:
+      bot: "#/PhysicalBot"
+      human: "#/HumanBot"
+  description: BCN control-plane domain object for physical Bots and Humans.
+
+BotCandidate:
+  type: object
+  additionalProperties: false
+  required:
+    - bot
+    - is_friend
+  properties:
+    bot:
+      $ref: "#/PhysicalBot"
+    is_friend:
+      type: boolean
+      description: Whether the acting physical Bot has an accepted Friendship.
+
+BotPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Bot"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+BotCandidatePage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/BotCandidate"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+BotList:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Bot"
+
+BotEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/Bot"
+    request_id:
+      type: string
+
+BotPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotPage"
+    request_id:
+      type: string
+
+BotCandidatePageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotCandidatePage"
+    request_id:
+      type: string
+
+BotListEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/BotList"
+    request_id:
+      type: string
+
+Participant:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+    - role
+    - mode
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+    role:
+      type: string
+      enum:
+        - driver
+        - consultant
+        - manager
+        - worker
+        - observer
+    mode:
+      type: string
+      enum:
+        - auto
+        - muted
+        - present
+        - absent
+
+DeliveryPolicy:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_final_delivery
+  properties:
+    bot_final_delivery:
+      type: string
+      enum:
+        - send_to_driver
+        - inject_observers
+
+GroupStatus:
+  type: string
+  enum:
+    - active
+    - completed
+    - error
+    - closed
+    - inactive
+
+GroupVisibility:
+  type: string
+  enum:
+    - private
+    - public
+
+Membership:
+  type: string
+  enum:
+    - direct
+    - session_only
+
+NormalGroupSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - group_id
+    - version
+    - kind
+    - status
+    - visibility
+    - membership
+    - originator_actor_id
+    - participant_count
+    - driver_bot_uuid
+    - strategy
+    - created_at
+    - updated_at
+  properties:
+    group_id:
+      type: string
+    version:
+      type: integer
+    name:
+      type: string
+    kind:
+      const: normal
+    status:
+      $ref: "#/GroupStatus"
+    visibility:
+      $ref: "#/GroupVisibility"
+    membership:
+      $ref: "#/Membership"
+    originator_actor_id:
+      type: string
+    participant_count:
+      type: integer
+      minimum: 1
+    driver_bot_uuid:
+      type: string
+    strategy:
+      type: string
+      enum:
+        - chat
+        - manager_worker
+        - state_machine
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+DirectMessageGroupSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - group_id
+    - version
+    - kind
+    - status
+    - visibility
+    - membership
+    - originator_actor_id
+    - participant_count
+    - created_at
+    - updated_at
+  properties:
+    group_id:
+      type: string
+    version:
+      type: integer
+    name:
+      type: string
+    kind:
+      const: dm
+    status:
+      $ref: "#/GroupStatus"
+    visibility:
+      $ref: "#/GroupVisibility"
+    membership:
+      $ref: "#/Membership"
+    originator_actor_id:
+      type: string
+    participant_count:
+      const: 2
+    peer_actor:
+      $ref: "#/Actor"
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+GroupSummary:
+  oneOf:
+    - $ref: "#/NormalGroupSummary"
+    - $ref: "#/DirectMessageGroupSummary"
+  discriminator:
+    propertyName: kind
+    mapping:
+      normal: "#/NormalGroupSummary"
+      dm: "#/DirectMessageGroupSummary"
+
+ChatConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+    - delivery_policy
+  properties:
+    strategy:
+      const: chat
+    delivery_policy:
+      $ref: "#/DeliveryPolicy"
+
+ManagerWorkerConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+  properties:
+    strategy:
+      const: manager_worker
+
+StateMachineDefinitionReference:
+  type: object
+  additionalProperties: false
+  required:
+    - definition_id
+    - version
+  properties:
+    definition_id:
+      type: string
+    version:
+      type: integer
+      minimum: 1
+
+StateMachineParticipantBinding:
+  type: object
+  additionalProperties: false
+  required:
+    - binding
+    - actor_ids
+  properties:
+    binding:
+      type: string
+    actor_ids:
+      type: array
+      minItems: 1
+      items:
+        type: string
+
+StateMachineConfiguration:
+  type: object
+  additionalProperties: false
+  required:
+    - strategy
+    - definition
+    - participant_bindings
+  properties:
+    strategy:
+      const: state_machine
+    definition:
+      $ref: "#/StateMachineDefinitionReference"
+    participant_bindings:
+      type: array
+      items:
+        $ref: "#/StateMachineParticipantBinding"
+
+CollaborationConfiguration:
+  oneOf:
+    - $ref: "#/ChatConfiguration"
+    - $ref: "#/ManagerWorkerConfiguration"
+    - $ref: "#/StateMachineConfiguration"
+  discriminator:
+    propertyName: strategy
+    mapping:
+      chat: "#/ChatConfiguration"
+      manager_worker: "#/ManagerWorkerConfiguration"
+      state_machine: "#/StateMachineConfiguration"
+
+CollaborationGroupDetail:
+  type: object
+  additionalProperties: false
+  required:
+    - group_id
+    - version
+    - kind
+    - status
+    - visibility
+    - originator_actor_id
+    - participants
+    - driver_bot_uuid
+    - collaboration
+    - created_at
+    - updated_at
+  properties:
+    group_id:
+      type: string
+    version:
+      type: integer
+    name:
+      type: string
+    kind:
+      const: normal
+    status:
+      $ref: "#/GroupStatus"
+    visibility:
+      $ref: "#/GroupVisibility"
+    context:
+      type: string
+    originator_actor_id:
+      type: string
+    participants:
+      type: array
+      minItems: 1
+      items:
+        $ref: "#/Participant"
+    driver_bot_uuid:
+      type: string
+    collaboration:
+      $ref: "#/CollaborationConfiguration"
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+DirectMessageGroupDetail:
+  type: object
+  additionalProperties: false
+  required:
+    - group_id
+    - version
+    - kind
+    - status
+    - visibility
+    - originator_actor_id
+    - participants
+    - created_at
+    - updated_at
+  properties:
+    group_id:
+      type: string
+    version:
+      type: integer
+    name:
+      type: string
+    kind:
+      const: dm
+    status:
+      $ref: "#/GroupStatus"
+    visibility:
+      $ref: "#/GroupVisibility"
+    context:
+      type: string
+    originator_actor_id:
+      type: string
+    participants:
+      type: array
+      minItems: 2
+      maxItems: 2
+      items:
+        $ref: "#/Participant"
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+GroupDetail:
+  oneOf:
+    - $ref: "#/CollaborationGroupDetail"
+    - $ref: "#/DirectMessageGroupDetail"
+  discriminator:
+    propertyName: kind
+    mapping:
+      normal: "#/CollaborationGroupDetail"
+      dm: "#/DirectMessageGroupDetail"
+
+GroupPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/GroupSummary"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+GroupPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/GroupPage"
+    request_id:
+      type: string
+
+GroupDetailEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/GroupDetail"
+    request_id:
+      type: string
+
+CreatedGroupDetailEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/GroupDetail"
+    request_id:
+      type: string
+
+DeleteResult:
+  type: object
+  additionalProperties: false
+  required:
+    - deleted
+  properties:
+    deleted:
+      type: boolean
+
+DeleteResultEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/DeleteResult"
+    request_id:
+      type: string
+
+# ---------------------------------------------------------------------------
+# Batch 2 resource models: Session, SessionParticipant, Invitation,
+# Friendship, and FriendRequest. They reuse Actor/ActorKind/Participant from
+# above and are V1-only projections; Legacy routing internals (mode,
+# sender_routes, dm_pair_key) are not leaked here.
+# ---------------------------------------------------------------------------
+
+ParticipantMode:
+  type: string
+  enum:
+    - auto
+    - muted
+    - present
+    - absent
+
+BotParticipantMode:
+  type: string
+  enum:
+    - auto
+    - muted
+
+SessionStatus:
+  type: string
+  enum:
+    - running
+    - completed
+
+SessionMessageKind:
+  type: string
+  enum:
+    - text
+    - system
+
+MessageSenderKind:
+  type: string
+  enum:
+    - bot
+    - human
+    - system
+
+SessionParticipant:
+  type: object
+  additionalProperties: false
+  required:
+    - actor_id
+    - actor_kind
+    - role
+    - mode
+  properties:
+    actor_id:
+      type: string
+    actor_kind:
+      $ref: "#/ActorKind"
+    name:
+      type: string
+    role:
+      type: string
+      enum:
+        - driver
+        - consultant
+        - manager
+        - worker
+        - observer
+    mode:
+      $ref: "#/ParticipantMode"
+    joined_at:
+      type: integer
+      minimum: 0
+
+SessionSummary:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - version
+    - group_id
+    - status
+    - created_at
+    - updated_at
+  properties:
+    session_id:
+      type: string
+    version:
+      type: integer
+    group_id:
+      type: string
+    status:
+      $ref: "#/SessionStatus"
+    title:
+      type: string
+    participant_count:
+      type: integer
+      minimum: 0
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+SessionDetail:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - version
+    - group_id
+    - status
+    - participants
+    - created_at
+    - updated_at
+  properties:
+    session_id:
+      type: string
+    version:
+      type: integer
+    group_id:
+      type: string
+    status:
+      $ref: "#/SessionStatus"
+    title:
+      type: string
+    input:
+      $ref: "#/SessionInput"
+    participants:
+      type: array
+      items:
+        $ref: "#/SessionParticipant"
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+SessionInput:
+  type: object
+  additionalProperties: false
+  description: >-
+    Optional task input for a session. If omitted on creation, the session
+    reuses the parent group's context as its task.
+  properties:
+    query:
+      type: string
+
+SessionPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/SessionSummary"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+SessionMessage:
+  type: object
+  additionalProperties: false
+  required:
+    - id
+    - session_seq
+    - sender_id
+    - sender_type
+    - kind
+    - content
+    - created_at
+  properties:
+    id:
+      type: string
+    session_seq:
+      type: integer
+      minimum: 0
+    sender_id:
+      type: string
+    sender_type:
+      $ref: "#/MessageSenderKind"
+    kind:
+      $ref: "#/SessionMessageKind"
+    content:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+
+SessionMessagePage:
+  type: object
+  additionalProperties: false
+  required:
+    - messages
+    - next_cursor
+    - has_more
+  properties:
+    messages:
+      type: array
+      items:
+        $ref: "#/SessionMessage"
+    next_cursor:
+      type: string
+      nullable: true
+      description: >-
+        Opaque composite cursor (`"created_at:session_seq"`) for the next
+        page. Present (non-null) only when has_more is true; pass it as the
+        `before` query param to fetch the next page. Null when there are no
+        more messages.
+    has_more:
+      type: boolean
+
+SessionCompletionResult:
+  type: object
+  additionalProperties: false
+  required:
+    - session_id
+    - status
+    - completed_at
+  properties:
+    session_id:
+      type: string
+    status:
+      type: string
+      enum:
+        - completed
+    completed_at:
+      type: integer
+      minimum: 0
+
+InvitationTargetType:
+  type: string
+  enum:
+    - group
+    - session
+
+InvitationState:
+  type: string
+  enum:
+    - pending
+    - accepted
+    - expired
+
+Invitation:
+  type: object
+  additionalProperties: false
+  required:
+    - token
+    - target_type
+    - target_id
+    - state
+    - created_at
+  properties:
+    token:
+      type: string
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    state:
+      $ref: "#/InvitationState"
+    expires_at:
+      type: integer
+      minimum: 0
+    created_at:
+      type: integer
+      minimum: 0
+
+InvitationAcceptResult:
+  type: object
+  additionalProperties: false
+  required:
+    - target_type
+    - target_id
+    - joined
+  properties:
+    target_type:
+      $ref: "#/InvitationTargetType"
+    target_id:
+      type: string
+    joined:
+      type: boolean
+    already_joined:
+      type: boolean
+      default: false
+
+FriendRequestStatus:
+  type: string
+  enum:
+    - pending
+    - accepted
+    - rejected
+
+FriendRequestDirection:
+  type: string
+  enum:
+    - sent
+    - received
+
+Friendship:
+  type: object
+  additionalProperties: false
+  required:
+    - bot_uuid
+    - friend_bot_uuid
+    - created_at
+  properties:
+    bot_uuid:
+      type: string
+    friend_bot_uuid:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+
+FriendshipPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/Friendship"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+FriendRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - request_id
+    - from_bot_uuid
+    - to_bot_uuid
+    - status
+    - created_at
+    - updated_at
+  properties:
+    request_id:
+      type: string
+    from_bot_uuid:
+      type: string
+    to_bot_uuid:
+      type: string
+    status:
+      $ref: "#/FriendRequestStatus"
+    message:
+      type: string
+    created_at:
+      type: integer
+      minimum: 0
+    updated_at:
+      type: integer
+      minimum: 0
+
+FriendRequestPage:
+  type: object
+  additionalProperties: false
+  required:
+    - items
+    - total
+    - offset
+    - limit
+  properties:
+    items:
+      type: array
+      items:
+        $ref: "#/FriendRequest"
+    total:
+      type: integer
+      minimum: 0
+    offset:
+      type: integer
+      minimum: 0
+    limit:
+      type: integer
+      minimum: 1
+
+# ---- Success envelopes for batch 2 resources ------------------------------
+
+SessionDetailEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionDetail"
+    request_id:
+      type: string
+
+CreatedSessionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/SessionDetail"
+    request_id:
+      type: string
+
+SessionPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionPage"
+    request_id:
+      type: string
+
+SessionMessagePageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionMessagePage"
+    request_id:
+      type: string
+
+SessionCompletionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionCompletionResult"
+    request_id:
+      type: string
+
+ParticipantEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/Participant"
+    request_id:
+      type: string
+
+SessionParticipantEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/SessionParticipant"
+    request_id:
+      type: string
+
+CreatedInvitationEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/Invitation"
+    request_id:
+      type: string
+
+InvitationAcceptanceEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/InvitationAcceptResult"
+    request_id:
+      type: string
+
+FriendshipPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendshipPage"
+    request_id:
+      type: string
+
+CreatedFriendRequestEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20100
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequest"
+    request_id:
+      type: string
+
+FriendRequestPageEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequestPage"
+    request_id:
+      type: string
+
+FriendRequestDecisionEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: "#/FriendRequest"
+    request_id:
+      type: string

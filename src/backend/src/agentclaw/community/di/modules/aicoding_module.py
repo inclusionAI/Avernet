@@ -14,11 +14,17 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.data_proxy_service import DataProxyServiceProtocol
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
 from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
+from agentclaw.community.api.aicoding.architect_rebind_service import (
+    ArchitectRebindServiceProtocol,
+)
 from agentclaw.community.core.aicoding.services.data_proxy_service import DataProxyService
 from agentclaw.community.core.aicoding.services.workspace_hosting_workitem_service import (
     WorkspaceHostingWorkItemService,
 )
 from agentclaw.community.core.aicoding.services.workspace_service import WorkspaceService
+from agentclaw.community.core.aicoding.services.architect_rebind_service import (
+    ArchitectRebindService,
+)
 
 
 class AICodingModule(Module):
@@ -37,6 +43,7 @@ class AICodingModule(Module):
             to=WorkspaceHostingWorkItemService,
             scope=singleton,
         )
+        binder.bind(ArchitectRebindService, to=ArchitectRebindService, scope=singleton)
 
     @singleton
     @provider
@@ -60,4 +67,12 @@ class AICodingModule(Module):
     def _workitem_service_protocol(
         self, svc: WorkspaceHostingWorkItemService
     ) -> WorkItemServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _architect_rebind_service_protocol(
+        self, svc: ArchitectRebindService
+    ) -> ArchitectRebindServiceProtocol:
         return svc

@@ -42,6 +42,47 @@ def test_limiter_ref_count():
     assert limiter.ref_count == 1
 
 
+# ----------------------- min_interval (亚单位并发) ----------------------
+
+
+def test_limiter_min_interval_blocks_immediate_reacquire():
+    """capacity=1 + min_interval: acquire 后立即再 acquire 应被拒绝。"""
+    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=10.0)
+    assert limiter.try_acquire() is True
+    limiter.release()  # 槽位归还，但间隔未过
+    assert limiter.has_slot() is False
+    assert limiter.try_acquire() is False
+
+
+def test_limiter_min_interval_allows_after_interval():
+    """间隔过后可以再次 acquire。"""
+    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=0.05)
+    assert limiter.try_acquire() is True
+    limiter.release()
+    assert limiter.has_slot() is False
+    time.sleep(0.06)
+    assert limiter.has_slot() is True
+    assert limiter.try_acquire() is True
+
+
+def test_limiter_min_interval_zero_behaves_like_normal():
+    """min_interval=0 时行为与原来一致，不受间隔限制。"""
+    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=0.0)
+    assert limiter.try_acquire() is True
+    limiter.release()
+    # 间隔为 0，立即可以再次获取
+    assert limiter.has_slot() is True
+    assert limiter.try_acquire() is True
+
+
+def test_limiter_min_interval_capacity_exhausted_first():
+    """capacity 用尽时 has_slot 先返回 False（槽位检查优先于间隔检查）。"""
+    limiter = ConcurrencyLimiter(capacity=1, min_interval_seconds=10.0)
+    assert limiter.try_acquire() is True
+    # capacity 用尽，has_slot 返回 False（不会走到间隔检查）
+    assert limiter.has_slot() is False
+
+
 # ----------------------- FixedMachineCountProvider ----------------------
 
 

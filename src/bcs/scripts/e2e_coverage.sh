@@ -39,6 +39,10 @@ bcs_port="${BCS_PORT:-21000}"
 compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
 line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
 method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
+# The coverage runner is a local test launcher, so explicitly provide the same
+# non-production Principal key to both the BCS child and the E2E client.
+export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"
+source "$bcs_dir/scripts/e2e-test/mock_services.sh"
 
 skip_start=0
 no_stop=0
@@ -87,8 +91,12 @@ cleanup_bcs() {
   pids=$(lsof -tiTCP:"$bcs_port" -sTCP:LISTEN 2>/dev/null || true)
   [[ -n "$pids" ]] && echo "$pids" | xargs kill -TERM 2>/dev/null || true
 }
+cleanup_e2e() {
+  cleanup_bcs
+  bcs_e2e_mock_stop
+}
 if [[ "$no_stop" -eq 0 ]]; then
-  trap cleanup_bcs EXIT
+  trap cleanup_e2e EXIT
 fi
 
 # The 5 bot ports, matching the BOT1..BOT5_PORT defaults in scripts/modules/bcs.sh.
@@ -137,6 +145,7 @@ preflight_reclaim_ports() {
 #    no frontend (e2e needs none).
 if [[ "$skip_start" -eq 0 ]]; then
   preflight_reclaim_ports
+  bcs_e2e_mock_start "$cov_dir/mock-services"
   # Export LLVM_PROFILE_FILE BEFORE singlebox starts the instrumented bcs server
   # (and bcs-cli). prepare_bcs_coverage_bin sets it too, but only inside
   # singlebox's process; the bcs server it launches inherits this one. Without
@@ -163,6 +172,8 @@ if [[ "$skip_start" -eq 0 ]]; then
   # bot-onboarding setup requests nor a stale log from a prior run.
   bcs_log="$repo_root/scripts/.dependencies/logs/bcs.log"
   "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcs_bots
+elif [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
+  bcs_e2e_mock_start "$cov_dir/mock-services"
 fi
 
 # Re-export the instrumented binary paths for the e2e.sh child process.

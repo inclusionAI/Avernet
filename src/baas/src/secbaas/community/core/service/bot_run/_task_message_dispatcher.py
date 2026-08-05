@@ -62,7 +62,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
@@ -96,7 +96,7 @@ class TaskMessageDispatcher:
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
     ) -> AsyncIterator[StreamChunk]:
         """流式直传：直接 yield bot_service.send_message_stream 的 chunk。
@@ -141,7 +141,7 @@ class TaskMessageDispatcher:
                 # 客户端断连（GeneratorExit）时检查 run 是否已终结，
                 # 未终结则标记为 error
                 run = self._run_repository.get_by_run_id(run_id)
-                if run and run.status not in ("COMPLETED", "FAILED", "TIMEOUT"):
+                if run and run.status not in ("COMPLETED", "FAILED", "TIME_OUT"):
                     self._run_repository.update_error(
                         run_id=run_id,
                         error="stream interrupted",
@@ -195,7 +195,7 @@ class TaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float,
         bot_id: str = "",
         chat_metadata: dict[str, str] | None = None,
     ) -> None:
@@ -217,7 +217,7 @@ class TaskMessageDispatcher:
                     binding_info=binding_info,
                     wait_result=wait_result,
                     context=context,
-                    timeout=timeout,
+                    timeout=max(timeout - 0.2, 0.1),
                     chat_metadata=chat_metadata,
                 )
 
@@ -243,7 +243,7 @@ class TaskMessageDispatcher:
                 await _do_send()
 
         except TimeoutError:
-            self._run_repository.update_error(
+            self._run_repository.update_timeout(
                 run_id=run_id,
                 error="Task execution timeout",
             )

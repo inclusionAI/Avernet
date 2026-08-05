@@ -41,6 +41,8 @@ files. Use environment variables or the session file instead.
 ```bash
 # Discover bots
 bcs-cli --url "$BCS_API_BASE_URL" discover --query "database"
+bcs-cli --url "$BCS_API_BASE_URL" discover --query "deployment" \
+  --skill "code_review" --skill "sql"
 
 # Ask for group help
 bcs-cli --url "$BCS_API_BASE_URL" request-group-help --topic "Investigate a production issue"
@@ -51,11 +53,20 @@ bcs-cli --url "$BCS_API_BASE_URL" create-group \
   --participants "bot-dba,bot-security" \
   --topic "Incident analysis"
 
+# Create a manager-worker group; all participants are assigned the worker role
+bcs-cli --url "$BCS_API_BASE_URL" create-group \
+  --manager "bot-manager" \
+  --participants "bot-worker-1,bot-worker-2" \
+  --topic "Parallel implementation"
+
 # Send a direct message to a bot
 bcs-cli --url "$BCS_API_BASE_URL" chat \
   --bot-uuid "bot-dba" \
   --message "Please inspect the migration plan."
 ```
+
+`discover --skill` is repeatable. Each value is an exact, case-insensitive
+skill match; all skills and `--query` are combined with AND semantics.
 
 ## References
 

@@ -15,8 +15,10 @@ import pytest
 
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
+    BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
+    DefaultBotTeclawNotAllowedError,
     DeviceLimitError,
     validate_bot_name,
 )
@@ -41,6 +43,11 @@ def _make_service(max_bots: int = 5, current_bots: int = 0, policy_service=None)
     svc._cleanup_service = MagicMock()
     svc._bcn_service = MagicMock()
     svc._bot_publish_repo = MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: (
+        (engine or "").strip().lower() == "teclaw"
+    )
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     svc._policy_service = policy_service
     return svc
 
@@ -187,30 +194,63 @@ class TestCreateBotValidation:
     def test_preflight_uses_count_limit(self):
         svc = _make_service(max_bots=3, current_bots=3)
         with pytest.raises(BotLimitExceededError):
-            svc.check_create_bot_preflight("u1")
+            svc.check_create_bot_preflight("u1", "bot001", "openclaw")
+
+    def test_preflight_rejects_teclaw_for_default_bot(self):
+        svc = _make_service()
+
+        with pytest.raises(
+            DefaultBotTeclawNotAllowedError,
+            match="Teclaw Cloud Bot 不能作为 Default Bot，请先创建其他类型的 Bot。",
+        ):
+            svc.check_create_bot_preflight("u1", "default", "teclaw")
+
+    @pytest.mark.parametrize(
+        ("bot_id", "engine_type"),
+        [("default", "openclaw"), ("bot001", "teclaw")],
+    )
+    def test_preflight_allows_non_conflicting_bot_engine_pairs(
+        self, bot_id, engine_type
+    ):
+        svc = _make_service()
+
+        svc.check_create_bot_preflight("u1", bot_id, engine_type)
+
+    def test_create_bot_rejects_default_teclaw_before_persistence(self):
+        svc = _make_service()
+
+        with pytest.raises(DefaultBotTeclawNotAllowedError):
+            svc.create_bot(
+                user_id="u1",
+                nick_name="U1",
+                bot_id="default",
+                engine_type="teclaw",
+            )
+
+        svc._repository.create.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# _get_bots_ceiling_for_owner: policy 优先于 config
+# get_bots_ceiling_for_owner: policy 优先于 config
 # ---------------------------------------------------------------------------
 
 
 class TestGetBotsCeilingForOwner:
     def test_no_policy_service_falls_back_to_config(self):
         svc = _make_service(max_bots=3, policy_service=None)
-        assert svc._get_bots_ceiling_for_owner("u1") == 3
+        assert svc.get_bots_ceiling_for_owner("u1") == 3
 
     def test_policy_service_returns_ceiling(self):
         ps = MagicMock()
         ps.get_bots_ceiling.return_value = 10
         svc = _make_service(max_bots=5, policy_service=ps)
-        assert svc._get_bots_ceiling_for_owner("u1") == 10
+        assert svc.get_bots_ceiling_for_owner("u1") == 10
 
     def test_policy_service_exception_falls_back_to_config(self):
         ps = MagicMock()
         ps.get_bots_ceiling.side_effect = Exception("db error")
         svc = _make_service(max_bots=5, policy_service=ps)
-        assert svc._get_bots_ceiling_for_owner("u1") == 5
+        assert svc.get_bots_ceiling_for_owner("u1") == 5
 
 
 class TestCheckBotCountLimitWithPolicy:
@@ -289,6 +329,21 @@ class TestCheckDeviceLimitUsesCeiling:
         with pytest.raises(DeviceLimitError):
             svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
 
+    def test_stopped_binding_counts_toward_device_limit(self):
+        """STOPPED bindings remain restartable, so they still consume a device slot."""
+        ps = MagicMock()
+        ps.get_bots_ceiling.return_value = 1
+        svc = _make_service(max_bots=5, policy_service=ps)
+        svc._repository.list_by_owner.return_value = (1, [_bound_bot(0)])
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            status=DeviceBindingStatus.STOPPED.value,
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with pytest.raises(DeviceLimitError):
+            svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
+
     def test_device_limit_skipped_when_ceiling_non_positive(self):
         """ceiling<=0（config 无效）→ 提前放行，不因 >=0 恒真拦住第一个 bot"""
         ps = MagicMock()
@@ -299,3 +354,140 @@ class TestCheckDeviceLimitUsesCeiling:
         svc._device_service_provider = lambda: _make_device_service(active_count=3)
         # must not raise despite active devices present
         svc._check_device_limit(entity_id="u1", entity_type="staff", owner_id="u1")
+
+
+# ---------------------------------------------------------------------------
+# create_bot persists the CONFIGURED engine set, not the static list (R11/F44)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBotPersistsConfiguredEngines:
+    """A bot's enabled-engine list must be able to contain its own engine.
+
+    ``create_bot`` used to persist the static ``SUPPORTED_ENGINE_TYPES`` while
+    validation and ``switch_engine`` both consult ``_get_engine_types()`` (the
+    ``ENGINE_TYPES`` env). On a deployment that enables ``teclaw``, a teclaw bot
+    was stored with an ``engine_types`` list omitting teclaw — so switching away
+    and back was permanently rejected by ``switch_engine``'s per-bot check.
+    """
+
+    def test_active_engine_is_always_in_its_own_enabled_list(self, monkeypatch):
+        """R15/F50: never persist a row whose active engine is not in its list.
+
+        ``switch_engine`` validates against the bot's persisted ``engine_types``,
+        so a row violating this can never return to the engine it was created
+        on. The invariant held by accident while the static list was persisted
+        (it contains ``DEFAULT_ENGINE_TYPE``); persisting the configured
+        registry broke it wherever the two differ.
+        """
+        monkeypatch.setenv("ENGINE_TYPES", "teclaw")
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+
+        try:
+            # No engine_type → defaults to openclaw, which this registry omits.
+            svc.create_bot(user_id="u1", nick_name="u1", bot_name="Bot", bot_id="b1")
+        except Exception:
+            pass  # downstream provisioning is mocked; persistence is the subject
+
+        assert svc._repository.insert.called, "create never reached persistence"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert persisted["active_engine"] in persisted["engine_types"], persisted
+
+    def test_a_supported_engine_outside_the_registry_still_creates(self, monkeypatch):
+        """teclaw is absent from the default registry yet is a real engine.
+
+        Rejecting an engine missing from the registry would break teclaw
+        creation on every deployment that does not set ENGINE_TYPES — so the
+        invariant is preserved by widening the persisted list, not by refusing.
+        """
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+
+        try:
+            svc.create_bot(
+                user_id="u1", nick_name="u1", bot_name="Bot",
+                engine_type="teclaw", bot_id="b1",
+            )
+        except Exception:
+            pass
+
+        assert svc._repository.insert.called, "teclaw creation was rejected"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
+        assert persisted["active_engine"] == "teclaw"
+
+    def test_engine_types_come_from_the_configured_registry(self, monkeypatch):
+        monkeypatch.setenv("ENGINE_TYPES", "openclaw,teclaw")
+        from agentclaw.community.core.workspace.constants import _get_engine_types
+
+        assert "teclaw" in _get_engine_types()
+
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.insert.return_value = {"id": 1, "bot_id": "b1", "ext": {}}
+        # No existing row and the name is free — otherwise create_bot returns
+        # or raises before reaching persistence.
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        try:
+            svc.create_bot(
+                user_id="u1", nick_name="u1", bot_name="Bot",
+                engine_type="teclaw", bot_id="b1",
+            )
+        except Exception:
+            # Downstream provisioning is mocked out; the persisted payload is
+            # what this test is about, and insert() is reached before it.
+            pass
+
+        assert svc._repository.insert.called, "create never reached persistence"
+        persisted = svc._repository.insert.call_args[0][0]
+        assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
+        # The active engine is always in its own enabled list — the invariant
+        # switch_engine depends on.
+        assert persisted["active_engine"] in persisted["engine_types"]
+
+
+# ---------------------------------------------------------------------------
+# preflight rejects a taken name BEFORE Passport is applied for (R13/F48)
+# ---------------------------------------------------------------------------
+
+
+class TestPreflightChecksNameUniqueness:
+    """A duplicate name must not cost an external Passport identity.
+
+    ``create_bot`` rejects the duplicate, but only after the Passport
+    application has happened — leaving an identity behind with no bot, and
+    repeating that side effect on every retry. The preflight hook exists
+    precisely for checks that can run before authorization.
+    """
+
+    def test_taken_name_is_rejected_in_preflight(self):
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_bot_name.return_value = {"id": 9, "bot_id": "other"}
+
+        with pytest.raises(BotNameExistsError):
+            svc.check_create_bot_preflight("u1", bot_name="Taken")
+
+    def test_free_name_passes_preflight(self):
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc._repository.get_by_bot_name.return_value = None
+
+        svc.check_create_bot_preflight("u1", bot_name="Free")
+
+    def test_preflight_without_a_name_is_unchanged(self):
+        """The name is optional — callers that don't know it yet still work."""
+        svc = _make_service(max_bots=10, current_bots=0)
+        svc.check_create_bot_preflight("u1")
+        svc._repository.get_by_bot_name.assert_not_called()
+
+    def test_count_limit_still_takes_precedence(self):
+        """A quota failure is still reported even when the name is free."""
+        svc = _make_service(max_bots=1, current_bots=1)
+        svc._repository.get_by_bot_name.return_value = None
+
+        with pytest.raises(BotLimitExceededError):
+            svc.check_create_bot_preflight("u1", bot_name="Free")

@@ -7,10 +7,30 @@ the adapter (or a local plugin) in the ACL split, and the community port only
 owns the relay RPC shape. Returning the raw ``{success, payload|error}`` /
 dict / list / bool shapes the adapter consumes.
 """
+
 from __future__ import annotations
 
+import asyncio
 import logging
+from pathlib import Path
 from typing import Any
+
+from engine.community.core.skills.layout_planner import (
+    MAPPING_CONTRACT_VERSION,
+)
+from engine.community.plugins.claude_code.layout_pool import (
+    MappingSourceLayout,
+    activate_claude_code_pool,
+    inspect_claude_code_runtime_layout,
+    publish_claude_code_pool_mappings,
+    rollback_claude_code_pool,
+    verify_claude_code_pool_mappings,
+)
+from engine.community.plugins.skills_pool.layout_quarantine import cleanup_quarantine
+from engine.community.plugins.skills_pool.mapping_contract import (
+    ResolvedMappingPayload,
+    resolve_mapping_payload,
+)
 
 log = logging.getLogger("claude-code-community-port")
 
@@ -19,9 +39,13 @@ def _resp_dict(resp: Any) -> dict[str, Any]:
     if resp.ok:
         return {"success": True, "payload": resp.payload or {}}
     err = resp.error
-    return {"success": False,
-            "error": {"code": err.code if err else "UNKNOWN",
-                      "message": err.message if err else "Unknown error"}}
+    return {
+        "success": False,
+        "error": {
+            "code": err.code if err else "UNKNOWN",
+            "message": err.message if err else "Unknown error",
+        },
+    }
 
 
 class _SkillsPortMixin:
@@ -29,85 +53,237 @@ class _SkillsPortMixin:
     execute,validate,discover,sync_symlinks,sync_bindpaths,clean_symlinks,
     ensure_center}."""
 
+    @staticmethod
+    def _pool_mappings(
+        params: dict[str, Any],
+        *,
+        source_layout: MappingSourceLayout,
+        key: str = "mappings",
+    ) -> ResolvedMappingPayload:
+        return resolve_mapping_payload(
+            engine="claude_code",
+            source_layout=source_layout,
+            payload=params.get(key, []),
+            mapping_contract_version=params.get("mapping_contract_version"),
+        )
+
+    async def activate_pool_layout(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            activate_claude_code_pool,
+            migration_generation=params["migration_generation"],
+            preparation_id=params["preparation_id"],
+            registered_local_names=list(params.get("registered_local_names", [])),
+            mappings=list(
+                self._pool_mappings(
+                    params,
+                    source_layout=MappingSourceLayout.POOL,
+                ).mappings
+            ),
+        )
+        return result.to_data()
+
+    async def rollback_pool_layout(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            rollback_claude_code_pool,
+            rollback_generation=params["rollback_generation"],
+            registered_local_names=list(params.get("registered_local_names", [])),
+        )
+        return result.to_data()
+
+    async def cleanup_pool_quarantine(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            cleanup_quarantine,
+            engine="claude_code",
+            home=Path("/home/admin"),
+            migration_generation=params["migration_generation"],
+        )
+        return result.to_data()
+
+    async def probe_pool_layout(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(
+            inspect_claude_code_runtime_layout,
+            expected_contract_version=params["layout_contract_version"],
+            mapping_contract_version=MAPPING_CONTRACT_VERSION,
+        )
+        return result.to_data()
+
+    async def publish_pool_mappings(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
+        retired = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            key="retired_mappings",
+        )
+        publish_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            publish_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            publish_claude_code_pool_mappings,
+            **publish_kwargs,
+        )
+        data = result.to_data()
+        if result.published and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
+        return data
+
+    async def verify_pool_mappings(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        resolved = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get(
+                    "source_layout",
+                    MappingSourceLayout.POOL.value,
+                )
+            ),
+        )
+        retired = self._pool_mappings(
+            params,
+            source_layout=MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+            key="retired_mappings",
+        )
+        verify_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            verify_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            verify_claude_code_pool_mappings,
+            **verify_kwargs,
+        )
+        data = result.to_data()
+        if result.valid and resolved.resolved_locators:
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
+        return data
+
     async def skills_list(self, token: str | None = None) -> list[dict]:
         resp = await (await self._relay()).send_request("skills.list", {})
         if not resp.ok:
             return []
         payload = resp.payload or {}
         skills = payload.get("skills", []) if isinstance(payload, dict) else payload
-        return [s for s in skills if isinstance(s, dict)] if isinstance(skills, list) else []
+        return (
+            [s for s in skills if isinstance(s, dict)]
+            if isinstance(skills, list)
+            else []
+        )
 
-    async def skills_get(self, skill_id: str,
-                         token: str | None = None) -> dict | None:
+    async def skills_get(self, skill_id: str, token: str | None = None) -> dict | None:
         resp = await (await self._relay()).send_request(
-            "skills.get", {"skillId": skill_id})
+            "skills.get", {"skillId": skill_id}
+        )
         if not resp.ok or not resp.payload:
             return None
         return resp.payload if isinstance(resp.payload, dict) else None
 
-    async def skills_install(self, config: dict,
-                             token: str | None = None) -> dict:
+    async def skills_install(self, config: dict, token: str | None = None) -> dict:
         resp = await (await self._relay()).send_request("skills.install", config)
         if not resp.ok:
             raise RuntimeError(
                 f"skills.install failed: "
-                f"{resp.error.message if resp.error else 'unknown'}")
+                f"{resp.error.message if resp.error else 'unknown'}"
+            )
         return resp.payload if isinstance(resp.payload, dict) else config
 
-    async def skills_uninstall(self, skill_id: str,
-                               token: str | None = None) -> bool:
+    async def skills_uninstall(self, skill_id: str, token: str | None = None) -> bool:
         resp = await (await self._relay()).send_request(
-            "skills.uninstall", {"skillId": skill_id})
+            "skills.uninstall", {"skillId": skill_id}
+        )
         if not resp.ok:
             return False
         payload = resp.payload
         return bool(payload.get("removed") if isinstance(payload, dict) else True)
 
-    async def skills_update(self, skill_id: str, patch: dict,
-                            token: str | None = None) -> dict:
+    async def skills_update(
+        self, skill_id: str, patch: dict, token: str | None = None
+    ) -> dict:
         params = dict(patch)
         params["skillId"] = skill_id
         resp = await (await self._relay()).send_request("skills.update", params)
         if not resp.ok:
             raise RuntimeError(
                 f"skills.update failed: "
-                f"{resp.error.message if resp.error else 'unknown'}")
+                f"{resp.error.message if resp.error else 'unknown'}"
+            )
         return resp.payload if isinstance(resp.payload, dict) else params
 
-    async def skills_enable(self, skill_id: str,
-                            token: str | None = None) -> bool:
+    async def skills_enable(self, skill_id: str, token: str | None = None) -> bool:
         resp = await (await self._relay()).send_request(
-            "skills.update", {"skillId": skill_id, "enabled": True})
+            "skills.update", {"skillId": skill_id, "enabled": True}
+        )
         return bool(resp.ok)
 
-    async def skills_disable(self, skill_id: str,
-                             token: str | None = None) -> bool:
+    async def skills_disable(self, skill_id: str, token: str | None = None) -> bool:
         resp = await (await self._relay()).send_request(
-            "skills.update", {"skillId": skill_id, "enabled": False})
+            "skills.update", {"skillId": skill_id, "enabled": False}
+        )
         return bool(resp.ok)
 
-    async def skills_execute(self, skill_id: str, args: dict | None = None,
-                             token: str | None = None) -> dict:
+    async def skills_execute(
+        self, skill_id: str, args: dict | None = None, token: str | None = None
+    ) -> dict:
         params: dict[str, Any] = {"skillId": skill_id, "args": args or {}}
         resp = await (await self._relay()).send_request("skills.execute", params)
         return _resp_dict(resp)
 
-    async def skills_validate(self, config: dict,
-                              token: str | None = None) -> dict:
+    async def skills_validate(self, config: dict, token: str | None = None) -> dict:
         resp = await (await self._relay()).send_request("skills.validate", config)
         if resp.ok:
             return resp.payload if isinstance(resp.payload, dict) else {}
         return _resp_dict(resp)
 
-    async def skills_discover(self, source: str,
-                              token: str | None = None) -> list[dict]:
+    async def skills_discover(
+        self, source: str, token: str | None = None
+    ) -> list[dict]:
         resp = await (await self._relay()).send_request(
-            "skills.discover", {"source": source})
+            "skills.discover", {"source": source}
+        )
         if not resp.ok:
             return []
         payload = resp.payload or {}
         skills = payload.get("skills", []) if isinstance(payload, dict) else payload
-        return [s for s in skills if isinstance(s, dict)] if isinstance(skills, list) else []
+        return (
+            [s for s in skills if isinstance(s, dict)]
+            if isinstance(skills, list)
+            else []
+        )
 
     async def _skills_passthrough(self, method: str, params: dict[str, Any]) -> dict:
         resp = await (await self._relay()).send_request(method, params)

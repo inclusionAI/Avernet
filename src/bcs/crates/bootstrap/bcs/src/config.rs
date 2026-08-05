@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export storage config contract types for convenience.
 pub use bcs_config_api::{
-    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, MistConfig, RedisCacheConfig,
+    BcsFuseConfig, CacheConfig, DatabaseConfig, DatabaseType, RedisCacheConfig,
 };
 
 // Re-export config contract types from bcs-config-api.
@@ -18,7 +18,7 @@ pub use bcs_config_api::{
 pub use bcs_config_api::{
     AuthChainConfig, AuthSdkConfig, ChannelConfigSection, DingTalkAccountConfig,
     FusionProviderConfig, LlmConfig, LlmProviderType, LogOutputConfig, LogOutputFormat,
-    LoggingConfig, ManifestConfig, LeaderElectionConfig, StructuredOutputMode, SecurityConfig,
+    LoggingConfig, ManifestConfig, LeaderElectionConfig, SecretConfig, StructuredOutputMode, SecurityConfig,
     UserDirectoryConfig, UserDirectoryProviderConfig,
     deserialize_optional_secret, serialize_optional_secret,
 };
@@ -47,11 +47,154 @@ fn default_invite_ttl_seconds() -> u64 {
     86400
 }
 
+/// Session file workspace configuration (Task 11 bootstrap wiring).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFilesConfig {
+    /// Storage backend tag. `"local"` selects `bcs_storage_local::LocalStoragePlugin`.
+    /// Other backends are linked into the binary by future plugin registration.
+    #[serde(default = "default_session_files_storage_backend")]
+    pub storage_backend: String,
+
+    /// Object size at or above which uploads switch from single-PUT to multipart.
+    #[serde(default = "default_session_files_multipart_threshold")]
+    pub multipart_threshold: u64,
+
+    /// Hard cap on a single object's size in bytes; intersected with the
+    /// backend's `capabilities().max_object_size` at service construction.
+    #[serde(default = "default_session_files_max_file_size")]
+    pub max_file_size: u64,
+
+    /// In-session + share download share-link TTL (baas expire_seconds), seconds.
+    #[serde(default = "default_session_files_share_link_ttl")]
+    pub share_link_ttl: u64,
+
+    /// Share-token configuration — independent of `invite.token_secret`
+    /// so rotating one does not invalidate the other's outstanding tokens.
+    #[serde(default)]
+    pub share: SessionFilesShareConfig,
+
+    /// Backend-specific config pass-through (local: data_dir; baas: endpoint/tenant/...).
+    #[serde(default)]
+    pub backend: toml::Table,
+}
+
+impl Default for SessionFilesConfig {
+    fn default() -> Self {
+        Self {
+            storage_backend: default_session_files_storage_backend(),
+            multipart_threshold: default_session_files_multipart_threshold(),
+            max_file_size: default_session_files_max_file_size(),
+            share_link_ttl: default_session_files_share_link_ttl(),
+            share: SessionFilesShareConfig::default(),
+            backend: toml::Table::new(),
+        }
+    }
+}
+
+fn default_session_files_storage_backend() -> String {
+    "local".to_string()
+}
+
+fn default_session_files_multipart_threshold() -> u64 {
+    104_857_600
+}
+
+fn default_session_files_max_file_size() -> u64 {
+    5_368_709_120
+}
+
+fn default_session_files_share_link_ttl() -> u64 {
+    3600
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SessionFilesShareConfig {
+    /// HMAC secret for share-token mint/consume. If unset, bootstrap logs a
+    /// warning and generates a random 32-byte secret that does NOT survive
+    /// restart — production deployments must set this explicitly.
+    #[serde(default)]
+    pub token_secret: Option<String>,
+
+    /// Default share-token TTL in seconds. Clamped to `[60, 604800]` at mint.
+    #[serde(default = "default_session_files_share_ttl")]
+    pub default_ttl_seconds: u64,
+
+    /// Public base URL used to construct share links. When None, falls back
+    /// to `bcs_endpoint` or `http://{bind}:{port}` in the service layer.
+    #[serde(default)]
+    pub share_base_url: Option<String>,
+}
+
+fn default_session_files_share_ttl() -> u64 {
+    86400
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct CorsConfig {
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TelemetryConfig {
+    #[serde(default = "default_telemetry_enabled")]
+    pub enabled: bool,
+
+    #[serde(default = "default_telemetry_service_name")]
+    pub service_name: String,
+
+    #[serde(default)]
+    pub otlp_traces_endpoint: Option<String>,
+
+    #[serde(default)]
+    pub extra_headers: BTreeMap<String, String>,
+}
+
+impl Default for TelemetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_telemetry_enabled(),
+            service_name: default_telemetry_service_name(),
+            otlp_traces_endpoint: None,
+            extra_headers: BTreeMap::new(),
+        }
+    }
+}
+
+impl TelemetryConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.service_name.trim().is_empty() {
+            return Err("telemetry.service_name must not be empty".to_string());
+        }
+        if let Some(endpoint) = self.otlp_traces_endpoint.as_deref() {
+            let endpoint = reqwest::Url::parse(endpoint)
+                .map_err(|error| format!("telemetry.otlp_traces_endpoint is invalid: {error}"))?;
+            if !matches!(endpoint.scheme(), "http" | "https") {
+                return Err(
+                    "telemetry.otlp_traces_endpoint must use http or https".to_string(),
+                );
+            }
+        }
+        for (name, value) in &self.extra_headers {
+            axum::http::HeaderName::try_from(name.as_str()).map_err(|_| {
+                format!("telemetry.extra_headers contains invalid header name '{name}'")
+            })?;
+            axum::http::HeaderValue::try_from(value.as_str()).map_err(|_| {
+                format!("telemetry.extra_headers contains an invalid value for '{name}'")
+            })?;
+        }
+        Ok(())
+    }
+}
+
+fn default_telemetry_enabled() -> bool {
+    true
+}
+
+fn default_telemetry_service_name() -> String {
+    "bcn".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +256,113 @@ fn default_collaboration_templates_default_language() -> String {
     "zh-CN".to_string()
 }
 
+/// Gateway Principal verification trust and signing-key lookup configuration.
+///
+/// The signing key itself is intentionally not configuration: bootstrap resolves
+/// it from `signing_key_secret` through the configured SecretAccessPort, or
+/// falls back to `signing_key_env` at process startup for compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GatewayPrincipalConfig {
+    #[serde(default = "default_gateway_principal_issuer")]
+    pub issuer: String,
+
+    #[serde(default = "default_gateway_principal_audience")]
+    pub audience: String,
+
+    #[serde(default = "default_gateway_principal_key_id")]
+    pub key_id: String,
+
+    #[serde(default = "default_gateway_principal_signing_key_env")]
+    pub signing_key_env: String,
+
+    #[serde(default)]
+    pub signing_key_secret: Option<String>,
+}
+
+impl Default for GatewayPrincipalConfig {
+    fn default() -> Self {
+        Self {
+            issuer: default_gateway_principal_issuer(),
+            audience: default_gateway_principal_audience(),
+            key_id: default_gateway_principal_key_id(),
+            signing_key_env: default_gateway_principal_signing_key_env(),
+            signing_key_secret: None,
+        }
+    }
+}
+
+impl GatewayPrincipalConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for (field, value) in [
+            ("issuer", &self.issuer),
+            ("audience", &self.audience),
+            ("key_id", &self.key_id),
+            ("signing_key_env", &self.signing_key_env),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("gateway_principal.{field} must not be blank"));
+            }
+        }
+        if self
+            .signing_key_secret
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err("gateway_principal.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_gateway_principal_issuer() -> String {
+    "gateway".to_string()
+}
+
+fn default_gateway_principal_audience() -> String {
+    "bcs".to_string()
+}
+
+fn default_gateway_principal_key_id() -> String {
+    "bare".to_string()
+}
+
+fn default_gateway_principal_signing_key_env() -> String {
+    "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
+}
+
+/// Group-session WebSocket JWT signing-key lookup configuration.
+///
+/// The signing key material is resolved through the configured SecretAccessPort
+/// using `signing_key_secret` as the logical secret name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSessionWsConfig {
+    #[serde(default = "default_group_session_ws_signing_key_secret")]
+    pub signing_key_secret: String,
+}
+
+impl Default for GroupSessionWsConfig {
+    fn default() -> Self {
+        Self {
+            signing_key_secret: default_group_session_ws_signing_key_secret(),
+        }
+    }
+}
+
+impl GroupSessionWsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.signing_key_secret.trim().is_empty() {
+            return Err("group_session_ws.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_group_session_ws_signing_key_secret() -> String {
+    "bcn-group-session-ws-jwt".to_string()
+}
+
 /// BCS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -161,6 +411,14 @@ pub struct BcsConfig {
     )]
     pub auth_token: Option<Secret<String>>,
 
+    /// Gateway-signed Principal verification trust configuration.
+    #[serde(default)]
+    pub gateway_principal: GatewayPrincipalConfig,
+
+    /// Group-session WebSocket JWT signing-key lookup configuration.
+    #[serde(default)]
+    pub group_session_ws: GroupSessionWsConfig,
+
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
     #[serde(default)]
@@ -174,13 +432,12 @@ pub struct BcsConfig {
     #[serde(default)]
     pub database: DatabaseConfig,
 
-    /// Mist (secret management) configuration. Disabled by default; when
-    /// enabled the BCS process talks to the configured local secret sidecar to
-    /// fetch secrets via the SecretService/SecretAccessPort stack. Use the
-    /// `GET /admin/secret/:name` route for end-to-end verification on dev
-    /// machines.
+    /// Provider-neutral secret backend selector.
+    ///
+    /// Defaults to `noop` for public/local builds. Product binaries can select
+    /// additional providers registered by linked crates.
     #[serde(default)]
-    pub mist: MistConfig,
+    pub secret: SecretConfig,
 
     /// Channel(IM bridge) configuration.
     #[serde(default)]
@@ -258,6 +515,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub logging: LoggingConfig,
 
+    /// OpenTelemetry trace export configuration.
+    #[serde(default)]
+    pub telemetry: TelemetryConfig,
+
     /// bcsfuse integration configuration.
     /// When enabled, fusion is delegated to bcsfuse (Python service) via HTTP.
     #[serde(default)]
@@ -292,7 +553,7 @@ pub struct BcsConfig {
 
     /// Async chat run (bcs-cli chat-async) — max wall-clock a single run may
     /// be pending/running before the cleanup task marks it failed("timeout").
-    /// Default 30 min, configurable up to 24 h.
+    /// Default 2 h 5 min, configurable up to 24 h.
     #[serde(default = "default_async_chat_run_timeout_ms")]
     pub async_chat_run_timeout_ms: u64,
 
@@ -342,6 +603,10 @@ pub struct BcsConfig {
     /// Invite link configuration for Human actor self-join.
     #[serde(default)]
     pub invite: InviteConfig,
+
+    /// Session file workspace configuration (uploads, downloads, share tokens).
+    #[serde(default)]
+    pub session_files: SessionFilesConfig,
 
     /// Provider IDs allowed to call the switch-bot-delivery endpoint.
     /// Empty list means no provider can switch bot delivery.
@@ -404,7 +669,7 @@ fn default_register_path() -> String {
 }
 
 fn default_async_chat_run_timeout_ms() -> u64 {
-    30 * 60 * 1_000
+    (2 * 60 + 5) * 60 * 1_000
 }
 
 fn default_async_chat_run_retention_ms() -> u64 {
@@ -590,10 +855,12 @@ impl Default for BcsConfig {
             store_messages: false,
             dingtalk_accounts: Vec::new(),
             auth_token: None,
+            gateway_principal: GatewayPrincipalConfig::default(),
+            group_session_ws: GroupSessionWsConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
-            mist: MistConfig::default(),
+            secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
@@ -610,6 +877,7 @@ impl Default for BcsConfig {
             manifest: ManifestConfig::default(),
             onboard_binding_enabled: false,
             logging: LoggingConfig::default(),
+            telemetry: TelemetryConfig::default(),
             bcsfuse: BcsFuseConfig::default(),
             auth_sdk: AuthSdkConfig::default(),
             user_directory: UserDirectoryConfig::default(),
@@ -626,6 +894,7 @@ impl Default for BcsConfig {
             api_keys: Vec::new(),
             metrics: MetricsConfig::default(),
             invite: InviteConfig::default(),
+            session_files: SessionFilesConfig::default(),
             allowed_switch_provider_ids: Vec::new(),
             provider_stream_gray_enabled: default_provider_stream_gray_enabled(),
             provider_stream_gray_created_by: Vec::new(),
@@ -1010,6 +1279,18 @@ impl BcsConfig {
 }
 
 fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::Error>> {
+    config.gateway_principal.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
+    config.group_session_ws.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
+    config.telemetry.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.validate_metrics().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
@@ -1055,8 +1336,51 @@ mod tests {
         assert_eq!(config.bots_base_dir, PathBuf::from("/bots"));
         assert!(config.fusion_provider.is_none());
         assert_eq!(config.max_history_per_session, 1000);
+        assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "bcn-group-session-ws-jwt"
+        );
+    }
+
+    #[test]
+    fn group_session_ws_signing_key_secret_can_be_configured() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = "other_manual_teamclawgw_principal_signing_key"
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml)
+            .expect("parse configurable group-session WebSocket secret name");
+
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "other_manual_teamclawgw_principal_signing_key"
+        );
+    }
+
+    #[test]
+    fn blank_group_session_ws_signing_key_secret_is_rejected() {
+        let tmp = tempfile::TempDir::new().expect("temp config dir");
+        std::fs::write(
+            tmp.path().join("bcs-config.toml"),
+            r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = " "
+            "#,
+        )
+        .expect("write config");
+
+        let err = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
+            .expect_err("blank group-session WebSocket secret name rejected");
+
+        assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
     }
 
     #[test]
@@ -1139,6 +1463,66 @@ mod tests {
                 "http://localhost:8000".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn test_telemetry_config_defaults_without_section() {
+        let config: BcsConfig = toml::from_str(r#"bots_base_dir = "/bots""#).unwrap();
+
+        assert!(config.telemetry.enabled);
+        assert_eq!(config.telemetry.service_name, "bcn");
+        assert_eq!(config.telemetry.otlp_traces_endpoint, None);
+        assert!(config.telemetry.extra_headers.is_empty());
+    }
+
+    #[test]
+    fn test_telemetry_config_parses_endpoint_and_extra_headers() {
+        let config: BcsConfig = toml::from_str(
+            r#"
+bots_base_dir = "/bots"
+
+[telemetry]
+enabled = true
+service_name = "bcn-prod"
+otlp_traces_endpoint = "https://collector.example.com/v1/traces"
+
+[telemetry.extra_headers]
+x-collector-route = "collector-local"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(config.telemetry.service_name, "bcn-prod");
+        assert_eq!(
+            config.telemetry.otlp_traces_endpoint.as_deref(),
+            Some("https://collector.example.com/v1/traces")
+        );
+        assert_eq!(
+            config
+                .telemetry
+                .extra_headers
+                .get("x-collector-route")
+                .map(String::as_str),
+            Some("collector-local")
+        );
+    }
+
+    #[test]
+    fn test_telemetry_config_validation_rejects_invalid_endpoint_and_headers() {
+        let invalid_endpoint = TelemetryConfig {
+            otlp_traces_endpoint: Some("not-an-http-endpoint".to_string()),
+            ..TelemetryConfig::default()
+        };
+        assert!(invalid_endpoint.validate().is_err());
+
+        let invalid_header = TelemetryConfig {
+            extra_headers: BTreeMap::from([(
+                "invalid header".to_string(),
+                "value".to_string(),
+            )]),
+            ..TelemetryConfig::default()
+        };
+        assert!(invalid_header.validate().is_err());
     }
 
     #[test]
@@ -1337,6 +1721,18 @@ mod tests {
         }"#;
 
         let err = serde_json::from_str::<BcsConfig>(json).expect_err("unknown key rejected");
+        assert!(err.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn test_config_rejects_mist_section() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+            [mist]
+            enabled = true
+        "#;
+
+        let err = toml::from_str::<BcsConfig>(toml).expect_err("public BCS rejects Ant-only mist config");
         assert!(err.to_string().contains("unknown field"));
     }
 
@@ -1628,6 +2024,29 @@ port = 6379
         let config: BcsConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.database.database_type, DatabaseType::Sqlite);
         assert_eq!(config.database.sqlite.path, "custom-bcs.db");
+    }
+
+    #[test]
+    fn session_files_config_parses_share_link_ttl_and_backend() {
+        let toml_str = r#"
+storage_backend = "baas"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+share_link_ttl = 3600
+
+[share]
+token_secret = "s3cret"
+default_ttl_seconds = 86400
+
+[backend]
+endpoint = "http://baas:8080"
+tenant = "teamclaw"
+"#;
+        let cfg: SessionFilesConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.storage_backend, "baas");
+        assert_eq!(cfg.share_link_ttl, 3600);
+        assert_eq!(cfg.backend["endpoint"], toml::Value::String("http://baas:8080".into()));
+        assert_eq!(cfg.backend["tenant"], toml::Value::String("teamclaw".into()));
     }
 
     #[test]

@@ -21,6 +21,11 @@ use tempfile::TempDir;
 // Constants
 // ============================================================================
 
+const TEST_GROUP_SESSION_WS_SIGNING_KEY: &str =
+    "test-only-group-session-key-at-least-32-bytes";
+const TEST_GATEWAY_PRINCIPAL_SIGNING_KEY: &str =
+    "test-only-gateway-principal-signing-key";
+
 /// Get next available port by asking the OS for a free one.
 ///
 /// Binds to port 0 (OS-assigned), reads the port, then releases it.
@@ -74,7 +79,15 @@ impl ProcessManager {
             "bind": "127.0.0.1",
             "port": port,
             "bots_base_dir": data_dir.to_str().unwrap_or(""),
-            "dingtalk_accounts": []
+            "dingtalk_accounts": [],
+            "secret": {
+                "provider": "env",
+                "providers": {
+                    "env": {
+                        "prefix": "BCS_SECRET_"
+                    }
+                }
+            }
         });
         let config_file = configs_dir.join("bcs-config.json");
         std::fs::write(&config_file, serde_json::to_string_pretty(&config_content)?)?;
@@ -82,6 +95,14 @@ impl ProcessManager {
         let mut cmd = Command::new(&bcs_bin);
         cmd.arg("-c").arg(&configs_dir)
             .env("BCS_DATA_DIR", data_dir)
+            .env(
+                "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE",
+                TEST_GATEWAY_PRINCIPAL_SIGNING_KEY,
+            )
+            .env(
+                "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT",
+                TEST_GROUP_SESSION_WS_SIGNING_KEY,
+            )
             // External-process integration tests pass per-request mock user
             // headers; enable the debug-only mock path without inheriting an
             // ambient default user from the parent shell.

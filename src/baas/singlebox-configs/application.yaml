@@ -22,6 +22,7 @@ user_config:
     cache: "stub"           # stub | real
     bot_service: "stub"     # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
+    file_transfer: "stub"  # stub | real
     database:
       plugin_database: "SQLITE_ORM"    # ZDAS_ORM (production ORM) | SQLITE_ORM (test only)
       database_url: "sqlite:////tmp/secbaas.db"
@@ -65,6 +66,8 @@ user_config:
     queue_max: 0                     # 全局最大排队等待数（0=不限）
     acquire_timeout: 0               # acquire 等待槽位超时秒数（0=不限）
     task_timeout: 660.0              # 单任务最大执行秒数（0=不限，默认660=10分钟+1分钟缓冲）
+    default_timeout: 30.0            # 请求默认超时秒数（metadata 未指定 timeout 时使用）
+    origin: "https://teamclaw.example.com"
 
   teamclaw:
     base_url: "https://teamclaw.example.com"
@@ -92,6 +95,15 @@ user_config:
     lock_expire_seconds: 120  # 分布式锁过期时间（秒），默认: 120
     lock_renew_interval_seconds: 30  # 分布式锁自动续期间隔（秒），默认: 30（0 表示禁用续期）
     stale_seconds: 120  # RUNNING 超过此时长无心跳视为悬挂（秒），默认: 120
+    dry_run: false  # 测试模式：只打印日志
+
+  # 文件传输轮询器配置（定期检测 OSS 上传完成并触发 device 下载）
+  file_transfer_poller:
+    enabled: true  # 是否启用定时任务
+    cron_interval_seconds: 10  # 执行间隔（秒），默认: 10
+    upload_timeout_seconds: 3600  # 上传超时（秒），超时未完成写入的 ticket 标记 FAILED
+    lock_expire_seconds: 300  # per-ticket 分布式锁过期时间（秒），默认: 300
+    max_concurrent_tickets: 5  # 单次扫描并发处理的 ticket 数上限
     dry_run: false  # 测试模式：只打印日志
 
   # BotRun 队列 Worker 配置（单机模式）
@@ -160,6 +172,13 @@ user_config:
         pre: "https://secbaas-pre.secbaas.ai"
         prod: "https://secbaas-prod.secbaas.ai"
 
+  # File transfer OSS storage backend configuration (enterprise/prod deployments only)
+  file_transfer_oss:
+    endpoint: ""
+    external_endpoint: ""
+    bucket_name: ""
+    staging_root_path: "baas-file-transfer"
+    secret_name: ""
   # Poolab API 端点（按环境，单机模式）
   poolab:
     endpoint:

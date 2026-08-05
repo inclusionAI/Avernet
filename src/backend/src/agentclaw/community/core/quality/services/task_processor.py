@@ -290,9 +290,14 @@ class TaskProcessor:
         bot_uuid = ext.get("bot_uuid")
         if bot_uuid:
             operator = task.operator_id or "system"
+            # Pass the originating publish_id so this early teardown and the TTL
+            # safety net (enqueued at eval_publish) converge on the same runner op.
+            publish_id = int(ext.get("publish_id") or 0)
             logger.info("[to_env_released] Calling eval_teardown: bot_uuid=%s, operator=%s", bot_uuid, operator)
             try:
-                teardown_result = self._publish_flow_service.eval_teardown(bot_uuid, operator=operator)
+                teardown_result = self._publish_flow_service.eval_teardown(
+                    bot_uuid, operator=operator, publish_id=publish_id
+                )
                 logger.info("[to_env_released] eval_teardown completed: result=%s", teardown_result)
                 if teardown_result and "destroy_publish_id" in teardown_result:
                     ext["destroy_publish_id"] = teardown_result["destroy_publish_id"]

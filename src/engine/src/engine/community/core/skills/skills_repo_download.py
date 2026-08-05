@@ -28,6 +28,7 @@
   - 启动时清理上次进程被 kill 残留的 ``.skills-repo-extract-*`` 临时目录。
   - 失败非致命：下载或解压失败只打日志，不阻断 engine。
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,23 @@ from pathlib import Path
 
 import requests
 
+from engine.community.config import (
+    AGENTBOX_ENV_VAR,
+    is_agentbox_runtime,
+    load_engine_config,
+)
+from engine.community.core.engine.naming import normalize
+from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION,
+    LayoutIdentity,
+    RuntimeLayoutContext,
+    SkillLayoutResolutionError,
+    resolve_filesystem_skill_layout,
+)
 from engine.community.plugin_api.workspace_root import workspace_root
+from engine.community.plugins.skills_pool.desktop_preparation import (
+    prepare_desktop_pool,
+)
 
 log = logging.getLogger("skills-repo-download")
 
@@ -69,7 +86,9 @@ def _get_internal_default_meta_url_template() -> str:
         from engine import internal_defaults
     except ImportError:
         return ""
-    return (getattr(internal_defaults, "SKILLS_REPO_META_URL_TEMPLATE", "") or "").strip()
+    return (
+        getattr(internal_defaults, "SKILLS_REPO_META_URL_TEMPLATE", "") or ""
+    ).strip()
 
 
 def _format_meta_url_template(template: str) -> str:
@@ -109,9 +128,49 @@ def _get_default_meta_url() -> str:
     return ""
 
 
-TARGET_DIR = workspace_root() / "skills" / "skills-repo"
-BACKUP_DIR = workspace_root() / "skills" / ".skills-repo-backups"
-ETAG_FILE = workspace_root() / "skills" / ".skills-repo-etag"
+def _repo_download_paths(
+    *,
+    engine: str,
+    home: Path,
+    openclaw_workspace: Path,
+) -> tuple[Path, Path, Path, Path]:
+    """Resolve canonical target, backup, ETag, and historical target paths."""
+
+    legacy_target = openclaw_workspace / "skills" / "skills-repo"
+    if engine == "openclaw":
+        # Preserve per-Bot OPENCLAW_WORKSPACE_DIR overrides used by Desktop.
+        pool_root = openclaw_workspace / "skills-pool"
+    else:
+        pool_root = resolve_filesystem_skill_layout(
+            LayoutIdentity(
+                engine_type=engine,
+                layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            ),
+            RuntimeLayoutContext(home=home),
+        ).pool_root
+    return (
+        pool_root / "skills-repo",
+        pool_root / ".skills-repo-backups",
+        pool_root / ".skills-repo-etag",
+        legacy_target,
+    )
+
+
+_DOWNLOAD_ENGINE = normalize(load_engine_config().default_engine)
+try:
+    TARGET_DIR, BACKUP_DIR, ETAG_FILE, LEGACY_TARGET_DIR = _repo_download_paths(
+        engine=_DOWNLOAD_ENGINE,
+        home=Path.home(),
+        openclaw_workspace=workspace_root(),
+    )
+    _DOWNLOAD_LAYOUT_CAPABLE = True
+except SkillLayoutResolutionError:
+    _DOWNLOAD_LAYOUT_CAPABLE = False
+    LEGACY_TARGET_DIR = workspace_root() / "skills" / "skills-repo"
+    _fallback_root = workspace_root() / "skills-pool"
+    TARGET_DIR = _fallback_root / "skills-repo"
+    BACKUP_DIR = _fallback_root / ".skills-repo-backups"
+    ETAG_FILE = _fallback_root / ".skills-repo-etag"
 EXTRACT_TMP_PREFIX = ".skills-repo-extract-"
 BACKUP_RETENTION_DAYS = 7
 MAX_BACKUP_COUNT = 1
@@ -119,8 +178,12 @@ MAX_RETRIES = 3
 BASE_DELAY_SECONDS = 2
 SYNC_INTERVAL_SECONDS = 300  # 5 分钟同步一次
 
-# agentbox 容器内置该环境变量；ARCA / 云端 bot 容器没有。
-AGENTBOX_ENV_VAR = "MAC_CONTAINER"
+
+def _lexical_target(path: Path) -> Path:
+    target = path.readlink()
+    if not target.is_absolute():
+        target = path.parent / target
+    return Path(os.path.abspath(target))
 
 
 def _is_agentbox_env() -> bool:
@@ -130,7 +193,7 @@ def _is_agentbox_env() -> bool:
     该环境变量。只在 agentbox 内才需要拉取 skills-repo，避免线上容器产
     生临时目录与备份目录的小文件污染。
     """
-    return os.getenv(AGENTBOX_ENV_VAR, "").strip().lower() in ("true", "1")
+    return _DOWNLOAD_LAYOUT_CAPABLE and is_agentbox_runtime()
 
 
 def _cleanup_stale_extract_dirs() -> None:
@@ -250,18 +313,46 @@ def _extract_atomic(tar_path: Path) -> bool:
     else:
         source_dir = Path(extract_tmp)
 
-    # 替换前备份现有仓库
-    _backup_existing_repo()
+    # 替换前备份现有仓库。已有内容无法完成备份时必须保留最后一份可用 corpus。
+    had_existing_repo = TARGET_DIR.exists()
+    had_existing_content = had_existing_repo and any(TARGET_DIR.iterdir())
+    backup_path = _backup_existing_repo()
+    if had_existing_content and backup_path is None:
+        log.error("Existing skills-repo backup failed; preserving current repo")
+        shutil.rmtree(extract_tmp, ignore_errors=True)
+        return False
+    if had_existing_repo and not had_existing_content:
+        try:
+            # rmdir is intentionally conditional: if another writer populated
+            # the directory after the inventory above, preserve its winner.
+            TARGET_DIR.rmdir()
+        except OSError as exc:
+            log.warning(
+                "Empty skills-repo changed before publish; preserving it: %s", exc
+            )
+            shutil.rmtree(extract_tmp, ignore_errors=True)
+            return False
 
     try:
-        # 如果备份失败导致 TARGET_DIR 仍存在，先删掉再搬入新内容
+        # 备份后目标重新出现说明有另一个 updater 赢得发布，不能删除它。
         if TARGET_DIR.exists():
-            shutil.rmtree(TARGET_DIR)
+            log.warning("Skills-repo target reappeared during update; aborting publish")
+            return False
         shutil.move(str(source_dir), str(TARGET_DIR))
         log.info("Atomically swapped skills-repo into %s", TARGET_DIR)
         return True
     except OSError as exc:
         log.error("Failed to swap extracted repo into place: %s", exc)
+        if backup_path is not None and backup_path.is_dir() and not TARGET_DIR.exists():
+            try:
+                os.replace(backup_path, TARGET_DIR)
+                log.info("Restored previous skills-repo after publish failure")
+            except OSError as restore_error:
+                log.error(
+                    "Failed to restore previous skills-repo %s: %s",
+                    backup_path,
+                    restore_error,
+                )
         return False
     finally:
         # 清理临时解压目录（如果我们从里面搬出了一个子目录，
@@ -297,7 +388,9 @@ def download_and_extract(url: str, timeout: int = 300) -> bool:
                             f.write(chunk)
                 break  # 成功，跳出重试循环
             except requests.RequestException as exc:
-                log.warning("Download attempt %d/%d failed: %s", attempt, MAX_RETRIES, exc)
+                log.warning(
+                    "Download attempt %d/%d failed: %s", attempt, MAX_RETRIES, exc
+                )
                 if attempt >= MAX_RETRIES:
                     log.error("All %d download attempts exhausted", MAX_RETRIES)
                     return False
@@ -439,7 +532,9 @@ def _get_download_info() -> tuple[str | None, str | None]:
     )
 
     if not available:
-        log.warning("Meta info indicates skills-repo is not available (available=%s)", available)
+        log.warning(
+            "Meta info indicates skills-repo is not available (available=%s)", available
+        )
         return None, None
 
     if not url:
@@ -456,7 +551,43 @@ def _download_and_save(url: str, etag: str | None) -> bool:
     if ok and etag:
         _save_last_etag(etag)
         log.info("Saved ETag: %s", etag)
+    if ok:
+        prepare_pool_layout()
     return ok
+
+
+def prepare_pool_layout(*, home: Path | None = None) -> None:
+    """Best-effort Desktop Pool preparation over the existing repo delivery."""
+
+    if not _is_agentbox_env():
+        return
+    try:
+        engine = normalize(load_engine_config().default_engine)
+        repo_source = TARGET_DIR
+        if LEGACY_TARGET_DIR != TARGET_DIR and (
+            LEGACY_TARGET_DIR.exists() or LEGACY_TARGET_DIR.is_symlink()
+        ):
+            legacy_is_canonical_bridge = (
+                LEGACY_TARGET_DIR.is_symlink()
+                and _lexical_target(LEGACY_TARGET_DIR) == TARGET_DIR
+            )
+            if not legacy_is_canonical_bridge:
+                repo_source = LEGACY_TARGET_DIR
+        result = prepare_desktop_pool(
+            engine=engine,
+            repo_source=repo_source,
+            home=home or Path.home(),
+        )
+        log.info(
+            "Desktop skills Pool preparation: status=%s preparation_id=%s reason=%s",
+            result.status.value,
+            result.preparation_id,
+            result.reason,
+        )
+    except Exception:
+        log.exception(
+            "Desktop skills Pool preparation failed; preserving Legacy layout"
+        )
 
 
 def bootstrap_on_startup() -> None:
@@ -476,13 +607,15 @@ def bootstrap_on_startup() -> None:
 
     if not _is_agentbox_env():
         log.info(
-            "Skills-repo bootstrap skipped: not running in agentbox "
-            "(%s != true)",
+            "Skills-repo bootstrap skipped: not running in agentbox (%s != true)",
             AGENTBOX_ENV_VAR,
         )
         return
 
     log.info("Skills-repo bootstrap starting...")
+    # Upgrade old Desktop storage before the downloader decides which corpus
+    # needs refreshing. Failure is non-fatal and leaves the old runtime intact.
+    prepare_pool_layout()
     url, etag = _get_download_info()
     if not url:
         log.info("No skills-repo URL available — skipping bootstrap download")
@@ -503,6 +636,25 @@ def bootstrap_on_startup() -> None:
         )
 
 
+def _sync_once() -> None:
+    """Run one periodic repo refresh and keep Pool preparation in sync."""
+
+    prepare_pool_layout()
+    url, etag = _get_download_info()
+    if not url:
+        log.info("Background sync: no URL available, skipping")
+        return
+    if not _should_download(url, etag):
+        log.info("Background sync: no changes (ETag match), skipping")
+        return
+    log.info("Background sync: downloading latest skills-repo...")
+    ok = _download_and_save(url, etag)
+    if ok:
+        log.info("Background sync: completed successfully")
+    else:
+        log.warning("Background sync: download failed, will retry next cycle")
+
+
 def start_background_sync(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> None:
     """启动后台定时同步线程，每隔 interval_seconds 秒从 OSS 拉取更新。
 
@@ -516,8 +668,7 @@ def start_background_sync(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> None
     """
     if not _is_agentbox_env():
         log.info(
-            "Skills-repo background sync skipped: not running in agentbox "
-            "(%s != true)",
+            "Skills-repo background sync skipped: not running in agentbox (%s != true)",
             AGENTBOX_ENV_VAR,
         )
         return
@@ -527,19 +678,7 @@ def start_background_sync(interval_seconds: int = SYNC_INTERVAL_SECONDS) -> None
             log.info("Background sync: sleeping %d seconds", interval_seconds)
             time.sleep(interval_seconds)
             log.info("Background sync: wake up, checking for updates")
-            url, etag = _get_download_info()
-            if not url:
-                log.info("Background sync: no URL available, skipping")
-                continue
-            if not _should_download(url, etag):
-                log.info("Background sync: no changes (ETag match), skipping")
-                continue
-            log.info("Background sync: downloading latest skills-repo...")
-            ok = _download_and_save(url, etag)
-            if ok:
-                log.info("Background sync: completed successfully")
-            else:
-                log.warning("Background sync: download failed, will retry next cycle")
+            _sync_once()
 
     t = threading.Thread(target=_sync_loop, daemon=True)
     t.start()

@@ -143,6 +143,7 @@ def _make_service(
     bot_publish_repo: MagicMock | None = None,
     baas_template_resolver: MagicMock | None = None,
     task_queue_service: MagicMock | None = None,
+    common_config_service: MagicMock | None = None,
 ) -> BotService:
     if lock_repo is None:
         lock_repo = FakeRestartLockRepo()
@@ -159,10 +160,29 @@ def _make_service(
     svc._bot_publish_repo = bot_publish_repo if bot_publish_repo is not None else MagicMock()
     svc._baas_template_resolver = baas_template_resolver
     svc._task_queue_service = task_queue_service
+    svc._common_config_service = common_config_service
+    svc._teclaw_provision_provider = lambda: SimpleNamespace(
+        is_teclaw=lambda active_engine: active_engine == "teclaw"
+    )
     svc._drm_reader = MagicMock()
     svc._drm_reader.read.return_value = None
     svc._bcn_service = MagicMock()
     return svc
+
+
+def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
+    state = dict(bot)
+    repository = MagicMock()
+    repository.get_by_id_and_owner.side_effect = (
+        lambda _bot_id, _owner_id: dict(state)
+    )
+
+    def update_bot(_bot_id, _owner_id, values):
+        state.update(values)
+        return dict(state)
+
+    repository.update_by_owner.side_effect = update_bot
+    return repository, state
 
 
 # ===========================================================================
@@ -171,24 +191,108 @@ def _make_service(
 
 
 class TestRestartGuardOrchestration:
-    @pytest.mark.parametrize("status", ["REACTIVATING", "PENDING"])
-    def test_restart_during_activation_is_idempotent(self, status):
-        """Activation owns the lifecycle while the bot is starting."""
+    def test_restart_during_reactivation_is_idempotent(self):
+        """Dormant reactivation owns the lifecycle while it is running."""
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
-        bot = _make_bot(status=status)
+        bot = _make_bot(status="REACTIVATING")
         svc._repository.get_by_id_and_owner.return_value = bot
 
         with patch.object(svc, "stop_bot") as stop, \
              patch.object(svc, "start_bot") as start:
             result = svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        assert result["status"] == status
+        assert result["status"] == "REACTIVATING"
         assert result["restart_in_progress"] is True
         assert result["message"] == "Bot activation is in progress"
         assert repo.acquire_calls == 0
         stop.assert_not_called()
         start.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("binding_id", "device_id"),
+        [(None, None), (42, "device-42")],
+        ids=["without-binding", "pending-binding"],
+    )
+    def test_pending_arca_bot_without_active_restart_can_recover(
+        self,
+        binding_id,
+        device_id,
+    ):
+        """A stranded PENDING Arca bot can allocate a replacement runtime."""
+        bot_repository, state = _stateful_bot_repository(
+            _make_bot(status="PENDING", binding_id=binding_id)
+        )
+        state["device_id"] = device_id
+        device_service = MagicMock()
+        if binding_id is not None:
+            device_service.get_device.return_value = SimpleNamespace(
+                id=binding_id,
+                device_id=device_id,
+                device_provider="arca",
+                status=DeviceBindingStatus.PENDING.value,
+            )
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status=DeviceBindingStatus.PENDING.value,
+        )
+
+        svc = _make_service(
+            FakeRestartLockRepo(),
+            bot_repository=bot_repository,
+            device_provider=device_service,
+        )
+        (
+            svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value
+        ) = []
+        svc._template_service.get_template_config.return_value = None
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ):
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["status"] == "PENDING"
+        assert result["binding_id"] == 7
+        assert result["device_id"] == "device-7"
+        assert "restart_in_progress" not in result
+
+    def test_pending_baas_bot_can_recover_in_place(self):
+        """A stranded personal BaaS bot can start a new update operation."""
+        bot_repository, state = _stateful_bot_repository(
+            _make_bot(status="PENDING", binding_id=42)
+        )
+        state["device_id"] = "BOT-device-42"
+        state["ext"] = {}
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_id="BOT-device-42",
+            device_provider="baas",
+            status=DeviceBindingStatus.PENDING.value,
+        )
+        baas_service = MagicMock()
+        baas_service.upgrade_bot.return_value = {"publish_id": 9377}
+
+        svc = _make_service(
+            FakeRestartLockRepo(),
+            bot_repository=bot_repository,
+            device_provider=device_service,
+            baas_service_provider=lambda: baas_service,
+            task_queue_service=MagicMock(),
+        )
+        svc._template_service.get_template_config.return_value = None
+
+        result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result["status"] == "PENDING"
+        assert result["binding_id"] == 42
+        assert result["ext"]["restart_publish_id"] == "9377"
+        assert "restart_in_progress" not in result
 
     def test_recycled_bot_restart_is_rejected_without_side_effects(self):
         """RECYCLED bots must only return through the explicit activate flow."""
@@ -301,10 +405,189 @@ class TestRestartGuardOrchestration:
         stop.assert_not_called()
         start.assert_not_called()
 
-    def test_failed_bot_without_binding_is_rejected(self):
-        """A failed bot without provider history must not re-enter create rollout."""
+    def test_active_bot_with_stopped_arca_binding_restarts_with_preserved_provider(self):
+        """A stopped ARCA runtime can be replaced without changing providers."""
         repo = FakeRestartLockRepo()
-        svc = _make_service(repo)
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+            status=DeviceBindingStatus.STOPPED,
+        )
+        svc = _make_service(repo, device_provider=device_service)
+        bot = _make_bot(status="ACTIVE", binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_active_bot_with_stopped_baas_binding_restarts_in_place(self):
+        """A stopped BaaS runtime keeps its binding and uses the update path."""
+        repo = FakeRestartLockRepo()
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="baas",
+            device_id="BOT-uuid-9",
+            status=DeviceBindingStatus.STOPPED,
+        )
+        svc = _make_service(
+            repo,
+            device_provider=device_service,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(status="ACTIVE", binding_id=42)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "_restart_bot_baas", return_value=bot) as restart_baas, \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        restart_baas.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            binding_id=42,
+            bot=bot,
+        )
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_failed_bot_without_binding_restarts_with_historical_provider(self):
+        """A failed unbound bot allocates a replacement from its own history."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            2,
+            [
+                SimpleNamespace(
+                    id=43,
+                    device_provider="arca",
+                    device_props={"bolt_id": "another-bot"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+                SimpleNamespace(
+                    id=42,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+            ],
+        )
+        svc = _make_service(repo, device_binding_repo=binding_repo)
+        bot = _make_bot(status="FAILED", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        pending_bot = {**bot, "status": "PENDING"}
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot", return_value=pending_bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == pending_bot
+        binding_repo.list_bindings.assert_called_once_with(
+            env="dev",
+            entity_id="staff_user001",
+            entity_type="staff",
+            status=None,
+            page=1,
+            page_size=100,
+        )
+        stop.assert_not_called()
+        svc._repository.update_by_owner.assert_called_once_with(
+            "bot001",
+            "user001",
+            {
+                "status": "PENDING",
+                "binding_id": None,
+                "device_id": None,
+            },
+        )
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_failed_bot_without_binding_is_rejected_without_historical_provider(self):
+        """A failed bot without trusted provider history must not re-enter rollout."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (0, [])
+        svc = _make_service(repo, device_binding_repo=binding_repo)
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(
+            status="FAILED",
+            binding_id=None,
+        )
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotInvalidLifecycleStateError) as exc_info:
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert exc_info.value.current_status == "FAILED_WITHOUT_BINDING"
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
+    def test_failed_bot_without_binding_allocates_new_baas_device_from_history(self):
+        """Historical BaaS provider creates a new binding, never an in-place upgrade."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            1,
+            [
+                SimpleNamespace(
+                    id=42,
+                    device_provider="baas",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.FAILED.value,
+                ),
+            ],
+        )
+        svc = _make_service(
+            repo,
+            device_binding_repo=binding_repo,
+            baas_service_provider=lambda: MagicMock(),
+        )
+        bot = _make_bot(status="FAILED", binding_id=None)
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "_restart_bot_baas") as restart_baas, \
+             patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        restart_baas.assert_not_called()
+        stop.assert_not_called()
+        assert start.call_args.kwargs["device_provider"] == "baas"
+
+    def test_failed_bot_without_binding_rejects_live_historical_binding(self):
+        """An unbound bot must not duplicate a provider that is still live."""
+        repo = FakeRestartLockRepo()
+        binding_repo = MagicMock()
+        binding_repo.list_bindings.return_value = (
+            2,
+            [
+                SimpleNamespace(
+                    id=43,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.ACTIVE.value,
+                ),
+                SimpleNamespace(
+                    id=42,
+                    device_provider="arca",
+                    device_props={"bolt_id": "bot001"},
+                    status=DeviceBindingStatus.RELEASED.value,
+                ),
+            ],
+        )
+        svc = _make_service(repo, device_binding_repo=binding_repo)
         svc._repository.get_by_id_and_owner.return_value = _make_bot(
             status="FAILED",
             binding_id=None,
@@ -395,6 +678,153 @@ class TestRestartGuardOrchestration:
         stop.assert_called_once()
         start.assert_called_once()
         assert start.call_args.kwargs["device_provider"] == "arca"
+
+    @pytest.mark.parametrize(
+        ("active_engine", "template_type", "bot_type"),
+        [
+            ("openclaw", None, "personal"),
+            ("hermes", None, "personal"),
+            ("claude_code", "normalCC", "personal"),
+            ("openclaw", None, "service"),
+        ],
+        ids=["openclaw", "hermes", "claude-code", "service"],
+    )
+    def test_restart_migrates_arca_to_baas_only_on_template_override_hit(
+        self,
+        active_engine,
+        template_type,
+        bot_type,
+    ):
+        """A positive hit in the existing DB config opts ARCA into BaaS."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        resolver.resolve_template_override.return_value = "TEMPLATE-new"
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            active_engine=active_engine,
+            template_type=template_type,
+            bot_type=bot_type,
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True) as stop, \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            result = svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert result == bot
+        stop.assert_called_once()
+        start.assert_called_once()
+        assert start.call_args.kwargs["device_provider"] == "baas"
+        resolver.resolve_template_override.assert_called_once_with(
+            env="dev",
+            user_id="user001",
+            bot_type=bot_type,
+        )
+
+    @pytest.mark.parametrize(
+        "lookup_result",
+        [None, "raises"],
+        ids=["not-configured-or-not-matched", "read-error"],
+    )
+    def test_restart_preserves_arca_when_template_override_does_not_hit(
+        self,
+        lookup_result,
+    ):
+        """Missing, unmatched, or unreadable config keeps the old ARCA path."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        if lookup_result == "raises":
+            resolver.resolve_template_override.side_effect = RuntimeError(
+                "config unavailable"
+            )
+        else:
+            resolver.resolve_template_override.return_value = lookup_result
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(status="ACTIVE", binding_id=42, active_engine="openclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    def test_restart_preserves_arca_without_template_resolver(self):
+        """Deployments without the resolver retain the original ARCA path."""
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo, baas_template_resolver=None)
+        bot = _make_bot(status="ACTIVE", binding_id=42, active_engine="openclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+
+    @pytest.mark.parametrize(
+        ("active_engine", "template_type"),
+        [
+            ("aicoding", "personalCoding"),
+            ("claude_code", "personalCoding"),
+            ("claude_code", "applicationCoding"),
+        ],
+        ids=["aicoding", "claude-personal-coding", "claude-application-coding"],
+    )
+    def test_restart_does_not_migrate_aicoding_paths(
+        self,
+        active_engine,
+        template_type,
+    ):
+        """AI Coding paths remain on their original provider."""
+        repo = FakeRestartLockRepo()
+        resolver = MagicMock()
+        resolver.resolve_template_override.return_value = "TEMPLATE-new"
+        svc = _make_service(repo, baas_template_resolver=resolver)
+        bot = _make_bot(
+            status="ACTIVE",
+            binding_id=42,
+            active_engine=active_engine,
+            template_type=template_type,
+        )
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42,
+            device_provider="arca",
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), \
+             patch.object(svc, "start_bot", return_value=bot) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["device_provider"] == "arca"
+        resolver.resolve_template_override.assert_not_called()
 
     def test_restart_logs_preserved_provider_before_stop(self):
         """Regression evidence: pre-release provider preservation must be visible
@@ -491,6 +921,47 @@ class TestRestartGuardOrchestration:
         start.assert_not_called()
         assert result == bot
 
+    def test_restart_baas_service_refreshes_pin_before_upgrade(self):
+        """草稿态重启读取当前开关，并仅刷新 Pin 字段后透传镜像。"""
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {"service_bot_config": {"device_count": 3}},
+        }
+        bot_repository, state = _stateful_bot_repository(bot)
+        svc = _make_service(
+            repo,
+            bot_repository=bot_repository,
+            common_config_service=common_config,
+        )
+        svc._template_service.get_template_config.return_value = {
+            "image": "registry/arka:v1",
+            "envs": {"A": "1"},
+        }
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        baas.upgrade_bot.return_value = {"publish_id": 101}
+        svc._baas_service_provider = lambda: baas
+
+        with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        common_config.get_value.assert_called_once()
+        assert state["ext"]["service_bot_config"] == {"device_count": 3}
+        assert state["ext"]["sbot_pin_image"] is True
+        assert state["ext"]["sbot_docker_image"] == "registry/arka:v2"
+        upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
+        assert upgrade_kwargs["template_config"] == {
+            "image": "registry/arka:v2",
+            "envs": {"A": "1"},
+        }
+
     def test_restart_baas_service_ignores_existing_publish_migration_path(self):
         """普通 restart 只重启当前 bot；历史发布记录里的 migration_path 不参与。"""
         repo = FakeRestartLockRepo()
@@ -534,6 +1005,7 @@ class TestRestartGuardOrchestration:
             template_uuid="TEMPLATE-claude-code",
             source="system_config",
         )
+        resolver.resolve_template_uid.return_value = "claude_code_bot_template"
         template_config = {"image": "reg.example/custom:latest"}
         svc = _make_service(
             repo,
@@ -569,10 +1041,23 @@ class TestRestartGuardOrchestration:
             template_type="normalCC",
             template_config=template_config,
         )
-        resolver.resolve_template_uid.assert_not_called()
+        resolver.resolve_template_uid.assert_called_once_with(
+            bot_id="bot001",
+            user_id="user001",
+            env=get_current_env(),
+            bot_type="service",
+            engine_type="claude_code",
+            template_type="normalCC",
+            template_config=template_config,
+        )
         resolver.resolve_template_uuid.assert_not_called()
-        assert baas.upgrade_bot.call_args.kwargs["template_uuid"] == "TEMPLATE-claude-code"
-        assert baas.upgrade_bot.call_args.kwargs["migration_path"] is None
+        upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
+        assert upgrade_kwargs["template_uuid"] == "TEMPLATE-claude-code"
+        assert upgrade_kwargs["template_config"] == {
+            "image": "reg.example/custom:latest",
+            "template_uid": "claude_code_bot_template",
+        }
+        assert upgrade_kwargs["migration_path"] is None
         publish_repo.get_by_publish_bot_id.assert_not_called()
 
     def test_restart_baas_service_does_not_require_published_version(self):
@@ -785,9 +1270,16 @@ class TestRestartGuardOrchestration:
         bot = _make_bot(status="ACTIVE")
         svc._repository.get_by_id_and_owner.return_value = bot
 
-        # start_bot is mocked and never releases → lock stays held after #1.
+        def start_pending(**_kwargs):
+            bot["status"] = "PENDING"
+            bot["binding_id"] = None
+            bot["device_id"] = None
+            return bot
+
+        # start_bot is mocked and never releases → lock stays held after #1,
+        # while the second request observes the persisted PENDING shape.
         with patch.object(svc, "stop_bot", return_value=True) as stop, \
-             patch.object(svc, "start_bot", return_value=bot) as start:
+             patch.object(svc, "start_bot", side_effect=start_pending) as start:
             svc.restart_bot(bot_id="bot001", user_id="user001")
             result2 = svc.restart_bot(bot_id="bot001", user_id="user001")
 

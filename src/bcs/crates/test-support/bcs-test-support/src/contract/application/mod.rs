@@ -5,9 +5,35 @@ use bcs_service_api::{
     BotManagementService, BotOnboardingService, BotQueryService, BotRuntimeConnectionService,
     FriendService, GroupFusionService, GroupManagementService, GroupMessageHistoryService,
     GroupProposalService, GroupQueryService, HumanActorService, MessageFlowService,
-    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService, ServiceError,
-    SystemMessageService, WorkbenchSessionService, WorkerProfileService,
+    CreateOrganizationCommand, OrganizationAuth, OrganizationManagementService,
+    OrganizationMemberAuth, ServiceError, SystemMessageService, WorkbenchSessionService,
+    WorkerProfileService,
 };
+use bcs_service_api::application::v1::{
+    AuthenticatedBotIdentity, AuthenticatedCaller, BotService, QueryBots,
+};
+
+pub async fn bot_service_contract_tests<T: BotService + ?Sized>(svc: &T) {
+    let error = svc
+        .query(QueryBots {
+            caller: AuthenticatedCaller {
+                tenant: "contract".into(),
+                user: None,
+                bot: Some(AuthenticatedBotIdentity {
+                    bot_uuid: "contract-bot".into(),
+                    owner_id: "owner".into(),
+                    app_id: 1,
+                    agent_code: "contract-agent".into(),
+                }),
+                app: None,
+                access_key: None,
+            },
+            bot_ids: Vec::new(),
+        })
+        .await
+        .expect_err("Bot control-plane service rejects callers without User");
+    assert_eq!(error.code(), "forbidden");
+}
 
 pub async fn a2a_chat_service_contract_tests<T: A2aChatService + ?Sized>(_svc: &T) {}
 
@@ -77,7 +103,12 @@ pub async fn organization_management_service_contract_tests<
     assert_eq!(created.code, organization_code);
 
     let fetched = svc
-        .get(valid_auth, organization_code)
+        .get(
+            OrganizationMemberAuth {
+                provider_admin_token: valid_auth.provider_admin_token,
+            },
+            organization_code,
+        )
         .await
         .expect("get organization through application service");
     assert_eq!(fetched.name, "Application Contract");

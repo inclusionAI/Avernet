@@ -153,6 +153,8 @@ class GovernanceLifecycleService:
             estimated_saving_tokens=snapshot.estimated_saving_tokens,
             saving_ratio=snapshot.saving_ratio,
             bot_name=ticket.bot_name,
+            owner_name=ticket.owner_name,
+            token_baseline=snapshot.token_baseline,
             task_summary=snapshot.task_summary,
             notification_structured=snapshot.notification_structured,
             analysis_status=snapshot.analysis_status,
@@ -165,6 +167,58 @@ class GovernanceLifecycleService:
             last_decision_dt_version=snapshot.last_decision_dt_version,
         )
         return ticket_id
+
+    def open_observed_ticket(self, *, ticket: GovernanceTicket) -> str:
+        """New ticket → OBSERVED(白名单观察):建观察单瘦路径。
+
+        白名单 bot 在 offline-batch 命中、且无活跃单也无现存观察单时,用当前
+        record 快照**新建**一条 OBSERVED 工单承载持续刷新的治理画像。与
+        :meth:`open_ticket` 关键差异:状态 OPEN→OBSERVED(经守卫);不设
+        close_reason(非关单转态);**assignee 直传 None 不 fallback** worker_id
+        (观察不占治理人力);**不建 notify_log、不设 delivery_status**(观察单
+        不发通知,"白名单不发通知"不变式核心)。
+
+        审计归属:同 ``open_ticket``,ENQUEUED/观察审计由调用方持有,不重复写。
+
+        Args:
+            ticket: ``GovernanceTicket.create(...)`` 构造的 OPEN 模型。
+
+        Returns:
+            持久化的 ``ticket_id``。
+        """
+        # 复用领域单一入口 enter_observed(状态机动作:转 OBSERVED+释放 assignee+
+        # 清 remind_at+不设 closed_at)。建单非关单,不传 close_reason(None)。
+        ticket.enter_observed()
+        snapshot = ticket.snapshot
+        # 与 open_ticket 同源字段映射,差异:assignee 不 fallback、状态=observed。
+        return self._task_repo.add_ticket(
+            ticket_id=ticket.ticket_id or "",
+            worker_id=ticket.worker_id,
+            assignee=ticket.assignee,  # None — 观察不占人力,不 fallback worker_id
+            bot_id=ticket.bot_id or "",
+            owner_id=ticket.owner_id or "",
+            dt_version=snapshot.dt_version,
+            initial_decision=snapshot.initial_decision,
+            current_decision=snapshot.current_decision or "actionable",
+            triggered_dimensions=snapshot.triggered_dimensions,
+            hit_dimensions_count=snapshot.hit_dimensions_count,
+            severity=snapshot.severity,
+            estimated_saving_tokens=snapshot.estimated_saving_tokens,
+            saving_ratio=snapshot.saving_ratio,
+            bot_name=ticket.bot_name,
+            owner_name=ticket.owner_name,
+            token_baseline=snapshot.token_baseline,
+            task_summary=snapshot.task_summary,
+            notification_structured=snapshot.notification_structured,
+            analysis_status=snapshot.analysis_status,
+            governance_status=ticket.governance_status.value,
+            consecutive_normal_days=snapshot.consecutive_normal_days,
+            remind_at=ticket.remind_at,
+            remind_count=ticket.remind_count,
+            last_seen_at=snapshot.last_seen_at,
+            last_sync_at=snapshot.last_sync_at,
+            last_decision_dt_version=snapshot.last_decision_dt_version,
+        )
 
     def refresh_snapshot(self, ticket_id: str, **snapshot_fields: object) -> bool:
         """Refresh an active ticket's mutable snapshot (non-state-transition).
@@ -181,11 +235,21 @@ class GovernanceLifecycleService:
             (default), ``datetime`` = set, ``None`` = clear. Lives on the
             model (not the snapshot); set before ``to_orm`` so it persists.
 
+        Display-field passthroughs (overwrite guard — incoming non-None
+        overwrites existing, incoming None keeps existing, so a batch that
+        omits them never erases a previously-known value):
+          - ``owner_name`` — identity display name; set on the model.
+          - ``token_baseline`` — a MutableSnapshot field, but intentionally
+            NOT routed through the model's ``refresh_snapshot``/``replace()``
+            (which would erase existing on None); set on the snapshot directly.
+
         Returns True if the ticket was found and updated.
         """
         # Pop non-snapshot passthroughs before delegating to the model's
         # snapshot-replace (which rejects keys absent from MutableSnapshot).
         bot_name = snapshot_fields.pop("bot_name", None)
+        owner_name = snapshot_fields.pop("owner_name", None)
+        token_baseline = snapshot_fields.pop("token_baseline", None)
         remind_at = snapshot_fields.pop("remind_at", "")
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
@@ -193,29 +257,102 @@ class GovernanceLifecycleService:
         ticket.refresh_snapshot(**snapshot_fields)
         if bot_name is not None:
             ticket.bot_name = bot_name
+        if owner_name is not None:
+            ticket.owner_name = owner_name
+        if token_baseline is not None:
+            ticket.update_token_baseline(token_baseline)
         if remind_at != "":  # type: ignore[comparison-overlap]
             ticket.remind_at = remind_at  # type: ignore[assignment]
         return self._task_repo._save_ticket_with_snapshot(ticket)  # noqa: SLF001 — primitive
 
-    def close_for_whitelist_hit(
-        self, ticket_id: str, *, now: datetime,
+    def observe_for_whitelist(
+        self, ticket_id: str, *, close_reason: str, now: datetime,
     ) -> bool:
-        """Whitelist hit → CLOSED(whitelist_filtered) + cancel pending + audit.
+        """加白→转 OBSERVED 单条语义方法(四条加白入口的统一收口)。
 
-        方案 A 链路:find → ``ticket.close()``(守卫激活)→ ``save_ticket`` →
+        把活跃单转 OBSERVED(持续观察画像,不发通知)+ 释放 active_worker +
+        不设 closed_at + 取消 pending 通知(best-effort)。方案 A 链路:find →
+        ``ticket.enter_observed(close_reason)``(守卫激活)→ ``save_ticket`` →
         取消通知。非法转移被守卫抛出,驱动服务捕获转审计 + False。
 
-        Returns True if the ticket was found and closed, False if not found.
+        四条加白入口经此(scan 兜底传 SCAN_WHITELISTED;批量加白经
+        :meth:`bulk_observe_by_ticket_ids` 传 WHITELIST_APPROVED;审批加白走
+        review 的 enter_observed 不经此;off-batch 建单走 open_observed_ticket)。
+
+        now 仍接受(调用方签名稳定),转 OBSERVED 不使用它(OBSERVED 不设 closed_at)。
+
+        Returns True if the ticket was found and observed, False if not found.
+        """
+        del now  # OBSERVED 不设 closed_at(与 enter_observed 一致);签名保留兼容现有调用方
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return False
+        try:
+            ticket.enter_observed(close_reason=close_reason)
+        except IllegalTicketTransitionError as exc:
+            self._audit_illegal(ticket_id, "observe_for_whitelist", exc)
+            return False
+        if not self._task_repo.save_ticket(ticket):
+            return False
+        self._cancel_pending(ticket_id)
+        return True
+
+    def close_observed_for_removal(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """删白收尾:OBSERVED → CLOSED(whitelist_approved) 终态 + cancel pending。
+
+        管理员删除白名单条目时,把该 worker 的现存观察单收尾为 CLOSED(归档为
+        终态,不再被 offline-batch 刷新)。best-effort:无观察单则跳过(返 False)。
+        不设 cooldown(删白后等 off-batch 正常 Step6 重建新单,非删白即复活)。
+
+        方案 A 链路:find → ``ticket.close()``(OBSERVED→CLOSED 合法,守卫激活)
+        → ``save_ticket`` → 取消待通知(观察单本无 pending,best-effort 幂等 no-op)。
+
+        审计归属:同 ``admin_close`` 约定,删白审计(WHITELIST_REMOVED)由调用方
+        (whitelist_service)持有,驱动不重复写。
+
+        Returns True if the ticket was found and closed, False if not found
+        (或已非 OBSERVED — 幂等 no-op)。
+        """
+        ticket = self._task_repo.find_by_ticket_id(ticket_id)
+        if ticket is None:
+            return False
+        if ticket.governance_status != GovernanceStatus.OBSERVED:
+            # 非观察态(已 CLOSED/活跃)→ 幂等 no-op,不强行转
+            return False
+        try:
+            ticket.close(
+                close_reason=CloseReason.WHITELIST_APPROVED, closed_at=now,
+            )
+        except IllegalTicketTransitionError as exc:
+            self._audit_illegal(ticket_id, "close_observed_for_removal", exc)
+            return False
+        if not self._task_repo.save_ticket(ticket):
+            return False
+        self._cancel_pending(ticket_id)  # best-effort:观察单本无 pending,幂等
+        return True
+
+    def close_for_stale_replace(
+        self, ticket_id: str, *, now: datetime,
+    ) -> bool:
+        """未回复换新 → CLOSED(stale_replaced) + cancel pending。
+
+        方案 A 链路同 observe_for_whitelist:find → ticket.close() → save →
+        cancel pending。不设 cooldown_until(stale_replace 去抖靠 gmt_create 节奏,
+        与 cooldown 体系隔离)。非法转移被守卫捕获 → audit + False。
+
+        Returns True if found+closed, False if not found。
         """
         ticket = self._task_repo.find_by_ticket_id(ticket_id)
         if ticket is None:
             return False
         try:
             ticket.close(
-                close_reason=CloseReason.WHITELIST_FILTERED, closed_at=now,
+                close_reason=CloseReason.STALE_REPLACED, closed_at=now,
             )
         except IllegalTicketTransitionError as exc:
-            self._audit_illegal(ticket_id, "close_for_whitelist_hit", exc)
+            self._audit_illegal(ticket_id, "close_for_stale_replace", exc)
             return False
         if not self._task_repo.save_ticket(ticket):
             return False
@@ -398,10 +535,12 @@ class GovernanceLifecycleService:
         close_reason: str | None = None,
         cooldown_until: datetime | None = None,
     ) -> bool:
-        """WAITING_REVIEW → CLOSED (three-branch) + cancel pending.
+        """WAITING_REVIEW → CLOSED/OBSERVED (四态分支) + cancel pending。
 
-        方案 A 链路:find → ``ticket.review(...)``(守卫激活,三态分支,
-        清 active_worker + remind_at)→ ``save_ticket`` → 取消通知。
+        方案 A 链路:find → ``ticket.review(...)``(守卫激活,四态分支,
+        清 active_worker + remind_at)→ ``save_ticket`` → 取消通知(pending 按
+        ticket_id 取消,不依赖后置态)。approve_whitelist 转 OBSERVED(白名单
+        观察态),其余 approve_close/reject_for_reopen 转 CLOSED。
 
         Returns True if found, False if not found.
         """
@@ -420,21 +559,39 @@ class GovernanceLifecycleService:
         except IllegalTicketTransitionError as exc:
             self._audit_illegal(ticket_id, "review_ticket", exc)
             return False
+        # approve_scheduled 应设 resume_at(=repair_deadline)作 mute_until,
+        # 供 cron schedule_due 到期触发。repair_deadline 缺失(need_time 必填
+        # 却无,异常数据)时领域静默不设,此兜 warn 可观测排查;不阻断审批。
+        if review_decision == "approve_scheduled" and ticket.resume_at is None:
+            log.warning(
+                "[GovernanceLifecycle] approve_scheduled left mute_until unset "
+                "(repair_deadline missing); schedule-due will not fire: ticket_id=%s",
+                ticket_id,
+            )
         if not self._task_repo.save_ticket(ticket):
             return False
         self._cancel_pending(ticket_id)
         return True
 
-    def emergency_close(
+    def admin_close(
         self, ticket_id: str, *, now: datetime,
+        cooldown_until: datetime | None = None,
+        close_conclusion: str | None = None,
+        close_payload: str | None = None,
     ) -> bool:
-        """Any non-CLOSED → CLOSED(emergency_closed) + cancel pending.
+        """Any non-CLOSED → CLOSED(admin_closed) + cancel pending.
 
         方案 A 链路:find → 幂等检查(已 CLOSED 返 False)→
-        ``ticket.close(EMERGENCY_CLOSED)``(守卫激活)→ ``save_ticket`` →
-        取消通知。审计由调用方(admin_service)拥有(携带 reason +
-        actor_id=admin_id)—— 与 pause_ticket / review_ticket 等
-        sibling 方法一致,driver 不重复写审计。
+        ``ticket.close(ADMIN_CLOSED, cooldown_until=..., close_conclusion=...,
+        close_payload=...)``(守卫激活)→ ``save_ticket`` → 取消通知。审计由调用方
+        (admin_service)拥有(携带 conclusion + actor_id=admin_id)—— 与 pause_ticket
+        / review_ticket 等 sibling 方法一致,driver 不重复写审计。
+
+        ``cooldown_until`` 透传到领域关单,与 ``review_ticket`` 的 approve_close
+        分支口径一致(关单后 N 天内不重建)。默认 None = 不设冷却(向后兼容)。
+        ``close_conclusion`` / ``close_payload`` 透传领域关单(管理员裁定结论 +
+        明细 JSON),仅 admin 关单链路有值,自动关单路径不传(留 None)。已 CLOSED
+        工单短路,never 到 close,这两个字段不被覆盖(幂等保持)。
 
         Returns True if the ticket was found and closed, False if not found
         (or already closed — idempotent no-op).
@@ -446,18 +603,24 @@ class GovernanceLifecycleService:
             return False  # already closed — idempotent no-op
         try:
             ticket.close(
-                close_reason=CloseReason.EMERGENCY_CLOSED, closed_at=now,
+                close_reason=CloseReason.ADMIN_CLOSED, closed_at=now,
+                cooldown_until=cooldown_until,
+                close_conclusion=close_conclusion,
+                close_payload=close_payload,
             )
         except IllegalTicketTransitionError as exc:
-            self._audit_illegal(ticket_id, "emergency_close", exc)
+            self._audit_illegal(ticket_id, "admin_close", exc)
             return False
         if not self._task_repo.save_ticket(ticket):
             return False
         self._cancel_pending(ticket_id)
         return True
 
-    def bulk_close_open(self, *, close_reason: str, now: datetime) -> int:
-        """Bulk emergency-close all open/scheduled tickets — joint orchestration:
+    def bulk_close_open(
+        self, *, close_reason: str, now: datetime,
+        close_conclusion: str | None = None,
+    ) -> int:
+        """Bulk admin-close all open/scheduled tickets — joint orchestration:
         land ``task_record`` CLOSED (ticket machine, via the bulk primitive)
         + cancel pending notifies (notify-delivery machine, one-way side
         effect). Ticket is cause, notify is effect.
@@ -466,10 +629,14 @@ class GovernanceLifecycleService:
         bypasses the per-row model load for performance; state legality is
         enforced by the SQL ``WHERE status IN (open,scheduled)`` predicate.
 
+        ``close_conclusion`` 透传 repo 批量落 ``close_conclusion`` 列(批量场景
+        统一 ``AdminCloseConclusion.BULK_CLOSED``,每张被关工单带同一结论)。
+
         Returns the number of tickets closed.
         """
         count = self._task_repo.bulk_close_open(
             close_reason=close_reason, closed_at=now,
+            close_conclusion=close_conclusion,
         )
         # Best-effort cancel of pending notifies across all closed tickets.
         # The notify bulk-cancel by status is orchestrated in admin_service /
@@ -489,25 +656,67 @@ class GovernanceLifecycleService:
 
     def bulk_close_by_ticket_ids(
         self, ticket_ids: list[str], *, now: datetime,
+        close_conclusion: str | None = None,
     ) -> int:
-        """Per-ticket emergency-close by ``ticket_id`` set — Task 8 用:
+        """Per-ticket admin-close by ``ticket_id`` set — Task 8 用:
         cancel_pending / bulk_whitelist 取消通知投递后,按被关通知的
         ``ticket_id`` 集合关对应 ``task_record`` 主体,口径对齐通知侧。
 
-        逐条走 :meth:`emergency_close` 链路(find→守卫激活→save→
+        逐条走 :meth:`admin_close` 链路(find→守卫激活→save→
         cancel_pending),激活领域模型白名单——**不裸用全量**
         :meth:`bulk_close_open`(会多关已反馈的 scheduled 单)。
         幂等:已 CLOSED / not-found / 非法态均返回 False 且不计数。
 
+        ``close_conclusion`` 透传逐条 admin_close 落盘(批量场景统一
+        ``AdminCloseConclusion.BULK_CLOSED``)。
+
         Args:
             ticket_ids: 被取消通知对应的 ticket_id 集合(已剔 None)。
             now: 关闭时间戳。
+            close_conclusion: 关单结论(批量统一值,可选)。
 
         Returns:
             实际关闭的工单数(不含幂等跳过的)。
         """
         closed = 0
         for ticket_id in ticket_ids:
-            if self.emergency_close(ticket_id, now=now):
+            if self.admin_close(
+                ticket_id, now=now, close_conclusion=close_conclusion,
+            ):
                 closed += 1
         return closed
+
+    def bulk_observe_by_ticket_ids(
+        self,
+        ticket_ids: list[str],
+        *,
+        now: datetime,
+        close_reason: str = CloseReason.WHITELIST_APPROVED,
+    ) -> int:
+        """Per-ticket observe (→OBSERVED) by ``ticket_id`` set — 批量加白收口。
+
+        批量加白(whitelist_service.bulk_whitelist)取消通知投递后,把对应工单转
+        OBSERVED(加白语义),而非 admin_close 的 CLOSED(运维关单语义)。逐条走
+        :meth:`observe_for_whitelist` 守卫激活,幂等:已 OBSERVED/CLOSED/not-found/
+        非法态均返 False 不计(对齐 bulk_close_by_ticket_ids 范式)。
+
+        close_reason 默认 WHITELIST_APPROVED(批量加白 admin 主动,语义同审批加白);
+        scan 兜底等其它加白入口走单条 observe_for_whitelist 传 SCAN_WHITELISTED。
+
+        Args:
+            ticket_ids: 待转观察的 ticket_id 集合(已剔 None)。
+            now: 时间戳(observe_for_whitelist 内 del now,OBSERVED 不设 closed_at;
+                保留签名兼容)。
+            close_reason: 观察来源,默认 WHITELIST_APPROVED。
+
+        Returns:
+            实际转 OBSERVED 的工单数(不含幂等跳过的)。
+        """
+        del now  # observe_for_whitelist 内已 del;签名保留兼容现有调用方
+        observed = 0
+        for ticket_id in ticket_ids:
+            if self.observe_for_whitelist(
+                ticket_id, close_reason=close_reason, now=datetime.now(),
+            ):
+                observed += 1
+        return observed

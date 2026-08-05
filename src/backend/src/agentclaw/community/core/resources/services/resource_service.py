@@ -686,11 +686,11 @@ class ResourceService:
             else:
                 # Fallback to current file_service (for backward compatibility)
                 file_service = self._file_service
-                logger.info(f"[delete_resource] Using default data_dir (metadata missing)")
+                logger.info("[delete_resource] Using default data_dir (metadata missing)")
 
             if device_provider == 'arca' and sandbox_id:
                 if data_dir is None:
-                    logger.error(f"[delete_resource] data_dir is None, cannot delete from arca")
+                    logger.error("[delete_resource] data_dir is None, cannot delete from arca")
                     return False
                 # 处理路径拼接，避免重复的斜杠
                 resource_path = resource.path.lstrip('/')

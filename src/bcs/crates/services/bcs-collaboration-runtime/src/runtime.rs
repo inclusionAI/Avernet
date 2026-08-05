@@ -5,48 +5,66 @@ use std::{
 };
 
 use async_trait::async_trait;
-use bcs_route_security::OutboundUrlGuard;
 use bcs_domain::{
+    BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
     CollaborationDefinition, CollaborationDefinitionRef, CollaborationRuntimeDefinition, Group,
-    GroupMessage, GroupMessageType, GroupRuntimeBinding, MessageRole, ParticipantRole,
-    ResolvedParticipant, ResolvedParticipantBinding, RuntimeParticipantBinding,
-    StateMachineAssignee, StateMachineDeliveryCorrelation,
-    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
+    GroupKind, GroupMessage, GroupMessageType, GroupRuntimeBinding, GroupStatus, GroupStrategy,
+    MessageRole, NewMessage, Participant, ParticipantMode, ParticipantRole, ResolvedParticipant,
+    ResolvedParticipantBinding, RuntimeParticipantBinding, STATE_MACHINE_PANEL_MESSAGE_TYPE,
+    SenderType, Session, StateMachineAssignee, StateMachineDeliveryCorrelation,
+    StateMachineNodeKind, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
+    StateMachineRunStatus,
 };
 use bcs_protocol::{
-    build_chat_send_frame, BcsFrame, BCS_PROTOCOL_VERSION, EventFrame, GroupContextInput,
-    GroupContextParticipant,
+    BCS_PROTOCOL_VERSION, BcsFrame, EventFrame, GroupContextInput, GroupContextParticipant,
+    build_chat_send_frame,
 };
+use bcs_route_security::OutboundUrlGuard;
+use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryTarget,
-    BotRegistryCoreService,
-    CancelStateMachineRunCommand,
-    ChatEventState, CollaborationDefinitionRecord, CollaborationEventRepoPort,
-    CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
-    ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand, DefinitionYamlSource,
-    FrontendDeliveryCommand, FrontendDeliveryKind,
-    FrontendDeliveryPort, FrontendDeliveryTarget, GroupCoreService, GroupRuntimeBindingRepoPort,
-    GroupCollaborationDefinitionView, HandleBotTerminalEventCommand,
-    HandleBotTerminalEventOutcome, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
-    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
-    MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, message_log_json,
-    NewSessionParams, PatchGroupCollaborationDefinitionCommand, RunFallbackDelivery,
-    SessionHistoryResult, SessionKind, SessionManagementService, StartStateMachineRunCommand,
-    StartStateMachineRunOutcome, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
-    JudgeArtifact, JudgeEvaluatorPort, JudgeRequest, ServiceError,
+    AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
+    BotDeliveryTarget, BotRegistryCoreService, CancelStateMachineRunCommand, ChatEventState,
+    CollaborationDefinitionRecord, CollaborationDefinitionValidationOutcome,
+    CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
+    ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, CreateOrReactivateCommand,
+    DefinitionYamlSource, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
+    FrontendDeliveryTarget, GroupCollaborationDefinitionView, GroupCoreService,
+    GroupRuntimeBindingRepoPort, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
+    HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanInputReadyEvent,
+    HumanRunAccessCommand, JudgeArtifact, JudgeEvaluatorPort, JudgeRequest,
+    ListPendingHumanNodesCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES,
+    MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, MarkHumanNodeRunningCommand, MessageLogContent,
+    MessageLogEventType, MessageLogMode, MessageLogStatus, NewSessionParams,
+    PatchGroupCollaborationDefinitionCommand, PendingHumanNodeView, RespondHumanNodeCommand,
+    RespondHumanNodeOutcome, RunFallbackDelivery, ServiceError, SessionChannelDeliveryOutcome,
+    SessionChannelOutboundPort, SessionHistoryResult, SessionKind, SessionManagementService,
+    SessionStateMachinePermissionCommand, SessionStateMachinePermissionView, SessionStatus,
+    SessionUseCaseError,
+    StartSessionStateMachineRunCommand, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDefinitionRepoPort,
     StateMachineGraphDefinitionView, StateMachineGraphEdgeView, StateMachineGraphNodeView,
-    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineRunGraphView,
-    StateMachineRunView, UpgradeGroupCollaborationDefinitionCommand,
+    StateMachineJudgeOutputView, StateMachineNodeRunView, StateMachineNodeSubStatus,
+    StateMachineResultPublishCommand, StateMachineResultPublisherPort,
+    StateMachineRunAccessCommand, StateMachineRunGraphView, StateMachineRunRepoPort,
+    StateMachineRunView, StateMachineTerminalEvent, StateMachineTerminalStatus,
+    UpgradeGroupCollaborationDefinitionCommand, ValidateCollaborationDefinitionYamlCommand,
+    message_log_json,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::definition::{CompiledStateMachine, reject_explicit_participant_roles, validate_definition};
+const RUNTIME_CLEANUP_SESSION_LIMIT: u64 = i64::MAX as u64;
 
-const BCS_STATE_MACHINE_BOT_ID: &str = "bcs_state_machine";
-const BCS_STATE_MACHINE_BOT_NAME: &str = "BCS State Machine";
+use crate::definition::{
+    CompiledStateMachine, project_definition_graph, reject_explicit_participant_roles,
+    validate_definition,
+};
+use crate::validation::validate_authoring_definition_yaml;
+
 const DEFAULT_JUDGE_TIMEOUT_MS: u64 = 90_000;
+const MAX_HUMAN_RESPONSE_BYTES: usize = 64 * 1024;
+const SESSION_STATE_MACHINE_POLICY_VERSION: &str = "session_state_machine_v1";
 
 enum JudgeEvaluationResult {
     Outcome(String),
@@ -63,6 +81,9 @@ pub struct CollaborationRuntime {
     bot_delivery: Arc<dyn BotDeliveryPort>,
     bot_registry: Option<Arc<dyn BotRegistryCoreService>>,
     frontend_delivery: Option<Arc<dyn FrontendDeliveryPort>>,
+    message_repo: Option<Arc<dyn MessageRepoPort>>,
+    session_channel_outbound: Option<Arc<dyn SessionChannelOutboundPort>>,
+    result_publisher: Option<Arc<dyn StateMachineResultPublisherPort>>,
     judge: Arc<dyn JudgeEvaluatorPort>,
     callback_url_guard: OutboundUrlGuard,
 }
@@ -100,6 +121,9 @@ impl CollaborationRuntime {
             bot_registry: None,
             judge,
             frontend_delivery: None,
+            message_repo: None,
+            session_channel_outbound: None,
+            result_publisher: None,
             callback_url_guard: OutboundUrlGuard::strict(),
         }
     }
@@ -114,6 +138,27 @@ impl CollaborationRuntime {
         frontend_delivery: Arc<dyn FrontendDeliveryPort>,
     ) -> Self {
         self.frontend_delivery = Some(frontend_delivery);
+        self
+    }
+
+    pub fn with_message_repo(mut self, message_repo: Arc<dyn MessageRepoPort>) -> Self {
+        self.message_repo = Some(message_repo);
+        self
+    }
+
+    pub fn with_session_channel_outbound(
+        mut self,
+        outbound: Arc<dyn SessionChannelOutboundPort>,
+    ) -> Self {
+        self.session_channel_outbound = Some(outbound);
+        self
+    }
+
+    pub fn with_result_publisher(
+        mut self,
+        publisher: Arc<dyn StateMachineResultPublisherPort>,
+    ) -> Self {
+        self.result_publisher = Some(publisher);
         self
     }
 
@@ -233,11 +278,7 @@ impl CollaborationRuntime {
     ) -> Result<Vec<StateMachineJudgeOutputView>, CollaborationRuntimeError> {
         let events = self
             .events
-            .list_events_by_run_node_and_type(
-                run_id,
-                node_id,
-                "state_machine.judge.completed",
-            )
+            .list_events_by_run_node_and_type(run_id, node_id, "state_machine.judge.completed")
             .await?;
         events
             .into_iter()
@@ -257,6 +298,212 @@ impl CollaborationRuntime {
             .collect()
     }
 
+    async fn authorize_human_for_run(
+        &self,
+        run: &StateMachineRun,
+        actor_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let belongs = self
+            .sessions
+            .belongs_to_group(&run.session_id, &run.group_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
+        if !belongs {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "run session does not belong to the run group".to_string(),
+            ));
+        }
+        let session = self
+            .sessions
+            .get(&run.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::Forbidden("run session is unavailable".to_string())
+            })?;
+        let authorized = session.participants.iter().any(|participant| {
+            participant.bot_uuid == actor_id
+                && participant.is_human()
+                && participant.effective_mode() == ParticipantMode::Present
+        });
+        if !authorized {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "caller is not a present Human participant in the run session".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn authorize_run_access(
+        &self,
+        run: &StateMachineRun,
+        authenticated_human: Option<&AuthenticatedHumanCaller>,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let compiled = validate_definition(self.load_run_definition(run).await?)?;
+        // COSEC: unauthenticated legacy access is retained only for Bot-only
+        // runs; any run containing HumanInput remains identity-protected.
+        if !compiled_has_human_input(&compiled) {
+            return Ok(false);
+        }
+        let human = authenticated_human.ok_or(CollaborationRuntimeError::Unauthenticated)?;
+        self.authorize_human_for_run(run, &human.actor_id).await?;
+        Ok(true)
+    }
+
+    async fn pending_human_node_view(
+        &self,
+        compiled: &CompiledStateMachine,
+        run: &StateMachineRun,
+        node_run: &StateMachineNodeRun,
+    ) -> Result<PendingHumanNodeView, CollaborationRuntimeError> {
+        let state_machine = match &compiled.definition.runtime {
+            CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(
+                    "runtime.kind must be state_machine".to_string(),
+                ));
+            }
+        };
+        let node = state_machine.nodes.get(&node_run.node_id).ok_or_else(|| {
+            CollaborationRuntimeError::NodeNotFound {
+                run_id: run.run_id.clone(),
+                node_id: node_run.node_id.clone(),
+            }
+        })?;
+        let mut upstream_artifacts = self
+            .judge_upstream_outputs(compiled, &run.run_id, &node_run.node_id)
+            .await?;
+        upstream_artifacts.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+        Ok(PendingHumanNodeView {
+            node_id: node_run.node_id.clone(),
+            display_name: node.display_name.clone(),
+            instruction: node.instruction.clone().unwrap_or_default(),
+            response_ref: format!("{}/{}", run.run_id, node_run.node_id),
+            judge_outcomes: node
+                .judge
+                .as_ref()
+                .map(|judge| judge.outcomes.clone())
+                .unwrap_or_default(),
+            timeout_deadline_ms: node_run.timeout_deadline_ms,
+            upstream_artifacts,
+        })
+    }
+
+    async fn activate_human_input(
+        &self,
+        compiled: &CompiledStateMachine,
+        group: &Group,
+        run: &StateMachineRun,
+        node_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let state_machine = match &compiled.definition.runtime {
+            CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(
+                    "runtime.kind must be state_machine".to_string(),
+                ));
+            }
+        };
+        let node = state_machine.nodes.get(node_id).ok_or_else(|| {
+            CollaborationRuntimeError::InvalidDefinition(format!("node not found: {node_id}"))
+        })?;
+        let node_run = self
+            .runs
+            .get_node_run(&run.run_id, node_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                run_id: run.run_id.clone(),
+                node_id: node_id.to_string(),
+            })?;
+        let now = bcs_protocol::now_ms();
+        let timeout_ms = node.node_timeout_ms.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidDefinition(format!(
+                "human_input node {node_id} requires node_timeout_ms"
+            ))
+        })?;
+        let deadline = now.saturating_add(timeout_ms);
+        let marked = self
+            .runs
+            .mark_human_node_running_if_run_active(MarkHumanNodeRunningCommand {
+                run_id: run.run_id.clone(),
+                node_id: node_id.to_string(),
+                attempt: node_run.attempt,
+                started_at_ms: now,
+                timeout_deadline_ms: deadline,
+            })
+            .await?;
+        if !marked {
+            return Ok(());
+        }
+        self.publish_state_machine_panel_event(group, run, None)
+            .await;
+        let Some(notification) = node.notification.as_ref() else {
+            return Ok(());
+        };
+        let assignee_actor_id = match &node.assignee {
+            Some(StateMachineAssignee::RuntimeActor { actor }) => actor.clone(),
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(format!(
+                    "human_input node {node_id} with notification requires runtime_actor assignee"
+                )));
+            }
+        };
+        let human_input_channel = state_machine.human_input_channel.as_ref().ok_or_else(|| {
+            CollaborationRuntimeError::InvalidDefinition(format!(
+                "human_input node {node_id} with notification requires state_machine.human_input_channel"
+            ))
+        })?;
+        let Some(outbound) = self.session_channel_outbound.as_ref() else {
+            return Ok(());
+        };
+        let running_node = self
+            .runs
+            .get_node_run(&run.run_id, node_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                run_id: run.run_id.clone(),
+                node_id: node_id.to_string(),
+            })?;
+        let pending = self
+            .pending_human_node_view(compiled, run, &running_node)
+            .await?;
+        let event = HumanInputReadyEvent {
+            event_id: format!("human-ready:{}:{}", run.run_id, node_id),
+            group_id: run.group_id.clone(),
+            session_id: run.session_id.clone(),
+            run_id: run.run_id.clone(),
+            node_id: node_id.to_string(),
+            display_name: pending.display_name,
+            instruction: pending.instruction,
+            assignee_actor_id,
+            channel_type: human_input_channel.channel_type.clone(),
+            notification_mode: notification.mode,
+            fixed_group_conversation_id: human_input_channel
+                .fixed_group
+                .as_ref()
+                .map(|group| group.conversation_id.clone()),
+            response_ref: pending.response_ref,
+            upstream_artifacts: pending.upstream_artifacts,
+            judge_outcomes: pending.judge_outcomes,
+            timeout_deadline_ms: pending.timeout_deadline_ms,
+        };
+        match outbound.publish_human_input_ready(event).await {
+            Ok(
+                SessionChannelDeliveryOutcome::Delivered
+                | SessionChannelDeliveryOutcome::NotApplicable,
+            ) => {}
+            Err(error) => {
+                warn!(
+                    run_id = %run.run_id,
+                    node_id = %node_id,
+                    error = %error,
+                    "state_machine: human-ready channel delivery failed"
+                );
+            }
+        }
+        Ok(())
+    }
+
     async fn dispatch_node(
         &self,
         compiled: &CompiledStateMachine,
@@ -269,21 +516,43 @@ impl CollaborationRuntime {
             _ => {
                 return Err(CollaborationRuntimeError::InvalidDefinition(
                     "runtime.kind must be state_machine".to_string(),
-                ))
+                ));
             }
         };
-        state_machine.nodes.get(node_id).ok_or_else(|| {
+        let node_definition = state_machine.nodes.get(node_id).ok_or_else(|| {
             CollaborationRuntimeError::InvalidDefinition(format!("node not found: {node_id}"))
         })?;
+        match node_definition.kind {
+            StateMachineNodeKind::HumanInput => {
+                return self
+                    .activate_human_input(compiled, group, run, node_id)
+                    .await;
+            }
+            StateMachineNodeKind::BotTask => {}
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(format!(
+                    "node {node_id} kind is not supported"
+                )));
+            }
+        }
         let node_run = self
             .runs
             .get_node_run(&run.run_id, node_id)
             .await?
             .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))?;
         let attempt = node_run.attempt;
-        let assignee_bot_id = node_run.assignee_bot_id.clone();
+        let assignee_bot_id = node_run
+            .assignee_bot_id
+            .clone()
+            .filter(|bot_id| !bot_id.trim().is_empty())
+            .ok_or_else(|| {
+                CollaborationRuntimeError::InvalidDefinition(format!(
+                    "bot task node {node_id} has no assignee_bot_id"
+                ))
+            })?;
         let delivery_request_id = format!("smnode-{}-{}-{}", run.run_id, node_id, attempt);
-        let marked = self.runs
+        let marked = self
+            .runs
             .mark_node_running_if_run_active(
                 &run.run_id,
                 node_id,
@@ -332,8 +601,8 @@ impl CollaborationRuntime {
             &group.id,
             &group_context,
             &prompt,
-            BCS_STATE_MACHINE_BOT_ID,
-            BCS_STATE_MACHINE_BOT_NAME,
+            BCS_STATE_MACHINE_MESSAGE_SENDER,
+            BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             &[],
             &assignee_bot_id,
             &None,
@@ -392,7 +661,8 @@ impl CollaborationRuntime {
                     "state-machine node delivery failed for bot '{}': {}",
                     assignee_bot_id, error
                 );
-                self.fail_dispatched_node(compiled, group, run, node_id, attempt, message).await?;
+                self.fail_dispatched_node(compiled, group, run, node_id, attempt, message)
+                    .await?;
                 return Err(error.into());
             }
         };
@@ -405,8 +675,16 @@ impl CollaborationRuntime {
             &delivery_request_id,
             Some(&delivery_result.target_bot_id),
             delivery_result.delivered,
-            delivery_result.error.as_ref().map(ToString::to_string).as_deref(),
-            if delivery_result.delivered { None } else { Some("deliver") },
+            delivery_result
+                .error
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            if delivery_result.delivered {
+                None
+            } else {
+                Some("deliver")
+            },
         );
         info!(
             run_id = %run.run_id,
@@ -443,7 +721,8 @@ impl CollaborationRuntime {
                 error = %detail,
                 "state_machine: node dispatch failed"
             );
-            self.fail_dispatched_node(compiled, group, run, node_id, attempt, message.clone()).await?;
+            self.fail_dispatched_node(compiled, group, run, node_id, attempt, message.clone())
+                .await?;
             return Err(CollaborationRuntimeError::InvalidRequest(message));
         }
         Ok(())
@@ -483,10 +762,10 @@ impl CollaborationRuntime {
             "bcs_session_id": run.session_id.clone(),
             "state": "final",
             "role": "assistant",
-            "sender": BCS_STATE_MACHINE_BOT_ID,
+            "sender": BCS_STATE_MACHINE_MESSAGE_SENDER,
             "content": content.clone(),
             "message_type": "bot",
-            "bot_name": BCS_STATE_MACHINE_BOT_NAME,
+            "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
             "metadata": metadata,
             "message": {
                 "role": "assistant",
@@ -499,7 +778,7 @@ impl CollaborationRuntime {
             "event": "chat",
             "payload": payload.clone(),
             "group_id": group.id.clone(),
-            "bot_uuid": BCS_STATE_MACHINE_BOT_ID,
+            "bot_uuid": BCS_STATE_MACHINE_MESSAGE_SENDER,
         });
         let fallback = BcsFrame::Event(EventFrame::new("chat", Some(payload), None));
         let publish_result = tokio::time::timeout(
@@ -540,6 +819,48 @@ impl CollaborationRuntime {
         }
     }
 
+    async fn persist_state_machine_panel_message(
+        &self,
+        run: &StateMachineRun,
+        session_title: Option<&str>,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let Some(message_repo) = self.message_repo.as_ref() else {
+            return Err(CollaborationRuntimeError::Internal(
+                ServiceError::InvalidOperation {
+                    message: "state-machine panel message repository is not configured"
+                        .to_string(),
+                    request_id: None,
+                },
+            ));
+        };
+        let message_id = format!("{}:000-panel", run.run_id);
+        let content = format_state_machine_panel_message(&run.run_id, session_title);
+        message_repo
+            .append_message(NewMessage {
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                sender_id: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: STATE_MACHINE_PANEL_MESSAGE_TYPE.to_string(),
+                content: serde_json::json!({
+                    "text": content,
+                    "bot_name": BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
+                    "metadata": state_machine_panel_metadata(run),
+                }),
+                client_msg_id: Some(message_id),
+                owner_bot_id: None,
+                created_at: run.created_at,
+                run_id: run.run_id.clone(),
+            })
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(format!(
+                    "state-machine panel history persistence failed: {error}"
+                )))
+            })?;
+        Ok(())
+    }
+
     async fn publish_state_machine_bot_event(
         &self,
         run: &StateMachineRun,
@@ -567,11 +888,8 @@ impl CollaborationRuntime {
             "group_id": run.group_id.clone(),
             "bot_uuid": bot_id,
         });
-        let fallback = BcsFrame::Event(EventFrame::new(
-            event_type.to_string(),
-            Some(payload),
-            None,
-        ));
+        let fallback =
+            BcsFrame::Event(EventFrame::new(event_type.to_string(), Some(payload), None));
         if let Err(error) = frontend_delivery
             .publish(FrontendDeliveryCommand {
                 target: FrontendDeliveryTarget::Session {
@@ -611,7 +929,7 @@ impl CollaborationRuntime {
             _ => {
                 return Err(CollaborationRuntimeError::InvalidDefinition(
                     "runtime.kind must be state_machine".to_string(),
-                ))
+                ));
             }
         };
         let node = state_machine.nodes.get(node_id).ok_or_else(|| {
@@ -630,8 +948,8 @@ impl CollaborationRuntime {
                 }
             }
         }
-        let input = serde_json::to_string_pretty(&run.input)
-            .unwrap_or_else(|_| run.input.to_string());
+        let input =
+            serde_json::to_string_pretty(&run.input).unwrap_or_else(|_| run.input.to_string());
         Ok(format!(
             "[State Machine Task]\nnode_id: {node_id}\ndisplay_name: {}\n\n[Input]\n{input}\n\n[Upstream Outputs]{}\n\n[Instruction]\n{}",
             node.display_name,
@@ -663,12 +981,9 @@ impl CollaborationRuntime {
         &self,
         group_id: &str,
     ) -> Result<GroupCollaborationDefinitionView, CollaborationRuntimeError> {
-        self.groups
-            .get(group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {group_id}"
-            )))?;
+        self.groups.get(group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {group_id}"))
+        })?;
         let binding = self.bindings.get(group_id).await?;
         let participant_bindings = binding
             .as_ref()
@@ -687,7 +1002,8 @@ impl CollaborationRuntime {
                 participant_bindings,
             });
         };
-        let record = self.definitions
+        let record = self
+            .definitions
             .get_record(&definition_ref.id, definition_ref.version)
             .await?
             .ok_or_else(|| {
@@ -731,13 +1047,10 @@ impl CollaborationRuntime {
         GroupMessage {
             id: format!("{}:000-panel", run.run_id),
             timestamp: run.created_at,
-            sender: BCS_STATE_MACHINE_BOT_ID.to_string(),
-            content: format_state_machine_panel_message(
-                &run.run_id,
-                session_title.as_deref(),
-            ),
+            sender: BCS_STATE_MACHINE_MESSAGE_SENDER.to_string(),
+            content: format_state_machine_panel_message(&run.run_id, session_title.as_deref()),
             message_type: GroupMessageType::Bot,
-            bot_name: Some(BCS_STATE_MACHINE_BOT_NAME.to_string()),
+            bot_name: Some(BCS_STATE_MACHINE_MESSAGE_SENDER_NAME.to_string()),
             role: MessageRole::Assistant,
             history_meta: None,
             metadata: Some(state_machine_panel_metadata(run)),
@@ -751,27 +1064,59 @@ impl CollaborationRuntime {
         run: &StateMachineRun,
     ) -> Result<Vec<GroupMessage>, CollaborationRuntimeError> {
         let nodes = self.runs.list_node_runs(&run.run_id).await?;
+        let session = match self.sessions.get(&run.session_id).await {
+            Ok(session) => session,
+            Err(error) => {
+                warn!(
+                    session_id = %run.session_id,
+                    error = %error,
+                    "state_machine: failed to load session participant names"
+                );
+                None
+            }
+        };
         let mut messages = Vec::new();
         messages.push(self.state_machine_panel_message(run).await);
         for node in nodes {
             if let Some(artifact_text) = node.artifact_text.as_ref() {
+                let is_human = node.responded_by.is_some();
+                let Some(sender) = node
+                    .responded_by
+                    .clone()
+                    .or_else(|| node.assignee_bot_id.clone())
+                else {
+                    continue;
+                };
                 messages.push(GroupMessage {
-                    id: format!(
-                        "{}:{}:{}:1-output",
-                        run.run_id, node.node_id, node.attempt
-                    ),
+                    id: format!("{}:{}:{}:1-output", run.run_id, node.node_id, node.attempt),
                     timestamp: node.completed_at.unwrap_or(run.updated_at),
-                    sender: node.assignee_bot_id.clone(),
+                    sender: sender.clone(),
                     content: artifact_text.clone(),
+                    // Keep the existing group-history wire shape: user messages
+                    // are identified by role, while message_type remains `bot`.
+                    // This lets the current Workbench render HumanInput responses
+                    // without requiring a frontend protocol change.
                     message_type: GroupMessageType::Bot,
-                    bot_name: bot_display_name(group, &node.assignee_bot_id),
-                    role: MessageRole::Assistant,
+                    bot_name: if is_human {
+                        session
+                            .as_ref()
+                            .and_then(|session| {
+                                session
+                                    .participants
+                                    .iter()
+                                    .find(|participant| participant.bot_uuid == sender)
+                            })
+                            .and_then(|participant| participant.bot_name.clone())
+                    } else {
+                        bot_display_name(group, &sender)
+                    },
+                    role: if is_human {
+                        MessageRole::User
+                    } else {
+                        MessageRole::Assistant
+                    },
                     history_meta: None,
-                    metadata: Some(state_machine_message_metadata(
-                        run,
-                        &node,
-                        "output",
-                    )),
+                    metadata: Some(state_machine_message_metadata(run, &node, "output")),
                     run_id: String::new(),
                 });
             }
@@ -805,7 +1150,10 @@ impl CollaborationRuntime {
             MessageLogStatus::Routed,
         );
         for target in targets {
-            if self.all_upstreams_completed(compiled, &run.run_id, &target).await? {
+            if self
+                .all_upstreams_completed(compiled, &run.run_id, &target)
+                .await?
+            {
                 let Some(target_run) = self.runs.get_node_run(&run.run_id, &target).await? else {
                     continue;
                 };
@@ -885,14 +1233,10 @@ impl CollaborationRuntime {
             ) {
                 continue;
             }
-            self.runs.skip_node(&run.run_id, &node_id, skipped_at).await?;
-            log_state_machine_transition(
-                run,
-                &node_id,
-                "skipped",
-                &[],
-                MessageLogStatus::Skipped,
-            );
+            self.runs
+                .skip_node(&run.run_id, &node_id, skipped_at)
+                .await?;
+            log_state_machine_transition(run, &node_id, "skipped", &[], MessageLogStatus::Skipped);
             let Some(node) = state_machine.nodes.get(&node_id) else {
                 continue;
             };
@@ -936,15 +1280,12 @@ impl CollaborationRuntime {
         run: &StateMachineRun,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         let nodes = self.runs.list_node_runs(&run.run_id).await?;
-        if nodes
-            .iter()
-            .any(|node| {
-                !matches!(
-                    node.status,
-                    StateMachineNodeStatus::Completed | StateMachineNodeStatus::Skipped
-                )
-            })
-        {
+        if nodes.iter().any(|node| {
+            !matches!(
+                node.status,
+                StateMachineNodeStatus::Completed | StateMachineNodeStatus::Skipped
+            )
+        }) {
             return Ok(self.run_view(&run.run_id).await?);
         }
         let output = final_output_text(compiled, &nodes).or_else(|| {
@@ -955,6 +1296,25 @@ impl CollaborationRuntime {
         });
         let output_len = output.as_ref().map_or(0, String::len);
         let now = bcs_protocol::now_ms();
+        let session = self.sessions.get(&run.session_id).await.map_err(|error| {
+            CollaborationRuntimeError::InvalidRequest(error.to_string())
+        })?;
+        let is_chat_session = session
+            .as_ref()
+            .is_some_and(|session| session.session_kind == SessionKind::Chat);
+        if let Some(session) = session.as_ref().filter(|_| is_chat_session) {
+            if let Err(error) = self
+                .publish_chat_session_result(run, session, output.as_deref())
+                .await
+            {
+                return self
+                    .fail_run(
+                        run,
+                        format!("state-machine result publication failed: {error}"),
+                    )
+                    .await;
+            }
+        }
         self.runs
             .update_run_status(
                 &run.run_id,
@@ -965,36 +1325,61 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let session_complete_result = match self
-            .sessions
-            .complete_if_running(
-                &run.session_id,
-                output.map(Value::String),
-                None,
-            )
-            .await
-        {
-            Ok(Some(session)) => {
-                bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                    session,
-                    self.groups.clone(),
-                    self.sessions.clone(),
-                    self.callback_url_guard.clone(),
-                );
-                "completed"
-            }
-            Ok(None) => "not_running",
-            Err(error) => {
-                warn!(
-                    run_id = %run.run_id,
-                    group_id = %run.group_id,
-                    session_id = %run.session_id,
-                    error = %error,
-                    "state_machine: failed to complete session for completed run"
-                );
-                "error"
+        let (session_complete_result, session_transitioned) = if is_chat_session {
+            ("chat_preserved", false)
+        } else {
+            match self
+                .sessions
+                .complete_if_running(
+                    &run.session_id,
+                    output.clone().map(Value::String),
+                    None,
+                )
+                .await
+            {
+                Ok(Some(session)) => {
+                    bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
+                        session,
+                        self.groups.clone(),
+                        self.sessions.clone(),
+                        self.callback_url_guard.clone(),
+                    );
+                    ("completed", true)
+                }
+                Ok(None) => ("not_running", false),
+                Err(error) => {
+                    warn!(
+                        run_id = %run.run_id,
+                        group_id = %run.group_id,
+                        session_id = %run.session_id,
+                        error = %error,
+                        "state_machine: failed to complete session for completed run"
+                    );
+                    ("error", false)
+                }
             }
         };
+        if session_transitioned {
+            if let Some(outbound) = self.session_channel_outbound.as_ref() {
+                if let Err(error) = outbound
+                    .publish_state_machine_terminal(StateMachineTerminalEvent {
+                        group_id: run.group_id.clone(),
+                        session_id: run.session_id.clone(),
+                        run_id: run.run_id.clone(),
+                        workflow_name: compiled.definition.name.clone(),
+                        status: StateMachineTerminalStatus::Completed,
+                        output: output.clone(),
+                    })
+                    .await
+                {
+                    warn!(
+                        run_id = %run.run_id,
+                        error = %error,
+                        "state_machine: failed to publish completed IM notification"
+                    );
+                }
+            }
+        }
         info!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1006,13 +1391,71 @@ impl CollaborationRuntime {
             session_complete_result = %session_complete_result,
             "state_machine: run completed"
         );
-        log_state_machine_run_complete(
-            run,
-            nodes.len(),
-            output_len,
-            session_complete_result,
-        );
+        log_state_machine_run_complete(run, nodes.len(), output_len, session_complete_result);
         self.run_view(&run.run_id).await
+    }
+
+    async fn publish_chat_session_result(
+        &self,
+        run: &StateMachineRun,
+        session: &Session,
+        output: Option<&str>,
+    ) -> Result<(), ServiceError> {
+        let (Some(sender_bot_id), Some(content)) = (run.created_by.as_ref(), output) else {
+            return Ok(());
+        };
+        if !session.participants.iter().any(|participant| {
+            participant.is_bot() && participant.bot_uuid == sender_bot_id.as_str()
+        }) {
+            warn!(
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                sender_actor_id = %sender_bot_id,
+                "state_machine: refusing to publish chat result under a non-Bot session identity"
+            );
+            return Ok(());
+        }
+        let Some(publisher) = self.result_publisher.as_ref() else {
+            return Err(ServiceError::InvalidOperation {
+                message: "state-machine chat result publisher is not configured".to_string(),
+                request_id: None,
+            });
+        };
+        if let Err(error) = publisher
+            .publish_state_machine_result(StateMachineResultPublishCommand {
+                run_id: run.run_id.clone(),
+                group_id: run.group_id.clone(),
+                session_id: run.session_id.clone(),
+                sender_bot_id: sender_bot_id.clone(),
+                content: content.to_string(),
+            })
+            .await
+        {
+            warn!(
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                sender_bot_id = %sender_bot_id,
+                error = %error,
+                "state_machine: failed to publish completed result into chat session"
+            );
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    async fn is_chat_session(
+        &self,
+        session_id: &str,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        self.sessions
+            .get(session_id)
+            .await
+            .map(|session| {
+                session.is_some_and(|session| session.session_kind == SessionKind::Chat)
+            })
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))
     }
 
     async fn fail_run(
@@ -1031,32 +1474,64 @@ impl CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let session_complete_result = match self
-            .sessions
-            .complete_if_running(&run.session_id, None, Some(error.clone()))
-            .await
-        {
-            Ok(Some(session)) => {
-                bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
-                    session,
-                    self.groups.clone(),
-                    self.sessions.clone(),
-                    self.callback_url_guard.clone(),
-                );
-                "completed"
+        let (session_complete_result, session_transitioned) =
+            if self.is_chat_session(&run.session_id).await? {
+                ("chat_preserved", false)
+            } else {
+                match self
+                    .sessions
+                    .complete_if_running(&run.session_id, None, Some(error.clone()))
+                    .await
+                {
+                    Ok(Some(session)) => {
+                        bcs_callback::dispatch::maybe_dispatch_for_session_with_url_guard(
+                            session,
+                            self.groups.clone(),
+                            self.sessions.clone(),
+                            self.callback_url_guard.clone(),
+                        );
+                        ("completed", true)
+                    }
+                    Ok(None) => ("not_running", false),
+                    Err(error) => {
+                        warn!(
+                            run_id = %run.run_id,
+                            group_id = %run.group_id,
+                            session_id = %run.session_id,
+                            error = %error,
+                            "state_machine: failed to complete session for failed run"
+                        );
+                        ("error", false)
+                    }
+                }
+            };
+        if session_transitioned {
+            let workflow_name = self
+                .definitions
+                .get_run_snapshot(&run.run_id)
+                .await?
+                .map(|definition| definition.name)
+                .unwrap_or_else(|| run.definition_id.clone());
+            if let Some(outbound) = self.session_channel_outbound.as_ref() {
+                if let Err(publish_error) = outbound
+                    .publish_state_machine_terminal(StateMachineTerminalEvent {
+                        group_id: run.group_id.clone(),
+                        session_id: run.session_id.clone(),
+                        run_id: run.run_id.clone(),
+                        workflow_name,
+                        status: StateMachineTerminalStatus::Failed,
+                        output: None,
+                    })
+                    .await
+                {
+                    warn!(
+                        run_id = %run.run_id,
+                        error = %publish_error,
+                        "state_machine: failed to publish failed IM notification"
+                    );
+                }
             }
-            Ok(None) => "not_running",
-            Err(error) => {
-                warn!(
-                    run_id = %run.run_id,
-                    group_id = %run.group_id,
-                    session_id = %run.session_id,
-                    error = %error,
-                    "state_machine: failed to complete session for failed run"
-                );
-                "error"
-            }
-        };
+        }
         warn!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1083,7 +1558,8 @@ impl CollaborationRuntime {
         let max_attempts = compiled_node_max_attempts(compiled, node_id);
         if attempt + 1 < max_attempts {
             let next_attempt = attempt + 1;
-            let scheduled = self.runs
+            let scheduled = self
+                .runs
                 .schedule_node_retry(&run.run_id, node_id, attempt, next_attempt)
                 .await?;
             if scheduled {
@@ -1141,7 +1617,10 @@ impl CollaborationRuntime {
         let upstream_outputs = self
             .judge_upstream_outputs(compiled, &run.run_id, node_id)
             .await?;
-        let judge_type = judge.judge_type.clone().unwrap_or_else(|| "llm".to_string());
+        let judge_type = judge
+            .judge_type
+            .clone()
+            .unwrap_or_else(|| "llm".to_string());
         let allowed_outcomes = judge.outcomes.clone();
         let judge_timeout_ms = node
             .node_timeout_ms
@@ -1178,9 +1657,8 @@ impl CollaborationRuntime {
             Ok(Err(error)) => {
                 let elapsed_ms = elapsed_ms(started_at);
                 let provider_error = judge_service_error_message(&error);
-                let failure = format!(
-                    "judge failed for node {node_id} attempt {attempt}: {provider_error}"
-                );
+                let failure =
+                    format!("judge failed for node {node_id} attempt {attempt}: {provider_error}");
                 warn!(
                     run_id = %run.run_id,
                     node_id = %node_id,
@@ -1206,8 +1684,9 @@ impl CollaborationRuntime {
             }
             Err(_) => {
                 let elapsed_ms = elapsed_ms(started_at);
-                let failure =
-                    format!("judge timed out for node {node_id} attempt {attempt} after {judge_timeout_ms}ms");
+                let failure = format!(
+                    "judge timed out for node {node_id} attempt {attempt} after {judge_timeout_ms}ms"
+                );
                 warn!(
                     run_id = %run.run_id,
                     node_id = %node_id,
@@ -1233,7 +1712,10 @@ impl CollaborationRuntime {
             }
         };
         let elapsed_ms = elapsed_ms(started_at);
-        if !allowed_outcomes.iter().any(|outcome| outcome == &decision.outcome) {
+        if !allowed_outcomes
+            .iter()
+            .any(|outcome| outcome == &decision.outcome)
+        {
             let failure = format!(
                 "judge outcome is not declared by node {node_id}: {}",
                 decision.outcome
@@ -1344,39 +1826,404 @@ impl CollaborationRuntime {
         }
         Ok(artifacts)
     }
+
+    async fn apply_completed_node_progression(
+        &self,
+        compiled: &CompiledStateMachine,
+        group: &Group,
+        run: &StateMachineRun,
+        node_id: &str,
+        outcome: &str,
+        completed_at_ms: u64,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        self.skip_unselected_targets(compiled, run, node_id, outcome, completed_at_ms)
+            .await?;
+        self.dispatch_ready_targets(compiled, group, run, node_id, outcome)
+            .await?;
+        self.complete_run_if_done(compiled, run).await?;
+        self.run_view(&run.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(run.run_id.clone()))
+    }
+
+    async fn validate_human_input_channel_for_group(
+        &self,
+        group_id: &str,
+        compiled: &CompiledStateMachine,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let CollaborationRuntimeDefinition::StateMachine(state_machine) =
+            &compiled.definition.runtime
+        else {
+            return Ok(());
+        };
+        let Some(channel) = state_machine.human_input_channel.as_ref() else {
+            return Ok(());
+        };
+        if let Some(outbound) = self.session_channel_outbound.as_ref() {
+            outbound
+                .validate_human_input_channel(group_id, &channel.channel_type)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn process_expired_node_timeout_candidate(
+        &self,
+        node: &StateMachineNodeRun,
+        now: u64,
+        timeout_grace_ms: u64,
+    ) -> Result<bool, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&node.run_id).await? else {
+            return Ok(false);
+        };
+        if run.status != StateMachineRunStatus::Running {
+            return Ok(false);
+        }
+        let Some(group) = self.groups.get(&run.group_id).await else {
+            self.cancel_state_machine_run(CancelStateMachineRunCommand {
+                run_id: run.run_id.clone(),
+                reason: Some("group_not_found".to_string()),
+            })
+            .await?;
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.run_aborted_missing_group",
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                node_id = %node.node_id,
+                "state-machine run aborted because its group no longer exists"
+            );
+            return Ok(true);
+        };
+        let session_exists = self
+            .sessions
+            .get(&run.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .is_some();
+        if !session_exists {
+            self.cancel_state_machine_run(CancelStateMachineRunCommand {
+                run_id: run.run_id.clone(),
+                reason: Some("session_not_found".to_string()),
+            })
+            .await?;
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.run_aborted_missing_session",
+                run_id = %run.run_id,
+                group_id = %run.group_id,
+                session_id = %run.session_id,
+                node_id = %node.node_id,
+                "state-machine run aborted because its session no longer exists"
+            );
+            return Ok(true);
+        }
+        let definition = self.load_run_definition(&run).await?;
+        let compiled = validate_definition(definition)?;
+        let timeout_ms = node.node_timeout_ms.unwrap_or_default();
+        let deadline_ms = node.timeout_deadline_ms;
+        let error = format!(
+            "state-machine node '{}' timed out after {}ms",
+            node.node_id, timeout_ms
+        );
+        self.events
+            .append_event(
+                &run.run_id,
+                Some(&node.node_id),
+                Some(node.attempt),
+                "state_machine.node.timeout",
+                serde_json::json!({
+                    "run_id": run.run_id.clone(),
+                    "node_id": node.node_id.clone(),
+                    "attempt": node.attempt,
+                    "node_timeout_ms": timeout_ms,
+                    "timeout_deadline_ms": deadline_ms,
+                    "observed_at_ms": now,
+                    "timeout_grace_ms": timeout_grace_ms,
+                    "delivery_request_id": node.delivery_request_id.clone(),
+                    "bot_delivery_run_id": node.bot_delivery_run_id.clone(),
+                }),
+                now,
+            )
+            .await?;
+        let failed = self
+            .runs
+            .fail_node_attempt(&run.run_id, &node.node_id, node.attempt, error.clone(), now)
+            .await?;
+        if !failed {
+            return Ok(false);
+        }
+        log_state_machine_timeout(&run, node, timeout_ms, deadline_ms, timeout_grace_ms);
+        self.fail_node_or_schedule_retry(
+            &compiled,
+            &group,
+            &run,
+            &node.node_id,
+            node.attempt,
+            error,
+        )
+        .await?;
+        Ok(true)
+    }
 }
 
 #[async_trait]
 impl CollaborationRuntimeService for CollaborationRuntime {
+    async fn validate_definition_yaml(
+        &self,
+        cmd: ValidateCollaborationDefinitionYamlCommand,
+    ) -> Result<CollaborationDefinitionValidationOutcome, CollaborationRuntimeError> {
+        Ok(validate_authoring_definition_yaml(cmd))
+    }
+
+    async fn get_session_state_machine_permission(
+        &self,
+        cmd: SessionStateMachinePermissionCommand,
+    ) -> Result<SessionStateMachinePermissionView, CollaborationRuntimeError> {
+        let session = self
+            .sessions
+            .get(&cmd.session_id)
+            .await
+            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::InvalidRequest(format!(
+                    "session not found: {}",
+                    cmd.session_id
+                ))
+            })?;
+        let group = self.groups.get(&session.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!(
+                "group not found: {}",
+                session.group_id
+            ))
+        })?;
+        let active_run_id = self
+            .runs
+            .get_run_by_session_id(&session.id)
+            .await?
+            .filter(|run| {
+                matches!(
+                    run.status,
+                    StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+                )
+            })
+            .map(|run| run.run_id);
+        let denied = |reason_code: &str, message: &str| {
+            session_state_machine_permission_view(
+                &session.id,
+                &group,
+                &cmd.caller_bot_id,
+                false,
+                reason_code,
+                message,
+                active_run_id.clone(),
+            )
+        };
+
+        if group.group_kind != GroupKind::Normal {
+            return Ok(denied(
+                "unsupported_group_kind",
+                "state-machine runs are currently available only in normal groups",
+            ));
+        }
+        if !matches!(
+            group.group_strategy,
+            GroupStrategy::Chat | GroupStrategy::ManagerWorker
+        ) {
+            return Ok(denied(
+                "unsupported_group_strategy",
+                "state-machine runs are currently available only in chat and manager_worker groups",
+            ));
+        }
+        if group.status != GroupStatus::Active {
+            return Ok(denied(
+                "group_not_active",
+                "the group must be active to start a state-machine run",
+            ));
+        }
+        if session.session_kind != SessionKind::Chat {
+            return Ok(denied(
+                "unsupported_session_kind",
+                "one-shot state-machine runs require a chat session",
+            ));
+        }
+        if session.status != SessionStatus::Running {
+            return Ok(denied(
+                "session_not_running",
+                "the session must be running to start a state-machine run",
+            ));
+        }
+        if !session
+            .participants
+            .iter()
+            .any(|participant| {
+                participant.is_bot() && participant.bot_uuid == cmd.caller_bot_id
+            })
+        {
+            return Ok(denied(
+                "caller_not_session_member",
+                "the caller bot must be a member of the current session",
+            ));
+        }
+        if cmd.caller_bot_id != group.driver_bot {
+            return Ok(denied(
+                "caller_not_group_owner",
+                "only the current group owner bot may start a state-machine run",
+            ));
+        }
+        if active_run_id.is_some() {
+            return Ok(denied(
+                "state_machine_run_active",
+                "the current session already has an active state-machine run",
+            ));
+        }
+
+        Ok(session_state_machine_permission_view(
+            &session.id,
+            &group,
+            &cmd.caller_bot_id,
+            true,
+            "allowed",
+            "the caller may start a one-shot state-machine run in this session",
+            None,
+        ))
+    }
+
+    async fn start_session_state_machine_run(
+        &self,
+        cmd: StartSessionStateMachineRunCommand,
+    ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
+        let permission = self
+            .get_session_state_machine_permission(SessionStateMachinePermissionCommand {
+                session_id: cmd.session_id.clone(),
+                caller_bot_id: cmd.caller_bot_id.clone(),
+            })
+            .await?;
+        if !permission.allowed {
+            return Err(CollaborationRuntimeError::Forbidden(format!(
+                "{}: {}",
+                permission.reason_code, permission.message
+            )));
+        }
+
+        let validation =
+            validate_authoring_definition_yaml(ValidateCollaborationDefinitionYamlCommand {
+                definition_yaml: cmd.definition_yaml.clone(),
+                judge_available: cmd.judge_available,
+            });
+        if !validation.valid {
+            let details = validation
+                .errors
+                .iter()
+                .map(|error| format!("{} {}: {}", error.code, error.path, error.message))
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(CollaborationRuntimeError::InvalidDefinition(details));
+        }
+
+        self.start_state_machine_run(StartStateMachineRunCommand {
+            group_id: permission.group_id,
+            session_id: Some(cmd.session_id),
+            definition_yaml: Some(cmd.definition_yaml),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: Some(cmd.participant_bindings),
+            input: cmd.input,
+            caller_id: Some(cmd.caller_bot_id),
+            authenticated_human: None,
+        })
+        .await
+    }
+
     async fn start_state_machine_run(
         &self,
         cmd: StartStateMachineRunCommand,
     ) -> Result<StartStateMachineRunOutcome, CollaborationRuntimeError> {
-        let group = self
-            .groups
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                cmd.group_id
-            )))?;
+        // Session one-shot launches are the only path that supplies transient
+        // participant bindings. Keep their persistence and concurrency rules
+        // separate from configured group state-machine runs.
+        let is_one_shot_session_run =
+            cmd.session_id.is_some() && cmd.participant_bindings.is_some();
+        let mut group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
+        })?;
+        if cmd.participant_bindings.is_some() {
+            if let Some(session_id) = cmd.session_id.as_deref() {
+                let participant_scope = self
+                    .sessions
+                    .get(session_id)
+                    .await
+                    .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                    .ok_or_else(|| {
+                        CollaborationRuntimeError::InvalidRequest(format!(
+                            "session not found: {session_id}"
+                        ))
+                    })?;
+                if participant_scope.group_id != group.id {
+                    return Err(CollaborationRuntimeError::InvalidRequest(
+                        "state-machine session does not belong to the target group".to_string(),
+                    ));
+                }
+                group.participants = participant_scope.participants;
+            }
+        }
         let group_binding = self.bindings.get(&cmd.group_id).await?;
-        let resolved_definition = self.resolve_definition(&cmd, group_binding.as_ref()).await?;
-        let should_upsert_definition =
-            resolved_definition.source == ResolvedDefinitionSource::Inline;
+        let resolved_definition = self
+            .resolve_definition(&cmd, group_binding.as_ref())
+            .await?;
+        let should_upsert_definition = resolved_definition.source
+            == ResolvedDefinitionSource::Inline
+            && !is_one_shot_session_run;
+        let authenticated_human = cmd.authenticated_human.clone();
         let compiled = validate_definition(resolved_definition.definition)?;
         let definition = &compiled.definition;
-        let resolved_participant_bindings =
-            resolve_participant_bindings(&group, &compiled, group_binding.as_ref())?;
+        let has_human_input = compiled_has_human_input(&compiled);
+        self.validate_human_input_channel_for_group(&cmd.group_id, &compiled)
+            .await?;
+        let participant_binding_override =
+            cmd.participant_bindings
+                .as_ref()
+                .map(|participant_bindings| GroupRuntimeBinding {
+                    group_id: group.id.clone(),
+                    group_version: group.version,
+                    default_definition: None,
+                    participant_bindings: participant_bindings.clone(),
+                    auto_start_on_service_invocation: false,
+                });
+        let resolved_participant_bindings = resolve_participant_bindings(
+            &group,
+            &compiled,
+            participant_binding_override
+                .as_ref()
+                .or(group_binding.as_ref()),
+        )?;
         if should_upsert_definition {
             self.definitions.upsert(definition.clone()).await?;
         }
-        let (session_id, session_title) = match cmd.session_id {
+        let (session_id, session_title, mut session) = match cmd.session_id {
             Some(session_id) => {
-                let session_title = self.session_title(&session_id).await;
-                (session_id, session_title)
+                let session = self
+                    .sessions
+                    .get(&session_id)
+                    .await
+                    .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?
+                    .ok_or_else(|| {
+                        CollaborationRuntimeError::InvalidRequest(format!(
+                            "session not found: {session_id}"
+                        ))
+                    })?;
+                (session_id, session.session_title.clone(), session)
             }
             None => {
+                let mut participants = group.participants.clone();
+                if let Some(human) = authenticated_human.as_ref() {
+                    participants.retain(|participant| participant.bot_uuid != human.actor_id);
+                    let mut participant =
+                        Participant::human(human.actor_id.clone(), ParticipantRole::Observer);
+                    participant.bot_name = human.display_name.clone();
+                    participant.mode = Some(ParticipantMode::Present);
+                    participants.push(participant);
+                }
                 let outcome = self
                     .sessions
                     .create_or_reactivate(CreateOrReactivateCommand {
@@ -1384,7 +2231,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                         session_id: None,
                         params: NewSessionParams {
                             session_kind: SessionKind::ServiceInvocation,
-                            participants: group.participants.clone(),
+                            participants,
                             group_version: Some(group.version),
                             caller_id: cmd.caller_id.clone(),
                             input: Some(cmd.input.clone()),
@@ -1396,9 +2243,87 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     .map_err(|error| {
                         CollaborationRuntimeError::InvalidRequest(error.to_string())
                     })?;
-                (outcome.session.id, outcome.session.session_title)
+                let session = outcome.session;
+                (session.id.clone(), session.session_title.clone(), session)
             }
         };
+        if session.group_id != group.id {
+            return Err(CollaborationRuntimeError::InvalidRequest(
+                "state-machine session does not belong to the target group".to_string(),
+            ));
+        }
+        if has_human_input {
+            // COSEC: caller_id is not proof of Human identity. Only a Human
+            // established by the server-side authentication port may be
+            // materialized into the session.
+            if let Some(human) = authenticated_human.as_ref() {
+                let existing = session
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == human.actor_id);
+                if existing.is_some_and(|participant| !participant.is_human()) {
+                    return Err(CollaborationRuntimeError::Forbidden(
+                        "authenticated Human actor ID conflicts with a non-Human session participant"
+                            .to_string(),
+                    ));
+                }
+                if existing.is_none() {
+                    let mut participant =
+                        Participant::human(human.actor_id.clone(), ParticipantRole::Observer);
+                    participant.bot_name = human.display_name.clone();
+                    participant.mode = Some(ParticipantMode::Present);
+                    session = self
+                        .sessions
+                        .add_participant(&session_id, participant)
+                        .await
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
+                } else if existing.is_some_and(|participant| {
+                    participant.effective_mode() != ParticipantMode::Present
+                }) {
+                    session = self
+                        .sessions
+                        .update_participant_mode(
+                            &session_id,
+                            &human.actor_id,
+                            ParticipantMode::Present,
+                        )
+                        .await
+                        .map_err(|error| {
+                            CollaborationRuntimeError::InvalidRequest(error.to_string())
+                        })?;
+                }
+            }
+            let present_humans = session
+                .participants
+                .iter()
+                .filter(|participant| {
+                    participant.is_human()
+                        && participant.effective_mode() == ParticipantMode::Present
+                })
+                .collect::<Vec<_>>();
+            if present_humans.is_empty() {
+                return Err(CollaborationRuntimeError::InvalidRequest(
+                    "state-machine definitions with human_input require a Present Human session participant"
+                        .to_string(),
+                ));
+            }
+            let missing_assignees = human_input_assignees(&compiled)
+                .into_iter()
+                .filter(|assignee| {
+                    !present_humans
+                        .iter()
+                        .any(|participant| participant.bot_uuid == *assignee)
+                })
+                .collect::<Vec<_>>();
+            if !missing_assignees.is_empty() {
+                return Err(CollaborationRuntimeError::InvalidRequest(format!(
+                    "HumanInput assignees must be Present Human session participants: {}",
+                    missing_assignees.join(", ")
+                )));
+            }
+        }
         let run_id = format!("sm-{}", Uuid::new_v4());
         let now = bcs_protocol::now_ms();
         let run = StateMachineRun {
@@ -1419,15 +2344,37 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         };
         let nodes = build_node_runs(&compiled, &run, &resolved_participant_bindings)?;
         let node_count = nodes.len();
-        self.runs.create_run(run.clone(), nodes).await?;
-        self.definitions
+        let created = if is_one_shot_session_run {
+            self.runs
+                .create_run_if_session_idle(run.clone(), nodes)
+                .await?
+        } else {
+            self.runs.create_run(run.clone(), nodes).await?;
+            true
+        };
+        if !created {
+            return Err(CollaborationRuntimeError::Conflict(
+                "state_machine_run_active: the current session already has an active state-machine run"
+                    .to_string(),
+            ));
+        }
+        if let Err(error) = self
+            .definitions
             .save_run_snapshot(
                 &run,
                 group.version,
                 definition,
                 Some(&resolved_participant_bindings),
             )
+            .await
+        {
+            self.fail_run(
+                &run,
+                format!("state-machine run snapshot persistence failed: {error}"),
+            )
             .await?;
+            return Err(error.into());
+        }
         info!(
             run_id = %run.run_id,
             group_id = %run.group_id,
@@ -1440,12 +2387,17 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             node_count = node_count,
             "state_machine: run started"
         );
-        self.publish_state_machine_panel_event(
-            &group,
-            &run,
-            session_title.as_deref(),
-        )
-        .await;
+        if is_one_shot_session_run {
+            if let Err(error) = self
+                .persist_state_machine_panel_message(&run, session_title.as_deref())
+                .await
+            {
+                self.fail_run(&run, error.to_string()).await?;
+                return Err(error);
+            }
+        }
+        self.publish_state_machine_panel_event(&group, &run, session_title.as_deref())
+            .await;
         for node_id in &compiled.initial_nodes {
             self.dispatch_node(&compiled, &group, &run, node_id).await?;
         }
@@ -1463,6 +2415,429 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.run_view(run_id).await
     }
 
+    async fn get_state_machine_run_by_session_id(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run_by_session_id(session_id).await? else {
+            return Ok(None);
+        };
+        self.run_view(&run.run_id).await
+    }
+
+    async fn handle_session_human_input(
+        &self,
+        cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        let group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
+        })?;
+        if group.group_strategy != GroupStrategy::StateMachine {
+            return Ok(HandleSessionHumanInputOutcome::NotStateMachine);
+        }
+
+        let session_id = cmd.session_id.as_deref().ok_or_else(|| {
+            CollaborationRuntimeError::Conflict(
+                "state-machine messages require a session id".to_string(),
+            )
+        })?;
+        let run = self
+            .runs
+            .get_run_by_session_id(session_id)
+            .await?
+            .ok_or_else(|| {
+                CollaborationRuntimeError::Conflict(
+                    "state-machine session has no active run".to_string(),
+                )
+            })?;
+        if run.group_id != cmd.group_id {
+            return Err(CollaborationRuntimeError::Conflict(
+                "state-machine session does not belong to the target group".to_string(),
+            ));
+        }
+
+        let pending = self
+            .list_pending_human_nodes(ListPendingHumanNodesCommand {
+                run_id: run.run_id.clone(),
+                caller_actor_id: cmd.caller_actor_id.clone(),
+            })
+            .await?;
+        let node = match pending.as_slice() {
+            [node] => node,
+            [] => {
+                return Err(CollaborationRuntimeError::Conflict(
+                    "state machine is not waiting for Human input".to_string(),
+                ));
+            }
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(
+                    "multiple pending human_input nodes are not supported".to_string(),
+                ));
+            }
+        };
+        let response = self
+            .respond_human_node(RespondHumanNodeCommand {
+                run_id: run.run_id,
+                node_id: node.node_id.clone(),
+                caller_actor_id: cmd.caller_actor_id,
+                content: cmd.content,
+                source: cmd.source,
+            })
+            .await?;
+        Ok(HandleSessionHumanInputOutcome::Consumed { response })
+    }
+
+    async fn respond_human_node(
+        &self,
+        cmd: RespondHumanNodeCommand,
+    ) -> Result<RespondHumanNodeOutcome, CollaborationRuntimeError> {
+        let content = cmd.content.trim().to_string();
+        if content.is_empty() {
+            return Err(CollaborationRuntimeError::InvalidRequest(
+                "human response must not be empty".to_string(),
+            ));
+        }
+        if content.len() > MAX_HUMAN_RESPONSE_BYTES {
+            return Err(CollaborationRuntimeError::InvalidRequest(format!(
+                "human response exceeds {MAX_HUMAN_RESPONSE_BYTES} UTF-8 bytes"
+            )));
+        }
+
+        let run = self
+            .runs
+            .get_run(&cmd.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        if run.status != StateMachineRunStatus::Running {
+            return Err(CollaborationRuntimeError::Conflict(
+                "human node is no longer accepting responses".to_string(),
+            ));
+        }
+
+        let compiled = validate_definition(self.load_run_definition(&run).await?)?;
+        let state_machine = match &compiled.definition.runtime {
+            CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+            _ => {
+                return Err(CollaborationRuntimeError::InvalidDefinition(
+                    "runtime.kind must be state_machine".to_string(),
+                ));
+            }
+        };
+        let node_definition = state_machine.nodes.get(&cmd.node_id).ok_or_else(|| {
+            CollaborationRuntimeError::NodeNotFound {
+                run_id: cmd.run_id.clone(),
+                node_id: cmd.node_id.clone(),
+            }
+        })?;
+        if node_definition.kind != StateMachineNodeKind::HumanInput {
+            return Err(CollaborationRuntimeError::InvalidRequest(format!(
+                "node {} is not a human_input node",
+                cmd.node_id
+            )));
+        }
+        // COSEC: IM-targeted input is restricted to its frozen assignee. A
+        // frontend-only node has no assignee and retains the existing rule
+        // that any Present Human participant in the run session may respond.
+        let caller_matches_node = match &node_definition.assignee {
+            None => true,
+            Some(StateMachineAssignee::RuntimeActor { actor }) => actor == &cmd.caller_actor_id,
+            Some(StateMachineAssignee::BotBinding { .. }) => false,
+        };
+        if !caller_matches_node {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "caller is not the HumanInput node assignee".to_string(),
+            ));
+        }
+
+        let node = self
+            .runs
+            .get_node_run(&cmd.run_id, &cmd.node_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                run_id: cmd.run_id.clone(),
+                node_id: cmd.node_id.clone(),
+            })?;
+        let now = bcs_protocol::now_ms();
+        if node.status != StateMachineNodeStatus::Running
+            || node
+                .timeout_deadline_ms
+                .is_none_or(|deadline| deadline <= now)
+        {
+            return Err(CollaborationRuntimeError::Conflict(
+                "human node is no longer accepting responses".to_string(),
+            ));
+        }
+
+        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        })?;
+        if !self
+            .runs
+            .record_human_response_if_running(
+                &run.run_id,
+                &cmd.node_id,
+                node.attempt,
+                content.clone(),
+                cmd.caller_actor_id.clone(),
+            )
+            .await?
+        {
+            return Err(CollaborationRuntimeError::Conflict(
+                "human node is no longer accepting responses".to_string(),
+            ));
+        }
+        match self
+            .evaluate_node_outcome(&compiled, &run, &cmd.node_id, node.attempt, &content)
+            .await?
+        {
+            JudgeEvaluationResult::Outcome(outcome) => {
+                let completed_at = bcs_protocol::now_ms();
+                let completed = self
+                    .runs
+                    .complete_node_attempt(
+                        &run.run_id,
+                        &cmd.node_id,
+                        node.attempt,
+                        outcome.clone(),
+                        content,
+                        Some(cmd.caller_actor_id),
+                        completed_at,
+                    )
+                    .await?;
+                if !completed {
+                    return Err(CollaborationRuntimeError::Conflict(
+                        "human response lost the completion race".to_string(),
+                    ));
+                }
+                let view = self
+                    .apply_completed_node_progression(
+                        &compiled,
+                        &group,
+                        &run,
+                        &cmd.node_id,
+                        &outcome,
+                        completed_at,
+                    )
+                    .await?;
+                let node = self
+                    .runs
+                    .get_node_run(&run.run_id, &cmd.node_id)
+                    .await?
+                    .ok_or_else(|| CollaborationRuntimeError::NodeNotFound {
+                        run_id: run.run_id.clone(),
+                        node_id: cmd.node_id.clone(),
+                    })?;
+                Ok(RespondHumanNodeOutcome {
+                    node,
+                    run: view.run,
+                })
+            }
+            JudgeEvaluationResult::Failed(error) => {
+                let failed_at = bcs_protocol::now_ms();
+                let failed = self
+                    .runs
+                    .fail_node_attempt(
+                        &run.run_id,
+                        &cmd.node_id,
+                        node.attempt,
+                        error.clone(),
+                        failed_at,
+                    )
+                    .await?;
+                if !failed {
+                    return Err(CollaborationRuntimeError::Conflict(
+                        "human response lost the completion race".to_string(),
+                    ));
+                }
+                self.fail_node_or_schedule_retry(
+                    &compiled,
+                    &group,
+                    &run,
+                    &cmd.node_id,
+                    node.attempt,
+                    error.clone(),
+                )
+                .await?;
+                Err(CollaborationRuntimeError::JudgeUnavailable(error))
+            }
+        }
+    }
+    async fn list_pending_human_nodes(
+        &self,
+        cmd: ListPendingHumanNodesCommand,
+    ) -> Result<Vec<PendingHumanNodeView>, CollaborationRuntimeError> {
+        let run = self
+            .runs
+            .get_run(&cmd.run_id)
+            .await?
+            .ok_or(CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        if run.status != StateMachineRunStatus::Running {
+            return Ok(Vec::new());
+        }
+        let compiled = validate_definition(self.load_run_definition(&run).await?)?;
+        let state_machine = match &compiled.definition.runtime {
+            CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
+            _ => return Ok(Vec::new()),
+        };
+        let mut pending = Vec::new();
+        for node_run in self.runs.list_node_runs(&run.run_id).await? {
+            if node_run.status != StateMachineNodeStatus::Running
+                || node_run.artifact_text.is_some()
+            {
+                continue;
+            }
+            if !state_machine.nodes.get(&node_run.node_id).is_some_and(|node| {
+                node.kind == StateMachineNodeKind::HumanInput
+                    && match &node.assignee {
+                        None => true,
+                        Some(StateMachineAssignee::RuntimeActor { actor }) => {
+                            actor == &cmd.caller_actor_id
+                        }
+                        Some(StateMachineAssignee::BotBinding { .. }) => false,
+                    }
+            })
+            {
+                continue;
+            }
+            pending.push(
+                self.pending_human_node_view(&compiled, &run, &node_run)
+                    .await?,
+            );
+        }
+        pending.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+        Ok(pending)
+    }
+
+    async fn get_state_machine_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        self.run_view(&cmd.run_id).await
+    }
+
+    async fn get_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        self.run_view(&cmd.run_id).await
+    }
+
+    async fn get_state_machine_node_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+        node_id: &str,
+    ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        self.get_state_machine_node_run(&cmd.run_id, node_id).await
+    }
+
+    async fn get_state_machine_node_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        node_id: &str,
+    ) -> Result<Option<StateMachineNodeRunView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        self.get_state_machine_node_run(&cmd.run_id, node_id).await
+    }
+
+    async fn get_state_machine_run_graph_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+    ) -> Result<Option<StateMachineRunGraphView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        self.get_state_machine_run_graph(&cmd.run_id).await
+    }
+
+    async fn get_state_machine_run_graph_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+    ) -> Result<Option<StateMachineRunGraphView>, CollaborationRuntimeError> {
+        let Some(run) = self.runs.get_run(&cmd.run_id).await? else {
+            return Ok(None);
+        };
+        self.authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        self.get_state_machine_run_graph(&cmd.run_id).await
+    }
+
+    async fn cancel_state_machine_run_for_human(
+        &self,
+        cmd: HumanRunAccessCommand,
+        reason: Option<String>,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        let run = self
+            .runs
+            .get_run(&cmd.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        self.authorize_human_for_run(&run, &cmd.caller_actor_id)
+            .await?;
+        if run.created_by.as_deref() != Some(cmd.caller_actor_id.as_str()) {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "only the Human who started the run can cancel it".to_string(),
+            ));
+        }
+        self.cancel_state_machine_run(CancelStateMachineRunCommand {
+            run_id: cmd.run_id,
+            reason,
+        })
+        .await
+    }
+
+    async fn cancel_state_machine_run_with_access(
+        &self,
+        cmd: StateMachineRunAccessCommand,
+        reason: Option<String>,
+    ) -> Result<StateMachineRunView, CollaborationRuntimeError> {
+        let run = self
+            .runs
+            .get_run(&cmd.run_id)
+            .await?
+            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id.clone()))?;
+        let human_access_required = self
+            .authorize_run_access(&run, cmd.authenticated_human.as_ref())
+            .await?;
+        if human_access_required
+            && let Some(human) = cmd.authenticated_human.as_ref()
+            && run.created_by.as_deref() != Some(human.actor_id.as_str())
+        {
+            return Err(CollaborationRuntimeError::Forbidden(
+                "only the Human who started the run can cancel it".to_string(),
+            ));
+        }
+        self.cancel_state_machine_run(CancelStateMachineRunCommand {
+            run_id: cmd.run_id,
+            reason,
+        })
+        .await
+    }
+
     async fn get_state_machine_node_run(
         &self,
         run_id: &str,
@@ -1472,8 +2847,10 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(None);
         };
         let judge_outputs = self.judge_outputs_for_node(run_id, node_id).await?;
+        let sub_status = node_sub_status(&node);
         Ok(Some(StateMachineNodeRunView {
             node,
+            sub_status,
             judge_outputs,
         }))
     }
@@ -1505,14 +2882,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         let Some(run) = self.runs.get_run_by_session_id(session_id).await? else {
             return Ok(None);
         };
-        let group = self
-            .groups
-            .get(&run.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                run.group_id
-            )))?;
+        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        })?;
         let mut messages = self
             .state_machine_messages_from_snapshot(&group, &run)
             .await?;
@@ -1553,11 +2925,27 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 Some(now),
             )
             .await?;
-        let completed_session = self.sessions
-            .complete_if_running(&run.session_id, None, Some("aborted".to_string()))
-            .await
-            .map_err(|error| CollaborationRuntimeError::InvalidRequest(error.to_string()))?;
-        let session_complete_result = if completed_session.is_some() {
+        let is_chat_session = self.is_chat_session(&run.session_id).await?;
+        let (completed_session, session_missing) = if is_chat_session {
+            (None, false)
+        } else {
+            match self
+                .sessions
+                .complete_if_running(&run.session_id, None, Some("aborted".to_string()))
+                .await
+            {
+                Ok(completed_session) => (completed_session, false),
+                Err(SessionUseCaseError::NotFound(_)) => (None, true),
+                Err(error) => {
+                    return Err(CollaborationRuntimeError::InvalidRequest(error.to_string()));
+                }
+            }
+        };
+        let session_complete_result = if is_chat_session {
+            "chat_preserved"
+        } else if session_missing {
+            "missing"
+        } else if completed_session.is_some() {
             "completed"
         } else {
             "not_running"
@@ -1584,7 +2972,6 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .await?
             .ok_or_else(|| CollaborationRuntimeError::RunNotFound(cmd.run_id))
     }
-
     async fn lookup_delivery_correlation(
         &self,
         run_id: &str,
@@ -1617,9 +3004,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             .runs
             .get_run(&correlation.state_machine_run_id)
             .await?
-            .ok_or_else(|| CollaborationRuntimeError::RunNotFound(
-                correlation.state_machine_run_id.clone(),
-            ))?;
+            .ok_or_else(|| {
+                CollaborationRuntimeError::RunNotFound(correlation.state_machine_run_id.clone())
+            })?;
         let node = self
             .runs
             .get_node_run(&correlation.state_machine_run_id, &correlation.node_id)
@@ -1628,7 +3015,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             run.status == StateMachineRunStatus::Running
                 && node.status == StateMachineNodeStatus::Running
                 && node.attempt == correlation.attempt
-                && node.delivery_request_id.as_deref() == Some(correlation.delivery_request_id.as_str())
+                && node.delivery_request_id.as_deref()
+                    == Some(correlation.delivery_request_id.as_str())
                 && correlation.assignee_bot_id == cmd.bot_id
         });
         if !current_event {
@@ -1697,24 +3085,82 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         .await;
         let definition = self.load_run_definition(&run).await?;
         let compiled = validate_definition(definition)?;
-        let group = self
-            .groups
-            .get(&run.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                run.group_id
-            )))?;
+        let group = self.groups.get(&run.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", run.group_id))
+        })?;
         let now = bcs_protocol::now_ms();
+        if matches!(cmd.state, ChatEventState::Final) && extract_text(&cmd.event_payload).is_none()
+        {
+            // A message-less final completes the bot attempt without an
+            // artifact. It must advance the node into the normal failure/retry
+            // path instead of leaving the node Running after an InvalidRequest.
+            let error = "bot completed without visible output".to_string();
+            let failed = self
+                .runs
+                .fail_node_attempt(
+                    &correlation.state_machine_run_id,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error.clone(),
+                    now,
+                )
+                .await?;
+            let view = if failed {
+                warn!(
+                    run_id = %correlation.state_machine_run_id,
+                    group_id = %run.group_id,
+                    session_id = %run.session_id,
+                    node_id = %correlation.node_id,
+                    attempt = correlation.attempt,
+                    error = %error,
+                    "state_machine: node failed"
+                );
+                log_state_machine_node_result(
+                    &run,
+                    &correlation,
+                    MessageLogStatus::Failed,
+                    None,
+                    Some(&error),
+                    None,
+                );
+                self.fail_node_or_schedule_retry(
+                    &compiled,
+                    &group,
+                    &run,
+                    &correlation.node_id,
+                    correlation.attempt,
+                    error,
+                )
+                .await?
+            } else {
+                self.run_view(&run.run_id).await?
+            };
+            return Ok(HandleBotTerminalEventOutcome {
+                consumed: true,
+                view,
+            });
+        }
         let mut view = None;
         match cmd.state {
             ChatEventState::Final => {
-                let text = extract_text(&cmd.event_payload).ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidRequest(
-                        "final state-machine bot event must include text".to_string(),
-                    )
-                })?;
+                let text = extract_text(&cmd.event_payload).unwrap_or_default();
                 let artifact_len = text.len();
+                if node_uses_judge(&compiled, &correlation.node_id)
+                    && !self
+                        .runs
+                        .record_node_artifact_if_running(
+                            &correlation.state_machine_run_id,
+                            &correlation.node_id,
+                            correlation.attempt,
+                            text.clone(),
+                        )
+                        .await?
+                {
+                    return Ok(HandleBotTerminalEventOutcome {
+                        consumed: true,
+                        view: self.run_view(&run.run_id).await?,
+                    });
+                }
                 let evaluation = self
                     .evaluate_node_outcome(
                         &compiled,
@@ -1733,7 +3179,9 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                                 &correlation.state_machine_run_id,
                                 &correlation.node_id,
                                 correlation.attempt,
+                                outcome.clone(),
                                 text,
+                                None,
                                 completed_at,
                             )
                             .await?
@@ -1756,23 +3204,17 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                                 None,
                                 Some(artifact_len),
                             );
-                            self.skip_unselected_targets(
-                                &compiled,
-                                &run,
-                                &correlation.node_id,
-                                &outcome,
-                                completed_at,
-                            )
-                            .await?;
-                            self.dispatch_ready_targets(
-                                &compiled,
-                                &group,
-                                &run,
-                                &correlation.node_id,
-                                &outcome,
-                            )
-                            .await?;
-                            view = self.complete_run_if_done(&compiled, &run).await?;
+                            view = Some(
+                                self.apply_completed_node_progression(
+                                    &compiled,
+                                    &group,
+                                    &run,
+                                    &correlation.node_id,
+                                    &outcome,
+                                    completed_at,
+                                )
+                                .await?,
+                            );
                         }
                     }
                     JudgeEvaluationResult::Failed(error) => {
@@ -1884,76 +3326,38 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             return Ok(0);
         }
         let now = bcs_protocol::now_ms();
-        let expired_nodes = self.runs
+        let expired_nodes = self
+            .runs
             .list_expired_running_node_runs(now, timeout_grace_ms, limit)
             .await?;
         let mut processed = 0usize;
+        let mut skipped = 0usize;
+        let mut first_skipped = None;
         for node in expired_nodes {
-            let Some(run) = self.runs.get_run(&node.run_id).await? else {
-                continue;
-            };
-            if run.status != StateMachineRunStatus::Running {
-                continue;
-            }
-            let definition = self.load_run_definition(&run).await?;
-            let compiled = validate_definition(definition)?;
-            let group = self
-                .groups
-                .get(&run.group_id)
+            match self
+                .process_expired_node_timeout_candidate(&node, now, timeout_grace_ms)
                 .await
-                .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                    "group not found: {}",
-                    run.group_id
-                )))?;
-            let timeout_ms = node.node_timeout_ms.unwrap_or_default();
-            let deadline_ms = node.timeout_deadline_ms;
-            let error = format!(
-                "state-machine node '{}' timed out after {}ms",
-                node.node_id, timeout_ms
-            );
-            self.events
-                .append_event(
-                    &run.run_id,
-                    Some(&node.node_id),
-                    Some(node.attempt),
-                    "state_machine.node.timeout",
-                    serde_json::json!({
-                        "run_id": run.run_id.clone(),
-                        "node_id": node.node_id.clone(),
-                        "attempt": node.attempt,
-                        "node_timeout_ms": timeout_ms,
-                        "timeout_deadline_ms": deadline_ms,
-                        "observed_at_ms": now,
-                        "timeout_grace_ms": timeout_grace_ms,
-                        "delivery_request_id": node.delivery_request_id.clone(),
-                        "bot_delivery_run_id": node.bot_delivery_run_id.clone(),
-                    }),
-                    now,
-                )
-                .await?;
-            let failed = self.runs
-                .fail_node_attempt(
-                    &run.run_id,
-                    &node.node_id,
-                    node.attempt,
-                    error.clone(),
-                    now,
-                )
-                .await?;
-            if !failed {
-                continue;
+            {
+                Ok(true) => processed += 1,
+                Ok(false) => {}
+                Err(error) => {
+                    skipped += 1;
+                    if first_skipped.is_none() {
+                        first_skipped = Some((node.run_id, node.node_id, error.to_string()));
+                    }
+                }
             }
-            processed += 1;
-            log_state_machine_timeout(&run, &node, timeout_ms, deadline_ms, timeout_grace_ms);
-            self.fail_node_or_schedule_retry(
-                &compiled,
-                &group,
-                &run,
-                &node.node_id,
-                node.attempt,
-                error,
-            )
-            .await?;
+        }
+        if let Some((run_id, node_id, error)) = first_skipped {
+            warn!(
+                target: "state_machine_timeout_scanner",
+                event = "scanner.candidates_skipped",
+                skipped,
+                first_run_id = %run_id,
+                first_node_id = %node_id,
+                first_error = %error,
+                "state-machine timeout scanner skipped unprocessable candidates"
+            );
         }
         Ok(processed)
     }
@@ -1989,17 +3393,98 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.group_collaboration_definition_view(group_id).await
     }
 
+    async fn cancel_session_runs(
+        &self,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let mut first_error = None;
+        for run in self.runs.list_runs_by_session_id(session_id).await? {
+            if !matches!(
+                run.status,
+                StateMachineRunStatus::Pending | StateMachineRunStatus::Running
+            ) {
+                continue;
+            }
+            if let Err(error) = self
+                .cancel_state_machine_run(CancelStateMachineRunCommand {
+                    run_id: run.run_id,
+                    reason: Some(reason.to_string()),
+                })
+                .await
+            {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn cancel_group_runs(
+        &self,
+        group_id: &str,
+        reason: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let sessions = self
+            .sessions
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        let mut first_error = None;
+        for session in sessions {
+            if let Err(error) = self.cancel_session_runs(&session.id, reason).await {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    async fn delete_group_runtime_state(
+        &self,
+        group_id: &str,
+    ) -> Result<(), CollaborationRuntimeError> {
+        let sessions = self
+            .sessions
+            .list_by_group(
+                group_id,
+                None,
+                0,
+                RUNTIME_CLEANUP_SESSION_LIMIT,
+                None,
+                None,
+            )
+            .await
+            .map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        for session in sessions {
+            self.sessions.delete(&session.id).await.map_err(|error| {
+                CollaborationRuntimeError::Internal(ServiceError::InternalError(error.to_string()))
+            })?;
+        }
+        self.bindings.delete(group_id).await?;
+        Ok(())
+    }
+
     async fn patch_group_collaboration_definition(
         &self,
         cmd: PatchGroupCollaborationDefinitionCommand,
     ) -> Result<GroupCollaborationDefinitionView, CollaborationRuntimeError> {
-        let group = self.groups
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                cmd.group_id
-            )))?;
+        let group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
+        })?;
         let binding = self.bindings.get(&cmd.group_id).await?.ok_or_else(|| {
             CollaborationRuntimeError::Conflict(
                 "group has no default collaboration definition binding".to_string(),
@@ -2052,7 +3537,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         self.definitions
             .upsert_with_source_yaml(compiled.definition, cmd.definition_yaml)
             .await?;
-        let rebound = self.bindings
+        let rebound = self
+            .bindings
             .bind_default_definition_if_current(
                 &cmd.group_id,
                 group.version,
@@ -2067,7 +3553,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 "group default definition changed while applying patch".to_string(),
             ));
         }
-        self.group_collaboration_definition_view(&cmd.group_id).await
+        self.group_collaboration_definition_view(&cmd.group_id)
+            .await
     }
 
     async fn upgrade_group_collaboration_definition(
@@ -2081,16 +3568,13 @@ impl CollaborationRuntimeService for CollaborationRuntime {
         }
         if cmd.target_definition.version <= cmd.base_definition.version {
             return Err(CollaborationRuntimeError::InvalidRequest(
-                "target_definition.version must be greater than base_definition.version".to_string(),
+                "target_definition.version must be greater than base_definition.version"
+                    .to_string(),
             ));
         }
-        let group = self.groups
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                cmd.group_id
-            )))?;
+        let group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
+        })?;
         let binding = self.bindings.get(&cmd.group_id).await?.ok_or_else(|| {
             CollaborationRuntimeError::Conflict(
                 "group has no default collaboration definition binding".to_string(),
@@ -2110,7 +3594,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                     cmd.target_definition.id.clone(),
                     cmd.target_definition.version,
                 )
-            })?;
+        })?;
         let compiled = validate_definition(definition)?;
         let final_participant_bindings = cmd
             .participant_bindings
@@ -2131,7 +3615,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 auto_start_on_service_invocation: binding.auto_start_on_service_invocation,
             }),
         )?;
-        let rebound = self.bindings
+        let rebound = self
+            .bindings
             .bind_default_definition_if_current(
                 &cmd.group_id,
                 group.version,
@@ -2146,20 +3631,17 @@ impl CollaborationRuntimeService for CollaborationRuntime {
                 "group default definition changed while applying upgrade".to_string(),
             ));
         }
-        self.group_collaboration_definition_view(&cmd.group_id).await
+        self.group_collaboration_definition_view(&cmd.group_id)
+            .await
     }
 
     async fn configure_group_runtime(
         &self,
         cmd: ConfigureGroupRuntimeCommand,
     ) -> Result<ConfigureGroupRuntimeOutcome, CollaborationRuntimeError> {
-        let group = self.groups
-            .get(&cmd.group_id)
-            .await
-            .ok_or_else(|| CollaborationRuntimeError::InvalidRequest(format!(
-                "group not found: {}",
-                cmd.group_id
-            )))?;
+        let group = self.groups.get(&cmd.group_id).await.ok_or_else(|| {
+            CollaborationRuntimeError::InvalidRequest(format!("group not found: {}", cmd.group_id))
+        })?;
 
         let participant_bindings = cmd.participant_bindings;
         let mut definition_for_validation = None;
@@ -2190,7 +3672,8 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             self.definitions.upsert(compiled.definition).await?;
             Some(definition_ref)
         } else if let Some(definition_ref) = cmd.definition_ref {
-            let definition = self.definitions
+            let definition = self
+                .definitions
                 .get(&definition_ref.id, definition_ref.version)
                 .await?
                 .ok_or_else(|| {
@@ -2213,6 +3696,14 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             })?;
             validate_runtime_participant_bindings(definition, &group, &participant_bindings)?;
         }
+        let requires_human_input_channel =
+            definition_for_validation.as_ref().is_some_and(|definition| {
+                matches!(
+                    &definition.runtime,
+                    CollaborationRuntimeDefinition::StateMachine(state_machine)
+                        if state_machine.human_input_channel.is_some()
+                )
+            });
 
         self.bindings
             .bind_default_definition(
@@ -2228,6 +3719,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             group_id: cmd.group_id,
             default_definition,
             auto_start_on_service_invocation: cmd.auto_start_on_service_invocation,
+            requires_human_input_channel,
         })
     }
 }
@@ -2295,7 +3787,7 @@ fn resolve_participant_bindings(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return invalid_participant_binding(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             ));
         }
         let participants = bot_ids
@@ -2362,7 +3854,7 @@ fn referenced_participant_slots(
         _ => {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "runtime.kind must be state_machine".to_string(),
-            ))
+            ));
         }
     };
     let mut slots = HashSet::new();
@@ -2416,10 +3908,43 @@ fn inferred_participant_role(group: &Group, bot_id: &str) -> ParticipantRole {
     }
 }
 
+fn session_state_machine_permission_view(
+    session_id: &str,
+    group: &Group,
+    caller_bot_id: &str,
+    allowed: bool,
+    reason_code: &str,
+    message: &str,
+    active_run_id: Option<String>,
+) -> SessionStateMachinePermissionView {
+    SessionStateMachinePermissionView {
+        session_id: session_id.to_string(),
+        group_id: group.id.clone(),
+        caller_bot_id: caller_bot_id.to_string(),
+        allowed,
+        reason_code: reason_code.to_string(),
+        message: message.to_string(),
+        policy_version: SESSION_STATE_MACHINE_POLICY_VERSION.to_string(),
+        group_strategy: group_strategy_slug(group.group_strategy).to_string(),
+        group_owner_bot_id: group.driver_bot.clone(),
+        active_run_id,
+    }
+}
+
+fn group_strategy_slug(strategy: GroupStrategy) -> &'static str {
+    match strategy {
+        GroupStrategy::Chat => "chat",
+        GroupStrategy::ManagerWorker => "manager_worker",
+        GroupStrategy::StateMachine => "state_machine",
+    }
+}
+
 fn invalid_participant_binding<T>(
     message: impl Into<String>,
 ) -> Result<T, CollaborationRuntimeError> {
-    Err(CollaborationRuntimeError::InvalidParticipantBinding(message.into()))
+    Err(CollaborationRuntimeError::InvalidParticipantBinding(
+        message.into(),
+    ))
 }
 
 fn definition_yaml_for_record(
@@ -2436,10 +3961,7 @@ fn definition_yaml_for_record(
         );
     }
     match generated_authoring_yaml(&record.definition) {
-        Ok(generated) => (
-            Some(generated),
-            DefinitionYamlSource::GeneratedNormalized,
-        ),
+        Ok(generated) => (Some(generated), DefinitionYamlSource::GeneratedNormalized),
         Err(_) => (None, DefinitionYamlSource::Unavailable),
     }
 }
@@ -2740,6 +4262,35 @@ fn stale_event_reason(
     "event no longer matches current node run".to_string()
 }
 
+fn compiled_has_human_input(compiled: &CompiledStateMachine) -> bool {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .values()
+            .any(|node| node.kind == StateMachineNodeKind::HumanInput),
+        _ => false,
+    }
+}
+
+fn human_input_assignees(compiled: &CompiledStateMachine) -> HashSet<String> {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .values()
+            .filter_map(|node| {
+                if node.kind != StateMachineNodeKind::HumanInput {
+                    return None;
+                }
+                match &node.assignee {
+                    Some(StateMachineAssignee::RuntimeActor { actor }) => Some(actor.clone()),
+                    _ => None,
+                }
+            })
+            .collect(),
+        _ => HashSet::new(),
+    }
+}
+
 fn build_node_runs(
     compiled: &CompiledStateMachine,
     run: &StateMachineRun,
@@ -2750,33 +4301,51 @@ fn build_node_runs(
         _ => {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "runtime.kind must be state_machine".to_string(),
-            ))
+            ));
         }
     };
     let default_node_timeout_ms = state_machine.defaults.node_timeout_ms;
     let default_max_attempts = state_machine.defaults.max_attempts.max(1);
     let mut nodes = Vec::new();
     for (node_id, node) in &state_machine.nodes {
-        let assignee_bot_id = match &node.assignee {
-            Some(StateMachineAssignee::BotBinding { binding }) => resolved_participant_bindings
-                .get(binding)
-                .and_then(|binding| binding.bot_ids.first().cloned())
-                .ok_or_else(|| {
-                    CollaborationRuntimeError::InvalidParticipantBinding(format!(
-                        "node {node_id} assignee binding {binding} has no resolved bot_id"
-                    ))
-                })?,
+        let (assignee_bot_id, node_timeout_ms, max_attempts) = match node.kind {
+            StateMachineNodeKind::BotTask => {
+                let assignee_bot_id = match &node.assignee {
+                    Some(StateMachineAssignee::BotBinding { binding }) => {
+                        resolved_participant_bindings
+                            .get(binding)
+                            .and_then(|binding| binding.bot_ids.first().cloned())
+                            .ok_or_else(|| {
+                                CollaborationRuntimeError::InvalidParticipantBinding(format!(
+                                    "node {node_id} assignee binding {binding} has no resolved bot_id"
+                                ))
+                            })?
+                    }
+                    _ => {
+                        return Err(CollaborationRuntimeError::InvalidDefinition(format!(
+                            "node {node_id} assignee is not supported"
+                        )))
+                    }
+                };
+                (
+                    Some(assignee_bot_id),
+                    node.node_timeout_ms
+                        .or(default_node_timeout_ms)
+                        .filter(|timeout_ms| *timeout_ms > 0),
+                    node.max_attempts.unwrap_or(default_max_attempts).max(1),
+                )
+            }
+            StateMachineNodeKind::HumanInput => (
+                None,
+                node.node_timeout_ms.filter(|timeout_ms| *timeout_ms > 0),
+                1,
+            ),
             _ => {
                 return Err(CollaborationRuntimeError::InvalidDefinition(format!(
-                    "node {node_id} assignee is not supported"
-                )))
+                    "node {node_id} kind is not supported"
+                )));
             }
         };
-        let node_timeout_ms = node
-            .node_timeout_ms
-            .or(default_node_timeout_ms)
-            .filter(|timeout_ms| *timeout_ms > 0);
-        let max_attempts = node.max_attempts.unwrap_or(default_max_attempts).max(1);
         nodes.push(StateMachineNodeRun {
             run_id: run.run_id.clone(),
             node_id: node_id.clone(),
@@ -2786,6 +4355,8 @@ fn build_node_runs(
             timeout_deadline_ms: None,
             max_attempts,
             assignee_bot_id,
+            outcome: None,
+            responded_by: None,
             delivery_request_id: None,
             bot_delivery_run_id: None,
             artifact_text: None,
@@ -2807,45 +4378,44 @@ fn run_graph_view(
         _ => {
             return Err(CollaborationRuntimeError::InvalidDefinition(
                 "runtime.kind must be state_machine".to_string(),
-            ))
+            ));
         }
     };
     let node_runs_by_id = node_runs
         .iter()
         .map(|node| (node.node_id.as_str(), node))
         .collect::<BTreeMap<_, _>>();
-    let nodes = state_machine
+    let projection = project_definition_graph(compiled)?;
+    let nodes = projection
         .nodes
-        .iter()
-        .map(|(node_id, node)| {
-            let run_node = node_runs_by_id.get(node_id.as_str()).copied();
+        .into_iter()
+        .map(|node| {
+            let run_node = node_runs_by_id.get(node.node_id.as_str()).copied();
             StateMachineGraphNodeView {
-                node_id: node_id.clone(),
-                display_name: node.display_name.clone(),
+                node_id: node.node_id,
+                display_name: node.display_name,
                 kind: node.kind,
-                assignee: node.assignee.clone(),
+                assignee: node.assignee,
                 final_output: node.final_output,
                 status: run_node.map(|node| node.status),
                 attempt: run_node.map(|node| node.attempt),
-                assignee_bot_id: run_node.map(|node| node.assignee_bot_id.clone()),
+                assignee_bot_id: run_node.and_then(|node| node.assignee_bot_id.clone()),
                 started_at: run_node.and_then(|node| node.started_at),
                 completed_at: run_node.and_then(|node| node.completed_at),
+                sub_status: run_node.and_then(node_sub_status),
             }
         })
         .collect();
-    let mut edges = Vec::new();
-    for (source, node) in &state_machine.nodes {
-        for (outcome, transition) in &node.transitions {
-            for target in &transition.targets {
-                edges.push(StateMachineGraphEdgeView {
-                    source: source.clone(),
-                    outcome: outcome.clone(),
-                    target: target.clone(),
-                    guard: transition.guard.clone(),
-                });
-            }
-        }
-    }
+    let edges = projection
+        .edges
+        .into_iter()
+        .map(|edge| StateMachineGraphEdgeView {
+            source: edge.source,
+            outcome: edge.outcome,
+            target: edge.target,
+            guard: edge.guard,
+        })
+        .collect();
     Ok(StateMachineRunGraphView {
         run,
         definition: StateMachineGraphDefinitionView {
@@ -2858,6 +4428,27 @@ fn run_graph_view(
         },
         nodes,
         edges,
+    })
+}
+
+fn node_uses_judge(compiled: &CompiledStateMachine, node_id: &str) -> bool {
+    match &compiled.definition.runtime {
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .get(node_id)
+            .is_some_and(|node| node.judge.is_some()),
+        _ => false,
+    }
+}
+
+fn node_sub_status(node: &StateMachineNodeRun) -> Option<StateMachineNodeSubStatus> {
+    if node.status != StateMachineNodeStatus::Running {
+        return None;
+    }
+    Some(if node.artifact_text.is_some() {
+        StateMachineNodeSubStatus::Judging
+    } else {
+        StateMachineNodeSubStatus::AwaitingResponse
     })
 }
 
@@ -3127,11 +4718,7 @@ fn log_state_machine_run_complete(
     );
 }
 
-fn log_state_machine_run_failed(
-    run: &StateMachineRun,
-    error: &str,
-    session_complete_result: &str,
-) {
+fn log_state_machine_run_failed(run: &StateMachineRun, error: &str, session_complete_result: &str) {
     warn!(
         target: MSG_LOG_TARGET,
         schema_version = MESSAGE_LOG_SCHEMA_VERSION,
@@ -3167,8 +4754,8 @@ fn log_state_machine_timeout(
         run_id = %node.delivery_request_id.as_deref().unwrap_or(run.run_id.as_str()),
         node_id = %node.node_id,
         attempt = node.attempt,
-        bot_id = %node.assignee_bot_id,
-        assignee_bot_id = %node.assignee_bot_id,
+        bot_id = %node.assignee_bot_id.as_deref().unwrap_or(""),
+        assignee_bot_id = %node.assignee_bot_id.as_deref().unwrap_or(""),
         delivery_request_id = %node.delivery_request_id.as_deref().unwrap_or(""),
         bot_delivery_run_id = %node.bot_delivery_run_id.as_deref().unwrap_or(""),
         node_timeout_ms = timeout_ms,
@@ -3198,7 +4785,12 @@ fn extract_text(payload: &Value) -> Option<String> {
                 .and_then(Value::as_str)
                 .map(str::to_string)
         })
-        .or_else(|| payload.get("text").and_then(Value::as_str).map(str::to_string))
+        .or_else(|| {
+            payload
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
 }
@@ -3349,10 +4941,7 @@ fn state_machine_panel_metadata(run: &StateMachineRun) -> Value {
     })
 }
 
-fn format_state_machine_panel_message(
-    run_id: &str,
-    session_title: Option<&str>,
-) -> String {
+fn format_state_machine_panel_message(run_id: &str, session_title: Option<&str>) -> String {
     let title_suffix = session_title
         .map(str::trim)
         .filter(|title| !title.is_empty())
@@ -3363,10 +4952,7 @@ fn format_state_machine_panel_message(
         json_string(&format!("state-machine-run-{run_id}")),
         json_string(&title)
     ));
-    let params_json = single_quoted_json_attr(format!(
-        "{{\"runId\":{}}}",
-        json_string(run_id)
-    ));
+    let params_json = single_quoted_json_attr(format!("{{\"runId\":{}}}", json_string(run_id)));
     format!(
         "<AixUI\n  type=\"panel\"\n  component=\"bcsPanel.StateMachineRunView\"\n  tab='{tab_json}'\n  params='{params_json}'\n/>"
     )
@@ -3400,16 +4986,13 @@ fn final_output_text(
         CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine,
         _ => return None,
     };
-    let final_node_id = state_machine
-        .nodes
-        .iter()
-        .find_map(|(node_id, node)| {
-            if node.final_output {
-                Some(node_id)
-            } else {
-                None
-            }
-        })?;
+    let final_node_id = state_machine.nodes.iter().find_map(|(node_id, node)| {
+        if node.final_output {
+            Some(node_id)
+        } else {
+            None
+        }
+    })?;
     nodes
         .iter()
         .find(|node| &node.node_id == final_node_id)
@@ -3418,14 +5001,12 @@ fn final_output_text(
 
 fn compiled_node_max_attempts(compiled: &CompiledStateMachine, node_id: &str) -> i32 {
     match &compiled.definition.runtime {
-        CollaborationRuntimeDefinition::StateMachine(state_machine) => {
-            state_machine
-                .nodes
-                .get(node_id)
-                .and_then(|node| node.max_attempts)
-                .unwrap_or(state_machine.defaults.max_attempts)
-                .max(1)
-        }
+        CollaborationRuntimeDefinition::StateMachine(state_machine) => state_machine
+            .nodes
+            .get(node_id)
+            .and_then(|node| node.max_attempts)
+            .unwrap_or(state_machine.defaults.max_attempts)
+            .max(1),
         _ => 1,
     }
 }
@@ -3464,7 +5045,10 @@ runtime:
   kind: chat
 "#;
         let err = reject_authoring_yaml_identity(yaml).unwrap_err();
-        assert!(matches!(err, CollaborationRuntimeError::InvalidDefinition(_)));
+        assert!(matches!(
+            err,
+            CollaborationRuntimeError::InvalidDefinition(_)
+        ));
     }
 
     #[test]
@@ -3529,5 +5113,10 @@ runtime:
         assert_eq!(nodes.len(), 1);
         assert_eq!(nodes[0].node_timeout_ms, None);
         assert_eq!(nodes[0].attempt, 0);
+    }
+
+    #[test]
+    fn runtime_cleanup_session_limit_is_sqlite_representable() {
+        assert!(RUNTIME_CLEANUP_SESSION_LIMIT <= i64::MAX as u64);
     }
 }

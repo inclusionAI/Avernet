@@ -9,6 +9,7 @@ from sqlalchemy.orm import relationship
 
 # 使用 plugins.models.Base 以与 SkillSet 等模型共享同一个 metadata
 from agentclaw.community.plugin_api.models import Base
+from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tenant_guard
 
 
 class SkillSetMCPServer(Base):
@@ -27,6 +28,9 @@ class SkillSetMCPServer(Base):
     icon = Column(String(500), nullable=True)  # MCP server icon URL
     user_id = Column(String(100), nullable=True, index=True)  # 用户工号
     env = Column(String(50), nullable=True)  # 环境标识: dev/pre/prod
+    # The association is tenant-owned alongside its Skill Set. Keep the field
+    # out of to_dict() so existing Skills API payloads do not change.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     # DB-owned timestamps: prod ac_user_mcp_config is `timestamp NULL
     # DEFAULT CURRENT_TIMESTAMP [ON UPDATE CURRENT_TIMESTAMP]`. The repo
     # does not set these in Python (matches the prior prod twin's NOW()).
@@ -53,6 +57,11 @@ class SkillSetMCPServer(Base):
         }
 
 
+# Register where the model is defined so every direct ORM path has the shared
+# read/write boundary without per-repository predicates or Session listeners.
+register_avernet_tenant_guard(SkillSetMCPServer)
+
+
 class UserMCPConfig(Base):
     """User-specific MCP Server configuration (API keys, etc.).
 
@@ -68,16 +77,33 @@ class UserMCPConfig(Base):
     custom_headers = Column(Text, nullable=True)  # JSON: 用户自定义Headers
     extra_config = Column(Text, nullable=True)  # JSON: 其他配置项
     env = Column(String(50), nullable=True)  # 环境标识: dev/pre/prod
+    # Data-isolation tenant (see utils/avernet_tenant_guard + the registration
+    # below). server_default (not a Python default=) so create_all emits the
+    # same DEFAULT 'teamclaw' prod's out-of-band DDL applies, backfilling
+    # existing rows and covering any non-ORM insert; the context-aware value on
+    # ORM inserts comes from the insert guard. Deliberately absent from
+    # to_dict() so no current API response body changes.
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
     gmt_created = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
-        # Production's unique key is (user_id, server_code, env) — see
+        # Production's unique key was (user_id, server_code, env) — see
         # specs/2026-05-17-unified-repository-round-2/
-        # ddl-parity-ac_user_mcp_config.md. Aligned so the local SQLite
-        # test DB enforces the same constraint as prod.
+        # ddl-parity-ac_user_mcp_config.md. Tenant-isolation prepends
+        # avernet_tenant: a user identifier is only meaningful *within* a
+        # tenant, so two tenants may each configure their own "12345" for the
+        # same MCP server. Without the tenant in the key the second tenant's
+        # write fails with a duplicate-key error against a row it cannot see.
+        # Adding a leading column only loosens a unique key, so every existing
+        # row stays valid. Aligned so the local SQLite test DB enforces the
+        # same constraint as prod.
         UniqueConstraint(
-            "user_id", "server_code", "env", name="uix_user_mcp_config"
+            "avernet_tenant",
+            "user_id",
+            "server_code",
+            "env",
+            name="uix_user_mcp_config_tenant",
         ),
     )
 
@@ -115,3 +141,10 @@ class UserMCPConfig(Base):
             "endpoint_env": extra.get("endpoint_env", "PROD"),  # 默认 PROD
             "transport_protocol": extra.get("transport_protocol"),  # 默认 None
         }
+
+
+# Confine every read/update/delete to the request's tenant and stamp it on every
+# insert. Registered here so the guarantee is welded to the model: import
+# UserMCPConfig, get the guard. This table holds third-party API keys and
+# authorization headers, so it is the most sensitive data in the mcp category.
+register_avernet_tenant_guard(UserMCPConfig)

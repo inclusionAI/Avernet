@@ -57,6 +57,7 @@ def _make_service(*, current_bots: int = 0) -> BotService:
     teclaw_provision = MagicMock()
     teclaw_provision.is_teclaw.return_value = False
     svc._teclaw_provision_provider = lambda: teclaw_provision
+    svc._common_config_service = None
     svc._policy_service = None
     # DRM reader: default unset (None) ⇒ _is_new_bot_use_nas() is False (OSS).
     # BCN-register tests patch BotService._is_claude_code_bcn_register_enabled.
@@ -152,6 +153,42 @@ class TestCreateBotBcnRegister:
             name="cc-svc-bot",
             summary="service desc",
         )
+
+    def test_service_bot_create_persists_and_uses_current_pinned_image(self):
+        svc = _make_service()
+        device_service = _attach_device_service(svc)
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        svc._common_config_service = common_config
+        template_config = {
+            "image": "registry/arka:v1",
+            "envs": {"A": "1"},
+        }
+
+        svc.create_bot(
+            user_id="u1",
+            nick_name="nick",
+            bot_name="pinned-service-bot",
+            bot_id="service-pin-1",
+            engine_type="openclaw",
+            bot_type="service",
+            template_type="service",
+            template_config=template_config,
+            ext={"service_bot_config": {"device_count": 3}},
+        )
+
+        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        assert inserted_ext == {
+            "service_bot_config": {"device_count": 3},
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        }
+        apply_kwargs = device_service.apply_device.call_args.kwargs
+        assert apply_kwargs["template_config"] == {
+            "image": "registry/arka:v2",
+            "envs": {"A": "1"},
+        }
+        assert template_config["image"] == "registry/arka:v1"
 
     def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
         """claude_code + applicationCoding 创建时不应触发 BCN 注册。"""

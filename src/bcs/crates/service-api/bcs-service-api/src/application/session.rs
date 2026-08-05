@@ -140,6 +140,7 @@ pub trait SessionManagementService: Send + Sync {
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError>;
 
+    /// Abort active StateMachine runs before deleting the Session.
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError>;
 
     // ── session collection (收藏) ──────────────────────────────
@@ -174,6 +175,18 @@ pub trait SessionManagementService: Send + Sync {
         _offset: u64,
         _limit: u64,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
+        Ok(Vec::new())
+    }
+
+    /// Batch lookup of collected_at by bot for the given session ids. Returns
+    /// `(session_id, collected_at_ms)` only for sessions the bot has collected.
+    /// Used by the session-list HTTP layer to surface per-session collected
+    /// state for a participant.
+    async fn collected_at_map(
+        &self,
+        _session_ids: &[&str],
+        _bot_uuid: &str,
+    ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
         Ok(Vec::new())
     }
 }

@@ -9,46 +9,51 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
-use bcs_channel_api::{
-    ChannelInboundSink, ChannelProvider, ChannelProviderRegistry,
-};
+use bcs_channel_api::{ChannelInboundSink, ChannelProvider, ChannelProviderRegistry};
 use bcs_domain::{
     ActorKind, BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    Group, GroupChatScope, GroupStrategy, ImParticipantMap, Participant, ParticipantMode,
+    Group, GroupChatScope, GroupKind, GroupStrategy, HumanInputNotificationMode,
+    HumanInputRequest, HumanInputRequestStatus, ImParticipantMap, Participant, ParticipantMode,
     ParticipantRole, Session, SessionKind, SessionScope, SessionStatus, SystemMessageEvent,
-    Visibility,
+    Visibility, channel_group_id,
 };
 use bcs_service_api::application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
     CreateBindingCommand, InboundMessage, OutboundMessage,
 };
-use bcs_service_api::application::collaboration_runtime::StartStateMachineRunCommand;
+use bcs_service_api::application::collaboration_runtime::{
+    AuthenticatedHumanCaller, StartStateMachineRunCommand,
+};
 use bcs_service_api::application::message_flow::WebSendCommand;
 use bcs_service_api::application::principal::{CallerContext, HumanActor};
 use bcs_service_api::core::DmActorSpec;
 use bcs_service_api::port::channel_delivery::{
     ChannelBindingRef, ChannelOutboundEvent,
 };
+use bcs_service_api::port::ChannelBindingCleanupPort;
 use bcs_service_api::port::repo::{
-    ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort, NewSessionParams,
-    SessionRepoPort,
+    ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
 };
 use bcs_service_api::{
-    BotRegistryCoreService, ChannelOutboundEventKind, CollaborationRuntimeService,
-    GroupCoreService, MessageFlowService, ServiceError, SystemMessageService,
+    BotRegistryCoreService, ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
+    CollaborationRuntimeService, GroupCoreService, HumanInputReadyEvent, HumanResponseSource,
+    MessageFlowService, RespondHumanNodeCommand, ServiceError, ServiceResult,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
+    StateMachineTerminalEvent, StateMachineTerminalStatus, SystemMessageService,
 };
 
 pub use visibility::visibility_allows;
 
 const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
-const MAX_CHANNEL_SESSION_ID_CHARS: usize = 64;
-const GENERATED_SESSION_ID_SUFFIX_CHARS: usize = 9;
+const CHANNEL_START_STALE_MS: u64 = 30_000;
 
 /// Channel application service implementation.
 pub struct BcsChannelService {
     bindings: Arc<dyn ChannelBindingRepoPort>,
     conversations: Arc<dyn ConversationSessionRepoPort>,
     im_participants: Arc<dyn ImParticipantRepoPort>,
+    human_input_requests: Arc<dyn HumanInputRequestRepoPort>,
     sessions: Arc<dyn SessionRepoPort>,
     message_flow: Arc<dyn MessageFlowService>,
     system_message: Arc<dyn SystemMessageService>,
@@ -61,6 +66,7 @@ pub struct BcsChannelService {
     new_id: Arc<dyn Fn() -> String + Send + Sync>,
     inbound_dedup: InboundDedupGuard,
     binding_admin_lock: Mutex<()>,
+    state_machine_session_resolution_lock: Mutex<()>,
 }
 
 struct ResolvedInboundContext {
@@ -79,6 +85,7 @@ impl BcsChannelService {
         bindings: Arc<dyn ChannelBindingRepoPort>,
         conversations: Arc<dyn ConversationSessionRepoPort>,
         im_participants: Arc<dyn ImParticipantRepoPort>,
+        human_input_requests: Arc<dyn HumanInputRequestRepoPort>,
         sessions: Arc<dyn SessionRepoPort>,
         message_flow: Arc<dyn MessageFlowService>,
         system_message: Arc<dyn SystemMessageService>,
@@ -95,6 +102,7 @@ impl BcsChannelService {
             bindings,
             conversations,
             im_participants,
+            human_input_requests,
             sessions,
             message_flow,
             system_message,
@@ -107,6 +115,7 @@ impl BcsChannelService {
             new_id,
             inbound_dedup: InboundDedupGuard::new(DEFAULT_INBOUND_DEDUP_LIMIT),
             binding_admin_lock: Mutex::new(()),
+            state_machine_session_resolution_lock: Mutex::new(()),
         }
     }
 
@@ -147,12 +156,15 @@ impl BcsChannelService {
     ) -> Result<ResolvedInboundContext, ChannelUseCaseError> {
         let (group_id, is_bot_target) = match &binding.target {
             BindingTarget::Group { group_id } => (group_id.clone(), false),
-            BindingTarget::Bot { bot_id } if msg.conversation_type == "1" => {
-                (self.ensure_dm_group(binding, bot_id, msg, actor_id).await?, true)
-            }
-            BindingTarget::Bot { bot_id } => {
-                (self.ensure_managed_single_bot_group(binding, bot_id).await?, true)
-            }
+            BindingTarget::Bot { bot_id } if msg.conversation_type == "1" => (
+                self.ensure_dm_group(binding, bot_id, msg, actor_id).await?,
+                true,
+            ),
+            BindingTarget::Bot { bot_id } => (
+                self.ensure_managed_single_bot_group(binding, bot_id)
+                    .await?,
+                true,
+            ),
         };
         let group = self
             .groups
@@ -184,7 +196,10 @@ impl BcsChannelService {
             None
         };
         let caller_principal = match im_user_id.as_deref() {
-            Some(user_id) => format!("{}:{}:{}", msg.channel_type, msg.im_conversation_id, user_id),
+            Some(user_id) => format!(
+                "{}:{}:{}",
+                msg.channel_type, msg.im_conversation_id, user_id
+            ),
             None => format!("{}:{}", msg.channel_type, msg.im_conversation_id),
         };
 
@@ -195,7 +210,8 @@ impl BcsChannelService {
             im_user_id,
             caller_principal,
             context_projection: if is_bot_target { "direct_bot" } else { "group" },
-            state_machine_trigger: !is_bot_target && group.group_strategy == GroupStrategy::StateMachine,
+            state_machine_trigger: !is_bot_target
+                && group.group_strategy == GroupStrategy::StateMachine,
         })
     }
 
@@ -206,7 +222,11 @@ impl BcsChannelService {
         msg: &InboundMessage,
         actor_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(&binding.channel_type, &(self.new_id)())?;
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Dm,
+            &(self.new_id)(),
+        )?;
         let label = msg
             .im_user_nick
             .as_ref()
@@ -239,14 +259,25 @@ impl BcsChannelService {
         binding: &ChannelBinding,
         bot_id: &str,
     ) -> Result<String, ChannelUseCaseError> {
-        let group_id = channel_owned_group_id(&binding.channel_type, &binding.id)?;
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Normal,
+            &binding.id,
+        )?;
         if self.groups.get(&group_id).await.is_some() {
             return Ok(group_id);
+        }
+        let legacy_group_id = legacy_channel_owned_group_id(&binding.channel_type, &binding.id);
+        if self.groups.get(&legacy_group_id).await.is_some() {
+            return Ok(legacy_group_id);
         }
         let mut group = Group::new(
             group_id.clone(),
             bot_id.to_string(),
-            vec![Participant::bot(bot_id.to_string(), ParticipantRole::Driver)],
+            vec![Participant::bot(
+                bot_id.to_string(),
+                ParticipantRole::Driver,
+            )],
         );
         group.group_strategy = GroupStrategy::Chat;
         group.label = Some(format!("Channel {}", binding.account_ref));
@@ -333,6 +364,7 @@ impl BcsChannelService {
                         reason,
                         session_input: session.input.clone(),
                         task_ledger: None,
+                        driver_delivery: None,
                     },
                     &session.id,
                     &session.participants,
@@ -364,6 +396,55 @@ impl BcsChannelService {
         msg: &InboundMessage,
         actor_id: &str,
     ) -> Result<(), ChannelUseCaseError> {
+        let guard = self.state_machine_session_resolution_lock.lock().await;
+        let current = self
+            .conversations
+            .get(
+                &ctx.binding_id,
+                &msg.im_conversation_id,
+                ctx.session_scope,
+                ctx.im_user_id.as_deref(),
+            )
+            .await?;
+        if let Some(mapping) = current.as_ref() {
+            if let Some(view) = self
+                .collaboration_runtime
+                .get_state_machine_run_by_session_id(&mapping.bcs_session_id)
+                .await
+                .map_err(|error| {
+                    ChannelUseCaseError::Internal(ServiceError::InternalError(error.to_string()))
+                })?
+            {
+                if view.run.status == bcs_domain::StateMachineRunStatus::Running
+                    && view.run.group_id == ctx.group_id
+                {
+                    drop(guard);
+                    return self
+                        .continue_state_machine_from_inbound(
+                            ctx,
+                            msg,
+                            actor_id,
+                            &view.run.run_id,
+                            &view.run.session_id,
+                        )
+                        .await;
+                }
+            } else if (self.now_ms)().saturating_sub(mapping.last_active_at)
+                < CHANNEL_START_STALE_MS
+            {
+                let session_id = mapping.bcs_session_id.clone();
+                drop(guard);
+                self.send_state_machine_system(
+                    ctx,
+                    &session_id,
+                    "",
+                    "流程正在启动，请稍后再试。",
+                    Some(&msg.msg_id),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
         let input = serde_json::json!({
             "source": msg.channel_type,
             "text": msg.text,
@@ -381,6 +462,20 @@ impl BcsChannelService {
                 SessionScope::PerSender => "per_sender",
             },
         });
+        let group = self
+            .groups
+            .get(&ctx.group_id)
+            .await
+            .ok_or_else(|| ChannelUseCaseError::NotFound(ctx.group_id.clone()))?;
+        let mut participants = group
+            .participants
+            .into_iter()
+            .filter(|participant| participant.is_bot())
+            .collect::<Vec<_>>();
+        let mut human = Participant::human(actor_id.to_string(), ParticipantRole::Observer);
+        human.mode = Some(ParticipantMode::Present);
+        human.bot_name = msg.im_user_nick.clone();
+        participants.push(human);
         let session = self
             .sessions
             .create(
@@ -392,6 +487,7 @@ impl BcsChannelService {
                     input: Some(input.clone()),
                     session_title: msg.im_user_nick.clone(),
                     meta: Some(channel_meta(ctx, msg)),
+                    participants,
                     ..Default::default()
                 },
             )
@@ -407,21 +503,375 @@ impl BcsChannelService {
                 last_active_at: (self.now_ms)(),
             })
             .await?;
-        self.collaboration_runtime
+        let session_id = session.id.clone();
+        let start_result = self
+            .collaboration_runtime
             .start_state_machine_run(StartStateMachineRunCommand {
                 group_id: ctx.group_id.clone(),
-                session_id: Some(session.id),
+                session_id: Some(session_id.clone()),
                 definition_yaml: None,
                 definition: None,
                 definition_ref: None,
+                participant_bindings: None,
                 input,
                 caller_id: Some(actor_id.to_string()),
+                authenticated_human: Some(AuthenticatedHumanCaller {
+                    actor_id: actor_id.to_string(),
+                    display_name: msg.im_user_nick.clone(),
+                }),
             })
-            .await
-            .map_err(|error| {
-                ChannelUseCaseError::Internal(ServiceError::InternalError(error.to_string()))
-            })?;
+            .await;
+        if let Err(error) = start_result {
+            if let Err(cleanup_error) = self
+                .sessions
+                .complete_if_running(
+                    &session_id,
+                    None,
+                    Some("state_machine_start_failed".to_string()),
+                )
+                .await
+            {
+                warn!(
+                    session_id = %session_id,
+                    error = %cleanup_error,
+                    "channel state-machine start: failed to complete orphan session"
+                );
+            }
+            if let Err(cleanup_error) = self
+                .conversations
+                .delete_if_session(
+                    &ctx.binding_id,
+                    &msg.im_conversation_id,
+                    ctx.session_scope,
+                    ctx.im_user_id.as_deref(),
+                    &session_id,
+                )
+                .await
+            {
+                warn!(
+                    session_id = %session_id,
+                    error = %cleanup_error,
+                    "channel state-machine start: failed to remove orphan conversation mapping"
+                );
+            }
+            drop(guard);
+            return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+                error.to_string(),
+            )));
+        }
+        drop(guard);
         Ok(())
+    }
+
+    async fn continue_state_machine_from_inbound(
+        &self,
+        ctx: &ResolvedInboundContext,
+        msg: &InboundMessage,
+        _actor_id: &str,
+        run_id: &str,
+        session_id: &str,
+    ) -> Result<(), ChannelUseCaseError> {
+        // HumanInput replies are selected exclusively through the persisted
+        // active request before normal state-machine conversation resolution.
+        // Never guess a node from a session's pending-node list and never grant
+        // session participation merely because someone sent an IM message.
+        self.send_state_machine_system(
+            ctx,
+            session_id,
+            run_id,
+            "流程当前没有可通过此会话回复的人工输入请求，消息未被接收。",
+            Some(&msg.msg_id),
+        )
+        .await
+    }
+
+    async fn send_state_machine_system(
+        &self,
+        ctx: &ResolvedInboundContext,
+        session_id: &str,
+        run_id: &str,
+        text: &str,
+        source_im_message_id: Option<&str>,
+    ) -> Result<(), ChannelUseCaseError> {
+        self.try_outbound(OutboundMessage {
+            group_id: ctx.group_id.clone(),
+            bcs_session_id: session_id.to_string(),
+            run_id: run_id.to_string(),
+            sender_actor_id: "bcs_state_machine".to_string(),
+            sender_role: ParticipantRole::Driver,
+            sender_label: "BCS State Machine".to_string(),
+            kind: ChannelOutboundEventKind::System,
+            purpose: ChannelOutboundPurpose::HumanInputAck,
+            text: Some(text.to_string()),
+            raw_payload: serde_json::json!({
+                "type": "state_machine.system",
+                "run_id": run_id,
+            }),
+            render_hint: ChannelRenderHint::Render,
+            source_im_message_id: source_im_message_id.map(str::to_string),
+            source_is_channel: false,
+        })
+        .await
+    }
+
+    async fn try_consume_human_input(
+        &self,
+        binding: &ChannelBinding,
+        msg: &InboundMessage,
+        actor_id: &str,
+    ) -> Result<bool, ChannelUseCaseError> {
+        let reply_scope_key = match msg.conversation_type.as_str() {
+            "2" => fixed_group_reply_scope(
+                &binding.id,
+                &msg.im_conversation_id,
+                actor_id,
+            ),
+            "1" => direct_reply_scope(&binding.id, &msg.im_user_id, actor_id),
+            _ => return Ok(false),
+        };
+        let Some(request) = self
+            .human_input_requests
+            .find_active_by_scope(&reply_scope_key)
+            .await?
+        else {
+            return Ok(false);
+        };
+
+        // COSEC: never trust message text or a visible card title to select a
+        // request. Match the authenticated binding, actor and destination
+        // against the persisted active HumanInputRequest snapshot.
+        let destination_matches = request.binding_id == binding.id
+            && request.account_ref == binding.account_ref
+            && request.assignee_actor_id == actor_id
+            && match request.notification_mode {
+                HumanInputNotificationMode::FixedGroup => {
+                    msg.conversation_type == "2"
+                        && request.im_conversation_id == msg.im_conversation_id
+                }
+                HumanInputNotificationMode::DirectAssignee => {
+                    msg.conversation_type == "1"
+                        && request.im_user_id.as_deref() == Some(msg.im_user_id.as_str())
+                }
+            };
+        if !destination_matches {
+            return Ok(false);
+        }
+
+        let now = (self.now_ms)();
+        if request.deadline_ms <= now {
+            self.human_input_requests
+                .close_for_run_node(
+                    &request.run_id,
+                    &request.node_id,
+                    HumanInputRequestStatus::Expired,
+                )
+                .await?;
+            self.advance_human_input_queue(&request.reply_scope_key)
+                .await?;
+            return Ok(true);
+        }
+
+        let outcome = self
+            .collaboration_runtime
+            .respond_human_node(RespondHumanNodeCommand {
+                run_id: request.run_id.clone(),
+                node_id: request.node_id.clone(),
+                caller_actor_id: actor_id.to_string(),
+                content: msg.text.trim().to_string(),
+                source: HumanResponseSource::Channel {
+                    binding_id: binding.id.clone(),
+                    conversation_id: msg.im_conversation_id.clone(),
+                    message_id: msg.msg_id.clone(),
+                },
+            })
+            .await;
+        match outcome {
+            Ok(outcome) => {
+                if !self
+                    .human_input_requests
+                    .mark_responded(&request.request_id, now)
+                    .await?
+                {
+                    return Err(ChannelUseCaseError::Internal(ServiceError::Conflict(
+                        "HumanInput request lost the response completion race".to_string(),
+                    )));
+                }
+                if outcome.run.status != bcs_domain::StateMachineRunStatus::Completed {
+                    if let Err(error) = self.deliver_human_input_event(
+                        &request,
+                        ChannelOutboundPurpose::HumanInputAck,
+                        format!("【输入已接收】{}\n\n流程继续执行。", request.node_display_name),
+                        Some(&msg.msg_id),
+                    )
+                    .await
+                    {
+                        warn!(
+                            request_id = %request.request_id,
+                            run_id = %request.run_id,
+                            error = %error,
+                            "human_input: response persisted but acknowledgement delivery failed"
+                        );
+                    }
+                }
+                self.advance_human_input_queue(&request.reply_scope_key)
+                    .await?;
+                Ok(true)
+            }
+            Err(bcs_service_api::CollaborationRuntimeError::Conflict(_)) => {
+                self.human_input_requests
+                    .close_for_run_node(
+                        &request.run_id,
+                        &request.node_id,
+                        HumanInputRequestStatus::Cancelled,
+                    )
+                    .await?;
+                self.advance_human_input_queue(&request.reply_scope_key)
+                    .await?;
+                Ok(true)
+            }
+            Err(error) => Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+                error.to_string(),
+            ))),
+        }
+    }
+
+    async fn deliver_human_input_event(
+        &self,
+        request: &HumanInputRequest,
+        purpose: ChannelOutboundPurpose,
+        text: String,
+        source_im_message_id: Option<&str>,
+    ) -> Result<Option<String>, ChannelUseCaseError> {
+        let binding = self
+            .bindings
+            .get(&request.binding_id)
+            .await?
+            .ok_or_else(|| ChannelUseCaseError::NotFound(request.binding_id.clone()))?;
+        if binding.status != BindingStatus::Active
+            || binding.channel_type != request.channel_type
+            || binding.account_ref != request.account_ref
+        {
+            return Err(ChannelUseCaseError::InvalidParams(
+                "HumanInput request binding snapshot is no longer active".to_string(),
+            ));
+        }
+        let provider = self.provider_for(&binding.channel_type)?;
+        let binding_ref = ChannelBindingRef {
+            channel_type: binding.channel_type,
+            account_ref: binding.account_ref,
+        };
+        if !provider.delivery().is_available(&binding_ref).await {
+            return Err(ChannelUseCaseError::InvalidParams(
+                "HumanInput channel delivery is unavailable".to_string(),
+            ));
+        }
+        let result = provider
+            .delivery()
+            .deliver_event(ChannelOutboundEvent {
+                binding_ref,
+                im_conversation_id: request.im_conversation_id.clone(),
+                im_conversation_type: request.im_conversation_type.clone(),
+                im_user_id: request.im_user_id.clone(),
+                im_user_display_name: None,
+                bcs_session_id: request.session_id.clone(),
+                run_id: match purpose {
+                    ChannelOutboundPurpose::StateMachineCompleted
+                    | ChannelOutboundPurpose::StateMachineFailed => {
+                        format!("state-machine-terminal-{}", request.run_id)
+                    }
+                    _ => format!("human-input-{}", request.request_id),
+                },
+                sender_actor_id: "bcs_state_machine".to_string(),
+                sender_label: "BCS State Machine".to_string(),
+                render_sender_label: false,
+                sender_role: ParticipantRole::Driver,
+                kind: ChannelOutboundEventKind::System,
+                purpose,
+                text: Some(text),
+                raw_payload: serde_json::json!({
+                    "request_id": request.request_id,
+                    "run_id": request.run_id,
+                    "node_id": request.node_id,
+                }),
+                render_hint: ChannelRenderHint::Render,
+                source_im_message_id: source_im_message_id.map(str::to_string),
+            })
+            .await?;
+        if !result.delivered {
+            return Err(ChannelUseCaseError::Internal(
+                result.error.unwrap_or_else(|| {
+                    ServiceError::InternalError(
+                        "HumanInput channel delivery was not confirmed".to_string(),
+                    )
+                }),
+            ));
+        }
+        Ok(result.provider_message_ref)
+    }
+
+    async fn activate_human_input_request(
+        &self,
+        request: &HumanInputRequest,
+    ) -> Result<(), ChannelUseCaseError> {
+        let queued = self
+            .human_input_requests
+            .count_queued(&request.reply_scope_key)
+            .await?;
+        let mut text = request.notification_text.clone();
+        if queued > 0 {
+            text.push_str(&format!("\n\n另有 {queued} 项等待处理。"));
+        }
+        match self
+            .deliver_human_input_event(
+                request,
+                ChannelOutboundPurpose::HumanInputRequest,
+                text,
+                None,
+            )
+            .await
+        {
+            Ok(provider_message_ref) => {
+                if !self
+                    .human_input_requests
+                    .mark_active(
+                        &request.request_id,
+                        provider_message_ref.as_deref(),
+                        (self.now_ms)(),
+                    )
+                    .await?
+                {
+                    return Err(ChannelUseCaseError::Internal(ServiceError::Conflict(
+                        "HumanInput request was no longer notifying".to_string(),
+                    )));
+                }
+                Ok(())
+            }
+            Err(error) => {
+                let diagnostic = error.to_string();
+                self.human_input_requests
+                    .mark_delivery_failed(&request.request_id, &diagnostic)
+                    .await?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn advance_human_input_queue(
+        &self,
+        reply_scope_key: &str,
+    ) -> Result<(), ChannelUseCaseError> {
+        loop {
+            let Some(next) = self
+                .human_input_requests
+                .promote_next(reply_scope_key, (self.now_ms)())
+                .await?
+            else {
+                return Ok(());
+            };
+            if self.activate_human_input_request(&next).await.is_ok() {
+                return Ok(());
+            }
+        }
     }
 
     fn channel_route_from_session_meta(&self, session: &Session) -> Option<ConversationSessionMap> {
@@ -434,10 +884,16 @@ impl BcsChannelService {
         if binding_id.is_empty() {
             return None;
         }
-        let Some(conversation_id) = channel.get("conversation_id").and_then(|value| value.as_str()) else {
+        let Some(conversation_id) = channel
+            .get("conversation_id")
+            .and_then(|value| value.as_str())
+        else {
             return None;
         };
-        let session_scope = match channel.get("session_scope").and_then(|value| value.as_str()) {
+        let session_scope = match channel
+            .get("session_scope")
+            .and_then(|value| value.as_str())
+        {
             Some("per_sender") | Some("PerSender") => SessionScope::PerSender,
             _ => SessionScope::Conversation,
         };
@@ -465,10 +921,7 @@ impl BcsChannelService {
 
 #[async_trait]
 impl ChannelService for BcsChannelService {
-    async fn handle_inbound(
-        &self,
-        mut msg: InboundMessage,
-    ) -> Result<(), ChannelInboundError> {
+    async fn handle_inbound(&self, mut msg: InboundMessage) -> Result<(), ChannelInboundError> {
         msg.conversation_type = normalize_required(&msg.conversation_type, "conversation_type")
             .map_err(|error| invalid_inbound(error))?
             .to_string();
@@ -516,11 +969,7 @@ impl ChannelService for BcsChannelService {
             .find_active_by_account(msg.channel_type.clone(), &account_ref)
             .await
             .map_err(|error| {
-                inbound_failure(
-                    ChannelInboundFailureKind::BindingLookupFailed,
-                    true,
-                    error,
-                )
+                inbound_failure(ChannelInboundFailureKind::BindingLookupFailed, true, error)
             })?
         else {
             return Err(ChannelInboundError::new(
@@ -570,6 +1019,23 @@ impl ChannelService for BcsChannelService {
                 actor_id = %actor_id,
                 "channel inbound: actor resolved"
             );
+            if self
+                .try_consume_human_input(&binding, &msg, &actor_id)
+                .await
+                .map_err(|error| {
+                    inbound_failure(ChannelInboundFailureKind::DispatchFailed, true, error)
+                })?
+            {
+                info!(
+                    channel_type = %msg.channel_type,
+                    account_ref = %account_ref,
+                    binding_id = %binding.id,
+                    msg_id = %msg.msg_id,
+                    actor_id = %actor_id,
+                    "channel inbound: HumanInput consumed"
+                );
+                return Ok(());
+            }
             let ctx = self
                 .resolve_inbound_context(&binding, &msg, &actor_id)
                 .await
@@ -692,6 +1158,7 @@ impl ChannelService for BcsChannelService {
                     attachments: msg.attachments,
                     thinking: None,
                     idempotency_key: Some(dispatch_msg_id.clone()),
+                    source_im_message_id: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
                 })
                 .await
@@ -733,6 +1200,12 @@ impl ChannelService for BcsChannelService {
         if msg.source_is_channel {
             return Ok(());
         }
+        let require_confirmed_delivery = msg
+            .raw_payload
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            == Some("state_machine.human_input_ready");
+        let mut confirmed_deliveries = 0usize;
         let Some(group) = self.groups.get(&msg.group_id).await else {
             return Ok(());
         };
@@ -841,9 +1314,11 @@ impl ChannelService for BcsChannelService {
                         && binding.outbound_visibility == Visibility::FullTranscript,
                     sender_role: msg.sender_role,
                     kind: msg.kind,
+                    purpose: msg.purpose,
                     text: msg.text.clone(),
                     raw_payload: msg.raw_payload.clone(),
                     render_hint: msg.render_hint,
+                    source_im_message_id: msg.source_im_message_id.clone(),
                 })
                 .await
             {
@@ -873,6 +1348,7 @@ impl ChannelService for BcsChannelService {
                     "channel outbound: delivery not confirmed"
                 );
             } else {
+                confirmed_deliveries += 1;
                 info!(
                     binding_id = %binding.id,
                     channel_type = %binding.channel_type,
@@ -882,6 +1358,11 @@ impl ChannelService for BcsChannelService {
                     "channel outbound: delivered"
                 );
             }
+        }
+        if require_confirmed_delivery && confirmed_deliveries == 0 {
+            return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
+                "HumanInput ready event had no confirmed channel delivery".to_string(),
+            )));
         }
         Ok(())
     }
@@ -904,10 +1385,12 @@ impl ChannelService for BcsChannelService {
             (_, scope) => scope,
         };
         let provider = self.provider_for(&cmd.channel_type)?;
-        provider.validate_config(&cmd.config).map_err(provider_error)?;
+        provider
+            .validate_config(&cmd.config)
+            .map_err(provider_error)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
-            channel_owned_group_id(&cmd.channel_type, &binding_id)?;
+            channel_owned_group_id(&cmd.channel_type, GroupKind::Dm, &binding_id)?;
         }
         if self
             .bindings
@@ -955,11 +1438,7 @@ impl ChannelService for BcsChannelService {
         self.redact_bindings(bindings)
     }
 
-    async fn set_binding_status(
-        &self,
-        id: &str,
-        active: bool,
-    ) -> Result<(), ChannelUseCaseError> {
+    async fn set_binding_status(&self, id: &str, active: bool) -> Result<(), ChannelUseCaseError> {
         let _guard = self.binding_admin_lock.lock().await;
         let Some(binding) = self.bindings.get(id).await? else {
             return Err(ChannelUseCaseError::NotFound(id.to_string()));
@@ -1006,6 +1485,21 @@ impl ChannelService for BcsChannelService {
     }
 }
 
+#[async_trait]
+impl ChannelBindingCleanupPort for BcsChannelService {
+    async fn delete_bindings_for_group(
+        &self,
+        group_id: &str,
+    ) -> ServiceResult<u64> {
+        let _guard = self.binding_admin_lock.lock().await;
+        self.bindings
+            .delete_by_target(&BindingTarget::Group {
+                group_id: group_id.to_string(),
+            })
+            .await
+    }
+}
+
 impl BcsChannelService {
     fn redact_bindings(
         &self,
@@ -1033,6 +1527,351 @@ impl BcsChannelService {
     }
 }
 
+#[async_trait]
+impl SessionChannelOutboundPort for BcsChannelService {
+    async fn validate_human_input_channel(
+        &self,
+        group_id: &str,
+        channel_type: &str,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let target = BindingTarget::Group {
+            group_id: group_id.to_string(),
+        };
+        let bindings = self
+            .bindings
+            .list_by_target(&target, Some(channel_type))
+            .await?
+            .into_iter()
+            .filter(|binding| binding.status == BindingStatus::Active)
+            .collect::<Vec<_>>();
+        let binding = match bindings.as_slice() {
+            [binding] => binding,
+            [] => {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!(
+                        "no active {channel_type} ChannelBinding exists for group {group_id}"
+                    ),
+                    request_id: None,
+                });
+            }
+            _ => {
+                return Err(ServiceError::Conflict(format!(
+                    "multiple active {channel_type} ChannelBindings exist for group {group_id}"
+                )));
+            }
+        };
+        let provider = self
+            .providers
+            .get(channel_type)
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: format!("channel provider '{channel_type}' is not available"),
+                request_id: None,
+            })?;
+        let binding_ref = ChannelBindingRef {
+            channel_type: binding.channel_type.clone(),
+            account_ref: binding.account_ref.clone(),
+        };
+        if !provider.delivery().is_available(&binding_ref).await {
+            return Err(ServiceError::InvalidOperation {
+                message: format!(
+                    "channel provider '{channel_type}' is unavailable for group {group_id}"
+                ),
+                request_id: None,
+            });
+        }
+        Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
+
+    async fn publish_human_input_ready(
+        &self,
+        event: HumanInputReadyEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let target = BindingTarget::Group {
+            group_id: event.group_id.clone(),
+        };
+        let active_bindings = self
+            .bindings
+            .list_by_target(&target, Some(&event.channel_type))
+            .await?
+            .into_iter()
+            .filter(|binding| binding.status == BindingStatus::Active)
+            .collect::<Vec<_>>();
+        let binding = match active_bindings.as_slice() {
+            [binding] => binding.clone(),
+            [] => {
+                return Err(ServiceError::InvalidOperation {
+                    message: format!(
+                        "no active {} ChannelBinding exists for group {}",
+                        event.channel_type, event.group_id
+                    ),
+                    request_id: Some(event.event_id),
+                });
+            }
+            _ => {
+                return Err(ServiceError::Conflict(format!(
+                    "multiple active {} ChannelBindings exist for group {}",
+                    event.channel_type, event.group_id
+                )));
+            }
+        };
+        let (im_conversation_id, im_conversation_type, im_user_id, reply_scope_key) =
+            match event.notification_mode {
+                HumanInputNotificationMode::FixedGroup => {
+                    let conversation_id = event
+                        .fixed_group_conversation_id
+                        .clone()
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: "fixed_group HumanInput notification has no conversation id"
+                                .to_string(),
+                            request_id: Some(event.event_id.clone()),
+                        })?;
+                    (
+                        conversation_id.clone(),
+                        "2".to_string(),
+                        None,
+                        fixed_group_reply_scope(
+                            &binding.id,
+                            &conversation_id,
+                            &event.assignee_actor_id,
+                        ),
+                    )
+                }
+                HumanInputNotificationMode::DirectAssignee => {
+                    let provider = self.providers.get(&binding.channel_type).ok_or_else(|| {
+                        ServiceError::InvalidOperation {
+                            message: format!(
+                                "channel provider '{}' is not available",
+                                binding.channel_type
+                            ),
+                            request_id: Some(event.event_id.clone()),
+                        }
+                    })?;
+                    // COSEC: only provider-validated actor identities may become
+                    // external direct-message recipients.
+                    let im_user_id = provider
+                        .resolve_direct_recipient(&event.assignee_actor_id)
+                        .map_err(|error| ServiceError::InvalidOperation {
+                            message: error.to_string(),
+                            request_id: Some(event.event_id.clone()),
+                        })?
+                        .filter(|value| {
+                            !value.is_empty() && value.trim().len() == value.len()
+                        })
+                        .ok_or_else(|| ServiceError::InvalidOperation {
+                            message: format!(
+                                "channel provider '{}' cannot resolve HumanInput assignee {}",
+                                binding.channel_type, event.assignee_actor_id
+                            ),
+                            request_id: Some(event.event_id.clone()),
+                        })?;
+                    (
+                        im_user_id.clone(),
+                        "1".to_string(),
+                        Some(im_user_id.clone()),
+                        direct_reply_scope(
+                            &binding.id,
+                            &im_user_id,
+                            &event.assignee_actor_id,
+                        ),
+                    )
+                }
+            };
+        let mut sections = vec![
+            format!("【待你处理】{}", event.display_name),
+            event.instruction.clone(),
+        ];
+        if event.notification_mode == HumanInputNotificationMode::DirectAssignee
+            && !event.upstream_artifacts.is_empty()
+        {
+            let artifacts = event
+                .upstream_artifacts
+                .iter()
+                .map(|artifact| format!("[{}]\n{}", artifact.node_id, artifact.text))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            sections.push(format!("上游结果：\n{artifacts}"));
+        }
+        if !event.judge_outcomes.is_empty() {
+            sections.push(format!("可识别结果：{}", event.judge_outcomes.join(" / ")));
+        }
+        if let Some(deadline_ms) = event.timeout_deadline_ms {
+            sections.push(format!("等待截止时间（Unix ms）：{deadline_ms}"));
+        }
+        sections.push(match event.notification_mode {
+            HumanInputNotificationMode::FixedGroup => "请直接 @ 机器人回复。".to_string(),
+            HumanInputNotificationMode::DirectAssignee => "请直接回复本会话。".to_string(),
+        });
+        let text = sections.join("\n\n");
+        let deadline_ms = event
+            .timeout_deadline_ms
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "HumanInput notification requires a deadline".to_string(),
+                request_id: Some(event.event_id.clone()),
+            })?;
+        let request = HumanInputRequest {
+            request_id: event.event_id,
+            session_id: event.session_id,
+            run_id: event.run_id,
+            node_id: event.node_id,
+            binding_id: binding.id,
+            channel_type: binding.channel_type,
+            account_ref: binding.account_ref,
+            notification_mode: event.notification_mode,
+            reply_scope_key: reply_scope_key.clone(),
+            active_slot_key: None,
+            assignee_actor_id: event.assignee_actor_id,
+            im_conversation_id,
+            im_conversation_type,
+            im_user_id,
+            node_display_name: event.display_name,
+            notification_text: text,
+            deadline_ms,
+            status: HumanInputRequestStatus::Queued,
+            provider_message_ref: None,
+            delivery_attempts: 0,
+            last_delivery_error: None,
+            created_at: (self.now_ms)(),
+            activated_at: None,
+            responded_at: None,
+        };
+        match self.human_input_requests.enqueue(request.clone()).await? {
+            HumanInputEnqueueDisposition::Queued => {
+                let queued = self
+                    .human_input_requests
+                    .count_queued(&request.reply_scope_key)
+                    .await?;
+                if let Err(error) = self
+                    .deliver_human_input_event(
+                        &request,
+                        ChannelOutboundPurpose::HumanInputQueueSummary,
+                        format!(
+                            "【待办队列更新】当前已有请求等待回复，另有 {queued} 项排队；完成当前项后会继续通知。"
+                        ),
+                        None,
+                    )
+                    .await
+                {
+                    warn!(
+                        request_id = %request.request_id,
+                        run_id = %request.run_id,
+                        error = %error,
+                        "human_input: queued summary delivery failed"
+                    );
+                }
+            }
+            HumanInputEnqueueDisposition::Notifying => {
+                let request = self
+                    .human_input_requests
+                    .get(&request.request_id)
+                    .await?
+                    .ok_or_else(|| {
+                        ServiceError::InternalError(
+                            "enqueued HumanInput request is missing".to_string(),
+                        )
+                    })?;
+                if let Err(error) = self.activate_human_input_request(&request).await {
+                    let _ = self.advance_human_input_queue(&reply_scope_key).await;
+                    return Err(ServiceError::InternalError(error.to_string()));
+                }
+            }
+        }
+        Ok(SessionChannelDeliveryOutcome::Delivered)
+    }
+
+    async fn publish_state_machine_terminal(
+        &self,
+        event: StateMachineTerminalEvent,
+    ) -> ServiceResult<SessionChannelDeliveryOutcome> {
+        let requests = self.human_input_requests.list_by_run(&event.run_id).await?;
+        let reply_scopes = requests
+            .iter()
+            .map(|request| request.reply_scope_key.clone())
+            .collect::<HashSet<_>>();
+        if event.status == StateMachineTerminalStatus::Failed {
+            let run_nodes = requests
+                .iter()
+                .map(|request| (request.run_id.clone(), request.node_id.clone()))
+                .collect::<HashSet<_>>();
+            for (run_id, node_id) in run_nodes {
+                self.human_input_requests
+                    .close_for_run_node(
+                        &run_id,
+                        &node_id,
+                        HumanInputRequestStatus::Cancelled,
+                    )
+                    .await?;
+            }
+        }
+        let mut destinations = HashSet::new();
+        let requests = requests
+            .into_iter()
+            .filter(|request| {
+                destinations.insert((
+                    request.binding_id.clone(),
+                    request.im_conversation_id.clone(),
+                    request.im_conversation_type.clone(),
+                    request.im_user_id.clone(),
+                ))
+            })
+            .collect::<Vec<_>>();
+        if requests.is_empty() {
+            return Ok(SessionChannelDeliveryOutcome::NotApplicable);
+        }
+
+        let (purpose, text) = match event.status {
+            StateMachineTerminalStatus::Completed => {
+                let mut text = format!("【协同已完成】{}", event.workflow_name);
+                if let Some(output) = event.output.as_deref().filter(|value| !value.trim().is_empty())
+                {
+                    text.push_str("\n\n");
+                    text.push_str(&truncate_chars(output, 2_000));
+                }
+                (ChannelOutboundPurpose::StateMachineCompleted, text)
+            }
+            StateMachineTerminalStatus::Failed => (
+                ChannelOutboundPurpose::StateMachineFailed,
+                format!(
+                    "【协同执行失败】{}\n\n请在 Workbench 查看详情。",
+                    event.workflow_name
+                ),
+            ),
+        };
+
+        let mut delivered = 0usize;
+        let mut errors = Vec::new();
+        for request in requests {
+            match self
+                .deliver_human_input_event(&request, purpose, text.clone(), None)
+                .await
+            {
+                Ok(_) => delivered += 1,
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        for reply_scope in reply_scopes {
+            self.advance_human_input_queue(&reply_scope)
+                .await
+                .map_err(|error| ServiceError::InternalError(error.to_string()))?;
+        }
+        if delivered > 0 {
+            if !errors.is_empty() {
+                warn!(
+                    run_id = %event.run_id,
+                    failed_destinations = errors.len(),
+                    "state_machine: terminal IM notification partially failed"
+                );
+            }
+            Ok(SessionChannelDeliveryOutcome::Delivered)
+        } else {
+            Err(ServiceError::InternalError(format!(
+                "state-machine terminal notification failed for every destination: {}",
+                errors.join("; ")
+            )))
+        }
+    }
+}
+
 pub struct ChannelServiceInboundSink {
     service: Arc<dyn ChannelService>,
 }
@@ -1052,6 +1891,16 @@ impl ChannelInboundSink for ChannelServiceInboundSink {
 
 fn invalid_inbound(error: ChannelUseCaseError) -> ChannelInboundError {
     inbound_failure(ChannelInboundFailureKind::InvalidInbound, false, error)
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
 }
 
 fn inbound_failure(
@@ -1106,10 +1955,7 @@ fn provider_error(error: bcs_channel_api::ChannelProviderError) -> ChannelUseCas
     ChannelUseCaseError::InvalidParams(error.to_string())
 }
 
-fn channel_meta(
-    ctx: &ResolvedInboundContext,
-    msg: &InboundMessage,
-) -> serde_json::Value {
+fn channel_meta(ctx: &ResolvedInboundContext, msg: &InboundMessage) -> serde_json::Value {
     serde_json::json!({
         "channel": {
             "source": msg.channel_type,
@@ -1142,7 +1988,9 @@ fn binding_target_kind(target: &BindingTarget) -> &'static str {
 
 fn binding_relevant_to_group(binding: &ChannelBinding, group_id: &str, session: &Session) -> bool {
     match &binding.target {
-        BindingTarget::Group { group_id: target_group_id } => target_group_id == group_id,
+        BindingTarget::Group {
+            group_id: target_group_id,
+        } => target_group_id == group_id,
         BindingTarget::Bot { .. } => session.group_id == group_id,
     }
 }
@@ -1163,25 +2011,41 @@ fn normalize_required<'a>(
 
 fn channel_owned_group_id(
     channel_type: &str,
+    group_kind: GroupKind,
     owner_id: &str,
 ) -> Result<String, ChannelUseCaseError> {
     let channel_type = normalize_required(channel_type, "channel_type")?;
     let owner_id = normalize_required(owner_id, "channel group owner id")?;
-    let group_id = format!("{channel_type}_{owner_id}");
-    if group_id.chars().count() + GENERATED_SESSION_ID_SUFFIX_CHARS
-        > MAX_CHANNEL_SESSION_ID_CHARS
-    {
-        return Err(ChannelUseCaseError::Internal(ServiceError::InternalError(
-            format!(
-                "generated channel group id cannot produce a session id within {MAX_CHANNEL_SESSION_ID_CHARS} characters"
-            ),
-        )));
-    }
-    Ok(group_id)
+    channel_group_id(channel_type, group_kind, owner_id).map_err(|error| {
+        ChannelUseCaseError::Internal(ServiceError::InternalError(error.to_string()))
+    })
+}
+
+fn legacy_channel_owned_group_id(channel_type: &str, owner_id: &str) -> String {
+    format!("{}_{}", channel_type.trim(), owner_id.trim())
 }
 
 fn human_actor_id(staff_no: &str) -> String {
     format!("human_{}", staff_no.trim())
+}
+
+fn fixed_group_reply_scope(binding_id: &str, conversation_id: &str, actor_id: &str) -> String {
+    reply_scope_key("fixed_group", &[binding_id, conversation_id, actor_id])
+}
+
+fn direct_reply_scope(binding_id: &str, im_user_id: &str, actor_id: &str) -> String {
+    reply_scope_key("direct_assignee", &[binding_id, im_user_id, actor_id])
+}
+
+fn reply_scope_key(kind: &str, components: &[&str]) -> String {
+    let mut key = kind.to_string();
+    for component in components {
+        key.push('|');
+        key.push_str(&component.len().to_string());
+        key.push(':');
+        key.push_str(component);
+    }
+    key
 }
 
 fn inbound_dedup_key(channel_type: &str, account_ref: &str, msg_id: &str) -> Option<String> {
@@ -1238,27 +2102,28 @@ mod tests {
     use std::collections::HashMap;
     use std::future::Future;
     use std::io::{self, Write};
-    use std::sync::{Arc, Once, OnceLock};
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Once, OnceLock};
 
     use async_trait::async_trait;
     use tokio::sync::Mutex;
 
-    use bcs_channel_store::{
-        MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryImParticipantRepo,
-    };
     use bcs_channel_api::{
         ChannelInboundSink, ChannelProvider, ChannelProviderError, ChannelProviderRegistry,
         ChannelProviderResult,
     };
+    use bcs_channel_store::{
+        MemoryChannelBindingRepo, MemoryConversationSessionRepo, MemoryHumanInputRequestRepo,
+        MemoryImParticipantRepo,
+    };
     use bcs_domain::{
         ActorKind, BindingStatus, BindingTarget, BotCapabilities, BotDynamicStatus,
-        ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, Participant,
+        ChannelBinding, ChannelConfig, ChannelType, Group, GroupChatScope, GroupKind, Participant,
         ParticipantMode, ParticipantRole, RegisteredBot, Session, SessionKind, SessionScope,
-        SessionStatus, Skill, StateMachineRun, StateMachineRunStatus, SystemMessageEvent,
-        Visibility,
+        SessionStatus, Skill, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
+        StateMachineRunStatus, SystemMessageEvent, Visibility, HumanInputNotificationMode,
+        HumanInputRequestStatus,
     };
-    use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::application::channel::{
         ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
         CreateBindingCommand, InboundMessage, OutboundMessage,
@@ -1266,7 +2131,9 @@ mod tests {
     use bcs_service_api::application::collaboration_runtime::{
         CancelStateMachineRunCommand, CollaborationRuntimeError, ConfigureGroupRuntimeCommand,
         ConfigureGroupRuntimeOutcome, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
-        StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineRunView,
+        HumanResponseSource, ListPendingHumanNodesCommand, PendingHumanNodeView,
+        RespondHumanNodeCommand, RespondHumanNodeOutcome, StartStateMachineRunCommand,
+        StartStateMachineRunOutcome, StateMachineRunView,
     };
     use bcs_service_api::application::group_message::SessionHistoryResult;
     use bcs_service_api::application::message_flow::{
@@ -1280,19 +2147,24 @@ mod tests {
         AgentCredentials, BotDeliveryTarget, BotRegistryCoreService, EnsureHumanResult,
         GroupCoreService, ServiceError, ServiceResult,
     };
-    use bcs_service_api::{CollaborationRuntimeService, SystemMessageService};
+    use bcs_service_api::{
+        ChannelBindingCleanupPort, ChannelOutboundPurpose, CollaborationRuntimeService,
+        SystemMessageService,
+    };
+    use bcs_service_api::lifecycle::ServiceLifecycle;
     use bcs_service_api::port::channel_delivery::{
         ChannelBindingRef, ChannelDeliveryPort, ChannelDeliveryResult, ChannelOutboundEvent,
         ChannelOutboundEventKind, ChannelRenderHint,
     };
     use bcs_service_api::port::repo::{
-        ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
-        NewSessionParams, SessionRepoPort,
+        ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputRequestRepoPort,
+        ImParticipantRepoPort, NewSessionParams, SessionRepoPort,
+    };
+    use bcs_service_api::{
+        HumanInputReadyEvent, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     };
 
-    use crate::{
-        BcsChannelService, ResolvedInboundContext, channel_meta, channel_owned_group_id,
-    };
+    use crate::{BcsChannelService, ResolvedInboundContext, channel_meta, channel_owned_group_id};
 
     type TestResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
@@ -1338,6 +2210,10 @@ mod tests {
             self.inner.list_by_target(target, channel_type).await
         }
 
+        async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+            self.inner.delete_by_target(target).await
+        }
+
         async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
             self.inner.set_status(id, active).await
         }
@@ -1368,7 +2244,9 @@ mod tests {
             _channel_type: ChannelType,
             _account_ref: &str,
         ) -> ServiceResult<Option<ChannelBinding>> {
-            Err(ServiceError::InternalError("binding lookup failed".to_string()))
+            Err(ServiceError::InternalError(
+                "binding lookup failed".to_string(),
+            ))
         }
 
         async fn list(&self) -> ServiceResult<Vec<ChannelBinding>> {
@@ -1380,6 +2258,13 @@ mod tests {
             _target: &BindingTarget,
             _channel_type: Option<&str>,
         ) -> ServiceResult<Vec<ChannelBinding>> {
+            unreachable!("inbound binding lookup test only calls find_active_by_account")
+        }
+
+        async fn delete_by_target(
+            &self,
+            _target: &BindingTarget,
+        ) -> ServiceResult<u64> {
             unreachable!("inbound binding lookup test only calls find_active_by_account")
         }
 
@@ -1410,7 +2295,9 @@ mod tests {
         }
 
         async fn upsert(&self, _map: bcs_domain::ImParticipantMap) -> ServiceResult<()> {
-            Err(ServiceError::InternalError("actor write failed".to_string()))
+            Err(ServiceError::InternalError(
+                "actor write failed".to_string(),
+            ))
         }
     }
 
@@ -1528,6 +2415,7 @@ mod tests {
         binding_repo: Arc<MemoryChannelBindingRepo>,
         conversation_repo: Arc<MemoryConversationSessionRepo>,
         participant_repo: Arc<MemoryImParticipantRepo>,
+        human_input_requests: Arc<MemoryHumanInputRequestRepo>,
         session_repo: Arc<RecordingSessionRepo>,
         registry: Arc<RecordingRegistry>,
         message_flow: Arc<RecordingMessageFlow>,
@@ -1543,24 +2431,11 @@ mod tests {
         }
 
         async fn new_with_env(group: Group, env: &str) -> ServiceResult<Self> {
-            Self::new_with_env_and_id(
-                group,
-                env,
-                Arc::new(|| "generated_id".to_string()),
-            )
-            .await
+            Self::new_with_env_and_id(group, env, Arc::new(|| "generated_id".to_string())).await
         }
 
-        async fn new_with_generated_id(
-            group: Group,
-            generated_id: String,
-        ) -> ServiceResult<Self> {
-            Self::new_with_env_and_id(
-                group,
-                "pre",
-                Arc::new(move || generated_id.clone()),
-            )
-            .await
+        async fn new_with_generated_id(group: Group, generated_id: String) -> ServiceResult<Self> {
+            Self::new_with_env_and_id(group, "pre", Arc::new(move || generated_id.clone())).await
         }
 
         async fn new_with_env_and_id(
@@ -1568,9 +2443,10 @@ mod tests {
             env: &str,
             new_id: Arc<dyn Fn() -> String + Send + Sync>,
         ) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new(env));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
+            let human_input_requests = Arc::new(MemoryHumanInputRequestRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
             let groups = Arc::new(bcs_group::GroupCore::memory());
             groups.upsert(group).await?;
@@ -1588,6 +2464,7 @@ mod tests {
                 binding_repo.clone(),
                 conversation_repo.clone(),
                 participant_repo.clone(),
+                human_input_requests.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -1605,6 +2482,7 @@ mod tests {
                 binding_repo,
                 conversation_repo,
                 participant_repo,
+                human_input_requests,
                 session_repo,
                 registry,
                 message_flow,
@@ -1616,9 +2494,10 @@ mod tests {
         }
 
         async fn new_without_binding_list(group: Group) -> ServiceResult<Self> {
-            let binding_repo = Arc::new(MemoryChannelBindingRepo::new());
+            let binding_repo = Arc::new(MemoryChannelBindingRepo::new("pre"));
             let conversation_repo = Arc::new(MemoryConversationSessionRepo::new());
             let participant_repo = Arc::new(MemoryImParticipantRepo::new());
+            let human_input_requests = Arc::new(MemoryHumanInputRequestRepo::new());
             let session_repo = Arc::new(RecordingSessionRepo::default());
             let groups = Arc::new(bcs_group::GroupCore::memory());
             groups.upsert(group).await?;
@@ -1636,6 +2515,7 @@ mod tests {
                 Arc::new(PanicOnListBindingRepo::new(binding_repo.clone())),
                 conversation_repo.clone(),
                 participant_repo.clone(),
+                human_input_requests.clone(),
                 session_repo.clone(),
                 message_flow.clone(),
                 system_message.clone(),
@@ -1653,6 +2533,7 @@ mod tests {
                 binding_repo,
                 conversation_repo,
                 participant_repo,
+                human_input_requests,
                 session_repo,
                 registry,
                 message_flow,
@@ -1680,6 +2561,7 @@ mod tests {
             bindings,
             Arc::new(MemoryConversationSessionRepo::new()),
             im_participants,
+            Arc::new(MemoryHumanInputRequestRepo::new()),
             sessions,
             message_flow,
             Arc::new(RecordingSystemMessage::default()),
@@ -1694,7 +2576,7 @@ mod tests {
     }
 
     async fn active_inbound_binding_repo() -> Arc<MemoryChannelBindingRepo> {
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_1",
@@ -1808,6 +2690,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn group_binding_cleanup_removes_only_bindings_for_requested_group() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let group_1 = BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        };
+        let group_2 = BindingTarget::Group {
+            group_id: "group_2".to_string(),
+        };
+        let bot = BindingTarget::Bot {
+            bot_id: "bot_1".to_string(),
+        };
+
+        harness
+            .binding_repo
+            .create(active_binding(
+                "group_1_dingtalk",
+                "robot_1",
+                group_1.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        let mut group_1_other_channel = active_binding(
+            "group_1_other_channel",
+            "account_2",
+            group_1.clone(),
+            Visibility::FullTranscript,
+        );
+        group_1_other_channel.channel_type = "test_im".to_string();
+        harness.binding_repo.create(group_1_other_channel).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "group_2_dingtalk",
+                "robot_2",
+                group_2.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "bot_dingtalk",
+                "robot_3",
+                bot.clone(),
+                Visibility::FullTranscript,
+            ))
+            .await?;
+
+        let removed = harness.service.delete_bindings_for_group("group_1").await?;
+
+        assert_eq!(removed, 2);
+        assert!(
+            harness
+                .binding_repo
+                .list_by_target(&group_1, None)
+                .await?
+                .is_empty()
+        );
+        assert_eq!(
+            harness
+                .binding_repo
+                .list_by_target(&group_2, None)
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(harness.binding_repo.list_by_target(&bot, None).await?.len(), 1);
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn create_direct_bot_binding_defaults_group_scope_to_per_sender() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
 
@@ -1833,15 +2787,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_direct_bot_binding_rejects_overlong_generated_session_id_before_persisting(
-    ) -> TestResult {
+    async fn create_direct_bot_binding_canonicalizes_long_internal_owner_id() -> TestResult {
         let harness = TestHarness::new_with_generated_id(
             manager_group("group_1"),
             "x".repeat(55),
         )
         .await?;
 
-        let result = harness
+        let binding = harness
             .service
             .create_binding(CreateBindingCommand {
                 channel_type: channel_type(),
@@ -1855,22 +2808,57 @@ mod tests {
                 created_by: Some("creator".to_string()),
                 config: dingtalk_config("robot_1"),
             })
-            .await;
+            .await?;
 
-        assert!(matches!(
-            result,
-            Err(ChannelUseCaseError::Internal(ServiceError::InternalError(_)))
-        ));
-        assert!(harness.binding_repo.list().await?.is_empty());
+        let group_id = channel_owned_group_id(
+            &binding.channel_type,
+            GroupKind::Dm,
+            &binding.id,
+        )?;
+        assert!(format!("{group_id}:abcdef12").chars().count() <= 64);
+        assert_eq!(harness.binding_repo.list().await?.len(), 1);
 
         Ok(())
     }
 
     #[test]
-    fn channel_owned_group_id_rejects_overlong_session_id() {
-        let result = channel_owned_group_id("dingtalk", &"x".repeat(55));
+    fn channel_owned_group_id_encodes_channel_and_group_kind() -> TestResult {
+        let source_id = "bc7d5297-4947-474d-a2f1-cdea1c5642b6";
 
-        assert!(result.is_err());
+        assert_eq!(
+            channel_owned_group_id("dingtalk", GroupKind::Normal, source_id)?,
+            "bcs_grp_dingtalk_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        let dm_group_id = channel_owned_group_id("dingtalk", GroupKind::Dm, source_id)?;
+        assert_eq!(
+            dm_group_id,
+            "bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"
+        );
+        assert_eq!(format!("{dm_group_id}:abcdef12").chars().count(), 61);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn managed_bot_group_reuses_legacy_channel_group_id() -> TestResult {
+        let legacy_group_id = "dingtalk_binding_bot";
+        let harness = TestHarness::new(manager_group(legacy_group_id)).await?;
+        let binding = active_binding(
+            "binding_bot",
+            "robot_1",
+            BindingTarget::Bot {
+                bot_id: "target_bot".to_string(),
+            },
+            Visibility::FullTranscript,
+        );
+
+        let group_id = harness
+            .service
+            .ensure_managed_single_bot_group(&binding, "target_bot")
+            .await?;
+
+        assert_eq!(group_id, legacy_group_id);
+        Ok(())
     }
 
     #[tokio::test]
@@ -1905,8 +2893,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_binding_rejects_duplicate_active_account_and_provider_invalid_config(
-    ) -> TestResult {
+    async fn create_binding_rejects_duplicate_active_account_and_provider_invalid_config()
+    -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
 
         harness
@@ -2157,8 +3145,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inbound_manager_worker_materializes_human_and_isolates_dm_conversations(
-    ) -> TestResult {
+    async fn inbound_manager_worker_materializes_human_and_isolates_dm_conversations() -> TestResult
+    {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
             .service
@@ -2204,12 +3192,22 @@ mod tests {
 
         let conv_a = harness
             .conversation_repo
-            .get("generated_id", "conv_a", SessionScope::Conversation, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_a",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conv_a".to_string()))?;
         let conv_b = harness
             .conversation_repo
-            .get("generated_id", "conv_b", SessionScope::Conversation, Some("u2"))
+            .get(
+                "generated_id",
+                "conv_b",
+                SessionScope::Conversation,
+                Some("u2"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conv_b".to_string()))?;
         assert_ne!(conv_a.bcs_session_id, conv_b.bcs_session_id);
@@ -2218,6 +3216,15 @@ mod tests {
         assert_eq!(web_sends.len(), 2);
         assert_eq!(web_sends[0].from_actor_id, "human_u1");
         assert_eq!(web_sends[0].session_id.as_deref(), Some(conv_a.bcs_session_id.as_str()));
+        assert_eq!(web_sends[0].idempotency_key.as_deref(), Some("msg_a"));
+        assert_eq!(
+            web_sends[0].source_im_message_id.as_deref(),
+            Some("msg_a")
+        );
+        assert_eq!(
+            web_sends[1].source_im_message_id.as_deref(),
+            Some("msg_b")
+        );
 
         let added = harness.session_repo.added_participants.lock().await;
         assert_eq!(added.len(), 2);
@@ -2299,7 +3306,12 @@ mod tests {
             .await?;
         let conv = harness
             .conversation_repo
-            .get("generated_id", "conv_a", SessionScope::Conversation, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_a",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conv_a".to_string()))?;
 
@@ -2348,9 +3360,16 @@ mod tests {
 
         let conv = harness
             .conversation_repo
-            .get("generated_id", "conv_direct", SessionScope::Conversation, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_direct",
+                SessionScope::Conversation,
+                Some("u1"),
+            )
             .await?
-            .ok_or_else(|| ServiceError::InternalError("missing direct conversation".to_string()))?;
+            .ok_or_else(|| {
+                ServiceError::InternalError("missing direct conversation".to_string())
+            })?;
         let session = harness
             .session_repo
             .get(&conv.bcs_session_id)
@@ -2393,7 +3412,13 @@ mod tests {
 
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_ignored", false))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_ignored",
+                false,
+            ))
             .await?;
         assert!(harness.registry.ensured.lock().await.is_empty());
         assert!(harness.message_flow.web_sends.lock().await.is_empty());
@@ -2432,7 +3457,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_missing_binding_and_lookup_failure() -> TestResult {
         let missing_binding = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2477,7 +3502,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_classifies_invalid_input_and_context_resolution_failure() -> TestResult {
         let invalid_input = inbound_service(
-            Arc::new(MemoryChannelBindingRepo::new()),
+            Arc::new(MemoryChannelBindingRepo::new("pre")),
             Arc::new(MemoryImParticipantRepo::new()),
             Arc::new(RecordingSessionRepo::default()),
             Arc::new(RecordingMessageFlow::default()),
@@ -2498,7 +3523,7 @@ mod tests {
             "account_ref",
         );
 
-        let bindings = Arc::new(MemoryChannelBindingRepo::new());
+        let bindings = Arc::new(MemoryChannelBindingRepo::new("pre"));
         bindings
             .create(active_binding(
                 "binding_context",
@@ -2567,7 +3592,12 @@ mod tests {
         .await;
 
         let error = participant_failure
-            .handle_inbound(inbound("conv_participant", "u1", Some("张三"), "msg_participant"))
+            .handle_inbound(inbound(
+                "conv_participant",
+                "u1",
+                Some("张三"),
+                "msg_participant",
+            ))
             .await
             .expect_err("participant mapping failure must be reported");
         assert_inbound_error(
@@ -2647,7 +3677,13 @@ mod tests {
 
         let result = harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_fail", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_fail",
+                true,
+            ))
             .await;
 
         assert_inbound_error(
@@ -2692,17 +3728,33 @@ mod tests {
             .await?;
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u2", Some("李四"), "msg_u2", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u2",
+                Some("李四"),
+                "msg_u2",
+                true,
+            ))
             .await?;
 
         let u1 = harness
             .conversation_repo
-            .get("generated_id", "conv_group", SessionScope::PerSender, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u1"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing u1 conversation".to_string()))?;
         let u2 = harness
             .conversation_repo
-            .get("generated_id", "conv_group", SessionScope::PerSender, Some("u2"))
+            .get(
+                "generated_id",
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u2"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing u2 conversation".to_string()))?;
 
@@ -2795,6 +3847,7 @@ mod tests {
             reason,
             session_input,
             task_ledger,
+            ..
         } = &notification.event
         else {
             return Err("expected session context notification".into());
@@ -2850,15 +3903,26 @@ mod tests {
 
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_u1", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_u1",
+                true,
+            ))
             .await?;
 
         let mapped = harness
             .conversation_repo
-            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u1"))
+            .get(
+                binding_id,
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u1"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing conversation".to_string()))?;
-        assert!(mapped.bcs_session_id.starts_with("dingtalk_"));
+        assert!(mapped.bcs_session_id.starts_with("bcs_grp_dingtalk_"));
         assert!(mapped.bcs_session_id.len() <= 64);
 
         Ok(())
@@ -2902,12 +3966,22 @@ mod tests {
 
         let u1 = harness
             .conversation_repo
-            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u1"))
+            .get(
+                binding_id,
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u1"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing u1 conversation".to_string()))?;
         let u2 = harness
             .conversation_repo
-            .get(binding_id, "conv_group", SessionScope::PerSender, Some("u2"))
+            .get(
+                binding_id,
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u2"),
+            )
             .await?
             .ok_or_else(|| ServiceError::InternalError("missing u2 conversation".to_string()))?;
         assert_ne!(u1.bcs_session_id, u2.bcs_session_id);
@@ -2916,8 +3990,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inbound_group_shared_scope_reuses_conversation_session_for_different_senders(
-    ) -> TestResult {
+    async fn inbound_group_shared_scope_reuses_conversation_session_for_different_senders()
+    -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         harness
             .service
@@ -2937,21 +4011,45 @@ mod tests {
 
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u1", Some("张三"), "msg_u1", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u1",
+                Some("张三"),
+                "msg_u1",
+                true,
+            ))
             .await?;
         harness
             .service
-            .handle_inbound(group_inbound("conv_group", "u2", Some("李四"), "msg_u2", true))
+            .handle_inbound(group_inbound(
+                "conv_group",
+                "u2",
+                Some("李四"),
+                "msg_u2",
+                true,
+            ))
             .await?;
 
         let shared = harness
             .conversation_repo
-            .get("generated_id", "conv_group", SessionScope::Conversation, None)
+            .get(
+                "generated_id",
+                "conv_group",
+                SessionScope::Conversation,
+                None,
+            )
             .await?
-            .ok_or_else(|| ServiceError::InternalError("missing shared conversation".to_string()))?;
+            .ok_or_else(|| {
+                ServiceError::InternalError("missing shared conversation".to_string())
+            })?;
         let per_sender_u1 = harness
             .conversation_repo
-            .get("generated_id", "conv_group", SessionScope::PerSender, Some("u1"))
+            .get(
+                "generated_id",
+                "conv_group",
+                SessionScope::PerSender,
+                Some("u1"),
+            )
             .await?;
         assert_eq!(per_sender_u1, None);
 
@@ -2980,8 +4078,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inbound_state_machine_group_creates_service_invocation_and_starts_runtime(
-    ) -> TestResult {
+    async fn inbound_state_machine_group_creates_service_invocation_and_starts_runtime()
+    -> TestResult {
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
         harness
             .service
@@ -3008,6 +4106,13 @@ mod tests {
         assert_eq!(starts.len(), 1);
         assert_eq!(starts[0].group_id, "group_sm");
         assert_eq!(starts[0].caller_id.as_deref(), Some("human_u1"));
+        assert_eq!(
+            starts[0]
+                .authenticated_human
+                .as_ref()
+                .map(|human| human.actor_id.as_str()),
+            Some("human_u1")
+        );
         assert_eq!(starts[0].input["source"], "dingtalk");
         assert_eq!(starts[0].input["sender"]["actor_id"], "human_u1");
         assert_eq!(starts[0].input["conversation"]["id"], "conv_sm");
@@ -3016,14 +4121,16 @@ mod tests {
             .session_id
             .as_deref()
             .ok_or_else(|| ServiceError::InternalError("missing runtime session_id".to_string()))?;
-        let session = harness
-            .session_repo
-            .get(session_id)
-            .await
-            .ok_or_else(|| ServiceError::InternalError("missing service session".to_string()))?;
+        let session =
+            harness.session_repo.get(session_id).await.ok_or_else(|| {
+                ServiceError::InternalError("missing service session".to_string())
+            })?;
         assert_eq!(session.session_kind, SessionKind::ServiceInvocation);
         assert_eq!(session.caller_id.as_deref(), Some("human_u1"));
-        assert_eq!(session.caller_principal.as_deref(), Some("dingtalk:conv_sm"));
+        assert_eq!(
+            session.caller_principal.as_deref(),
+            Some("dingtalk:conv_sm")
+        );
 
         let channel = session
             .meta
@@ -3034,16 +4141,545 @@ mod tests {
         assert_eq!(channel["conversation_id"], "conv_sm");
         assert_eq!(channel["session_scope"], "conversation");
         assert_eq!(channel["context_projection"], "group");
-        assert_eq!(channel.get("im_user_id").and_then(|value| value.as_str()), None);
+        assert_eq!(
+            channel.get("im_user_id").and_then(|value| value.as_str()),
+            None
+        );
 
         let mapped = harness
             .conversation_repo
             .get("generated_id", "conv_sm", SessionScope::Conversation, None)
             .await?
-            .ok_or_else(|| ServiceError::InternalError("missing state machine conversation".to_string()))?;
+            .ok_or_else(|| {
+                ServiceError::InternalError("missing state machine conversation".to_string())
+            })?;
         assert_eq!(mapped.bcs_session_id, session_id);
         assert!(harness.message_flow.web_sends.lock().await.is_empty());
-        assert!(harness.session_repo.added_participants.lock().await.is_empty());
+        assert!(
+            harness
+                .session_repo
+                .added_participants
+                .lock()
+                .await
+                .is_empty()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_state_machine_group_preserves_source_message_while_starting() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_sm",
+                NewSessionParams {
+                    id: Some("pending-session".to_string()),
+                    session_kind: SessionKind::ServiceInvocation,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "generated_id".to_string(),
+                im_conversation_id: "conv_sm".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "pending-session".to_string(),
+                last_active_at: 42,
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_while_starting",
+                true,
+            ))
+            .await?;
+
+        assert!(harness.collaboration_runtime.starts.lock().await.is_empty());
+        let events = harness.delivery.events.lock().await;
+        let response = events.last().expect("state-machine starting response");
+        assert_eq!(response.purpose, ChannelOutboundPurpose::HumanInputAck);
+        assert_eq!(
+            response.source_im_message_id.as_deref(),
+            Some("msg_while_starting")
+        );
+        assert!(
+            response
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("流程正在启动"))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_state_machine_group_reuses_active_run_and_routes_human_response() -> TestResult
+    {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
+            .await?;
+        let session_id = harness.collaboration_runtime.starts.lock().await[0]
+            .session_id
+            .clone()
+            .expect("state-machine session");
+        SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            HumanInputReadyEvent {
+                event_id: "human-ready-state-run-1-human-review".to_string(),
+                group_id: "group_sm".to_string(),
+                session_id,
+                run_id: "state_run_1".to_string(),
+                node_id: "human_review".to_string(),
+                display_name: "Human review".to_string(),
+                instruction: "Review the draft".to_string(),
+                assignee_actor_id: "human_u1".to_string(),
+                channel_type: channel_type(),
+                notification_mode: HumanInputNotificationMode::FixedGroup,
+                fixed_group_conversation_id: Some("conv_sm".to_string()),
+                response_ref: "state_run_1:human_review".to_string(),
+                judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+                timeout_deadline_ms: Some(60_000),
+                upstream_artifacts: Vec::new(),
+            },
+        )
+        .await?;
+
+        let mut response = group_inbound("conv_sm", "u1", Some("张三"), "msg_response", true);
+        response.text = "looks good".to_string();
+        harness.service.handle_inbound(response).await?;
+
+        assert_eq!(harness.collaboration_runtime.starts.lock().await.len(), 1);
+        let responses = harness.collaboration_runtime.human_responses.lock().await;
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].run_id, "state_run_1");
+        assert_eq!(responses[0].node_id, "human_review");
+        assert_eq!(responses[0].caller_actor_id, "human_u1");
+        assert_eq!(responses[0].content, "looks good");
+        assert!(matches!(
+            &responses[0].source,
+            HumanResponseSource::Channel {
+                binding_id,
+                conversation_id,
+                message_id,
+            } if binding_id == "generated_id"
+                && conversation_id == "conv_sm"
+                && message_id == "msg_response"
+        ));
+        drop(responses);
+        let events = harness.delivery.events.lock().await;
+        let acknowledgement = events.last().expect("HumanInput acknowledgement");
+        assert_eq!(
+            acknowledgement.purpose,
+            ChannelOutboundPurpose::HumanInputAck
+        );
+        assert_eq!(
+            acknowledgement.source_im_message_id.as_deref(),
+            Some("msg_response")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_state_machine_group_rejects_message_without_pending_human_input() -> TestResult
+    {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        start_state_machine_channel(&harness).await?;
+
+        let mut response = group_inbound("conv_sm", "u1", Some("张三"), "msg_response", true);
+        response.text = "send this nowhere".to_string();
+        harness.service.handle_inbound(response).await?;
+
+        assert!(
+            harness
+                .collaboration_runtime
+                .human_responses
+                .lock()
+                .await
+                .is_empty()
+        );
+        assert!(harness.message_flow.web_sends.lock().await.is_empty());
+        let events = harness.delivery.events.lock().await;
+        assert!(
+            events
+                .last()
+                .and_then(|event| event.text.as_deref())
+                .is_some_and(|text| {
+                    text.contains("没有可通过此会话回复") && text.contains("消息未被接收")
+                })
+        );
+        assert_eq!(
+            events
+                .last()
+                .and_then(|event| event.source_im_message_id.as_deref()),
+            Some("msg_response")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_state_machine_group_rejects_multiple_pending_human_inputs() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        start_state_machine_channel(&harness).await?;
+        *harness
+            .collaboration_runtime
+            .pending_human_nodes
+            .lock()
+            .await = vec![
+            pending_human_node("review_a"),
+            pending_human_node("review_b"),
+        ];
+
+        let mut response = group_inbound("conv_sm", "u1", Some("张三"), "msg_response", true);
+        response.text = "do not guess the target".to_string();
+        harness.service.handle_inbound(response).await?;
+
+        assert!(
+            harness
+                .collaboration_runtime
+                .human_responses
+                .lock()
+                .await
+                .is_empty()
+        );
+        let events = harness.delivery.events.lock().await;
+        assert!(
+            events
+                .last()
+                .and_then(|event| event.text.as_deref())
+                .is_some_and(|text| {
+                    text.contains("没有可通过此会话回复") && text.contains("消息未被接收")
+                })
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_state_machine_start_failure_cleans_conversation_mapping_and_session()
+    -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        *harness.collaboration_runtime.start_error.lock().await =
+            Some("definition unavailable".to_string());
+
+        let result = harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
+            .await;
+        assert!(result.is_err());
+        assert!(
+            harness
+                .conversation_repo
+                .get("generated_id", "conv_sm", SessionScope::Conversation, None)
+                .await?
+                .is_none()
+        );
+        let starts = harness.collaboration_runtime.starts.lock().await;
+        let session_id = starts[0].session_id.as_deref().expect("session id");
+        let session = harness
+            .session_repo
+            .get(session_id)
+            .await
+            .expect("orphan session should remain auditable");
+        assert_eq!(session.status, SessionStatus::Completed);
+        assert_eq!(
+            session.error_message.as_deref(),
+            Some("state_machine_start_failed")
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn human_input_ready_uses_existing_channel_conversation_mapping() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
+            .await?;
+        let session_id = harness.collaboration_runtime.starts.lock().await[0]
+            .session_id
+            .clone()
+            .expect("session id");
+
+        let outcome = SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            HumanInputReadyEvent {
+                event_id: "event-1".to_string(),
+                group_id: "group_sm".to_string(),
+                session_id,
+                run_id: "state_run_1".to_string(),
+                node_id: "human_review".to_string(),
+                display_name: "Human review".to_string(),
+                instruction: "请审核上游结果".to_string(),
+                assignee_actor_id: "human_u1".to_string(),
+                channel_type: channel_type(),
+                notification_mode: HumanInputNotificationMode::FixedGroup,
+                fixed_group_conversation_id: Some("conv_sm".to_string()),
+                response_ref: "state_run_1:human_review".to_string(),
+                upstream_artifacts: vec![bcs_service_api::JudgeArtifact {
+                    node_id: "draft".to_string(),
+                    text: "draft content".to_string(),
+                }],
+                judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+                timeout_deadline_ms: Some(1234),
+            },
+        )
+        .await?;
+        assert_eq!(outcome, SessionChannelDeliveryOutcome::Delivered);
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, ChannelOutboundEventKind::System);
+        assert!(
+            events[0]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("请直接 @ 机器人回复"))
+        );
+        assert!(
+            !events[0]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("response_ref:"))
+        );
+        assert_eq!(events[0].purpose, ChannelOutboundPurpose::HumanInputRequest);
+        assert_eq!(events[0].raw_payload["request_id"], "event-1");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn direct_human_input_resolves_actor_without_mapping_and_queues_same_scope(
+    ) -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        let mut invalid_actor = human_input_ready_event(
+            "direct-invalid",
+            HumanInputNotificationMode::DirectAssignee,
+        );
+        invalid_actor.assignee_actor_id = "bot_u1".to_string();
+        let invalid_result = SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            invalid_actor,
+        )
+        .await;
+        assert!(matches!(
+            invalid_result,
+            Err(ServiceError::InvalidOperation { .. })
+        ));
+
+        for event_id in ["direct-first", "direct-second"] {
+            assert_eq!(
+                SessionChannelOutboundPort::publish_human_input_ready(
+                    &harness.service,
+                    human_input_ready_event(
+                        event_id,
+                        HumanInputNotificationMode::DirectAssignee,
+                    ),
+                )
+                .await?,
+                SessionChannelDeliveryOutcome::Delivered
+            );
+        }
+
+        let first = harness
+            .human_input_requests
+            .get("direct-first")
+            .await?
+            .expect("first direct request");
+        assert_eq!(first.status, HumanInputRequestStatus::Active);
+        assert_eq!(first.im_conversation_id, "u1");
+        assert_eq!(first.im_conversation_type, "1");
+        assert_eq!(first.im_user_id.as_deref(), Some("u1"));
+
+        let second = harness
+            .human_input_requests
+            .get("direct-second")
+            .await?
+            .expect("queued direct request");
+        assert_eq!(second.status, HumanInputRequestStatus::Queued);
+        assert_eq!(
+            harness
+                .human_input_requests
+                .count_queued(&second.reply_scope_key)
+                .await?,
+            1
+        );
+
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].purpose, ChannelOutboundPurpose::HumanInputRequest);
+        assert_eq!(
+            events[1].purpose,
+            ChannelOutboundPurpose::HumanInputQueueSummary
+        );
+        assert!(
+            events[0]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("上游结果") && text.contains("请直接回复本会话"))
+        );
+        assert!(
+            events[1]
+                .text
+                .as_deref()
+                .is_some_and(|text| text.contains("另有 1 项排队"))
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn human_input_delivery_failure_is_persisted() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        *harness.delivery.fail_error.lock().await = Some("provider unavailable".to_string());
+
+        let result = SessionChannelOutboundPort::publish_human_input_ready(
+            &harness.service,
+            human_input_ready_event(
+                "delivery-failed",
+                HumanInputNotificationMode::FixedGroup,
+            ),
+        )
+        .await;
+        assert!(matches!(result, Err(ServiceError::InternalError(_))));
+
+        let request = harness
+            .human_input_requests
+            .get("delivery-failed")
+            .await?
+            .expect("failed request");
+        assert_eq!(request.status, HumanInputRequestStatus::DeliveryFailed);
+        assert_eq!(request.delivery_attempts, 1);
+        assert!(
+            request
+                .last_delivery_error
+                .as_deref()
+                .is_some_and(|error| error.contains("provider unavailable"))
+        );
 
         Ok(())
     }
@@ -3114,27 +4750,22 @@ mod tests {
             })
             .await?;
 
-        harness
-            .service
-            .try_outbound(outbound(
-                "group_1:00000001",
-                ParticipantRole::Worker,
-                false,
-            ))
-            .await?;
+        let mut msg = outbound("group_1:00000001", ParticipantRole::Worker, false);
+        msg.source_im_message_id = Some("source-msg-1".to_string());
+        harness.service.try_outbound(msg).await?;
         let events = harness.delivery.events.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].im_conversation_id, "conv_a");
+        assert_eq!(
+            events[0].source_im_message_id.as_deref(),
+            Some("source-msg-1")
+        );
         assert!(events[0].render_sender_label);
         drop(events);
 
         harness
             .service
-            .try_outbound(outbound(
-                "group_1:00000001",
-                ParticipantRole::Manager,
-                true,
-            ))
+            .try_outbound(outbound("group_1:00000001", ParticipantRole::Manager, true))
             .await?;
         assert_eq!(harness.delivery.events.lock().await.len(), 1);
 
@@ -3179,11 +4810,7 @@ mod tests {
             })
             .await?;
 
-        let mut msg = outbound(
-            "group_1:00000001",
-            ParticipantRole::Observer,
-            false,
-        );
+        let mut msg = outbound("group_1:00000001", ParticipantRole::Observer, false);
         msg.kind = ChannelOutboundEventKind::System;
         harness.service.try_outbound(msg).await?;
 
@@ -3236,11 +4863,7 @@ mod tests {
         let (result, logs) = capture_tracing_logs(async {
             harness
                 .service
-                .try_outbound(outbound(
-                    "group_1:00000001",
-                    ParticipantRole::Worker,
-                    false,
-                ))
+                .try_outbound(outbound("group_1:00000001", ParticipantRole::Worker, false))
                 .await
         })
         .await;
@@ -3303,11 +4926,7 @@ mod tests {
 
         harness
             .service
-            .try_outbound(outbound(
-                "group_1:00000001",
-                ParticipantRole::Worker,
-                false,
-            ))
+            .try_outbound(outbound("group_1:00000001", ParticipantRole::Worker, false))
             .await?;
 
         let events = harness.delivery.events.lock().await;
@@ -3354,17 +4973,14 @@ mod tests {
                 last_active_at: 1,
             })
             .await?;
-        *harness.delivery.fail_error.lock().await =
-            Some("dingtalk normal message send returned status 400 code=invalidConversation".to_string());
+        *harness.delivery.fail_error.lock().await = Some(
+            "dingtalk normal message send returned status 400 code=invalidConversation".to_string(),
+        );
 
         let (result, logs) = capture_tracing_logs(async {
             harness
                 .service
-                .try_outbound(outbound(
-                    "group_1:00000001",
-                    ParticipantRole::Worker,
-                    false,
-                ))
+                .try_outbound(outbound("group_1:00000001", ParticipantRole::Worker, false))
                 .await
         })
         .await;
@@ -3435,16 +5051,11 @@ mod tests {
                 })
                 .await?;
         }
-        *harness.delivery.call_error_account_ref.lock().await =
-            Some("robot_failed".to_string());
+        *harness.delivery.call_error_account_ref.lock().await = Some("robot_failed".to_string());
 
         harness
             .service
-            .try_outbound(outbound(
-                "group_1:00000001",
-                ParticipantRole::Worker,
-                false,
-            ))
+            .try_outbound(outbound("group_1:00000001", ParticipantRole::Worker, false))
             .await?;
 
         let events = harness.delivery.events.lock().await;
@@ -3525,6 +5136,73 @@ mod tests {
         group
     }
 
+    async fn start_state_machine_channel(harness: &TestHarness) -> TestResult {
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_sm".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+        harness
+            .service
+            .handle_inbound(group_inbound(
+                "conv_sm",
+                "u1",
+                Some("张三"),
+                "msg_start",
+                true,
+            ))
+            .await?;
+        Ok(())
+    }
+
+    fn pending_human_node(node_id: &str) -> PendingHumanNodeView {
+        PendingHumanNodeView {
+            node_id: node_id.to_string(),
+            display_name: node_id.to_string(),
+            instruction: "Review the draft".to_string(),
+            response_ref: format!("state_run_1:{node_id}"),
+            judge_outcomes: Vec::new(),
+            timeout_deadline_ms: None,
+            upstream_artifacts: Vec::new(),
+        }
+    }
+
+    fn human_input_ready_event(
+        event_id: &str,
+        notification_mode: HumanInputNotificationMode,
+    ) -> HumanInputReadyEvent {
+        HumanInputReadyEvent {
+            event_id: event_id.to_string(),
+            group_id: "group_sm".to_string(),
+            session_id: format!("session-{event_id}"),
+            run_id: format!("run-{event_id}"),
+            node_id: "human_review".to_string(),
+            display_name: "Human review".to_string(),
+            instruction: "请审核上游结果".to_string(),
+            assignee_actor_id: "human_u1".to_string(),
+            channel_type: channel_type(),
+            notification_mode,
+            fixed_group_conversation_id: Some("conv_sm".to_string()),
+            response_ref: format!("run-{event_id}:human_review"),
+            upstream_artifacts: vec![bcs_service_api::JudgeArtifact {
+                node_id: "draft".to_string(),
+                text: "draft content".to_string(),
+            }],
+            judge_outcomes: vec!["approve".to_string(), "reject".to_string()],
+            timeout_deadline_ms: Some(1_000),
+        }
+    }
+
     fn dingtalk_config(account_ref: &str) -> ChannelConfig {
         serde_json::json!({
             "robot_code": account_ref,
@@ -3561,7 +5239,7 @@ mod tests {
             target,
             group_chat_scope: Some(GroupChatScope::ConversationShared),
             outbound_visibility: visibility,
-            env: "dev".to_string(),
+            env: "pre".to_string(),
             status: BindingStatus::Active,
             created_by: Some("creator".to_string()),
             config: dingtalk_config(account_ref),
@@ -3622,9 +5300,11 @@ mod tests {
             sender_role,
             sender_label: "Worker".to_string(),
             kind: ChannelOutboundEventKind::ChatFinal,
+            purpose: ChannelOutboundPurpose::Conversation,
             text: Some("done".to_string()),
             raw_payload: serde_json::json!({"type": "chat.final"}),
             render_hint: ChannelRenderHint::Render,
+            source_im_message_id: None,
             source_is_channel,
         }
     }
@@ -3640,11 +5320,7 @@ mod tests {
 
     #[async_trait]
     impl SessionRepoPort for RecordingSessionRepo {
-        async fn create(
-            &self,
-            group_id: &str,
-            params: NewSessionParams,
-        ) -> ServiceResult<Session> {
+        async fn create(&self, group_id: &str, params: NewSessionParams) -> ServiceResult<Session> {
             if let Some(error) = self.fail_create.lock().await.clone() {
                 return Err(ServiceError::InternalError(error));
             }
@@ -3676,6 +5352,7 @@ mod tests {
                 updated_at: 1,
                 completed_at: None,
                 meta: params.meta,
+                collected_at: None,
             };
             self.sessions.lock().await.insert(id, session.clone());
             Ok(session)
@@ -3718,11 +5395,18 @@ mod tests {
         }
 
         async fn count_running_service(&self, group_id: &str) -> u64 {
-            self.list_by_group(group_id, Some(SessionStatus::Running), 0, u64::MAX, None, None)
-                .await
-                .into_iter()
-                .filter(|session| session.session_kind == SessionKind::ServiceInvocation)
-                .count() as u64
+            self.list_by_group(
+                group_id,
+                Some(SessionStatus::Running),
+                0,
+                u64::MAX,
+                None,
+                None,
+            )
+            .await
+            .into_iter()
+            .filter(|session| session.session_kind == SessionKind::ServiceInvocation)
+            .count() as u64
         }
 
         async fn list_running_service(&self, _offset: u64, _limit: u64) -> Vec<Session> {
@@ -3901,7 +5585,10 @@ mod tests {
             })
         }
 
-        async fn handle_group_chat(&self, _cmd: GroupChatCommand) -> ServiceResult<GroupChatOutcome> {
+        async fn handle_group_chat(
+            &self,
+            _cmd: GroupChatCommand,
+        ) -> ServiceResult<GroupChatOutcome> {
             Err(not_configured("group chat"))
         }
 
@@ -3923,7 +5610,10 @@ mod tests {
             Err(not_configured("group callback"))
         }
 
-        async fn handle_chat_abort(&self, _cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
+        async fn handle_chat_abort(
+            &self,
+            _cmd: ChatAbortCommand,
+        ) -> ServiceResult<ChatAbortOutcome> {
             Err(not_configured("chat abort"))
         }
 
@@ -3983,11 +5673,13 @@ mod tests {
             if let Some(error) = self.fail_error.lock().await.clone() {
                 return Ok(ChannelDeliveryResult {
                     delivered: false,
+                    provider_message_ref: None,
                     error: Some(ServiceError::InternalError(error)),
                 });
             }
             Ok(ChannelDeliveryResult {
                 delivered: true,
+                provider_message_ref: None,
                 error: None,
             })
         }
@@ -4019,11 +5711,7 @@ mod tests {
 
         fn validate_config(&self, config: &serde_json::Value) -> ChannelProviderResult<()> {
             self.validate_calls.lock().unwrap().push(config.clone());
-            if config
-                .get("valid")
-                .and_then(serde_json::Value::as_bool)
-                == Some(false)
-            {
+            if config.get("valid").and_then(serde_json::Value::as_bool) == Some(false) {
                 return Err(ChannelProviderError::InvalidConfig(
                     "provider rejected config".to_string(),
                 ));
@@ -4037,6 +5725,21 @@ mod tests {
                 object.insert("client_secret".to_string(), serde_json::json!("<redacted>"));
             }
             redacted
+        }
+
+        fn resolve_direct_recipient(
+            &self,
+            actor_id: &str,
+        ) -> ChannelProviderResult<Option<String>> {
+            let recipient = actor_id
+                .strip_prefix("human_")
+                .filter(|value| !value.is_empty() && value.trim().len() == value.len())
+                .ok_or_else(|| {
+                    ChannelProviderError::Provider(format!(
+                        "test provider cannot resolve direct recipient from actor {actor_id}"
+                    ))
+                })?;
+            Ok(Some(recipient.to_string()))
         }
 
         fn delivery(&self) -> Arc<dyn ChannelDeliveryPort> {
@@ -4058,6 +5761,10 @@ mod tests {
     #[derive(Default)]
     struct RecordingCollaborationRuntime {
         starts: Mutex<Vec<StartStateMachineRunCommand>>,
+        start_error: Mutex<Option<String>>,
+        runs_by_session: Mutex<HashMap<String, StateMachineRunView>>,
+        pending_human_nodes: Mutex<Vec<PendingHumanNodeView>>,
+        human_responses: Mutex<Vec<RespondHumanNodeCommand>>,
     }
 
     #[async_trait]
@@ -4071,26 +5778,89 @@ mod tests {
                 None => "state_session".to_string(),
             };
             self.starts.lock().await.push(cmd.clone());
-            Ok(StartStateMachineRunOutcome {
-                view: StateMachineRunView {
-                    run: StateMachineRun {
-                        run_id: "state_run_1".to_string(),
-                        definition_id: "definition_1".to_string(),
-                        definition_version: 1,
-                        group_id: cmd.group_id,
-                        group_version: 1,
-                        session_id,
-                        created_by: cmd.caller_id,
-                        status: StateMachineRunStatus::Running,
-                        input: cmd.input,
-                        output: None,
-                        error: None,
-                        created_at: 1,
-                        updated_at: 1,
-                        completed_at: None,
-                    },
-                    nodes: Vec::new(),
-                    judge_outputs: Vec::new(),
+            if let Some(error) = self.start_error.lock().await.clone() {
+                return Err(CollaborationRuntimeError::InvalidRequest(error));
+            }
+            let view = StateMachineRunView {
+                run: StateMachineRun {
+                    run_id: "state_run_1".to_string(),
+                    definition_id: "definition_1".to_string(),
+                    definition_version: 1,
+                    group_id: cmd.group_id,
+                    group_version: 1,
+                    session_id,
+                    created_by: cmd.caller_id,
+                    status: StateMachineRunStatus::Running,
+                    input: cmd.input,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 1,
+                    completed_at: None,
+                },
+                nodes: Vec::new(),
+                judge_outputs: Vec::new(),
+            };
+            self.runs_by_session
+                .lock()
+                .await
+                .insert(view.run.session_id.clone(), view.clone());
+            Ok(StartStateMachineRunOutcome { view })
+        }
+
+        async fn get_state_machine_run_by_session_id(
+            &self,
+            session_id: &str,
+        ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
+            Ok(self.runs_by_session.lock().await.get(session_id).cloned())
+        }
+
+        async fn list_pending_human_nodes(
+            &self,
+            _cmd: ListPendingHumanNodesCommand,
+        ) -> Result<Vec<PendingHumanNodeView>, CollaborationRuntimeError> {
+            Ok(self.pending_human_nodes.lock().await.clone())
+        }
+
+        async fn respond_human_node(
+            &self,
+            cmd: RespondHumanNodeCommand,
+        ) -> Result<RespondHumanNodeOutcome, CollaborationRuntimeError> {
+            self.human_responses.lock().await.push(cmd.clone());
+            Ok(RespondHumanNodeOutcome {
+                node: StateMachineNodeRun {
+                    run_id: cmd.run_id.clone(),
+                    node_id: cmd.node_id,
+                    status: StateMachineNodeStatus::Completed,
+                    attempt: 0,
+                    node_timeout_ms: Some(60_000),
+                    timeout_deadline_ms: None,
+                    max_attempts: 1,
+                    assignee_bot_id: None,
+                    outcome: Some("complete".to_string()),
+                    responded_by: Some(cmd.caller_actor_id),
+                    delivery_request_id: None,
+                    bot_delivery_run_id: None,
+                    artifact_text: Some(cmd.content),
+                    error: None,
+                    started_at: Some(1),
+                    completed_at: Some(2),
+                },
+                run: StateMachineRun {
+                    run_id: cmd.run_id,
+                    definition_id: "definition_1".to_string(),
+                    definition_version: 1,
+                    group_id: "group_sm".to_string(),
+                    group_version: 1,
+                    session_id: "state_session".to_string(),
+                    created_by: None,
+                    status: StateMachineRunStatus::Running,
+                    input: serde_json::Value::Null,
+                    output: None,
+                    error: None,
+                    created_at: 1,
+                    updated_at: 2,
+                    completed_at: None,
                 },
             })
         }
@@ -4121,7 +5891,8 @@ mod tests {
         async fn lookup_delivery_correlation(
             &self,
             _run_id: &str,
-        ) -> Result<Option<bcs_domain::StateMachineDeliveryCorrelation>, CollaborationRuntimeError> {
+        ) -> Result<Option<bcs_domain::StateMachineDeliveryCorrelation>, CollaborationRuntimeError>
+        {
             Ok(None)
         }
 
@@ -4168,15 +5939,15 @@ mod tests {
 
     #[async_trait]
     impl BotRegistryCoreService for RecordingRegistry {
-        async fn register(&self, _bot_id: String, _capabilities: BotCapabilities) -> ServiceResult<()> {
+        async fn register(
+            &self,
+            _bot_id: String,
+            _capabilities: BotCapabilities,
+        ) -> ServiceResult<()> {
             Ok(())
         }
 
-        async fn update_status(
-            &self,
-            _bot_id: &str,
-            _status: BotDynamicStatus,
-        ) -> bool {
+        async fn update_status(&self, _bot_id: &str, _status: BotDynamicStatus) -> bool {
             false
         }
 
@@ -4222,7 +5993,11 @@ mod tests {
             None
         }
 
-        async fn save_to_storage(&self, _bot_id: &str, _caps: &BotCapabilities) -> ServiceResult<()> {
+        async fn save_to_storage(
+            &self,
+            _bot_id: &str,
+            _caps: &BotCapabilities,
+        ) -> ServiceResult<()> {
             Ok(())
         }
 

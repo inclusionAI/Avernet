@@ -27,7 +27,11 @@ from secbaas.community.api.tenant_manage import TenantType
 
 if TYPE_CHECKING:
     from secbaas.community.api.bot_runtime import HttpConnectionInfo
-    from secbaas.community.api.device_manage import DeviceInfo, OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        DeviceInfo,
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
     from secbaas.community.api.health_check.bot import TTLInfo
 
 
@@ -174,6 +178,7 @@ class PaasService(PaasServiceProtocol, ABC):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a device.
 
@@ -379,5 +384,57 @@ class PaasService(PaasServiceProtocol, ABC):
         Raises:
             NotImplementedError: If the platform does not support
                 HTTP invoke info resolution.
+        """
+        ...
+
+    @abstractmethod
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Download file from a URL to the device at the specified path.
+
+        Args:
+            paas_device_id: PaaS platform device ID in platform-specific
+                format, without @template_id suffix.
+            source_url: The URL to download from, e.g. OSS pre-signed GET URL.
+            device_path: Absolute path on device to save the downloaded file to.
+            timeout_seconds: Maximum download time in seconds (default: 300).
+
+        Returns:
+            None on success.
+
+        Raises:
+            NotImplementedError: If platform does not support file transfer.
+            PaasError: With FILE_TRANSFER_FAILED if download fails.
+        """
+        ...
+
+    @abstractmethod
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Upload file from device to the target URL (pre-signed PUT).
+
+        Args:
+            paas_device_id: PaaS platform device ID in platform-specific
+                format, without @template_id suffix.
+            device_path: Absolute path on device of the file to upload.
+            target_url: The URL to upload to, e.g. OSS pre-signed PUT URL.
+            timeout_seconds: Maximum upload time in seconds (default: 300).
+
+        Returns:
+            None on success.
+
+        Raises:
+            NotImplementedError: If platform does not support file transfer.
+            PaasError: With FILE_TRANSFER_FAILED if upload fails.
         """
         ...

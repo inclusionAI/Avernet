@@ -48,7 +48,7 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         leader_election: None,
         cache: Default::default(),
         database: Default::default(),
-        mist: bcs::MistConfig::default(),
+        secret: Default::default(),
         channels: Default::default(),
         collaboration: Default::default(),
         store_messages: true,
@@ -85,13 +85,14 @@ fn create_test_config(bots_dir: &PathBuf) -> BcsConfig {
         api_keys: vec![],
         metrics: Default::default(),
         invite: Default::default(),
+        ..BcsConfig::default()
     }
 }
 
 /// Start a BCS server on a random port.
 async fn start_test_server(bots_dir: &PathBuf) -> (SocketAddr, tokio::task::JoinHandle<Result<(), bcs::BcsError>>) {
     let config = create_test_config(bots_dir);
-    let server = BcsServer::new(config);
+    let server = BcsServer::new_allowing_private_outbound_for_tests(config);
     server.run_on_random_port().await.expect("Failed to start server")
 }
 
@@ -581,25 +582,28 @@ async fn test_1to1_chat_http_to_ws() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Connect Bot B (receiver) via WebSocket
-    let mut ws_b = connect_bot(addr, None).await;
-    let resp_b = send_frame(&mut ws_b, json!({
-        "type": "req", "id": "1", "method": "bot.connect", "params": {}
-    })).await.unwrap();
-    let bot_b_id = resp_b["payload"]["bot_uuid"].as_str().unwrap().to_string();
-    let bot_b_token = resp_b["payload"]["token"].as_str().unwrap().to_string();
+    let (_sender_ws, sender_bot_id, sender_client) =
+        connect_and_onboard_public_bot(addr, "SenderBot").await;
+    let (mut receiver_ws, receiver_bot_id, _receiver_client) =
+        connect_and_onboard_public_bot(addr, "ReceiverBot").await;
 
-    // Onboard Bot B
-    let client = create_client(addr, &bot_b_token);
-    client.onboard("ReceiverBot", None, None, None, None, None).await.ok();
+    let chat_task = tokio::spawn(async move {
+        sender_client
+            .chat(
+                &receiver_bot_id,
+                "Hello from Bot A",
+                Some(&sender_bot_id),
+                Some(200),
+            )
+            .await
+    });
 
-    // Bot A sends 1:1 message to Bot B via HTTP API
-    // Note: This requires Bot A to be connected via WS with a token
-    let result = client.chat(&bot_b_id, "Hello from Bot A", Some("bot_a"), None);
-    // The chat might fail if bot_a is not in registry, but we test the flow
-    let _ = result.await;
+    let frame = recv_chat_send_frame(&mut receiver_ws)
+        .await
+        .expect("Receiver bot should receive chat.send");
+    assert_eq!(frame["method"], "chat.send");
 
-    // The test verifies the infrastructure works
+    let _ = chat_task.await.expect("chat task should join");
 }
 
 #[tokio::test]

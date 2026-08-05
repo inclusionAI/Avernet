@@ -18,6 +18,7 @@ consumes:
 internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
+  - agentclaw.community.core.caller_identity
   - agentclaw.community.core.devices
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.skill_center

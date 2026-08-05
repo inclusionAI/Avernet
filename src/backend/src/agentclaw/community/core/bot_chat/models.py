@@ -91,6 +91,10 @@ class AcOtelLogTrace(Base):
         Index("idx_ac_otel_log_trace_bot", "bot_id"),
         Index("idx_ac_otel_log_trace_session_id", "session_id"),
         Index("idx_ac_otel_log_trace_session_key", "session_key"),
+        Index("idx_ac_otel_log_trace_task", "biz_scene", "biz_task_id", "start_time_ms"),
+        Index("idx_ac_otel_log_trace_task_only", "biz_task_id", "start_time_ms"),
+        Index("idx_ac_otel_log_trace_session", "session_id", "start_time_ms"),
+        Index("idx_ac_otel_log_trace_session_key_time", "session_key", "start_time_ms"),
     )
 
 
@@ -164,3 +168,18 @@ class AcOtelLogBizRef(Base):
         Index("idx_ac_otel_log_biz_ref_user", "user_id"),
         Index("idx_ac_otel_log_biz_ref_bot", "bot_id"),
     )
+
+
+class BcsGroupSession(Base):
+    """Read model for resolving a BCS group to its runtime sessions."""
+
+    __tablename__ = "bcs_group_sessions"
+    __table_args__ = {"extend_existing": True}
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    gmt_create = Column(DateTime, server_default=func.now())
+    session_id = Column(String(64), nullable=False)
+    group_id = Column(String(64), nullable=False)
+    env = Column(String(32), nullable=False, default="prod")
+    status = Column(String(16), nullable=False, default="running")
+    session_kind = Column(String(32), nullable=False, default="chat")

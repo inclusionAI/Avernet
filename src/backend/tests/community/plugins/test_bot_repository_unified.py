@@ -17,6 +17,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+)
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
@@ -90,6 +93,8 @@ def test_insert_and_get(repo):
     assert rec["engine_types"]  # defaulted
     got = repo.get_by_id_and_owner("bot-1", "emp1")
     assert got["bot_name"] == "Bot One"
+    assert got["call_type"] == "owner"
+    assert got["caller_config_revision"] == 0
 
 
 def test_get_by_id_without_owner(repo):
@@ -125,6 +130,43 @@ def test_get_by_id_returns_none_for_deleted(repo):
     # get_by_id should return None for deleted bots
     got = repo.get_by_id("bot-1")
     assert got is None
+
+
+def test_get_by_id_and_entity_selects_the_correct_default_bot(repo):
+    first = repo.insert(
+        _data(bot_id="default", entity_id="entity-one", owner_id="owner-one")
+    )
+    second = repo.insert(
+        _data(bot_id="default", entity_id="entity-two", owner_id="owner-two")
+    )
+
+    selected = repo.get_by_id_and_entity("default", "entity-two")
+
+    assert selected is not None
+    assert selected["id"] == second["id"]
+    assert selected["owner_id"] == "owner-two"
+    assert selected["id"] != first["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
+
+
+def test_get_unique_by_id_rejects_duplicate_default_bots(repo):
+    repo.insert(_data(bot_id="default", entity_id="entity-one"))
+    repo.insert(_data(bot_id="default", entity_id="entity-two"))
+
+    with pytest.raises(BotLookupAmbiguousError):
+        repo.get_unique_by_id("default")
+
+
+def test_get_unique_by_id_preserves_single_and_missing_lookups(repo):
+    inserted = repo.insert(_data(bot_id="default", entity_id="entity-one"))
+
+    selected = repo.get_unique_by_id("default")
+
+    assert selected["id"] == inserted["id"]
+    assert selected["call_type"] == "owner"
+    assert selected["caller_config_revision"] == 0
+    assert repo.get_unique_by_id("missing") is None
 
 
 def test_insert_plain_not_upsert(repo):
@@ -209,6 +251,34 @@ def test_list_and_count(repo):
     assert t3 == 2
     t4, _ = repo.list_by_search(search="Alice")
     assert t4 == 2
+
+
+def test_list_by_conditions_owner_engine_status_filters(repo):
+    """Additive owner_id / engine / status filters narrow with exact totals."""
+    repo.insert(_data(bot_id="b1", owner_id="alice", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Alpha"))
+    repo.insert(_data(bot_id="b2", owner_id="alice", active_engine="openclaw",
+                      status="PENDING", bot_name="Beta"))
+    repo.insert(_data(bot_id="b3", owner_id="bob", active_engine="teclaw",
+                      status="ACTIVE", bot_name="Gamma"))
+
+    # No new filters → every row (backward-compatible default).
+    assert repo.list_by_conditions()[0] == 3
+    # owner_id scopes to a single owner.
+    total, rows = repo.list_by_conditions(owner_id="alice")
+    assert total == 2
+    assert {r["bot_id"] for r in rows} == {"b1", "b2"}
+    # engine / status filter independently.
+    assert repo.list_by_conditions(engine="teclaw")[0] == 2
+    assert repo.list_by_conditions(status="PENDING")[0] == 1
+    # Combined filters narrow to the exact row, with an exact total.
+    total, rows = repo.list_by_conditions(
+        owner_id="alice", engine="teclaw", status="ACTIVE"
+    )
+    assert total == 1
+    assert rows[0]["bot_id"] == "b1"
+    # Keyword (bot_name) still composes with the new filters.
+    assert repo.list_by_conditions(owner_id="alice", bot_name="Alpha")[0] == 1
 
 
 def test_count_by_owner_excludes_desktop(repo):
@@ -564,3 +634,32 @@ def test_search_bots_filter_provider_cross_env_binding_no_match(repo, db):
     total, items = repo.search_bots(provider="arca", page=1, page_size=10)
     assert total == 0
     assert items == []
+
+
+def test_list_by_conditions_treats_like_wildcards_literally(repo):
+    """R9/F39: a `%` in the keyword narrowed nothing — it matched everything.
+
+    The keyword goes into a LIKE pattern, so an unescaped `%` or `_` is a
+    wildcard rather than the character the caller typed: searching for a name
+    containing `%` returned every bot and an inflated total.
+    """
+    repo.insert(_data(bot_id="b1", bot_name="100% Bot"))
+    repo.insert(_data(bot_id="b2", bot_name="Plain Bot"))
+    repo.insert(_data(bot_id="b3", bot_name="a_b Bot"))
+    repo.insert(_data(bot_id="b4", bot_name="axb Bot"))
+
+    # `%` is the literal character, not "match anything".
+    total, rows = repo.list_by_conditions(bot_name="100%")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b1"
+
+    # `_` is the literal character, not "match one".
+    total, rows = repo.list_by_conditions(bot_name="a_b")
+    assert total == 1, [r["bot_name"] for r in rows]
+    assert rows[0]["bot_id"] == "b3"
+
+    # A bare wildcard matches only names actually containing it.
+    assert repo.list_by_conditions(bot_name="%")[0] == 1
+
+    # Ordinary substring search is unchanged.
+    assert repo.list_by_conditions(bot_name="Bot")[0] == 4

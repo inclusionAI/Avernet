@@ -44,6 +44,8 @@ from agentclaw.community.core.devices.errors import (
     InvalidDeviceStatusError,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
@@ -335,10 +337,13 @@ class DeviceService:
         device: AllocatedDevice,
         agent_pass_token: str = "",
         agent_code: str = "",
+        active_only: bool = False,
     ) -> bool:
         """Update outbound header rules on a running device (hot-update hook)。
 
         Subclasses override this to provider-specific implementations.
+        ``active_only`` limits a provider's batch target set to ACTIVE physical
+        devices; providers without physical-device fan-out may ignore it.
         Default: no-op.
         """
         return False
@@ -689,16 +694,20 @@ class DeviceService:
             return record
 
         # 5. Start service asynchronously
-        # 仅 applicationCoding bot 透传 CodeFuse token（从 ext 读回密文，启动时解密为明文）。
+        # Token 透传由引擎策略决定（例如 coding bot 的 CodeFuse token）。
         # 解密在异步闭包内：密文损坏/密钥错配时由 start_service 的 except 承接为 FAILED，
         # 与 token 写入失败同语义（failure-closed），避免同步段抛错导致 binding 已落库但
         # apply_device 返回 500 的状态机不一致。token 全程 in-memory 不进 device_props；
         # get_template_config 不解密 → API 返回密文脱敏。
-        _raw_codefuse_token = (
-            (template_config or {}).get("token")
-            if (template_type or "") == "applicationCoding"
-            else None
+        _provisioning_ctx, _provisioning_strategy = resolve_provisioning(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=resolved_engine,
+            bot_type=bot_type,
+            template_type=template_type,
+            template_config=template_config,
         )
+        _raw_codefuse_token = _provisioning_strategy.extract_runtime_token(_provisioning_ctx)
 
         def start_service_async():
             try:
@@ -731,7 +740,9 @@ class DeviceService:
                 logger.exception(f"[apply_device] start service failed for device {allocated.device_id}: {e}")
                 self._mark_service_start_failed(binding_id=binding_id, error=str(e))
 
-        thread = threading.Thread(target=start_service_async, daemon=True)
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(start_service_async), daemon=True
+        )
         thread.start()
 
         record = self._repo.get_by_id(binding_id)
@@ -766,8 +777,11 @@ class DeviceService:
             DeviceBindingStatus.ACTIVE.value,
             DeviceBindingStatus.PENDING.value,
             DeviceBindingStatus.FAILED.value,
+            DeviceBindingStatus.STOPPED.value,
         ]:
-            raise InvalidDeviceStatusError("only ACTIVE/PENDING/FAILED devices can be released")
+            raise InvalidDeviceStatusError(
+                "only ACTIVE/PENDING/FAILED/STOPPED devices can be released"
+            )
 
         entity_id = current.entity_id
         entity_type = current.entity_type
@@ -941,6 +955,7 @@ class DeviceService:
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """Get device connection information.
 
@@ -950,6 +965,12 @@ class DeviceService:
         ``device_uuid`` (optional) targets a specific instance in the multi-instance
         BaaS provider (see ``BaasDeviceService.get_device_connection``); local /
         non-BaaS providers have a single device and ignore it.
+
+        ``path`` (optional) is the in-device path the returned URL should address.
+        It matters only where the provider builds a *complete* URL server-side —
+        BaaS relay mode — because that URL then embeds the path and cannot be
+        appended to. Providers that return a bare routing target ignore it, and
+        the caller appends the path itself. ``None`` keeps the provider default.
         """
         logger.info(f"[get_device_connection] called with binding_id={binding_id}, port={port}, ttl={ttl}")
 
@@ -1050,6 +1071,24 @@ class DeviceService:
             f"binding_id={record.id}, prev={prev_status}, new={new_status}, "
             f"is_first_active={prev_status == DeviceBindingStatus.PENDING.value}"
         )
+
+        if record.status == DeviceBindingStatus.PENDING.value:
+            # Required durable consumers run before the ACTIVE commit.  If
+            # enqueue fails, the exception propagates and the binding remains
+            # PENDING, so the runtime retry redelivers this one-shot signal.
+            from agentclaw.community.core.events.bus import get_event_bus
+            from agentclaw.community.core.events.types import DeviceAliveEvent
+
+            get_event_bus().publish(
+                DeviceAliveEvent(
+                    device_id=device_id,
+                    binding_id=record.id,
+                    entity_id=record.entity_id,
+                    entity_type=record.entity_type,
+                    device_provider=record.device_provider,
+                    sandbox_id=(record.device_props or {}).get("sandbox_id"),
+                )
+            )
 
         self._repo.update_status_and_alive_at(binding_id=record.id, status=new_status)
 
@@ -1516,7 +1555,9 @@ class DeviceService:
                     record.device_id, sync_error,
                 )
 
-        threading.Thread(target=_run, daemon=True).start()
+        threading.Thread(
+            target=bind_current_avernet_tenant(_run), daemon=True
+        ).start()
 
     def _trigger_data_init_on_device_ready(self, *, device_id: str, record) -> None:
         """当设备自报 SUCCEEDED 时触发 data-init。
@@ -1613,7 +1654,11 @@ class DeviceService:
                         exc_info=True,
                     )
 
-            thread = threading.Thread(target=_run_init, daemon=True, name=f"data-init-{bot_id}")
+            thread = threading.Thread(
+                target=bind_current_avernet_tenant(_run_init),
+                daemon=True,
+                name=f"data-init-{bot_id}",
+            )
             thread.start()
 
             logger.info(f"bot_id={bot_id} data_init_trigger dispatched source=status_succeeded thread={thread.name}")

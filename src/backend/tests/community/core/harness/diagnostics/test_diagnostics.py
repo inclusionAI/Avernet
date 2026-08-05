@@ -223,7 +223,7 @@ class TestToolsDeclarationDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -273,7 +273,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -284,12 +284,13 @@ class TestToolsMcpFormatDiagnostic:
         assert "TOOLS.md MCP 调用规范诊断" in captured_user
         assert "语雀MCP" in captured_user
         assert "语雀知识库文档管理" in captured_user
-        # Unverified MCPs: tools list is stripped, only server_code/name/description are sent
+        # Unreachable MCPs (no verified_guide, no inputSchema): tools list is
+        # stripped; only server_code/name/description are sent.
         assert "skylark_doc_create" not in captured_user
         assert "DataPhin MCP" in captured_user
         assert "query_asset" not in captured_user
-        # Section header should indicate unverified MCPs
-        assert "未验证 MCP" in captured_user
+        # Section header should indicate the unreachable (no-schema) bucket.
+        assert "无 schema MCP" in captured_user
 
     @pytest.mark.asyncio
     async def test_verified_guide_attached_for_known_mcp(self, monkeypatch):
@@ -308,7 +309,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -336,7 +337,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -353,7 +354,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -387,12 +388,19 @@ class TestToolsMcpFormatDiagnostic:
         }
         ctx.mcp_center = mock_center
 
-        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n缺少语雀MCP的调用规范和场景映射")
+        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n缺少语雀MCP的调用规范和场景映射 [SCORE:40]")
         findings = await diag.analyze(ctx)
         assert len(findings) == 1
         assert findings[0].rule_id == "D-TOOLS-002"
         assert findings[0].rule_name == "各项 MCP 调用规范诊断"
-        assert findings[0].severity == Severity.WARNING
+        # No verified_guide and no inputSchema ⇒ advisory (platform must author):
+        # template dropped (no TODO placeholder patch), bumped to pass/info so
+        # health_score isn't stuck, message annotated with the recovery note.
+        assert findings[0].suggested_template_ids == []
+        assert findings[0].severity == Severity.INFO
+        assert findings[0].score >= 80
+        assert findings[0].result == "pass"
+        assert "平台补全中" in findings[0].message
         assert findings[0].file_type == "TOOLS.md"
 
     @pytest.mark.asyncio
@@ -408,7 +416,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -435,7 +443,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -459,7 +467,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -487,7 +495,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -529,7 +537,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -567,7 +575,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -606,7 +614,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -640,7 +648,7 @@ class TestToolsMcpFormatDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -658,6 +666,111 @@ class TestToolsMcpFormatDiagnostic:
         assert findings == []
         assert "**CCT**: 大安全CCT平台" in captured_user
         assert "Unrelated" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_input_schema_keeps_template_and_forwards_schema(self):
+        """A tool exposing inputSchema is schema-derivable: keep the auto-fix
+        template (so Phase 3 emits a real, schema-transcribed call-spec patch
+        instead of a TODO) and forward inputSchema to the diagnostic LLM.
+        The finding is NOT bumped (it is recoverable)."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "Dima MCP",
+            "description": "Dima assistant",
+            "tools": [{
+                "name": "generateWorkSummary",
+                "description": "Generate a work summary",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "startDate": {"type": "string", "description": "yyyyMMdd"},
+                        "endDate": {"type": "string", "description": "yyyyMMdd"},
+                    },
+                    "required": ["startDate", "endDate"],
+                },
+            }],
+        }
+        ctx.mcp_center = mock_center
+
+        captured_user = None
+
+        async def capture_chat(system, user, **kwargs):
+            nonlocal captured_user
+            captured_user = user
+            return "MCP规范不全\n建议据 schema 补全 [SCORE:55]"
+
+        ctx.llm.chat = capture_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        # Recoverable ⇒ template kept, finding NOT bumped to pass.
+        assert findings[0].suggested_template_ids == [2]
+        assert findings[0].severity == Severity.WARNING
+        assert findings[0].score == 55
+        assert findings[0].result != "pass"
+        # inputSchema content is forwarded (not stripped) for transcription.
+        assert "inputSchema" in captured_user
+        assert "generateWorkSummary" in captured_user
+        assert "startDate" in captured_user
+        assert "可据 schema 转录" in captured_user
+
+    @pytest.mark.asyncio
+    async def test_all_unreachable_clears_template_and_bumps(self):
+        """MCPs with neither verified_guide nor inputSchema are advisory
+        (platform must author specs): drop the template and bump to pass so
+        health_score isn't stuck low; message carries the 平台补全中 note."""
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"}]
+        ctx = _make_ctx({"TOOLS.md": "# Tools"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+        mock_center.get_mcp_detail.return_value = {
+            "name": "Dima MCP",
+            "description": "Dima assistant",
+            "tools": [{"name": "generateWorkSummary", "description": "..."}],  # no inputSchema
+        }
+        ctx.mcp_center = mock_center
+        ctx.llm.chat = AsyncMock(return_value="MCP规范缺失\n建议后续补充调用规范 [SCORE:45]")
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == []
+        assert findings[0].severity == Severity.INFO
+        assert findings[0].score >= 80
+        assert findings[0].result == "pass"
+        assert "平台补全中" in findings[0].message
+
+    @pytest.mark.asyncio
+    async def test_mixed_verified_and_unreachable_keeps_template(self):
+        """A verified MCP makes the run recoverable: keep the template (real
+        patch for the verified spec) even though unreachable MCPs are also
+        present; the finding keeps its honest score (not bumped)."""
+        diag = ToolsMcpFormatDiagnostic()
+        verified_code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
+        mcps = [
+            {"server_code": verified_code, "name": "skylark"},
+            {"server_code": "mcp.ant.arkai.dimamcpserver", "name": "Dima"},
+        ]
+        ctx = _make_ctx({"TOOLS.md": "# Tools"}, activated_mcps=mcps)
+        mock_center = MagicMock()
+
+        def detail(code):
+            if code == verified_code:
+                return {"name": "语雀MCP", "description": "语雀", "tools": [{"name": "skylark_search"}]}
+            return {"name": "Dima MCP", "description": "Dima", "tools": [{"name": "generateWorkSummary"}]}
+
+        mock_center.get_mcp_detail.side_effect = detail
+        ctx.mcp_center = mock_center
+        ctx.llm.chat = AsyncMock(return_value="MCP规范不全\n部分MCP缺规范 [SCORE:60]")
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        # Recoverable (verified_guide present) ⇒ template kept, score honest.
+        assert findings[0].suggested_template_ids == [2]
+        assert findings[0].score == 60
+        assert findings[0].severity == Severity.WARNING
 
 
 class TestSoulPersonaDiagnostic:
@@ -704,7 +817,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -731,7 +844,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -809,7 +922,7 @@ class TestSoulPersonaDiagnostic:
 
         captured_user = None
 
-        async def capture_chat(system, user):
+        async def capture_chat(system, user, **kwargs):
             nonlocal captured_user
             captured_user = user
             return "无问题"
@@ -821,6 +934,79 @@ class TestSoulPersonaDiagnostic:
         assert "Active Bot" in captured_user
         assert "This is the active profile" in captured_user
         assert "Draft Bot" not in captured_user
+
+    @pytest.mark.asyncio
+    async def test_low_quality_profile_clears_template(self, monkeypatch):
+        """B-mode: profile quality < 0.7 → suggestions are advisory (improve
+        profile / supplement info), not a SOUL.md edit the patch LLM can fill.
+        The auto-fix template must be dropped so Phase 3 doesn't emit
+        TODO-placeholder patches. The finding still carries its score/message
+        (counts toward health_score, surfaces in the report)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发"]},
+                "quality_score": 0.3, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="通用模板问题\n缺少专属定制，建议完善画像\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].score == 50
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_no_profile_clears_template(self, monkeypatch):
+        """When BCSFuse is unavailable / returns nothing, the diagnostic can't
+        generate a full SOUL.md rewrite — its suggestions are advisory, so the
+        template is dropped (same as B-mode)."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: None,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议补充 Bot 专属职责\n[SCORE:55]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == []
+
+    @pytest.mark.asyncio
+    async def test_high_quality_profile_keeps_template(self, monkeypatch):
+        """A-mode: profile quality >= 0.7 → the LLM produces a full suggested
+        SOUL.md rewrite, a concrete file edit. Keep the auto-fix template so
+        Phase 3 can generate a real patch."""
+        diag = SoulPersonaDiagnostic()
+        ctx = _make_ctx({"SOUL.md": "## Persona\n\n通用助手"})
+        mock_profiles_resp = {
+            "items": [{
+                "profile_id": "default", "display_name": "Bot",
+                "contents": {"profile": "研发助手", "capabilities": ["代码开发", "问题排查"]},
+                "quality_score": 0.8, "quality_issues": [],
+            }],
+            "total": 1, "active_profile_id": "default",
+        }
+        monkeypatch.setattr(
+            "agentclaw.community.core.harness.diagnostics.config.soul._fetch_profiles",
+            lambda worker_id, base_url: mock_profiles_resp,
+        )
+        ctx.llm.chat = AsyncMock(
+            return_value="缺少专属定制\n建议版 SOUL.md\n\n我是研发助手\n[SCORE:50]"
+        )
+        findings = await diag.analyze(ctx)
+        assert len(findings) == 1
+        assert findings[0].suggested_template_ids == [3]
 
 
 class TestDiagnosticContextNoCache:

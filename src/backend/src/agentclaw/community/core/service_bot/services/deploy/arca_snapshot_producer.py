@@ -18,6 +18,9 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifact,
     DeployArtifactProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    ServiceSkillsManifestBuilder,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -26,11 +29,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 class ArcaSnapshotProducer(DeployArtifactProducer):
     """Wraps the existing ARCA build (rsync + mcporter snapshot), behavior-equivalent."""
 
-    def __init__(self, build_service: "BotBuildService") -> None:
+    def __init__(
+        self,
+        build_service: "BotBuildService",
+        skills_manifest_builder: ServiceSkillsManifestBuilder,
+    ) -> None:
         # Duck-typed at runtime — anything exposing ``build(bot, version) -> dict``
         # works (tests inject a lightweight stub). Annotated as the concrete
         # BotBuildService since that's what the DI root injects.
         self._build_service = build_service
+        self._skills_manifest_builder = skills_manifest_builder
 
     def produce_artifact(self, bot: dict[str, Any], version: int) -> DeployArtifact:
         """Delegate to ``build()`` and map its result onto :class:`DeployArtifact`.
@@ -41,6 +49,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         exactly that: same keys, same values, same failure message — only the
         return type changes.
         """
+        captured_layout = self._skills_manifest_builder.capture(bot=bot)
         result = self._build_service.build(bot=bot, version=version)
 
         success = bool(result.get("success"))
@@ -51,6 +60,17 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             ext["migration_path"] = result.get("migration_path")
         if "build_target_path" in result:
             ext["build_target_path"] = result.get("build_target_path")
+        if success and captured_layout is not None:
+            build_target_path = result.get("build_target_path")
+            if not build_target_path:
+                raise ValueError(
+                    "successful service build is missing build_target_path"
+                )
+            # This manifest only describes the Skills slice frozen inside the
+            # service version. It augments — never replaces — build_target_path.
+            ext["skills_manifest"] = self._skills_manifest_builder.finalize(
+                captured=captured_layout,
+            )
 
         return DeployArtifact(
             success=success,

@@ -12,6 +12,10 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlugin
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.utils.avernet_tenant import (
+    bind_current_avernet_tenant,
+    get_current_avernet_tenant,
+)
 from agentclaw.community.core.bot_public.repository.bot_friend_repository import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey, BotFriendStatus, ApprovalStatus, ApprovalType
 from agentclaw.community.core.operator_context import OperatorContext
@@ -114,7 +118,7 @@ class BotPublicService:
         access_mode: str,
         public: str,
     ) -> None:
-        """同步 passport accessMode 并回收/重建授权关系（best-effort，后台异步执行）。
+        """在后台同步 passport accessMode 并回收/重建授权关系。
 
         当 Bot 公开状态变化时调用，负责两件事：
         1. 更新 passport 的 accessMode（OPEN / RESTRICTED），控制外部访问策略。
@@ -125,10 +129,17 @@ class BotPublicService:
              人工审批通过的用户（通过 ext["approvals"] 中 approval_type="MANUAL" 且
              status="APPROVED" 来识别）。
 
-        注意：授权关系的创建/删除失败不会阻断 passport 更新，错误会被记录为 warning。
-              整个同步过程在后台线程执行，不阻塞主流程。
+        普通发布流程保留后台执行语义；失败会被线程入口记录。审批回调必须改用
+        ``_sync_access_mode_and_relations_or_raise``，同步等待并传播失败。
         """
-        sync_key = f"{owner_id}:{bot_id}"
+        # Tenant-scope the coalescing key: (owner_id, bot_id) is unique only
+        # WITHIN a tenant, but _syncing_bots / _pending_syncs are process-wide.
+        # Without the tenant prefix, a second tenant's sync for a colliding
+        # (owner_id, bot_id) would be queued under the first tenant's key and
+        # applied to the first tenant's bot by its (tenant-bound) thread, while
+        # its own bot is never synced. The key is built in the request thread,
+        # so get_current_avernet_tenant() is the request's tenant.
+        sync_key = f"{get_current_avernet_tenant()}:{owner_id}:{bot_id}"
         with self._sync_lock:
             if sync_key in self._syncing_bots:
                 # 当前已有同步任务在执行，把最新参数存入 pending。
@@ -141,23 +152,6 @@ class BotPublicService:
 
         def _do_sync():
             try:
-                # bot / agent_code / owner_name 在循环间不变，预取一次即可
-                bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
-                if not bot:
-                    logger.error(
-                        f"[_sync_access_mode_and_relations] Bot not found or not owned by user: "
-                        f"bot_id={bot_id}, owner_id={owner_id}"
-                    )
-                    raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-                from agentclaw.community.core.bot_management.utils import resolve_agent_code
-                agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin) or None
-                if not agent_code:
-                    logger.error(f"[_sync_access_mode_and_relations] agent_code is empty: bot_id={bot_id}, owner_id={owner_id}")
-                    raise BotPublicServiceError(f"agent_code 为空，无法重建授权关系: bot_id={bot_id}")
-
-                owner_name = bot.get("owner_name")
-
                 has_work = True
                 while has_work:
                     # pending 覆盖当前参数，保证执行的是最后一次请求的参数
@@ -169,27 +163,9 @@ class BotPublicService:
 
                     logger.info(f"[_sync_access_mode_and_relations] Start sync: sync_key={sync_key}, access_mode={current_access_mode}, public={current_public}")
 
-                    # 步骤1: 更新 passport accessMode，控制外部访问策略
-                    try:
-                        self._passport_plugin.update_passport(
-                            bot_id=bot_id,
-                            user_id=owner_id,
-                            bot_name=bot.get("bot_name"),
-                            bot_desc=bot.get("bot_desc"),
-                            engine_type=bot.get("active_engine") or DEFAULT_ENGINE_TYPE,
-                            access_mode=current_access_mode,
-                        )
-                        logger.info(f"[_sync_access_mode_and_relations] Updated passport accessMode: bot_id={bot_id}, owner_id={owner_id}, access_mode={current_access_mode}")
-                    except Exception as e:
-                        logger.error(f"[_sync_access_mode_and_relations] Failed to update passport accessMode: bot_id={bot_id}, owner_id={owner_id}, access_mode={current_access_mode}, error={e}")
-                        raise BotPublicServiceError(f"更新 passport accessMode 失败: {e}") from e
-
-                    # 步骤2: 根据新的 accessMode 回收并重建授权关系
-                    self._rebuild_auth_relationships(
+                    self._sync_access_mode_and_relations_or_raise(
                         bot_id=bot_id,
                         owner_id=owner_id,
-                        owner_name=owner_name,
-                        agent_code=agent_code,
                         access_mode=current_access_mode,
                         public=current_public,
                     )
@@ -208,9 +184,65 @@ class BotPublicService:
                     f"access_mode={access_mode}, public={public}"
                 )
 
-        thread = threading.Thread(target=_do_sync, daemon=False)
+        # Bare threads don't copy context vars; carry the request tenant so the
+        # BotRepository reads inside _do_sync stay tenant-scoped.
+        thread = threading.Thread(
+            target=bind_current_avernet_tenant(_do_sync), daemon=False
+        )
         thread.start()
         logger.info(f"[_sync_access_mode_and_relations] Started background thread: bot_id={bot_id}, owner_id={owner_id}")
+
+    def _sync_access_mode_and_relations_or_raise(
+        self,
+        bot_id: str,
+        owner_id: str,
+        access_mode: str,
+        public: str,
+    ) -> None:
+        """同步 accessMode 与授权关系，任一步失败都传播给调用方。"""
+        bot = self._bot_repository.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        from agentclaw.community.core.bot_management.utils import resolve_agent_code
+        agent_code = resolve_agent_code(
+            bot=bot,
+            passport_plugin=self._passport_plugin,
+        ) or None
+        if not agent_code:
+            raise BotPublicServiceError(
+                f"agent_code 为空，无法重建授权关系: bot_id={bot_id}"
+            )
+
+        try:
+            self._passport_plugin.update_passport(
+                bot_id=bot_id,
+                user_id=owner_id,
+                bot_name=bot.get("bot_name"),
+                bot_desc=bot.get("bot_desc"),
+                engine_type=bot.get("active_engine") or DEFAULT_ENGINE_TYPE,
+                access_mode=access_mode,
+            )
+        except Exception as exc:
+            raise BotPublicServiceError(
+                f"更新 passport accessMode 失败: {exc}"
+            ) from exc
+
+        logger.info(
+            "[_sync_access_mode_and_relations_or_raise] Updated passport "
+            "accessMode: bot_id=%s, owner_id=%s, access_mode=%s",
+            bot_id,
+            owner_id,
+            access_mode,
+        )
+        self._rebuild_auth_relationships(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            owner_name=bot.get("owner_name"),
+            agent_code=agent_code,
+            access_mode=access_mode,
+            public=public,
+        )
 
     def _rebuild_auth_relationships(
         self,
@@ -221,7 +253,7 @@ class BotPublicService:
         access_mode: str,
         public: str,
     ) -> None:
-        """根据 Bot 访问模式回收和重建授权关系（best-effort）。
+        """根据 Bot 访问模式回收和重建授权关系，失败直接传播。
 
         策略：循环查完所有现有关系，全部删除，再重新创建需要的。
         """
@@ -229,11 +261,8 @@ class BotPublicService:
 
         if access_mode == "OPEN":
             # OPEN 模式：直接删除所有授权关系
-            try:
-                deleted = plugin.delete_relationships_by_agent(agent_code)
-                logger.info(f"[_rebuild_auth_relationships] OPEN mode: deleted {deleted} auth relationships for bot_id={bot_id}, owner_id={owner_id}")
-            except Exception as e:
-                logger.warning(f"[_rebuild_auth_relationships] Failed to delete auth relationships in OPEN mode: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+            deleted = plugin.delete_relationships_by_agent(agent_code)
+            logger.info(f"[_rebuild_auth_relationships] OPEN mode: deleted {deleted} auth relationships for bot_id={bot_id}, owner_id={owner_id}")
             return
 
         # RESTRICTED 模式：先收集保留名单，再全删重建
@@ -242,47 +271,41 @@ class BotPublicService:
 
         if public == "1":
             # 收集人工审批通过的用户
-            try:
-                friends = self._bot_friend_repo.list_approved_friends_for_bot(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
-                for friend in friends:
-                    requester_id = friend.get("requester_entity_id")
-                    if requester_id:
-                        keep_work_nos.add(requester_id)
-                logger.info(f"[_rebuild_auth_relationships] RESTRICTED public=1: keeping {len(keep_work_nos)} users for bot_id={bot_id}, owner_id={owner_id}")
-            except Exception as e:
-                logger.warning(f"[_rebuild_auth_relationships] Failed to list approved friends: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+            friends = self._bot_friend_repo.list_approved_friends_for_bot(
+                bot_id=bot_id,
+                owner_id=owner_id,
+            )
+            for friend in friends:
+                requester_id = friend.get("requester_entity_id")
+                if requester_id:
+                    keep_work_nos.add(requester_id)
+            logger.info(f"[_rebuild_auth_relationships] RESTRICTED public=1: keeping {len(keep_work_nos)} users for bot_id={bot_id}, owner_id={owner_id}")
 
         # 步骤1: 删除所有现有授权关系
-        try:
-            deleted = plugin.delete_relationships_by_agent(agent_code)
-            logger.info(f"[_rebuild_auth_relationships] Deleted {deleted} auth relationships for bot_id={bot_id}, owner_id={owner_id}")
-        except Exception as e:
-            logger.warning(f"[_rebuild_auth_relationships] Failed to delete auth relationships: bot_id={bot_id}, owner_id={owner_id}, error={e}")
+        deleted = plugin.delete_relationships_by_agent(agent_code)
+        logger.info(f"[_rebuild_auth_relationships] Deleted {deleted} auth relationships for bot_id={bot_id}, owner_id={owner_id}")
 
         # 步骤2: 重新创建需要的授权关系
         # 限制并发数，避免对授权关系服务造成冲击
         def _create_one(work_no: str) -> None:
-            try:
-                is_owner = work_no == owner_id
-                result = plugin.create_relationship(
-                    work_no=work_no,
-                    agent_code=agent_code,
-                    description="Bot owner authorization by TeamClaw" if is_owner else "Authorized by TeamClaw via friend request approval",
-                    operator_work_no=owner_id,
-                    operator_name=owner_name,
-                )
-                if result:
-                    if result.get("already_exists"):
-                        logger.info(f"[_rebuild_auth_relationships] Relationship already exists, skipped: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}")
-                    else:
-                        logger.info(f"[_rebuild_auth_relationships] Created auth relationship: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}, auth_id={result.get('auth_id')}")
+            is_owner = work_no == owner_id
+            result = plugin.create_relationship(
+                work_no=work_no,
+                agent_code=agent_code,
+                description="Bot owner authorization by TeamClaw" if is_owner else "Authorized by TeamClaw via friend request approval",
+                operator_work_no=owner_id,
+                operator_name=owner_name,
+            )
+            if result:
+                if result.get("already_exists"):
+                    logger.info(f"[_rebuild_auth_relationships] Relationship already exists, skipped: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}")
                 else:
-                    logger.warning(f"[_rebuild_auth_relationships] auth relationship service returned failure: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}")
-            except Exception as e:
-                logger.warning(f"[_rebuild_auth_relationships] Failed to create auth relationship: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}, error={e}")
+                    logger.info(f"[_rebuild_auth_relationships] Created auth relationship: bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}, auth_id={result.get('auth_id')}")
+            else:
+                raise BotPublicServiceError(
+                    "授权关系服务返回失败: "
+                    f"bot_id={bot_id}, owner_id={owner_id}, work_no={work_no}"
+                )
 
         with ThreadPoolExecutor(max_workers=5) as executor:
             list(executor.map(_create_one, keep_work_nos))
@@ -580,7 +603,9 @@ class BotPublicService:
                 return {"success": False, "public": None, "message": "Failed to update bot"}
             # Sync passport accessMode and auth relationships
             access_mode = _resolve_access_mode(public_value, friend_approval_val)
-            self._sync_access_mode_and_relations(bot_id, owner_id, access_mode, public_value)
+            self._sync_access_mode_and_relations_or_raise(
+                bot_id, owner_id, access_mode, public_value,
+            )
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
         elif last_operate_upper == "DISAGREE":
@@ -932,64 +957,68 @@ class BotPublicService:
             return {"success": False, "message": f"Unknown operation: {last_operate}"}
 
     def _create_auth_relationship_for_approval(self, friend_record: dict[str, Any], bot_friend_id: int) -> None:
-        """为审批通过的好友申请创建授权关系（best-effort）。
+        """为审批通过的好友申请创建授权关系，失败直接传播。
 
         流程：
         1. 查 bot 并确认当前是 RESTRICTED 模式（friend_approval=1）。
            OPEN 模式跳过，因为公开 Bot 不需要显式授权。
         2. 取 agent_code 并调用授权关系服务创建单条授权关系。
 
-        注意：本方法是 best-effort，任何异常都会被捕获并记录，不会 propagate
-              到上层，避免影响好友审批回调的成功返回。
+        仅 OPEN 模式无需显式授权，其他失败都会阻断审批回调完成。
         """
         bot_id = friend_record.get("target_bot_id")
         operator_id = friend_record.get("requester_entity_id")
         if not bot_id or not operator_id:
-            logger.warning(f"[_create_auth_relationship_for_approval] Missing bot_id or operator_id: bot_friend_id={bot_friend_id}")
+            raise BotPublicServiceError(
+                "好友审批缺少授权关系所需字段: "
+                f"bot_friend_id={bot_friend_id}"
+            )
+
+        bot = self._bot_repository.get_by_id_and_owner(
+            bot_id,
+            friend_record.get("target_entity_id"),
+        )
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+
+        # 判断 Bot 当前是否为 RESTRICTED 模式，OPEN 模式不需要授权关系
+        bot_ext = bot.get("ext") or {}
+        if isinstance(bot_ext, str):
+            bot_ext = json.loads(bot_ext)
+        friend_approval = bot_ext.get("friend_approval", "0")
+        if friend_approval != "1":
+            logger.info(f"[_create_auth_relationship_for_approval] Skipped (OPEN mode): bot_id={bot_id}, operator_id={operator_id}")
             return
 
-        try:
-            bot = self._bot_repository.get_by_id_and_owner(bot_id, friend_record.get("target_entity_id"))
-            if not bot:
-                logger.warning(f"[_create_auth_relationship_for_approval] Bot not found: bot_id={bot_id}")
-                return
-
-            # 判断 Bot 当前是否为 RESTRICTED 模式，OPEN 模式不需要授权关系
-            bot_ext = bot.get("ext") or {}
-            if isinstance(bot_ext, str):
-                try:
-                    bot_ext = json.loads(bot_ext)
-                except json.JSONDecodeError:
-                    bot_ext = {}
-            friend_approval = bot_ext.get("friend_approval", "0")
-            if friend_approval != "1":
-                logger.info(f"[_create_auth_relationship_for_approval] Skipped (OPEN mode): bot_id={bot_id}, operator_id={operator_id}")
-                return
-
-            from agentclaw.community.core.bot_management.utils import resolve_agent_code
-            agent_code = resolve_agent_code(bot=bot, passport_plugin=self._passport_plugin) or None
-            if not agent_code:
-                logger.warning(f"[_create_auth_relationship_for_approval] agent_code is empty: bot_id={bot_id}")
-                return
-
-            owner_id = bot.get("owner_id")
-            owner_name = bot.get("owner_name")
-            result = self._auth_relationship_plugin.create_relationship(
-                work_no=operator_id,
-                agent_code=agent_code,
-                description="Authorized by TeamClaw via friend request approval",
-                operator_work_no=owner_id,
-                operator_name=owner_name,
+        from agentclaw.community.core.bot_management.utils import resolve_agent_code
+        agent_code = resolve_agent_code(
+            bot=bot,
+            passport_plugin=self._passport_plugin,
+        ) or None
+        if not agent_code:
+            raise BotPublicServiceError(
+                f"agent_code 为空，无法创建授权关系: bot_id={bot_id}"
             )
-            if result:
-                if result.get("already_exists"):
-                    logger.info(f"[_create_auth_relationship_for_approval] Already exists: bot_id={bot_id}, operator_id={operator_id}")
-                else:
-                    logger.info(f"[_create_auth_relationship_for_approval] Created: bot_id={bot_id}, operator_id={operator_id}, auth_id={result.get('auth_id')}")
+
+        owner_id = bot.get("owner_id")
+        owner_name = bot.get("owner_name")
+        result = self._auth_relationship_plugin.create_relationship(
+            work_no=operator_id,
+            agent_code=agent_code,
+            description="Authorized by TeamClaw via friend request approval",
+            operator_work_no=owner_id,
+            operator_name=owner_name,
+        )
+        if result:
+            if result.get("already_exists"):
+                logger.info(f"[_create_auth_relationship_for_approval] Already exists: bot_id={bot_id}, operator_id={operator_id}")
             else:
-                logger.warning(f"[_create_auth_relationship_for_approval] auth relationship service failure: bot_id={bot_id}, operator_id={operator_id}")
-        except Exception as e:
-            logger.warning(f"[_create_auth_relationship_for_approval] Failed: bot_friend_id={bot_friend_id}, error={e}")
+                logger.info(f"[_create_auth_relationship_for_approval] Created: bot_id={bot_id}, operator_id={operator_id}, auth_id={result.get('auth_id')}")
+        else:
+            raise BotPublicServiceError(
+                "授权关系服务返回失败: "
+                f"bot_id={bot_id}, operator_id={operator_id}"
+            )
 
     def search_public_bots_by_keyword(
         self,
@@ -1102,9 +1131,14 @@ class BotPublicService:
 
             # 并发查询 bot 信息
             bot_map = {}
+            # ThreadPoolExecutor workers don't copy context vars; bind the
+            # request tenant so these BotRepository reads stay tenant-scoped.
+            _get_bot = bind_current_avernet_tenant(
+                self._bot_repository.get_by_id_and_owner
+            )
             with ThreadPoolExecutor(max_workers=10) as executor:
                 future_to_key = {
-                    executor.submit(self._bot_repository.get_by_id_and_owner, bot_id, owner_id): (owner_id, bot_id)
+                    executor.submit(_get_bot, bot_id, owner_id): (owner_id, bot_id)
                     for owner_id, bot_id in unique_keys
                 }
                 for future in as_completed(future_to_key):

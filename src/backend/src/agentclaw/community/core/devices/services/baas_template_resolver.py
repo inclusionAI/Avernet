@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.log import get_logger
 
@@ -18,7 +19,6 @@ logger = get_logger()
 BAAS_TEMPLATE_MAPPING_CATEGORY = "system"
 BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY = "baas_template_uid_routing_config"
 PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY = "personal_bot_test_template_whitelist"
-CODING_TEMPLATE_TYPES = {"personalCoding", "applicationCoding"}
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,15 @@ class BaasTemplateResolveError(DeviceServiceError):
 
 
 class BaasTemplateResolverProtocol(Protocol):
+    def resolve_template_override(
+        self,
+        *,
+        env: str,
+        user_id: str | None,
+        bot_type: str,
+    ) -> str | None:
+        """命中现有工号映射时返回覆盖的 template_uuid。"""
+
     def resolve_template_uid(
         self,
         *,
@@ -223,26 +232,26 @@ class SystemConfigBaasTemplateResolver:
         template_config: dict | None,
     ) -> BaasTemplateResolution:
         """解析当前业务上下文最终使用的 BaaS template。"""
-        # 白名单覆盖检查：个人 Bot 创建者命中白名单时，直接返回测试模板 UUID。
-        # bot_type 统一归一化后比较，避免大小写不一致导致白名单被绕过。
-        normalized_bot_type = (bot_type or "").strip().lower()
-        if normalized_bot_type == "personal":
-            override_uuid = self._resolve_whitelist_override(env=env, user_id=user_id)
-            if override_uuid is not None:
-                logger.info(
-                    "[template.whitelist] whitelist override hit: "
-                    "env=%s config_key=%s user_id=%s template_uuid=%s bot_id=%s",
-                    env,
-                    PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
-                    user_id,
-                    override_uuid,
-                    bot_id,
-                )
-                return BaasTemplateResolution(
-                    template_uid="__whitelist_override__",
-                    template_uuid=override_uuid,
-                    source="whitelist",
-                )
+        override_uuid = self.resolve_template_override(
+            env=env,
+            user_id=user_id,
+            bot_type=bot_type,
+        )
+        if override_uuid is not None:
+            logger.info(
+                "[template.whitelist] whitelist override hit: "
+                "env=%s config_key=%s user_id=%s template_uuid=%s bot_id=%s",
+                env,
+                PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
+                user_id,
+                override_uuid,
+                bot_id,
+            )
+            return BaasTemplateResolution(
+                template_uid="__whitelist_override__",
+                template_uuid=override_uuid,
+                source="whitelist",
+            )
 
         uid_resolution = self.resolve_template_uid_context(
             bot_id=bot_id,
@@ -264,6 +273,23 @@ class SystemConfigBaasTemplateResolver:
             source=uid_resolution.source,
             config_version=uid_resolution.config_version,
         )
+
+    def resolve_template_override(
+        self,
+        *,
+        env: str,
+        user_id: str | None,
+        bot_type: str,
+    ) -> str | None:
+        """从现有数据库配置解析个人或服务 Bot 的模板覆盖。
+
+        只有配置有效且 owner 工号明确命中时才返回模板。调用方可将
+        ``None`` 视为保持原逻辑，包括配置缺失、读取失败和工号未命中。
+        """
+        normalized_bot_type = (bot_type or "").strip().lower()
+        if normalized_bot_type not in {"personal", "service"}:
+            return None
+        return self._resolve_whitelist_override(env=env, user_id=user_id)
 
     def select_template_uid(
         self,

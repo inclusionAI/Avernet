@@ -179,10 +179,10 @@ def build_file_tree(files: list[dict]) -> list[FileTreeNode]:
         for node in nodes:
             if node.children and isinstance(node.children, dict):
                 node.children = _sort_and_clean(node.children)
-                if not node.children:
-                    continue
+            else:
+                node.children = None
         nodes.sort(key=lambda n: (not n.is_dir, n.name))
-        return [n for n in nodes if not n.is_dir or n.children]
+        return nodes
 
     return _sort_and_clean(root_children)
 

@@ -19,19 +19,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishOperationKind,
+    PublishStatus,
+)
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
-from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
-from agentclaw.community.core.service_bot.services.publish_flow.errors import (
-    PublishFlowServiceError,
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
 )
+from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     ProviderBehavior,
     ProviderBehaviorRouter,
+)
+from agentclaw.community.core.service_bot.services.publish_flow.operation_runner import (
+    PublishOperationRunner,
+    TargetBotGoneError,
+    acquire_deploy_workflow,
+)
+from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
+    service_skills_env_from_ext,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -65,11 +77,11 @@ class ReleaseRecordOps(Protocol):
         engine_overrides: dict | None = None,
     ) -> dict: ...
 
-    def approve_baas_publish(
-        self, baas_publish_id: int, operator: str, stage: PublishStage, request_id: str
-    ) -> bool: ...
-
     def refresh_publish_handle(self, binding_id, publish_id) -> None: ...
+
+    def release_binding(
+        self, binding_id: int, *, destroy_publish_id: int | None
+    ) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -124,12 +136,14 @@ class ReleaseStageRunner:
         baas_service: BaasService,
         provider_behaviors: ProviderBehaviorRouter,
         ops: ReleaseRecordOps,
+        operation_runner: PublishOperationRunner,
     ) -> None:
         self._ext_state = ext_state
         self._build_service = build_service
         self._baas_service = baas_service
         self._provider_behaviors = provider_behaviors
         self._ops = ops
+        self._operation_runner = operation_runner
 
     def _provider_behavior(self, bot: dict) -> ProviderBehavior:
         """The :class:`ProviderBehavior` for ``bot``'s container."""
@@ -152,43 +166,61 @@ class ReleaseStageRunner:
         is no config_artifact."""
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
+        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
         # overlay, persisted below so a future restart/rollback can reproduce it.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
-        release_kwargs = dict(
-            bot=bot,
-            user_id=owner_id,
-            migration_path=migration_path,
-            device_count=1,
-            publish_stage=spec.stage,
-            # TODO(totalfrank): this still isn't fully provider-agnostic — the
-            # downstream (release_async / build service) branches on the container
-            # provider to interpret config_artifact. Push that decision behind the
-            # provider seam in a follow-up; tracked separately.
-            delivery=delivery,
-        )
-        if spec.first_release_passes_version:
-            release_kwargs["version"] = f"{publish_record.version}"
-        release_result = await self._build_service.release_async(**release_kwargs)
 
-        bot_uuid = release_result.get("bot_uuid")
-        baas_publish_id = release_result.get("publish_id")
-        if not bot_uuid:
-            raise PublishFlowServiceError("BaaS layer did not return bot_uuid")
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS layer did not return publish_id")
+        # Crash-safe issuance (#197) via the deploy atom: open the ledger op, then
+        # acquire the workflow (issue the BaaS create at most once — a resume
+        # adopts the in-doubt bot via its returned bot_uuid rather than creating a
+        # second one). The atom validates that the creation recorded both ids.
+        async def _issue():
+            release_kwargs = dict(
+                bot=bot,
+                user_id=owner_id,
+                migration_path=migration_path,
+                device_count=1,
+                publish_stage=spec.stage,
+                # TODO(totalfrank): this still isn't fully provider-agnostic — the
+                # downstream (release_async / build service) branches on the container
+                # provider to interpret config_artifact. Push that decision behind the
+                # provider seam in a follow-up; tracked separately.
+                delivery=delivery,
+                extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
+            )
+            if spec.first_release_passes_version:
+                release_kwargs["version"] = f"{publish_record.version}"
+            return await self._build_service.release_async(**release_kwargs)
 
-        # Three distinct steps invoked in sequence: (1) create the device binding,
-        # (2) record the binding/publish refs + provider promotion + status into
-        # ext, (3) approve the BaaS workflow.
-        binding_id = self._ops.create_release_binding(
-            bot=bot,
-            bot_uuid=bot_uuid,
-            baas_publish_id=baas_publish_id,
+        op = await acquire_deploy_workflow(
+            self._operation_runner,
+            publish_id=publish_id,
+            kind=PublishOperationKind.FIRST_RELEASE,
+            stage=spec.stage,
             operator=operator,
+            issue=_issue,
         )
+        bot_uuid = op.bot_uuid
+        baas_publish_id = op.baas_publish_id
+
+        # Two follow-up steps: (1) create the device binding (recorded into the op's
+        # result so a re-run reuses it rather than creating a second binding), (2)
+        # record the binding/publish refs + provider promotion + status into ext (a
+        # source-status-guarded CAS — a no-op on a re-run that already advanced).
+        binding_id = (op.result or {}).get("binding_id")
+        if binding_id is None:
+            binding_id = self._ops.create_release_binding(
+                bot=bot,
+                bot_uuid=bot_uuid,
+                baas_publish_id=baas_publish_id,
+                operator=operator,
+            )
+            op = self._operation_runner.record_step_result(op, {"binding_id": binding_id})
         self._ops.record_release_ext(
             publish_id=publish_id,
             bot=bot,
@@ -199,16 +231,7 @@ class ReleaseStageRunner:
             target_status=spec.target_status,
             engine_overrides=overrides,
         )
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage=spec.stage.value,
-        )
-        self._ops.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=spec.stage,
-            request_id=request_id,
-        )
+        self._operation_runner.complete_operation(op)
 
         logger.info(
             "[ReleaseStageRunner.first_release] %s release completed: bot_uuid=%s",
@@ -243,30 +266,65 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
+        skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
         # overlay, persisted below via the provider's stage-promotion write.
         delivery, overrides = self._ext_state.compose_live(publish_record, spec.stage)
-        upgrade_result = await self._build_service.upgrade_async(
-            bot_uuid=bot_uuid,
-            bot=bot,
-            user_id=owner_id,
-            device_count=1,
-            migration_path=migration_path,
-            publish_stage=spec.stage,
-            version=version,
-            delivery=delivery,
-        )
 
-        if (
-            upgrade_result.get("success") is False
-            and upgrade_result.get("error_code") == "BOT_NOT_FOUND"
-        ):
+        # Crash-safe issuance (#197) via the deploy atom: an existing-bot mutation
+        # → the runner adopts an in-doubt workflow (queried by bot_uuid) on resume
+        # instead of issuing a second upgrade. The atom classifies BOT_NOT_FOUND
+        # uniformly — it abandons the upgrade op and raises, and the first-release
+        # fallback opens its own op.
+        async def _issue():
+            return await self._build_service.upgrade_async(
+                bot_uuid=bot_uuid,
+                bot=bot,
+                user_id=owner_id,
+                device_count=1,
+                migration_path=migration_path,
+                publish_stage=spec.stage,
+                version=version,
+                delivery=delivery,
+                extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
+            )
+
+        try:
+            op = await acquire_deploy_workflow(
+                self._operation_runner,
+                publish_id=publish_id,
+                kind=PublishOperationKind.UPGRADE,
+                stage=spec.stage,
+                operator=operator,
+                issue=_issue,
+                bot_uuid=bot_uuid,
+                bot_gone_reason="BOT_NOT_FOUND -> first release",
+            )
+        except TargetBotGoneError as e:
             logger.warning(
-                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot not "
-                "found, fallback to first release: publish_id=%s, bot_uuid=%s",
-                spec.stage.value, publish_id, bot_uuid,
+                "[ReleaseStageRunner.upgrade_release] %s upgrade target bot gone "
+                "(%s), fallback to first release: publish_id=%s, bot_uuid=%s",
+                spec.stage.value, e.error_code, publish_id, bot_uuid,
+            )
+            # Secondary cleanup net (the primary decision is provider-aware and
+            # proactive). Either way the fallback first-release mints a fresh
+            # binding and rewrites ext.binding.<stage>, so the record's current
+            # binding must be released or it lingers ACTIVE pointing at the gone
+            # bot. A DEVICE_NOT_FOUND means the record still lingers with a gone
+            # container, so retire it first (and stash the destroy id); a
+            # BOT_NOT_FOUND means the bot is already fully gone (no destroy needed
+            # → destroy_publish_id=None).
+            destroy_publish_id = None
+            if e.error_code == "DEVICE_NOT_FOUND":
+                destroy_publish_id = self._build_service.retire_superseded_bot(
+                    bot_uuid, operator=operator
+                )
+            self._ops.release_binding(
+                existing_binding_id, destroy_publish_id=destroy_publish_id
             )
             return await fallback(
                 publish_record=publish_record,
@@ -275,9 +333,7 @@ class ReleaseStageRunner:
                 bot=bot,
             )
 
-        baas_publish_id = upgrade_result.get("publish_id")
-        if not baas_publish_id:
-            raise PublishFlowServiceError("BaaS layer upgrade did not return publish_id")
+        baas_publish_id = op.baas_publish_id
 
         # Reuse the existing binding; update ext (binding/publish refs, provider
         # per-stage promotion state, refresh the teclaw read handle).
@@ -294,25 +350,13 @@ class ReleaseStageRunner:
             source_status=spec.source_status,
             ext=ext,
         )
+        self._operation_runner.complete_operation(op)
 
-        request_id = self._build_service.generate_request_id(
-            bot=bot,
-            publish_stage=spec.upgrade_request_label,
-        )
-        approved = self._ops.approve_baas_publish(
-            baas_publish_id=baas_publish_id,
-            operator=operator,
-            stage=spec.stage,
-            request_id=request_id,
-        )
-        if approved is True:
-            # Provider-specific post-upgrade refresh (teclaw re-pushes the MCP
-            # outbound rule; ARCA/baas refresh via the startup callback → no-op).
-            self._provider_behavior(bot).refresh_after_upgrade(
-                bot_uuid=bot_uuid,
-                bot=bot,
-            )
-
+        # All-auto approval (#197): the upgrade workflow is auto-approved
+        # server-side — no client approve. The teclaw post-upgrade MCP outbound
+        # rule refresh moves to the progress-poll SUCCESS handler
+        # (ProgressSyncMixin._handle_sync_success), triggering on observed deploy
+        # success rather than an approve return value.
         logger.info(
             "[ReleaseStageRunner.upgrade_release] %s upgrade completed: "
             "bot_uuid=%s, baas_publish_id=%s",

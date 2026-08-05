@@ -1,7 +1,7 @@
 """Tests for GovernanceBotService.process_cron_tick() — cron orchestrator.
 
 Covers the main orchestration flows: pending send (markdown + tc_card),
-send failure, cancel, reminder creation, schedule_due, emergency brake,
+send failure, cancel, reminder creation, schedule_due, brake,
 dry_run, timeout recovery, and CronTickSummary.
 """
 from __future__ import annotations

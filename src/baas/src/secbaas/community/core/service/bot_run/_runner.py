@@ -89,12 +89,14 @@ class BotRunner:
         bot_service_plugin: BotServicePlugin,
         dispatchers: list[MessageDispatcher],
         system_config_service: SystemConfigManageService | None = None,
+        default_request_timeout: float = 30.0,
     ):
         self._bot_service_selector = bot_service_selector
         self._run_repository = run_repository
         self._bot_service_plugin = bot_service_plugin
         self._dispatchers = dispatchers
         self._system_config_service = system_config_service
+        self._default_request_timeout = default_request_timeout
         self._dispatcher_map: dict[str, MessageDispatcher] = {
             d.__class__.__name__: d for d in self._dispatchers
         }
@@ -178,7 +180,7 @@ class BotRunner:
         )
 
         # 4. 委托 dispatcher 异步注入
-        await self._select_dispatcher(bot_id).dispatch_inject(
+        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_inject(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -224,7 +226,7 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id)
         """
-        timeout: int | None = metadata.get("timeout")
+        timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())
@@ -273,7 +275,7 @@ class BotRunner:
         # 4. 委托 dispatcher 异步发送
         wait_result = parse_wait_result(metadata)
         chat_metadata = build_chat_metadata(metadata, run_id=message_id)
-        await self._select_dispatcher(bot_id).dispatch_send(
+        await self._select_dispatcher(bot_id, metadata=metadata).dispatch_send(
             bot_service=route.bot_service,
             run_id=message_id,
             session_id=actual_session_id,
@@ -323,7 +325,7 @@ class BotRunner:
         Returns:
             Tuple of (message_id, session_id, AsyncIterator[StreamChunk])
         """
-        timeout: int | None = metadata.get("timeout")
+        timeout: float = float(metadata.get("timeout") or self._default_request_timeout)
 
         if message_id is None:
             message_id = str(uuid.uuid4())
@@ -364,7 +366,7 @@ class BotRunner:
 
         # 委托 dispatcher 流式发送
         stream_iter = self._select_dispatcher(
-            bot_id, method="stream"
+            bot_id, method="stream", metadata=metadata
         ).dispatch_send_stream(
             bot_service=route.bot_service,
             run_id=message_id,
@@ -376,7 +378,7 @@ class BotRunner:
             bot_id=bot_id,
         )
 
-        return message_id, actual_session_id, _with_heartbeat(stream_iter)
+        return message_id, actual_session_id, stream_iter
 
     async def get_messages(
         self,
@@ -436,6 +438,24 @@ class BotRunner:
             session_id=session_id,
             binding_info=route.binding_info,
             context=context,
+        )
+
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot (read-only)."""
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.list_sessions(
+            binding_info=route.binding_info,
+            context=context,
+            limit=limit,
+            offset=offset,
         )
 
     def get_result(self, run_id: str) -> Any:
@@ -550,14 +570,38 @@ class BotRunner:
             )
 
     def _select_dispatcher(
-        self, bot_id: str, *, method: str | None = "chat"
+        self,
+        bot_id: str,
+        *,
+        method: str | None = "chat",
+        metadata: dict[str, Any] | None = None,
     ) -> MessageDispatcher:
         """根据 system_config 选择 dispatcher。
 
         查找顺序：``bot_run.dispatcher_route.{bot_id}:{method}`` → ``{bot_id}`` → ``default``。
-        值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置默认走 TaskMessageDispatcher。
+        值为 dispatcher 类名（如 ``"QueueTaskMessageDispatcher"``），未配置时：
+        - BCN 请求（metadata.bot_options.from_bcn == "true"）且
+          ``bot_run.bcn_queue_dispatcher_enabled == "true"`` 时默认走 QueueTaskMessageDispatcher
+        - 其他请求默认走 TaskMessageDispatcher
         """
         default_name = "TaskMessageDispatcher"
+        bot_options = (metadata or {}).get("bot_options")
+        if isinstance(bot_options, dict) and bot_options.get("from_bcn") == "true":
+            if self._system_config_service is not None:
+                try:
+                    flag = self._system_config_service.get_config(
+                        SystemConfigKey.BCN_QUEUE_DISPATCHER_ENABLED
+                    )
+                    if (
+                        flag is not None
+                        and (flag.conf_value or "").strip().lower() == "true"
+                    ):
+                        default_name = "QueueTaskMessageDispatcher"
+                except Exception:
+                    logger.warning(
+                        "[runner] failed to read bcn_queue_dispatcher_enabled",
+                        exc_info=True,
+                    )
         name = default_name
         if self._system_config_service is not None:
             keys = []
@@ -638,7 +682,14 @@ class BotRunner:
         context: BotChatContext,
         metadata: dict[str, Any],
     ) -> None:
-        """入库 PENDING 记录（DB-first）"""
+        """入库 PENDING 记录（DB-first）
+
+        将 context 的 app_id / app_type / tenant 写入 metadata，
+        供 Worker 端 ``_rebuild_context`` 重建 BotChatContext。
+        """
+        metadata["app_id"] = context.app_id
+        metadata["app_type"] = context.app_type
+        metadata["tenant"] = context.tenant
         try:
             self._run_repository.insert_run(
                 run_id=run_id,
@@ -715,59 +766,3 @@ class BotRunner:
                 return None
             raise
         return binding_data_to_info(data)
-
-
-async def _with_heartbeat(
-    stream: AsyncIterator[StreamChunk],
-) -> AsyncIterator[StreamChunk]:
-    """包装流式迭代器，每 30s 插入一个 heartbeat chunk。
-
-    使用 producer-consumer 模式：后台 task 从原始 stream 取数据放入 Queue，
-    主循环从 Queue 取并设超时。这样超时只 cancel queue.get()，不会 kill
-    原始 async generator（直接 wait_for(stream.__anext__) 会在超时时 cancel
-    生成器，导致后续数据全部丢失）。
-    """
-    queue: asyncio.Queue[StreamChunk | _StreamEnd | Exception] = asyncio.Queue()
-    end = _StreamEnd()
-
-    async def producer() -> None:
-        try:
-            async for chunk in stream:
-                await queue.put(chunk)
-        except Exception as e:
-            await queue.put(e)
-        finally:
-            await queue.put(end)
-
-    producer_task = asyncio.create_task(producer())
-    try:
-        while True:
-            try:
-                item: StreamChunk | _StreamEnd | Exception = await asyncio.wait_for(
-                    queue.get(), timeout=30.0
-                )
-            except TimeoutError:
-                yield StreamChunk(type="heartbeat")
-                continue
-            if item is end:
-                return
-            if isinstance(item, Exception):
-                raise item
-            if isinstance(item, StreamChunk):
-                yield item
-            else:
-                logger.warning(
-                    "[heartbeat] Unexpected item type from queue: %s",
-                    type(item).__name__,
-                )
-    finally:
-        producer_task.cancel()
-        try:
-            await producer_task
-        except (asyncio.CancelledError, Exception):
-            pass
-
-
-@dataclass
-class _StreamEnd:
-    """哨兵对象，标记 stream 结束。"""

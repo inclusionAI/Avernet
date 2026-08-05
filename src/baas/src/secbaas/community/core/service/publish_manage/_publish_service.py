@@ -7,6 +7,7 @@ with approval gates and rolling updates. Per D-01, D-01a, D-07.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -19,10 +20,12 @@ from secbaas.community.api.bot_manage import BotManageService, BotStatus
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.device_manage import DeviceService
 from secbaas.community.api.publish_manage import (
+    DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS,
     BatchDeviceProgress,
     BatchResult,
     BatchStatus,
+    BotPublishSummary,
     DeviceCallbackRequest,
     DeviceOperationResult,
     DrainResult,
@@ -64,6 +67,7 @@ from secbaas.community.core.repository.publish_batch import (
     PublishBatchRepository,
 )
 from secbaas.community.core.repository.publish_record import (
+    PublishRecordExtraConfig,
     PublishRecordRecord,
     PublishRecordRepository,
 )
@@ -641,6 +645,7 @@ class DefaultPublishService(PublishService):
             bot_record=bot,
             batch_records=batch_records,
             operator=operator,
+            publish_config=config,
         )
 
         # Step 6: Return publish response
@@ -883,6 +888,7 @@ class DefaultPublishService(PublishService):
         bot_record: BotRecord,
         batch_records: list[PublishBatchRecord],
         operator: str,
+        publish_config: PublishConfig | None = None,
     ) -> None:
         """Pre-create device-level PublishRecordRecord entries at create_publish time.
 
@@ -1003,6 +1009,16 @@ class DefaultPublishService(PublishService):
 
             bot_config = bot_record.config
 
+            # Prefer deploy_config from this Scale Publish, then fall back
+            # to Bot's persisted config, then to template defaults.
+            effective_deploy_config = (
+                publish_config.deploy_config
+                if publish_config and publish_config.deploy_config
+                else bot_config.deploy_config
+                if bot_config
+                else None
+            )
+
             total_new_devices = sum(b.batch_capacity for b in batch_records)
 
             event_type = PublishEventType.CREATE.value
@@ -1017,7 +1033,7 @@ class DefaultPublishService(PublishService):
                     operator=operator,
                     extra_config=DeviceConfig(
                         template_uuid=bot_record.template_uuid,
-                        deploy_config=bot_config.deploy_config if bot_config else None,
+                        deploy_config=effective_deploy_config,
                     ),
                 )
                 device = self._device_service.create_device(
@@ -1133,6 +1149,18 @@ class DefaultPublishService(PublishService):
             device_idx += batch_cap
 
             for device in batch_devices:
+                extra_config_dict = dataclasses.asdict(
+                    PublishRecordExtraConfig(
+                        device_uuid=device.device_uuid,
+                        provider_device_id=device.provider_device_id,
+                    )
+                )
+                extra_config = (
+                    extra_config_dict
+                    if extra_config_dict.get("device_uuid") is not None
+                    or extra_config_dict.get("provider_device_id") is not None
+                    else None
+                )
                 record_repo.insert_record(
                     tenant=tenant,
                     env=env,
@@ -1146,6 +1174,7 @@ class DefaultPublishService(PublishService):
                     result_message=None,
                     creator=operator,
                     modifier=operator,
+                    extra_config=extra_config,
                 )
 
         logger.info(
@@ -1757,6 +1786,51 @@ class DefaultPublishService(PublishService):
 
         return results[start:end]
 
+    async def list_publishes_by_bot_uuid(
+        self,
+        tenant: str,
+        bot_uuid: str,
+    ) -> list[BotPublishSummary]:
+        """List every publish workflow tied to a bot_uuid, newest first.
+
+        Backs ``GET /api/v1/bots/{bot_uuid}/publishes``. A bot_uuid may map to
+        several bot records (distinct statuses across its lifecycle); the union
+        of their publishes is returned so an idempotency caller can difference
+        the bot's complete workflow history — including workflows already in a
+        terminal state — not just the currently-active one. Returns ``[]`` when
+        the bot_uuid is unknown (the router turns that into a 404).
+
+        Soft-deleted bot records are included: a successful DESTROY soft-deletes
+        the bot, and its DESTROY workflow must stay visible so a crash-resumed
+        destroy operation adopts it instead of re-issuing against a gone bot.
+        """
+        env = get_current_env()
+        bot_records = self._bot_repo.list_by_bot_uuid_including_deleted(
+            bot_uuid=bot_uuid, tenant=tenant, env=env
+        )
+        if not bot_records:
+            return []
+
+        summaries: list[BotPublishSummary] = []
+        for bot_record in bot_records:
+            for publish_record in self._publish_repo.list_by_bot_id(
+                bot_id=bot_record.id, tenant=tenant, env=env
+            ):
+                summaries.append(
+                    BotPublishSummary(
+                        id=publish_record.id,
+                        bot_id=publish_record.bot_id,
+                        publish_type=publish_record.publish_type,
+                        status=publish_record.status,
+                        gmt_create=publish_record.gmt_create,
+                    )
+                )
+
+        # Newest first by workflow id (monotonic), so adopt-by-query picks the
+        # most recent matching workflow deterministically.
+        summaries.sort(key=lambda s: s.id, reverse=True)
+        return summaries
+
     # ====================================================================
     # EXECUTION ENGINE - BATCH PROCESSING AND DEVICE DRAIN
     # ====================================================================
@@ -1880,19 +1954,44 @@ class DefaultPublishService(PublishService):
             has_pending_callbacks = counts.get("PROCESSING", 0) > 0
 
             if not has_pending_callbacks:
-                # All records dispatched inline — mark batch COMPLETED/FAILED now
-                batch_status = (
-                    BatchStatus.COMPLETED.value
-                    if batch_result.success
-                    else BatchStatus.FAILED.value
-                )
-                batch_repo.update_status(
-                    batch_id=batch.id,
-                    tenant=tenant,
-                    env=env,
-                    status=batch_status,
-                    modifier=operator,
-                )
+                # All records dispatched inline — mark batch COMPLETED/FAILED now.
+                # BUT: the callback handler (running in a background thread) may
+                # have already set the batch to FAILED.  If we overwrite FAILED
+                # with COMPLETED here the publish will incorrectly auto-complete
+                # to SUCCESS.  Check the current batch status first and preserve
+                # a terminal status that was set by the callback handler.
+                current_batch = batch_repo.get_by_id(batch.id, tenant, env)
+                if current_batch and current_batch.status == BatchStatus.FAILED.value:
+                    # Callback already set batch to FAILED — count the failures
+                    # but do NOT overwrite the terminal status
+                    failed_in_batch = counts.get("FAILED", 0)
+                    total_failed += failed_in_batch
+                    logger.info(
+                        f"Batch {batch.id} already FAILED via callback "
+                        f"({failed_in_batch} failed records), preserving callback result"
+                    )
+                elif (
+                    current_batch
+                    and current_batch.status == BatchStatus.COMPLETED.value
+                ):
+                    # Callback already set batch to COMPLETED — nothing to do
+                    logger.info(
+                        f"Batch {batch.id} already COMPLETED via callback, "
+                        f"preserving callback result"
+                    )
+                else:
+                    batch_status = (
+                        BatchStatus.COMPLETED.value
+                        if batch_result.success
+                        else BatchStatus.FAILED.value
+                    )
+                    batch_repo.update_status(
+                        batch_id=batch.id,
+                        tenant=tenant,
+                        env=env,
+                        status=batch_status,
+                        modifier=operator,
+                    )
             else:
                 # Async hooks dispatched — batch stays RUNNING until callbacks complete
                 logger.info(
@@ -4177,7 +4276,7 @@ class DefaultPublishService(PublishService):
         full callback pipeline (device update, record update, batch/stage check).
         """
         env = get_current_env()
-        timeout_seconds = 600  # default
+        timeout_seconds = DEFAULT_CALLBACK_TIMEOUT_SECONDS  # default
 
         publish_config = _extra_config_to_publish_config(publish_record.extra_config)
         if publish_config is not None:

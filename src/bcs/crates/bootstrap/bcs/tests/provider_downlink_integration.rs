@@ -8,10 +8,15 @@ use axum::{
     http::{HeaderMap, header},
     routing::post,
 };
+use bcs::LlmProviderType;
 use bcs_domain::SystemMessageEvent;
-use helpers::{MockBot, create_temp_bots_dir, start_test_server, start_test_server_with_state};
+use helpers::{
+    MockBot, create_temp_bots_dir, create_test_config, start_test_server,
+    start_test_server_with_config, start_test_server_with_state,
+};
+use secrecy::Secret;
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 #[tokio::test]
 async fn provider_bot_registers_and_is_routable_without_ws_connection() {
@@ -443,29 +448,188 @@ async fn state_machine_dispatches_provider_bot_and_accepts_final_callback() {
         .expect("state-machine provider callback");
     let status = response.status();
     let body_text = response.text().await.expect("callback body");
-    assert!(
-        status.is_success(),
+    assert_eq!(
+        status.as_u16(),
+        200,
         "state-machine provider callback failed: {status} {body_text}"
     );
+    let callback: Value = serde_json::from_str(&body_text).expect("callback response");
+    assert_eq!(callback["ok"], true);
+    assert_eq!(callback["delivered_count"], 1);
+
+    let view = wait_for_state_machine_run_status(
+        &client,
+        bcs_addr,
+        &state_machine_run_id,
+        "completed",
+    )
+    .await;
+    assert_eq!(view["run"]["status"], "completed");
+    assert_eq!(view["nodes"][0]["status"], "completed");
+    assert_eq!(view["nodes"][0]["artifact_text"], "state-machine provider final");
+}
+
+#[tokio::test]
+async fn provider_callback_timeout_does_not_cancel_slow_state_machine_judge() {
+    let provider = start_provider_webhook().await;
+    let judge = start_blocking_judge().await;
+    let bots_dir = create_temp_bots_dir();
+    let mut config = create_test_config(&bots_dir.path().to_path_buf());
+    config.llm.provider_type = LlmProviderType::OpenAiCompatible;
+    config.llm.base_url = judge.url();
+    config.llm.api_key_env = None;
+    config.llm.api_key = Some(Secret::new("test-judge-key".to_string()));
+    config.llm.timeout_ms = 5_000;
+    let (bcs_addr, _bcs_server) = start_test_server_with_config(config).await;
+    let client = reqwest::Client::new();
+    let mut driver = MockBot::connect(bcs_addr).await;
+    driver.register("Driver", &["drive"], bcs_addr).await;
+    let registered = register_provider_bot(
+        &client,
+        bcs_addr,
+        provider.url(),
+        "provider-slow-judge",
+        "slow-judge-worker",
+    )
+    .await;
+    let group_id = create_judged_state_machine_group(
+        &client,
+        bcs_addr,
+        &driver.token,
+        &driver.bot_id,
+        &registered.bot_uuid,
+    )
+    .await;
+    provider.capture.clear().await;
+
+    let response = client
+        .post(format!(
+            "http://{}/groups/{}/state-machine-runs",
+            bcs_addr, group_id
+        ))
+        .json(&json!({
+            "input": { "question": "verify async provider callback judging" }
+        }))
+        .send()
+        .await
+        .expect("start judged state-machine run");
+    let status = response.status();
+    let body_text = response.text().await.expect("judged state-machine run body");
+    assert!(
+        status.is_success(),
+        "start judged state-machine run failed: {status} {body_text}"
+    );
+    let run: Value = serde_json::from_str(&body_text).expect("judged run response");
+    let state_machine_run_id = run["run"]["run_id"]
+        .as_str()
+        .expect("state-machine run id")
+        .to_string();
+
+    let review_send = provider.capture.wait_for_method("chat.send").await;
+    let review_provider_run_id = review_send.body["id"]
+        .as_str()
+        .expect("review provider run id")
+        .to_string();
+    let graph = wait_for_node_sub_status(
+        &client,
+        bcs_addr,
+        &state_machine_run_id,
+        "review",
+        "awaiting_response",
+    )
+    .await;
+    let review = graph["nodes"]
+        .as_array()
+        .expect("graph nodes")
+        .iter()
+        .find(|node| node["node_id"] == "review")
+        .expect("review graph node");
+    assert_eq!(review["status"], "running");
+
+    let callback_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(1))
+        .build()
+        .expect("callback client");
+    let callback_response = callback_client
+        .post(format!("http://{}/bot/events", bcs_addr))
+        .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+        .header(
+            "Authorization",
+            format!("Bearer {}", registered.bot_runtime_token),
+        )
+        .json(&json!({
+            "run_id": review_provider_run_id,
+            "state": "final",
+            "message": { "text": "candidate awaiting slow judge" }
+        }))
+        .send()
+        .await
+        .expect("provider callback must return before the slow judge completes");
+    assert_eq!(callback_response.status().as_u16(), 200);
+
+    judge.control.wait_for_start().await;
+    let graph = wait_for_node_sub_status(
+        &client,
+        bcs_addr,
+        &state_machine_run_id,
+        "review",
+        "judging",
+    )
+    .await;
+    let review = graph["nodes"]
+        .as_array()
+        .expect("graph nodes")
+        .iter()
+        .find(|node| node["node_id"] == "review")
+        .expect("review graph node");
+    assert_eq!(review["status"], "running");
+    assert_eq!(review["sub_status"], "judging");
 
     let response = client
         .get(format!(
-            "http://{}/state-machine-runs/{}",
+            "http://{}/state-machine-runs/{}/nodes/review",
             bcs_addr, state_machine_run_id
         ))
         .send()
         .await
-        .expect("get state-machine run");
-    let status = response.status();
-    let body_text = response.text().await.expect("state-machine view body");
-    assert!(
-        status.is_success(),
-        "get state-machine run failed: {status} {body_text}"
-    );
-    let view: Value = serde_json::from_str(&body_text).expect("state-machine run view");
-    assert_eq!(view["run"]["status"], "completed");
-    assert_eq!(view["nodes"][0]["status"], "completed");
-    assert_eq!(view["nodes"][0]["artifact_text"], "state-machine provider final");
+        .expect("get review node detail");
+    let detail: Value = response.json().await.expect("review node detail");
+    assert_eq!(detail["sub_status"], "judging");
+    assert_eq!(detail["node"]["artifact_text"], "candidate awaiting slow judge");
+
+    provider.capture.clear().await;
+    judge.control.release();
+    let publish_send = provider.capture.wait_for_method("chat.send").await;
+    let publish_provider_run_id = publish_send.body["id"]
+        .as_str()
+        .expect("publish provider run id")
+        .to_string();
+    let response = client
+        .post(format!("http://{}/bot/events", bcs_addr))
+        .header("X-BCN-Provider-Id", registered.provider_id.as_str())
+        .header(
+            "Authorization",
+            format!("Bearer {}", registered.bot_runtime_token),
+        )
+        .json(&json!({
+            "run_id": publish_provider_run_id,
+            "state": "final",
+            "message": { "text": "published after slow judge" }
+        }))
+        .send()
+        .await
+        .expect("publish provider callback");
+    assert_eq!(response.status().as_u16(), 200);
+
+    let view = wait_for_state_machine_run_status(
+        &client,
+        bcs_addr,
+        &state_machine_run_id,
+        "completed",
+    )
+    .await;
+    assert_eq!(view["run"]["output"], "published after slow judge");
+    assert_eq!(view["judge_outputs"][0]["decision"]["outcome"], "approved");
 }
 
 #[derive(Clone, Default)]
@@ -513,6 +677,91 @@ struct ProviderServer {
     capture: ProviderCapture,
     addr: SocketAddr,
     _handle: tokio::task::JoinHandle<()>,
+}
+
+#[derive(Clone)]
+struct BlockingJudgeControl {
+    started: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+}
+
+impl Default for BlockingJudgeControl {
+    fn default() -> Self {
+        Self {
+            started: Arc::new(Semaphore::new(0)),
+            release: Arc::new(Semaphore::new(0)),
+        }
+    }
+}
+
+impl BlockingJudgeControl {
+    async fn wait_for_start(&self) {
+        tokio::time::timeout(Duration::from_secs(2), self.started.acquire())
+            .await
+            .expect("slow judge should start")
+            .expect("slow judge start semaphore should remain open")
+            .forget();
+    }
+
+    fn release(&self) {
+        self.release.add_permits(1);
+    }
+}
+
+struct BlockingJudgeServer {
+    control: BlockingJudgeControl,
+    addr: SocketAddr,
+    _handle: tokio::task::JoinHandle<()>,
+}
+
+impl BlockingJudgeServer {
+    fn url(&self) -> String {
+        format!("http://{}/v1", self.addr)
+    }
+}
+
+async fn start_blocking_judge() -> BlockingJudgeServer {
+    let control = BlockingJudgeControl::default();
+    let app = Router::new()
+        .route("/v1/chat/completions", post(blocking_judge_handler))
+        .with_state(control.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind slow judge");
+    let addr = listener.local_addr().expect("slow judge addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    BlockingJudgeServer {
+        control,
+        addr,
+        _handle: handle,
+    }
+}
+
+async fn blocking_judge_handler(
+    State(control): State<BlockingJudgeControl>,
+    Json(_body): Json<Value>,
+) -> Json<Value> {
+    control.started.add_permits(1);
+    control
+        .release
+        .acquire()
+        .await
+        .expect("slow judge release semaphore should remain open")
+        .forget();
+    let decision = json!({
+        "outcome": "approved",
+        "reason": "candidate satisfies the test criteria",
+        "confidence": 0.99,
+        "checked_criteria": [],
+        "retry_instruction": ""
+    });
+    Json(json!({
+        "choices": [{
+            "message": { "content": decision.to_string() }
+        }]
+    }))
 }
 
 impl ProviderServer {
@@ -819,6 +1068,80 @@ runtime:
     group["id"].as_str().expect("state-machine group id").to_string()
 }
 
+async fn create_judged_state_machine_group(
+    client: &reqwest::Client,
+    bcs_addr: SocketAddr,
+    token: &str,
+    driver_bot: &str,
+    provider_bot: &str,
+) -> String {
+    let definition_yaml = r#"
+api_version: bcs.collaboration/v1
+name: Provider Slow Judge State Machine
+participants:
+  worker:
+    required: true
+runtime:
+  kind: state_machine
+  state_machine:
+    version: 1
+    graph_mode: acyclic
+    nodes:
+      review:
+        kind: bot_task
+        display_name: Review
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Produce a candidate response.
+        judge:
+          type: llm
+          criteria:
+            - The candidate is suitable for publishing.
+          outcomes: [approved]
+        transitions:
+          approved:
+            targets: [publish]
+      publish:
+        kind: bot_task
+        display_name: Publish
+        assignee:
+          type: bot_binding
+          binding: worker
+        instruction: Publish the approved response.
+        final_output: true
+"#;
+    let response = client
+        .post(format!("http://{}/groups", bcs_addr))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&json!({
+            "driver_bot": driver_bot,
+            "group_strategy": "state_machine",
+            "participant_bindings": {
+                "worker": {
+                    "source": "manual",
+                    "bot_ids": [provider_bot]
+                }
+            },
+            "participants": [
+                { "bot_uuid": driver_bot },
+                { "bot_uuid": provider_bot }
+            ],
+            "collaboration_definition_yaml": definition_yaml
+        }))
+        .send()
+        .await
+        .expect("create judged state-machine group");
+    let status = response.status();
+    let body_text = response.text().await.expect("judged state-machine group body");
+    assert!(
+        status.is_success(),
+        "create judged state-machine group failed: {status} {body_text}"
+    );
+    let group: Value = serde_json::from_str(&body_text).expect("judged group response");
+    group["id"].as_str().expect("judged group id").to_string()
+}
+
 async fn send_group_message(
     client: &reqwest::Client,
     bcs_addr: SocketAddr,
@@ -856,4 +1179,68 @@ async fn wait_for_bot_frame_containing(bot: &mut MockBot, needle: &str) -> Value
         }
     }
     panic!("bot did not receive frame containing {needle}");
+}
+
+async fn wait_for_state_machine_run_status(
+    client: &reqwest::Client,
+    bcs_addr: SocketAddr,
+    run_id: &str,
+    expected_status: &str,
+) -> Value {
+    let mut last_view = None;
+    for _ in 0..100 {
+        let response = client
+            .get(format!("http://{}/state-machine-runs/{}", bcs_addr, run_id))
+            .send()
+            .await
+            .expect("get state-machine run");
+        let status = response.status();
+        let body_text = response.text().await.expect("state-machine view body");
+        assert!(
+            status.is_success(),
+            "get state-machine run failed: {status} {body_text}"
+        );
+        let view: Value = serde_json::from_str(&body_text).expect("state-machine run view");
+        if view["run"]["status"] == expected_status {
+            return view;
+        }
+        last_view = Some(view);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!(
+        "state-machine run {run_id} did not reach {expected_status}; last view: {last_view:#?}"
+    );
+}
+
+async fn wait_for_node_sub_status(
+    client: &reqwest::Client,
+    bcs_addr: SocketAddr,
+    run_id: &str,
+    node_id: &str,
+    expected_sub_status: &str,
+) -> Value {
+    let mut last_graph = None;
+    for _ in 0..100 {
+        let response = client
+            .get(format!(
+                "http://{}/state-machine-runs/{}/graph",
+                bcs_addr, run_id
+            ))
+            .send()
+            .await
+            .expect("get state-machine graph");
+        let graph: Value = response.json().await.expect("state-machine graph");
+        let reached = graph["nodes"]
+            .as_array()
+            .and_then(|nodes| nodes.iter().find(|node| node["node_id"] == node_id))
+            .is_some_and(|node| node["sub_status"] == expected_sub_status);
+        if reached {
+            return graph;
+        }
+        last_graph = Some(graph);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!(
+        "state-machine node {run_id}/{node_id} did not enter sub_status={expected_sub_status}; last graph: {last_graph:#?}"
+    );
 }

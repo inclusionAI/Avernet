@@ -1,14 +1,13 @@
-"""工作项免鉴权路由 — 创建工作项、添加关联关系、Arkgw 文件上传。
-
-不检查用户身份，任何人均可访问。
+"""工作项路由 — 创建工作项、添加关联关系、Arkgw 文件上传。
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agentclaw.community.api.workitem_service import WorkItemServiceProtocol
 from agentclaw.community.di import Injected
@@ -18,7 +17,7 @@ class CreateWorkItemRequest(BaseModel):
     """创建工作项请求 — 透传模式。"""
 
     staff_id: str = Field(..., alias="staffId", description="用户工号")
-    workspace_id: str = Field(..., alias="workspaceId", description="DIMA 空间 ID")
+    workspace_id: str = Field(..., alias="workspaceId", description="需求空间 ID")
     subject: str = Field(..., description="工作项标题")
     content: str = Field(..., description="工作项详情描述")
     format_type: str = Field("MARKDOWN", alias="formatType", description="文档格式: MARKDOWN / RICHTEXT")
@@ -29,7 +28,7 @@ class CreateWorkItemRequest(BaseModel):
 class CreateRelationRequest(BaseModel):
     """添加工作项关联关系请求（仅 common 类型）。"""
 
-    # operator 为 DIMA 签名鉴权要求的必传字段，实际不校验内容，任意非空值均可调通
+    # operator 为签名鉴权要求的必传字段，实际不校验内容，任意非空值均可调通
     operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
     relation_identifier: Optional[str] = Field(None, alias="relationIdentifier", description="关联类型标识")
     source_identifier: str = Field(..., alias="sourceIdentifier", description="源工作项标识")
@@ -52,14 +51,19 @@ class UpdateWorkItemRequest(BaseModel):
     """工作项关联 URL 请求 — 专用于给工作项添加 URL 关联。"""
 
     operator: str = Field("100000", description="操作人工号（实际不校验内容，任意非空值均可）")
-    work_item_id: str = Field(..., alias="dimaId", description="DIMA 工作项标识")
+    work_item_id: str = Field(..., alias="dimaId", description="工作项标识")
     url: str = Field(..., description="要关联的 URL")
 
     model_config = {"extra": "allow", "populate_by_name": True}
 
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return normalize_dima_http_url(value)
+
 
 class DimaUpdateWorkItemDocumentRequest(BaseModel):
-    """DIMA 修改工作项描述内容请求。"""
+    """修改工作项描述内容请求。"""
 
     staff_id: str = Field(..., alias="staffId", description="用户工号")
     work_item_id: str = Field(..., alias="workItemId", description="工作项 ID")
@@ -77,6 +81,33 @@ class WorkItemApiResponse(BaseModel):
     data: Optional[Any] = None
 
 
+_ALLOWED_DIMA_URL_SCHEMES = {"http", "https"}
+_MAX_DIMA_URL_LENGTH = 4096
+
+
+def normalize_dima_http_url(raw_url: str) -> str:
+    """Normalize and validate DIMA URL relation input.
+
+    This endpoint is a pass-through wrapper for DIMA URL relation capability.
+    To avoid narrowing DIMA's HTTP(S) linking ability, this validation only
+    rejects malformed URLs and non-HTTP(S) schemes such as file:// or gopher://.
+    It intentionally does not restrict domains, IP ranges, DNS results, or ports.
+    """
+    value = raw_url.strip()
+    if not value:
+        raise ValueError("invalid url")
+    if len(value) > _MAX_DIMA_URL_LENGTH:
+        raise ValueError("invalid url")
+
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() not in _ALLOWED_DIMA_URL_SCHEMES:
+        raise ValueError("invalid url")
+    if not parsed.hostname:
+        raise ValueError("invalid url")
+
+    return value
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/public/dima", tags=["dima-noauth"])
@@ -87,9 +118,9 @@ async def create_work_item(
     req: CreateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """创建 DIMA 工作项（免鉴权，透传模式）。
+    """创建工作项（透传模式）。
 
-    请求体中 staffId 为必填，其余字段直接透传到 DIMA OpenAPI。
+    请求体中 staffId 为必填，其余字段直接透传到 OpenAPI。
     """
     logger.info(
         "[workitem_noauth.create] staffId=%s, keys=%s",
@@ -125,7 +156,7 @@ async def create_work_item_relation(
     req: CreateRelationRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """添加 DIMA 工作项关联关系（免鉴权）。
+    """添加工作项关联关系。
 
     POST /api/public/dima/work-items/relation/create
     Body: {
@@ -159,7 +190,7 @@ async def append_file_to_work_item(
     req: UpdateWorkItemRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """给 DIMA 工作项关联 URL（免鉴权）。
+    """给工作项关联 URL。
 
     POST /api/public/dima/work-items/append-file
     Body: {
@@ -195,7 +226,7 @@ async def update_work_item_document(
     req: DimaUpdateWorkItemDocumentRequest,
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """修改 DIMA 工作项描述内容（免鉴权）。
+    """修改工作项描述内容。
 
     POST /api/public/dima/work-items/document/update
     Body: {
@@ -244,7 +275,7 @@ async def upload_file_to_arkgw(
     url: Optional[str] = Form(None, description="图片文件链接（转存场景）"),
     service: WorkItemServiceProtocol = Injected(WorkItemServiceProtocol),
 ) -> WorkItemApiResponse:
-    """免鉴权上传文件到 Arkgw。
+    """上传文件到 Arkgw。
 
     file 和 url 二选一：
     - file 非空时上传文件

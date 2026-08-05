@@ -5,6 +5,7 @@ pub mod bot_chat;
 pub mod bot_events;
 pub mod bots;
 pub mod channel;
+pub mod collaboration_definitions;
 pub mod collaboration_runs;
 mod caller;
 pub mod discover;
@@ -23,6 +24,7 @@ pub mod providers;
 pub mod register;
 pub mod secret;
 pub mod services;
+pub mod session_files;
 pub mod sessions;
 pub mod templates;
 

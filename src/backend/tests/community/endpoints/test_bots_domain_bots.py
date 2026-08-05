@@ -45,7 +45,7 @@ def _seed_domain_bots(world):
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_no_pagination",
-    input=CaseInput(query_params={}),
+    input=CaseInput(query_params={}, headers={"x-user-id": "operator-user"}),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -63,7 +63,10 @@ def list_domain_bots_ok_no_pagination():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_with_pagination",
-    input=CaseInput(query_params={"page": "1", "page_size": "2"}),
+    input=CaseInput(
+        query_params={"page": "1", "page_size": "2"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -81,7 +84,10 @@ def list_domain_bots_ok_with_pagination():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_keyword_match",
-    input=CaseInput(query_params={"keyword": "Security"}),
+    input=CaseInput(
+        query_params={"keyword": "Security"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -99,7 +105,10 @@ def list_domain_bots_keyword_match():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="ok_keyword_no_match",
-    input=CaseInput(query_params={"keyword": "nonexistent"}),
+    input=CaseInput(
+        query_params={"keyword": "nonexistent"},
+        headers={"x-user-id": "operator-user"},
+    ),
     seed=_seed_domain_bots,
     expect=ExpectSuccess(
         status=200,
@@ -117,7 +126,10 @@ def list_domain_bots_keyword_no_match():
     method="GET",
     path="/api/bots/search/domain-bots",
     scenario="invalid_pagination",
-    input=CaseInput(query_params={"page": "0", "page_size": "20"}),
+    input=CaseInput(
+        query_params={"page": "0", "page_size": "20"},
+        headers={"x-user-id": "operator-user"},
+    ),
     expect=ExpectError(status=422),
 )
 def list_domain_bots_invalid_page():

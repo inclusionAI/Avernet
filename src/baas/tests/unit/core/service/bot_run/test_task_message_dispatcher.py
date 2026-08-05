@@ -1,6 +1,7 @@
 """Unit tests for TaskMessageDispatcher."""
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -76,6 +77,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -93,6 +95,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -110,6 +113,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -132,6 +136,7 @@ class TestTaskMessageDispatcherSend:
             message="hello",
             binding_info=arca_binding,
             context=context,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -153,6 +158,7 @@ class TestTaskMessageDispatcherSend:
             binding_info=arca_binding,
             context=context,
             wait_result=False,
+            timeout=30.0,
         )
         await asyncio.sleep(0)
 
@@ -187,10 +193,33 @@ class TestTaskMessageDispatcherSend:
             binding_info=arca_binding,
             context=context,
             callback="bcn_uplink",
+            timeout=30.0,
         )
         await asyncio.sleep(0.1)
 
         assert callback_called.is_set()
+
+    @pytest.mark.asyncio
+    async def test_dispatch_send_timeout_marks_timeout(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        mock_bot_service.send_message.side_effect = TimeoutError()
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+        )
+        await asyncio.sleep(0)
+
+        mock_run_repo.update_timeout.assert_called_once()
+        call_kw = mock_run_repo.update_timeout.call_args.kwargs
+        assert call_kw["run_id"] == "run-001"
+        assert "timeout" in call_kw["error"].lower()
 
 
 class TestTaskMessageDispatcherInject:
@@ -232,6 +261,98 @@ class TestTaskMessageDispatcherInject:
         assert call_kw["extra"]["injected"] == "true"
 
 
+class TestTaskMessageDispatcherSendStream:
+    @pytest.mark.asyncio
+    async def test_stream_completed_no_extra_error(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        from secbaas.community.api.sse import StreamChunk
+
+        async def _fake_stream(**kwargs):
+            yield StreamChunk(type="final", content="done")
+
+        mock_bot_service.send_message_stream = _fake_stream
+        run = MagicMock()
+        run.status = "COMPLETED"
+        mock_run_repo.get_by_run_id.return_value = run
+
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        chunks = []
+        async for c in dispatcher.dispatch_send_stream(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+        ):
+            chunks.append(c)
+
+        mock_run_repo.update_result.assert_called_once()
+        mock_run_repo.update_error.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_interrupted_marks_error_when_not_terminal(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        from secbaas.community.api.sse import StreamChunk
+
+        async def _fake_stream(**kwargs):
+            yield StreamChunk(type="delta", content="partial")
+            raise GeneratorExit()
+
+        mock_bot_service.send_message_stream = _fake_stream
+        run = MagicMock()
+        run.status = "RUNNING"
+        mock_run_repo.get_by_run_id.return_value = run
+
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        chunks = []
+        with contextlib.suppress(GeneratorExit):
+            async for c in dispatcher.dispatch_send_stream(
+                bot_service=mock_bot_service,
+                run_id="run-001",
+                session_id="sess-001",
+                message="hello",
+                binding_info=arca_binding,
+                context=context,
+                timeout=30.0,
+            ):
+                chunks.append(c)
+
+        mock_run_repo.update_error.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_timeout_run_skips_error_mark(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        from secbaas.community.api.sse import StreamChunk
+
+        async def _fake_stream(**kwargs):
+            yield StreamChunk(type="final", content="done")
+
+        mock_bot_service.send_message_stream = _fake_stream
+        run = MagicMock()
+        run.status = "TIME_OUT"
+        mock_run_repo.get_by_run_id.return_value = run
+
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        chunks = []
+        async for c in dispatcher.dispatch_send_stream(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+        ):
+            chunks.append(c)
+
+        mock_run_repo.update_error.assert_not_called()
+
+
 class TestTaskMessageDispatcherWithPool:
     @pytest.mark.asyncio
     async def test_acquires_slot_and_releases(
@@ -251,6 +372,7 @@ class TestTaskMessageDispatcherWithPool:
             binding_info=arca_binding,
             context=context,
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=30.0,
         )
         await asyncio.sleep(0.2)
         assert pool.active_count == 0
@@ -271,6 +393,72 @@ class TestTaskMessageDispatcherWithPool:
             binding_info=arca_binding,
             context=context,
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=30.0,
         )
         await asyncio.sleep(0.2)
+        assert pool.active_count == 0
+
+
+class TestTaskMessageDispatcherTimeout:
+    """Cover timeout reduction logic: bot_service gets timeout - 0.2 (floored at 0.1),
+    slot.run gets the original timeout."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_receives_reduced_timeout(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=30.0,
+        )
+        await asyncio.sleep(0)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(29.8)
+
+    @pytest.mark.asyncio
+    async def test_small_timeout_floored_to_0_1(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=None)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            timeout=0.1,
+        )
+        await asyncio.sleep(0)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(0.1)
+
+    @pytest.mark.asyncio
+    async def test_slot_run_receives_original_timeout(
+        self, mock_bot_service, mock_run_repo, arca_binding, context
+    ):
+        pool = TaskConcurrencyPool(softmax=1, per_key_max=0)
+        dispatcher = TaskMessageDispatcher(run_repository=mock_run_repo, task_pool=pool)
+        await dispatcher.dispatch_send(
+            bot_service=mock_bot_service,
+            run_id="run-001",
+            session_id="sess-001",
+            message="hello",
+            binding_info=arca_binding,
+            context=context,
+            bot_id=f"{BOT_ID}:{ENTITY_ID}",
+            timeout=15.0,
+        )
+        await asyncio.sleep(0.2)
+
+        call_kw = mock_bot_service.send_message.call_args.kwargs
+        assert call_kw["timeout"] == pytest.approx(14.8)
         assert pool.active_count == 0

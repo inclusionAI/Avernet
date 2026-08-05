@@ -45,10 +45,6 @@ class ComposeInputCollector(Protocol):
         """Bot resource files (or URL resources) with their sources."""
         ...
 
-    def bot_files(self, req: ComposeRequest) -> list[CollectedFile]:
-        """Teclaw workspace files tracked in ac_file (empty for non-teclaw)."""
-        ...
-
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
         """User/platform-authored identity files (NOT engine-generated ones)."""
         ...

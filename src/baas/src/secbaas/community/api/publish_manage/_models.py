@@ -44,10 +44,10 @@ from ._enums import PublishType, RestartScope  # noqa: E402 — cyclic import gu
 
 # ==================== Constants ====================
 
-DEFAULT_CALLBACK_TIMEOUT_SECONDS = 900
+DEFAULT_CALLBACK_TIMEOUT_SECONDS = 1800
 """Device callback timeout in seconds."""
 
-DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS = 900
+DEFAULT_PUBLISH_LEVEL_TIMEOUT_SECONDS = 1800
 """Maximum time a publish can stay in non-terminal state before auto-resolution.
 
 When a publish is stuck in PENDING/ACTIVE/APPROVING for longer than this
@@ -276,6 +276,24 @@ class PublishResponse(BaseModel):
     gmt_create: datetime = Field(..., description="Creation timestamp")
     gmt_modified: datetime = Field(..., description="Last modification timestamp")
     request_id: str = Field(default="", description="Request ID for correlation")
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class BotPublishSummary(BaseModel):
+    """Lightweight publish descriptor for the by-bot listing.
+
+    Carries only what an idempotency/reconciliation caller needs to difference
+    a bot's publish workflows (id, type, status, creation time) — no per-row
+    stage query or full config, so listing a bot's whole publish history stays
+    cheap.
+    """
+
+    id: int = Field(..., description="Internal publish ID (the workflow id)")
+    bot_id: int = Field(..., description="Bot ID this publish belongs to")
+    publish_type: str = Field(..., description="Type of publish")
+    status: str = Field(..., description="Current lifecycle status")
+    gmt_create: datetime = Field(..., description="Creation timestamp")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 

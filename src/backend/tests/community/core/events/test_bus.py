@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.events.bus import EventBus, get_event_bus, reset_event_bus
+from agentclaw.community.core.events.bus import (
+    EventBus,
+    RequiredEventDeliveryError,
+    get_event_bus,
+    reset_event_bus,
+)
 
 
 @dataclass
@@ -64,6 +69,21 @@ class TestEventBus:
         bus.publish(_DummyEvent(value=0))
 
         good_before.assert_called_once()
+        good_after.assert_called_once()
+
+    def test_required_handler_exception_is_propagated_after_siblings_run(self):
+        bus = EventBus()
+        good_after = MagicMock()
+
+        def bad(_event):
+            raise RuntimeError("queue unavailable")
+
+        bus.subscribe(_DummyEvent, bad, required=True)
+        bus.subscribe(_DummyEvent, good_after)
+
+        with pytest.raises(RequiredEventDeliveryError):
+            bus.publish(_DummyEvent(value=0))
+
         good_after.assert_called_once()
 
     def test_handlers_only_receive_their_event_type(self):

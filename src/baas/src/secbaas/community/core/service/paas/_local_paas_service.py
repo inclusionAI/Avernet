@@ -84,7 +84,10 @@ def _normalize_message(raw_message: str | list | Any) -> str:
 
 
 if TYPE_CHECKING:
-    from secbaas.community.api.device_manage import OutBoundOperationRule
+    from secbaas.community.api.device_manage import (
+        OutBoundOperationRule,
+        OutBoundOperationRuleUpdatedMode,
+    )
 
     # Phase 34: DeviceRecord forward reference for _process_publish_callback_for_device
     from secbaas.community.core.repository.device import DeviceRecord
@@ -862,10 +865,10 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             command: dict[str, Any] = {
                 "action": "open_ws_relay",
                 "params": {
+                    "container_id": container_id,
                     "session_id": session_id,
                     "token": getattr(conn_info, "token", ""),
                     "target": getattr(conn_info, "target", ""),
-                    "port": port,
                 },
             }
 
@@ -1481,6 +1484,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         self,
         paas_device_id: str,
         outbound_operation_rule: OutBoundOperationRule,
+        mode: OutBoundOperationRuleUpdatedMode | None = None,
     ) -> bool:
         """Update outbound operation rule for a local device.
 
@@ -2438,3 +2442,43 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         await self._process_publish_callback_for_device(
             device, source="container_ready"
         )
+
+    async def pull_file_from_url(
+        self,
+        paas_device_id: str,
+        source_url: str,
+        device_path: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Local platform does not support file transfer.
+
+        Args:
+            paas_device_id: Local device ID (container_id--machine_id--user_id).
+            source_url: URL to download from.
+            device_path: Destination path on device.
+            timeout_seconds: Maximum download time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Local.
+        """
+        raise NotImplementedError("File transfer not supported on Local platform")
+
+    async def push_file_to_url(
+        self,
+        paas_device_id: str,
+        device_path: str,
+        target_url: str,
+        timeout_seconds: int = 300,
+    ) -> None:
+        """Not supported: Local platform does not support file transfer.
+
+        Args:
+            paas_device_id: Local device ID (container_id--machine_id--user_id).
+            device_path: Source path on device.
+            target_url: URL to upload to.
+            timeout_seconds: Maximum upload time (unused).
+
+        Raises:
+            NotImplementedError: Always — file transfer not supported on Local.
+        """
+        raise NotImplementedError("File transfer not supported on Local platform")

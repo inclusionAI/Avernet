@@ -132,6 +132,23 @@ def test_default_config_path_loads_repo_hitl_config():
     assert detail["stdioConfigs"][0]["arguments"] == ["/home/admin/hitl/hitl_mcp_server.py"]
 
 
+def test_default_config_path_loads_repo_clawmind_config():
+    detail = LocalMCPRegistry().get_mcp_detail("clawmind")
+
+    assert detail is not None
+    assert detail["serverCode"] == "clawmind"
+    assert detail["runMode"] == "LOCAL"
+    assert detail["stdioConfigs"][0]["command"] == "node"
+    assert detail["stdioConfigs"][0]["arguments"] == [
+        "/home/admin/clawmind-mcp/dist/esm/platform/mcp-entry.js"
+    ]
+    env = detail["stdioConfigs"][0].get("envVariables", {})
+    assert env.get("MCP_TRANSPORT") == "stdio"
+    assert env.get("CCT_SOP_MCP_SERVER_MODE") == "prod"
+    # SKILL_ROOT, DATABASE_MODE and CLAWWEB_API_URL come from ClawMind's own
+    # configs/application.yaml / process.cwd() fallback, not from mcporter.json env
+
+
 def test_default_config_path_falls_back_when_repo_marker_missing(monkeypatch):
     monkeypatch.setattr("agentclaw.community.core.mcp.services.local_mcp_registry.Path", _NoRepoPath)
 

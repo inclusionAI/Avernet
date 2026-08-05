@@ -28,7 +28,7 @@ from secbaas.community.api.bot_runtime import (
     TooManyRequestsError,
 )
 from secbaas.community.api.device_manage import ErrorCode, PaasError
-from secbaas.community.api.sse import StreamChunk
+from secbaas.community.api.sse import SseEvent, StreamChunk
 from secbaas.community.core.service.bot_run import (
     BotBindingNotFoundError,
     BotRunner,
@@ -1642,76 +1642,477 @@ class TestSelectDispatcherConfig:
         assert result is task_d
 
 
-# ==================== Tests: _with_heartbeat ====================
+# ==================== Tests: BCN queue dispatcher switch ====================
 
 
-class TestWithHeartbeat:
-    """Cover _with_heartbeat: normal yield, timeout heartbeat, StopAsyncIteration."""
+def _bcn_metadata():
+    """Metadata with from_bcn=true, matching BCN service's _build_bcn_metadata."""
+    return {"bot_options": {"from_bcn": "true", "lifecycle_stage": "all"}}
+
+
+class TestSelectDispatcherBcnSwitch:
+    """Tests for bot_run.bcn_queue_dispatcher_enabled switch."""
+
+    def test_bcn_switch_on_selects_queue(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + switch='true' → QueueTaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("true")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is queue_d
+
+    def test_bcn_switch_off_keeps_task(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + switch='false' → still TaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("false")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_bcn_switch_get_config_exception_falls_through(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata + get_config raises → exception swallowed, defaults to Task."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                raise RuntimeError("db error")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_bcn_metadata_no_config_service_keeps_task(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """BCN metadata but no system_config_service → cannot read switch, defaults to Task."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        runner = BotRunner(
+            bot_service_selector=mock_selector,
+            run_repository=mock_run_repo,
+            bot_service_plugin=mock_bot_service_plugin,
+            dispatchers=[queue_d, task_d],
+        )
+        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        assert result is task_d
+
+    def test_non_bcn_metadata_ignores_switch(
+        self, mock_selector, mock_run_repo, mock_bot_service_plugin
+    ):
+        """Non-BCN metadata + switch='true' → still TaskMessageDispatcher."""
+        task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
+        queue_d = MagicMock(spec=MessageDispatcher)
+        queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
+
+        def get_config(key):
+            if key == "bot_run.bcn_queue_dispatcher_enabled":
+                return _config_response("true")
+            return None
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = get_config
+
+        runner = _make_runner_with_config(
+            mock_selector,
+            mock_run_repo,
+            mock_bot_service_plugin,
+            config_service,
+            [queue_d, task_d],
+        )
+        result = runner._select_dispatcher(
+            "bot-1", metadata={"bot_options": {"lifecycle_stage": "online"}}
+        )
+        assert result is task_d
+
+
+class TestWithSseHeartbeat:
+    """Cover with_sse_heartbeat: normal yield, timeout heartbeat, empty stream."""
 
     @pytest.mark.asyncio
-    async def test_yields_chunks(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+    async def test_yields_sse(self):
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def source():
-            yield StreamChunk(type="delta", content="a")
-            yield StreamChunk(type="final", content="done")
+            yield "event: delta\ndata: a\n\n"
+            yield "event: final\ndata: done\n\n"
 
-        chunks = []
-        async for chunk in _with_heartbeat(source()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(source()):
+            results.append(sse)
 
-        assert len(chunks) == 2
-        assert chunks[0].type == "delta"
-        assert chunks[1].type == "final"
+        assert len(results) == 2
+        assert results[0] == "event: delta\ndata: a\n\n"
+        assert results[1] == "event: final\ndata: done\n\n"
 
     @pytest.mark.asyncio
     async def test_inserts_heartbeat_on_timeout(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+        from secbaas.community.api.sse import HEARTBEAT_SSE, with_sse_heartbeat
 
         async def slow_source():
-            yield StreamChunk(type="delta", content="first")
+            yield "event: delta\ndata: first\n\n"
             await asyncio.sleep(0.15)
-            yield StreamChunk(type="final", content="late")
+            yield "event: final\ndata: late\n\n"
 
         original_wait_for = asyncio.wait_for
 
         with patch(
-            "secbaas.community.core.service.bot_run._runner.asyncio.wait_for",
+            "secbaas.community.api.sse._heartbeat.asyncio.wait_for",
             lambda coro, timeout: original_wait_for(coro, 0.1),
         ):
-            chunks = []
-            async for chunk in _with_heartbeat(slow_source()):
-                chunks.append(chunk)
+            results = []
+            async for sse in with_sse_heartbeat(slow_source()):
+                results.append(sse)
 
-        assert len(chunks) == 3
-        assert chunks[0].type == "delta"
-        assert chunks[1].type == "heartbeat"
-        assert chunks[2].type == "final"
+        assert len(results) == 3
+        assert results[0] == "event: delta\ndata: first\n\n"
+        assert results[1] == HEARTBEAT_SSE
+        assert results[2] == "event: final\ndata: late\n\n"
 
     @pytest.mark.asyncio
     async def test_empty_stream(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def empty():
             return
             yield  # make it an async generator
 
-        chunks = []
-        async for chunk in _with_heartbeat(empty()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(empty()):
+            results.append(sse)
 
-        assert chunks == []
+        assert results == []
 
     @pytest.mark.asyncio
-    async def test_single_chunk(self):
-        from secbaas.community.core.service.bot_run._runner import _with_heartbeat
+    async def test_single_sse(self):
+        from secbaas.community.api.sse import with_sse_heartbeat
 
         async def single():
-            yield StreamChunk(type="final", content="only")
+            yield "event: final\ndata: only\n\n"
 
-        chunks = []
-        async for chunk in _with_heartbeat(single()):
-            chunks.append(chunk)
+        results = []
+        async for sse in with_sse_heartbeat(single()):
+            results.append(sse)
 
-        assert len(chunks) == 1
-        assert chunks[0].content == "only"
+        assert len(results) == 1
+        assert results[0] == "event: final\ndata: only\n\n"
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_when_all_filtered(self):
+        """Upstream yields nothing useful for >interval; heartbeat should fire."""
+        from secbaas.community.api.sse import HEARTBEAT_SSE, with_sse_heartbeat
+
+        async def silent_source():
+            await asyncio.sleep(0.15)
+            return
+            yield  # make it an async generator
+
+        original_wait_for = asyncio.wait_for
+
+        with patch(
+            "secbaas.community.api.sse._heartbeat.asyncio.wait_for",
+            lambda coro, timeout: original_wait_for(coro, 0.1),
+        ):
+            results = []
+            async for sse in with_sse_heartbeat(silent_source()):
+                results.append(sse)
+
+        assert results == [HEARTBEAT_SSE]
+
+    @pytest.mark.asyncio
+    async def test_propagates_upstream_exception(self):
+        """Exceptions from the upstream SSE iterator are re-raised."""
+        from secbaas.community.api.sse import with_sse_heartbeat
+
+        async def failing_source():
+            yield "event: delta\ndata: a\n\n"
+            raise RuntimeError("upstream boom")
+
+        with pytest.raises(RuntimeError, match="upstream boom"):
+            async for _sse in with_sse_heartbeat(failing_source()):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_cancels_producer_on_early_exit(self):
+        """If the consumer stops early, the producer task is cancelled cleanly."""
+        from secbaas.community.api.sse import with_sse_heartbeat
+
+        async def endless_source():
+            yield "event: delta\ndata: a\n\n"
+            await asyncio.sleep(100)
+
+        gen = with_sse_heartbeat(endless_source())
+        # Read one item then abandon the generator
+        async for sse in gen:
+            assert sse == "event: delta\ndata: a\n\n"
+            break
+
+        # Generator cleanup runs __anext__ → triggers finally block
+        await gen.aclose()
+
+
+# ==================== Tests: convert_chunks_to_sse ====================
+
+
+class TestConvertChunksToSse:
+    """Cover convert_chunks_to_sse: prefix, conversion, None filtering, errors."""
+
+    @pytest.mark.asyncio
+    async def test_converts_chunks(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [
+            SseEvent(event="delta", data='{"a":1}'),
+            SseEvent(event="final", data='{"b":2}'),
+        ]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            yield StreamChunk(type="final", content="b")
+
+        results = []
+        async for sse in convert_chunks_to_sse(chunks(), converter, "run-1"):
+            results.append(sse)
+
+        assert len(results) == 2
+        assert results[0] == 'event: delta\ndata: {"a":1}\n\n'
+        assert results[1] == 'event: final\ndata: {"b":2}\n\n'
+
+    @pytest.mark.asyncio
+    async def test_skips_none_events(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [
+            None,
+            SseEvent(event="delta", data='{"ok":true}'),
+            None,
+        ]
+
+        async def chunks():
+            yield StreamChunk(type="agent")
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="agent")
+
+        results = []
+        async for sse in convert_chunks_to_sse(chunks(), converter, "r1"):
+            results.append(sse)
+
+        assert len(results) == 1
+        assert results[0] == 'event: delta\ndata: {"ok":true}\n\n'
+
+    @pytest.mark.asyncio
+    async def test_prefix_yields_first(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"x":1}')]
+
+        ready = 'event: ready\ndata: {"mid":"m1"}\n\n'
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="x")
+
+        results = []
+        async for sse in convert_chunks_to_sse(
+            chunks(), converter, "r1", prefix=[ready]
+        ):
+            results.append(sse)
+
+        assert results == [ready, 'event: delta\ndata: {"x":1}\n\n']
+
+    @pytest.mark.asyncio
+    async def test_on_error_callback(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"a":1}')]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            raise RuntimeError("convert boom")
+
+        captured: list[Exception] = []
+
+        def on_error(e: Exception) -> str:
+            captured.append(e)
+            return 'event: error\ndata: {"msg":"boom"}\n\n'
+
+        results = []
+        async for sse in convert_chunks_to_sse(
+            chunks(), converter, "r1", on_error=on_error
+        ):
+            results.append(sse)
+
+        assert len(results) == 2
+        assert results[0] == 'event: delta\ndata: {"a":1}\n\n'
+        assert results[1] == 'event: error\ndata: {"msg":"boom"}\n\n'
+        assert len(captured) == 1
+        assert isinstance(captured[0], RuntimeError)
+
+    @pytest.mark.asyncio
+    async def test_re_raise_without_on_error(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = [SseEvent(event="delta", data='{"a":1}')]
+
+        async def chunks():
+            yield StreamChunk(type="delta", content="a")
+            raise RuntimeError("no handler")
+
+        with pytest.raises(RuntimeError, match="no handler"):
+            async for _sse in convert_chunks_to_sse(chunks(), converter, "r1"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_empty_chunk_iter(self):
+        from secbaas.community.api.sse import convert_chunks_to_sse
+
+        converter = _DummyConverter()
+        converter._results = []
+
+        async def empty():
+            return
+            yield  # async generator
+
+        results = []
+        async for _sse in convert_chunks_to_sse(empty(), converter, "r1"):
+            results.append(_sse)
+
+        assert results == []
+
+
+# ==================== TestListSessions ====================
+
+
+class TestListSessions:
+    """BotRunner.list_sessions() coverage."""
+
+    @pytest.mark.asyncio
+    async def test_delegates_to_bot_service(
+        self, mock_bot_service, mock_selector, mock_run_repo, context
+    ):
+        """list_sessions resolves route and delegates to bot_service."""
+        from datetime import UTC, datetime
+
+        from secbaas.community.api.bot_runtime import SessionInfo
+
+        binding = BotBindingInfo(
+            bot_id=BOT_ID,
+            entity_id="entity-1",
+            sandbox_id="sandbox-1",
+            device_id="device-1",
+            device_provider="arca",
+            binding_id=100,
+            device_props={},
+            bot_type="personal",
+        )
+
+        expected_sessions = [
+            SessionInfo(
+                session_id="sess-001",
+                bot_id=BOT_ID,
+                status="active",
+                created_at=datetime.now(tz=UTC),
+            )
+        ]
+        mock_bot_service.list_sessions = AsyncMock(return_value=expected_sessions)
+
+        runner = BotRunner(
+            bot_service_selector=mock_selector,
+            run_repository=mock_run_repo,
+            bot_service_plugin=None,
+            dispatchers=[],
+        )
+
+        # Patch _resolve_bot_route to return our binding and service
+        route = MagicMock()
+        route.binding_info = binding
+        route.bot_service = mock_bot_service
+
+        with patch.object(
+            runner, "_resolve_bot_route", new_callable=AsyncMock, return_value=route
+        ):
+            result = await runner.list_sessions(
+                bot_id=BOT_ID,
+                context=context,
+                metadata={"source": "openapi"},
+                limit=5,
+                offset=2,
+            )
+
+        assert result == expected_sessions
+        mock_bot_service.list_sessions.assert_awaited_once_with(
+            binding_info=binding,
+            context=context,
+            limit=5,
+            offset=2,
+        )
+
+
+class _DummyConverter:
+    """Minimal StreamConverter stub for testing convert_chunks_to_sse."""
+
+    _idx = 0
+
+    @staticmethod
+    def name() -> str:
+        return "dummy"
+
+    def convert(self, chunk, *, run_id: str):
+        result = self._results[self._idx]
+        self._idx += 1
+        return result

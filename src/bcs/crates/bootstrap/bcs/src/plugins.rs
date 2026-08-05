@@ -9,7 +9,7 @@ use bcs_cache_api::CachePlugin;
 use bcs_cache_local::InMemoryCachePlugin;
 use bcs_cache_redis::RedisCachePlugin;
 use bcs_channel_api::ChannelProvider;
-use bcs_config_api::{LeaderElectionProviderConfig, RedisCacheConfig};
+use bcs_config_api::{LeaderElectionProviderConfig, RedisCacheConfig, SecretProviderConfig};
 use bcs_db_api::DbPlugin;
 use bcs_db_local::LocalSqliteDbPlugin;
 use bcs_db_mysql::{MysqlDbManager, MysqlDbPlugin};
@@ -239,6 +239,28 @@ pub fn build_registered_user_directory(
         }
     }
     Ok(None)
+}
+
+pub async fn build_registered_secret_plugin(
+    provider: &str,
+    provider_config: SecretProviderConfig,
+) -> crate::Result<Option<bcs_secret_api::SecretPluginRegistration>> {
+    for factory in inventory::iter::<bcs_secret_api::SecretPluginFactory> {
+        if factory.name == provider {
+            return (factory.build)(provider_config)
+                .await
+                .map(Some)
+                .map_err(map_secret_plugin_error);
+        }
+    }
+    Ok(None)
+}
+
+fn map_secret_plugin_error(err: bcs_secret_api::SecretPluginError) -> crate::BcsError {
+    match err {
+        bcs_secret_api::SecretPluginError::InvalidConfig(msg) => crate::BcsError::InvalidConfig(msg),
+        bcs_secret_api::SecretPluginError::Init(msg) => crate::BcsError::StorageInitError(msg),
+    }
 }
 
 pub fn build_registered_channel_provider(
@@ -688,6 +710,7 @@ mod tests {
         ) -> ServiceResult<ChannelDeliveryResult> {
             Ok(ChannelDeliveryResult {
                 delivered: true,
+                provider_message_ref: None,
                 error: None,
             })
         }
@@ -829,7 +852,7 @@ mod tests {
     #[test]
     fn registered_channel_provider_factory_receives_provider_context() {
         let channel_bindings: Arc<dyn ChannelBindingRepoPort> =
-            Arc::new(MemoryChannelBindingRepo::new());
+            Arc::new(MemoryChannelBindingRepo::new("test"));
         let mut provider_config = bcs_config_api::ChannelProviderConfig {
             enabled: true,
             ..Default::default()

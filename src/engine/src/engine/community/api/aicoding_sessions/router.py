@@ -1,25 +1,28 @@
 """HTTP routes for AICoding session workspace inspection.
 
-Nine read-only endpoints, all served directly by the engine running inside
+Ten read-only endpoints, all served directly by the engine running inside
 the aicoding container:
 
 * ``GET /api/aicoding/sessions``                     — sessions list + run_status enrich
-* ``GET /api/aicoding/sessions/file-tree``           — recursive workspace tree
+* ``GET /api/aicoding/sessions/file-tree``           — depth-limited workspace tree
 * ``GET /api/aicoding/sessions/files/preview``       — file content (size-bounded)
 * ``GET /api/aicoding/sessions/git-diff``            — changed files (tree per project)
 * ``GET /api/aicoding/sessions/files/diff``          — unified diff for one file
 * ``GET /api/aicoding/sessions/runs``                — devflow runs for a session
 * ``GET /api/aicoding/sessions/phases``              — phase detail for a run
 * ``GET /api/aicoding/sessions/runs/pull-requests``  — PR outputs for a session
+* ``GET /api/aicoding/sessions/runs/issues``         — issue outputs for a session
 * ``GET /api/aicoding/sessions/worktree-status``     — .worktree.json existence/status
 
 The workspace-inspection endpoints (file-tree / files/preview / git-diff /
-files/diff / worktree-status / runs / phases / runs/pull-requests) accept an
-optional ``cwd`` query parameter: when provided it is validated
-(``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
+files/diff / worktree-status / runs / phases / runs/pull-requests /
+runs/issues) accept an optional ``cwd`` query parameter: when provided it is
+validated (``WorkspaceService.validate_cwd`` / ``_validate_cwd_prefix``) and used directly
 as the session workspace root; when omitted, the legacy ``base/{session_id}``
-derivation serves as a fallback (full backwards compatibility). ``session_id``
-stays required for response correlation and fallback.
+derivation serves as a fallback (full backwards compatibility). For
+``file-tree`` only, ``session_id`` and ``cwd`` are alternative workspace
+locators and at least one must be non-empty; the other endpoints continue to
+require ``session_id``.
 
 Each handler composes a fresh
 :class:`engine.community.core.aicoding.workspace_service.WorkspaceService` over
@@ -44,9 +47,11 @@ from engine.community.api.aicoding_sessions.schemas import (
     FileTreeResponse,
     GitDiffResponse,
     GitProjectDiffSchema,
+    IssueOutputInfo,
     PullRequestOutputInfo,
     RunPhaseStatusData,
     RunPhaseStatusResponse,
+    SessionIssuesResponse,
     SessionPullRequestsResponse,
     SessionRunsResponse,
     WorktreeStatusResponse,
@@ -56,6 +61,7 @@ from engine.community.api.session.router import _session_to_dict
 from engine.community.core.aicoding.models import DiffTreeNode, FileTreeNode
 from engine.community.core.aicoding.runstatus_service import RunStatusService
 from engine.community.core.aicoding.workspace_service import (
+    DEFAULT_FILE_TREE_MAX_DEPTH,
     FilePreviewTooLargeError,
     WorkspaceService,
 )
@@ -133,18 +139,37 @@ def _diff_node_to_schema(node: DiffTreeNode) -> DiffTreeNodeSchema:
 
 @router.get("/file-tree", response_model=FileTreeResponse)
 async def list_file_tree(
-    session_id: str = Query(..., description="AICoding session ID"),
+    session_id: str | None = Query(
+        None,
+        description="可选：AICoding session ID；与 cwd 至少提供一个",
+    ),
     cwd: str | None = Query(
         None,
-        description="可选：前端直传工作目录绝对路径，"
-        "缺省回退 base/{session_id}",
+        description="可选：前端直传工作目录绝对路径；与 session_id 至少提供一个",
+    ),
+    depth: int = Query(
+        DEFAULT_FILE_TREE_MAX_DEPTH,
+        ge=0,
+        description="最大遍历层数；默认 3，0 表示返回所有层级",
     ),
 ) -> FileTreeResponse:
-    """Return the full workspace tree (recursive, filtered, sorted)."""
+    """Return a depth-limited workspace tree (filtered and sorted)."""
+    normalized_session_id = (session_id.strip() or None) if session_id else None
+    normalized_cwd = (cwd.strip() or None) if cwd else None
+    if not normalized_session_id and not normalized_cwd:
+        raise HTTPException(
+            status_code=400,
+            detail="session_id and cwd cannot both be empty",
+        )
+
     check_capability(Capability.FILE_LIST)
     service = _workspace_service()
     try:
-        tree = await service.list_file_tree(session_id, cwd)
+        tree = await service.list_file_tree(
+            normalized_session_id,
+            normalized_cwd,
+            max_depth=depth,
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except NotADirectoryError as e:
@@ -156,7 +181,7 @@ async def list_file_tree(
 
     return FileTreeResponse(
         success=True,
-        session_id=session_id,
+        session_id=normalized_session_id,
         tree=[_file_node_to_schema(n) for n in tree],
     )
 
@@ -399,6 +424,36 @@ async def list_session_pull_requests(
         success=True,
         session_id=session_id,
         pull_requests=[PullRequestOutputInfo(**o) for o in items],
+    )
+
+
+@router.get("/runs/issues", response_model=SessionIssuesResponse)
+async def list_session_issues(
+    session_id: str = Query(..., description="AICoding session ID"),
+    cwd: str | None = Query(
+        None,
+        description="可选：前端直传工作目录绝对路径，"
+        "缺省回退 base/{session_id}",
+    ),
+) -> SessionIssuesResponse:
+    """返回 session 工作空间下所有 run 产出的 issue outputs。
+
+    执行 ``aix run output list --kind issue --json --filter <workspace>``，按
+    ``at`` (unix ms) 倒序排列。不做 pull-request / issue 融合，单独返回
+    ``issues`` 列表。
+    """
+    check_capability(Capability.BASH_EXEC)
+    service = _runstatus_service()
+    try:
+        items = await service.get_session_issues(session_id, cwd)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return SessionIssuesResponse(
+        success=True,
+        session_id=session_id,
+        issues=[IssueOutputInfo(**o) for o in items],
     )
 
 

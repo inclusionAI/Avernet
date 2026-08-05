@@ -22,8 +22,12 @@ bcs-auth-api    = { workspace = true }
 bcs-jwt         = { workspace = true }
 bcs-services-container = { workspace = true }
 bcs-protocol    = { workspace = true }
+bcs-storage-api = { workspace = true }
+bcs-telemetry   = { workspace = true }
 axum            = { workspace = true }
 async-trait     = { workspace = true }
+bytes           = { workspace = true }
+futures         = { workspace = true }
 base64          = { workspace = true }
 serde           = { workspace = true }
 serde_json      = { workspace = true }
@@ -32,7 +36,12 @@ thiserror       = { workspace = true }
 strum           = { workspace = true }
 tokio           = { workspace = true }
 tracing         = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tower-http      = { workspace = true, features = ["trace"] }
+opentelemetry   = { workspace = true }
+opentelemetry-http = { workspace = true }
 urlencoding     = { workspace = true }
+url             = { workspace = true }
 uuid            = { workspace = true }
 sha2            = { workspace = true }
 hex             = { workspace = true }
@@ -44,6 +53,12 @@ bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-cli = { workspace = true }
 bcs-friend = { workspace = true }
+bcs-group-store = { workspace = true }
+bcs-session = { workspace = true }
+bcs-session-store = { workspace = true }
+bcs-session-file = { workspace = true }
+bcs-session-file-store = { workspace = true }
+bcs-storage-api = { workspace = true }
 bcs-auth-local = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true }
@@ -51,3 +66,4 @@ bcs-user-directory-api = { workspace = true }
 tempfile = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["testing"] }

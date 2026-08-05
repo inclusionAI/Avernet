@@ -29,6 +29,12 @@ pub enum SystemMessageEvent {
         session_input: Option<serde_json::Value>,
         #[serde(default)]
         task_ledger: Option<crate::LedgerSummary>,
+        /// Delivery override for the driver bot's `[GROUP CONTEXT]` message.
+        /// `None` keeps the default `DeliveryType::Send`; `Some(Inject)`
+        /// delivers the context silently. Only applies to the driver;
+        /// other participants always receive `DeliveryType::Inject`.
+        #[serde(default)]
+        driver_delivery: Option<DeliveryType>,
     },
     HumanJoined {
         group_id: String,

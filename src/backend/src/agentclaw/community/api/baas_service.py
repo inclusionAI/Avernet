@@ -53,6 +53,8 @@ class BaasServiceProtocol(Protocol):
         template_uuid: Optional[str] = None,
         stage: str = PublishStage.ONLINE.value,
         version: str = "1",
+        ext_info: Optional[Dict[str, Any]] = None,
+        extra_envs: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Create a BaaS bot. Returns ``{bot_uuid, publish_id}``."""
         ...
@@ -233,8 +235,12 @@ class BaasServiceProtocol(Protocol):
         bot_uuid: str,
         *,
         agent_pass_token: str = "",
-    ) -> list[dict[str, Any]]:
-        """按 BaaS bot_uuid 更新 Teclaw PaaS 设备的出站规则。"""
+    ) -> list[dict[str, Any]] | None:
+        """按 BaaS bot_uuid 更新 Teclaw PaaS 设备的出站规则。
+
+        ``None`` = 当前 provider 无出站改写(无需下发);``[]`` = 设备尚未就绪
+        (调用方应重试);非空 = 全部设备写入成功。
+        """
         ...
 
     def get_bot_start_progress(

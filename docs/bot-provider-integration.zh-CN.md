@@ -87,7 +87,7 @@ X-BCN-Timestamp: <unix-ms>
 | `to_bot.provider_bot_ref` | 同上 | Provider 内部 bot 标识，用于路由到自己的 bot runtime。 |
 | `session_id` | `chat.send` / `chat.inject` / `chat.history` / `chat.abort` | 会话标识，Provider 按它维护上下文。 |
 | `message` | `chat.send` / `chat.inject` | 当前下发消息。 |
-| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | BCS 等待 Provider 确认或回调的超时时间。 |
+| `timeout_ms` | `chat.send` / `chat.inject` / `chat.history` | 下游操作超时。对于 `bcs-cli chat` 发起的 A2A 直聊 `chat.send`，BCS 固定下发 2 小时执行预算（`7200000` 毫秒），与 CLI 的轮询超时相互独立。 |
 
 ## 回调 BCS
 
@@ -127,6 +127,7 @@ X-BCN-Event-Id: <uuid>
 - `state` 固定为 `final`。
 - 同一个 `run_id` 只发送一次成功的 final。
 - Provider 重试同一个回调事件时，应保持同一个 `X-BCN-Event-Id`。
+- 事件通过同步请求校验、鉴权和运行关联校验后，BCS 返回 HTTP `200`。如果该事件属于状态机运行，包括 Judge 判定在内的后续处理会在当前 BCS 进程中异步继续；该响应不表示节点或状态机已经完成，且 BCS 进程退出后不会恢复尚未完成的处理。
 
 ## 错误响应
 

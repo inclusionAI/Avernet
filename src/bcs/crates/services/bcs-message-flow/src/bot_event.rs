@@ -9,7 +9,7 @@ use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
     BotEventCommand, BotEventOutcome, BotTerminalEvent, BotTerminalState,
-    ChannelOutboundEventKind, ChannelRenderHint,
+    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
     ChatEventRouting, ChatEventState, ChatResponseMode,
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
     FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy, MessageDeliveryResult,
@@ -224,6 +224,10 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
     };
 
     let (sender_role, sender_label) = resolve_channel_sender(flow, cmd).await;
+    let source_im_message_id = flow
+        .message_tracker
+        .channel_source_message_id(&cmd.run_id)
+        .await;
     let text = channel_outbound_text(kind, cmd);
     let raw_payload = if kind == ChannelOutboundEventKind::System {
         serde_json::json!({ "state": channel_terminal_state(&cmd.state) })
@@ -249,9 +253,11 @@ async fn try_channel_outbound(flow: &BcsMessageFlow, cmd: &BotEventCommand) {
             sender_role,
             sender_label,
             kind,
+            purpose: ChannelOutboundPurpose::Conversation,
             text: (!text.is_empty()).then_some(text),
             raw_payload,
             render_hint,
+            source_im_message_id,
             source_is_channel: false,
         })
         .await

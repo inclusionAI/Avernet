@@ -35,6 +35,43 @@ class SkillRepository(Protocol):
                     env: str | None = None) -> list[dict]:
         ...
 
+    def get_bot_local_by_name(
+        self,
+        *,
+        bot_id: str,
+        name: str,
+        user_id: str | None = None,
+    ) -> dict | None:
+        """精确查询 Bot 自有的同名 local 技能，不包含全局行。"""
+        ...
+
+    def list_bot_local_by_name(self, *, bot_id: str, name: str) -> list[dict]:
+        """Return every exact Bot-local same-name row for ambiguity handling.
+
+        The caller resolves legacy owner semantics after it holds the Bot Skill
+        layout edit lock; this method deliberately does not pick a winner.
+        """
+        ...
+
+    def list_bot_local_skills(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        page: int,
+        page_size: int,
+        active: bool | None,
+        keyword: str | None,
+    ) -> tuple[int, list[dict]]:
+        """Page exact Bot-owned ``local://`` desired-state Skill metadata."""
+        ...
+
+    def get_bot_local_skill(
+        self, *, skill_id: str, bot_id: str, user_id: str
+    ) -> dict | None:
+        """Return one exact Bot-owned ``local://`` Skill with desired state."""
+        ...
+
     def create(self, skill_data: dict) -> dict:
         ...
 
@@ -42,6 +79,23 @@ class SkillRepository(Protocol):
         ...
 
     def delete(self, skill_id: str) -> bool:
+        ...
+
+    def list_skill_set_references(
+        self,
+        skill_id: str,
+        skill_uuid: str | None = None,
+    ) -> list[dict]:
+        """Return every current-environment SkillSet association for a Skill."""
+
+    def add_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
+        ...
+
+    def remove_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
         ...
 
     def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:
@@ -143,6 +197,16 @@ class SkillSetRepository(Protocol):
         ...
 
     def remove_skill_from_set(self, skill_set_id: str, skill_id: str) -> bool:
+        ...
+
+    def add_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
+        ...
+
+    def remove_default_skill_exclusion(
+        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
+    ) -> bool:
         ...
 
     def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,

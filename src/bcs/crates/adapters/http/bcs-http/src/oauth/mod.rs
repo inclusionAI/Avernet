@@ -388,9 +388,11 @@ pub struct UserInfoResponse {
 ///   `X-Mock-*` headers.
 ///
 /// This keeps `/auth/user` source-agnostic: new authentication plugins work
-/// here without changes, and there is no duplicated JWT/cookie logic. If the
-/// chain yields no identity, 401 is returned (preserving the
-/// `require_authentication` semantics).
+/// here without changes, and there is no duplicated JWT/cookie logic. 401 is
+/// returned when the chain yields no identity OR yields a principal whose
+/// `user_id` is `None`/empty (a non-human principal is not a human login;
+/// returning 200 with an empty user_id would make the caller appear logged
+/// in), preserving the `require_authentication` semantics.
 pub async fn current_user_handler(
     State(state): State<Arc<OAuthRouteState>>,
     headers: HeaderMap,
@@ -402,16 +404,28 @@ pub async fn current_user_handler(
 
     match chain.authenticate(&headers).await {
         Ok(result) => match result.principal {
-            Some(principal) => (StatusCode::OK, Json(UserInfoResponse {
-                user_id: principal.user_id.unwrap_or_default(),
-                name: principal.user_name,
-                provider: principal
-                    .source_name
-                    .unwrap_or_else(|| "chain".to_string()),
-                avatar: principal.avatar,
-            }))
-                .into_response(),
-            None => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
+            // A principal without a non-empty `user_id` is not a human login
+            // (e.g. a bot-only principal). `/auth/user` is the "who am I?"
+            // endpoint for human users: returning 200 with an empty user_id
+            // would make the frontend treat the caller as logged in. Treat
+            // `None` / empty the same as an anonymous request.
+            Some(principal)
+                if principal
+                    .user_id
+                    .as_deref()
+                    .is_some_and(|id| !id.is_empty()) =>
+            {
+                (StatusCode::OK, Json(UserInfoResponse {
+                    user_id: principal.user_id.unwrap(),
+                    name: principal.user_name,
+                    provider: principal
+                        .source_name
+                        .unwrap_or_else(|| "chain".to_string()),
+                    avatar: principal.avatar,
+                }))
+                    .into_response()
+            }
+            _ => (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "not authenticated"})))
                 .into_response(),
         },
         Err(e) => {
@@ -459,5 +473,88 @@ pub async fn get_user_handler(
             warn!(error = %e, "get_identity_by_user_id failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use axum::body::to_bytes;
+    use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource};
+    use bcs_test_support::{NoopAuthPlugin, NoopUserIdentityPort};
+
+    /// A chain plugin that always yields a principal with the given `user_id`
+    /// (which may be `None`), so the empty/missing-user_id branch of
+    /// `current_user_handler` is reachable without depending on any specific
+    /// config-driven plugin's input validation.
+    struct FixedUserPlugin {
+        user_id: Option<String>,
+    }
+
+    #[async_trait]
+    impl AuthPlugin for FixedUserPlugin {
+        fn can_authenticate(&self, _headers: &HeaderMap) -> bool {
+            true
+        }
+        async fn authenticate(
+            &self,
+            _headers: &HeaderMap,
+        ) -> Result<Option<AuthPrincipal>, AuthError> {
+            let mut p = AuthPrincipal::new(AuthSource::Local);
+            p.user_id = self.user_id.clone();
+            Ok(Some(p))
+        }
+        fn priority(&self) -> u8 {
+            10
+        }
+        fn name(&self) -> &'static str {
+            "fixed"
+        }
+    }
+
+    fn chain_with(user_id: Option<String>) -> Arc<AuthPluginChain> {
+        Arc::new(AuthPluginChain::new(vec![
+            Box::new(FixedUserPlugin { user_id }),
+            Box::new(NoopAuthPlugin),
+        ]))
+    }
+
+    async fn run_current_user(chain: Arc<AuthPluginChain>) -> (StatusCode, serde_json::Value) {
+        let state = Arc::new(OAuthRouteState::new_chain_only(
+            Arc::new(NoopUserIdentityPort),
+            chain,
+        ));
+        let resp = current_user_handler(State(state), HeaderMap::new())
+            .await
+            .into_response();
+        let status = resp.status();
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body");
+        let body = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, body)
+    }
+
+    /// A principal whose `user_id` is `None` is not a human login — `/auth/user`
+    /// must NOT return 200 with an empty user_id.
+    #[tokio::test]
+    async fn current_user_rejects_principal_without_user_id() {
+        let (status, body) = run_current_user(chain_with(None)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "no user_id => 401, got {body}");
+    }
+
+    /// A principal whose `user_id` is an empty string must likewise be treated
+    /// as not authenticated, not as a logged-in user with id "".
+    #[tokio::test]
+    async fn current_user_rejects_principal_with_empty_user_id() {
+        let (status, body) = run_current_user(chain_with(Some(String::new()))).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "empty user_id => 401, got {body}");
+    }
+
+    /// Regression guard: a populated user_id still returns 200.
+    #[tokio::test]
+    async fn current_user_accepts_principal_with_user_id() {
+        let (status, body) = run_current_user(chain_with(Some("u-123".to_string()))).await;
+        assert_eq!(status, StatusCode::OK, "real user_id => 200, got {body}");
+        assert_eq!(body["user_id"], "u-123");
     }
 }

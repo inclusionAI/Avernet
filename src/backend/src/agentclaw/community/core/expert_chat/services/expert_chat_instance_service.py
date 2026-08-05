@@ -27,12 +27,19 @@ stands alone and is wired into the DI graph for callers to inject.
 """
 from __future__ import annotations
 
+import asyncio
 import traceback
 from typing import Any, Dict, Optional
 
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
+from agentclaw.community.core.caller_identity.protocols import (
+    CallerIdentityTokenExchangeProtocol,
+    CallerRuntimeUpdaterProtocol,
+    CallerTokenProviderProtocol,
+)
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.expert_chat.errors import (
@@ -49,6 +56,9 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -63,7 +73,10 @@ class ExpertChatInstanceService:
     ``ExpertChatInstanceRepository`` (ledger), ``BaasService`` (container
     lifecycle), ``BotPublishRepositoryProtocol`` (success publish order /
     migration_path reverse-lookup), ``BotRepository`` (bot info lookup),
-    ``DeviceBindingRepository`` (device binding for caller containers).
+    ``DeviceBindingRepository`` (device binding for caller containers),
+    ``CallerIdentityTokenExchangeProtocol`` (caller identity exchange),
+    ``CallerTokenProviderProtocol`` (token exchange), ``CallerRuntimeUpdaterProtocol``
+    (runtime identity update).
     """
 
     @inject
@@ -75,6 +88,9 @@ class ExpertChatInstanceService:
         bot_repo: BotRepository,
         binding_repo: DeviceBindingRepository,
         bot_build_service: BotBuildService,
+        caller_identity: CallerIdentityTokenExchangeProtocol,
+        token_provider: CallerTokenProviderProtocol,
+        runtime_updater: CallerRuntimeUpdaterProtocol,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
@@ -82,6 +98,9 @@ class ExpertChatInstanceService:
         self._bot_repo = bot_repo
         self._binding_repo = binding_repo
         self._bot_build_service = bot_build_service
+        self._caller_identity = caller_identity
+        self._token_provider = token_provider
+        self._runtime_updater = runtime_updater
 
     # ------------------------------------------------------------------
     # Public entry
@@ -92,6 +111,7 @@ class ExpertChatInstanceService:
         bot_id: str,
         owner_id: str,
         force_upgrade: bool = False,
+        iam_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Return the caller's container ``connection``.
 
@@ -106,6 +126,7 @@ class ExpertChatInstanceService:
             force_upgrade: If True, skip the version check fast path and
                 always execute create/upgrade flow, even when the instance
                 is in success state with the latest version.
+            iam_token: IAM token (optional).
 
         Raises:
             BotNotPublishedError: no success publish order for the service
@@ -119,6 +140,7 @@ class ExpertChatInstanceService:
             bot_id, owner_id
         )
         version = publish_record.version or 1
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # --- Step 1: look up / create instance row ---
         instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
@@ -178,6 +200,7 @@ class ExpertChatInstanceService:
                     user_id=user_id,
                     migration_path=migration_path,
                     version=version,
+                    docker_image=image_pin.docker_image,
                 )
                 bot_uuid = order["bot_uuid"]
                 baas_publish_id = order.get("publish_id")
@@ -199,12 +222,14 @@ class ExpertChatInstanceService:
                     owner_id=owner_id,
                     migration_path=migration_path,
                     version=version,
+                    docker_image=image_pin.docker_image,
                 )
                 bot_uuid = upgraded["bot_uuid"]
                 baas_publish_id = upgraded.get("publish_id")
                 binding_id = ext.get("binding_id")
                 ext = dict(ext)
                 ext["baas_publish_id"] = baas_publish_id
+                ext["version"] = version
                 if "bot_uuid" not in ext:
                     ext["bot_uuid"] = bot_uuid
             else:
@@ -240,6 +265,23 @@ class ExpertChatInstanceService:
                         "[ExpertChatInstance] Updated binding status: binding_id=%s status=%s",
                         binding_id, binding_status,
                     )
+
+                # Exchange caller identity when container is successfully pulled
+                if status == "SUCCESS":
+                    if iam_token:
+                        await self._exchange_caller_identity(
+                            iam_token=iam_token,
+                            user_id=user_id,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            publish_id=service_bot_publish_id,
+                            binding_id=binding_id,
+                        )
+                    else:
+                        logger.warning(
+                            "[ExpertChatInstance] Skip caller identity exchange: no iam_token provided bot=%s owner=%s user=%s",
+                            bot_id, owner_id, user_id,
+                        )
 
                 ext = dict(ext)
                 ext["baas_publish"] = progress
@@ -358,6 +400,7 @@ class ExpertChatInstanceService:
         user_id: str,
         migration_path: Optional[str],
         version: int = 1,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """Call ``release_async`` and return the publish order.
 
@@ -385,6 +428,7 @@ class ExpertChatInstanceService:
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                docker_image=docker_image,
             )
         except Exception as e:
             logger.error(
@@ -438,6 +482,7 @@ class ExpertChatInstanceService:
         owner_id: str,
         migration_path: Optional[str],
         version: int = 1,
+        docker_image: str | None = None,
     ) -> Dict[str, Any]:
         """Upgrade a RELEASED container, preferring ``bot_uuid`` preservation.
 
@@ -465,6 +510,7 @@ class ExpertChatInstanceService:
                 device_count=1,
                 publish_stage=PublishStage.ONLINE,
                 version=str(version),
+                docker_image=docker_image,
             )
             logger.info(
                 "[ExpertChatInstance] upgrade_async succeeded: bot_uuid=%s",
@@ -537,3 +583,55 @@ class ExpertChatInstanceService:
             "tenant": ws_info.tenant,
             "bot_uuid": ws_info.bot_uuid,
         }
+
+    # ------------------------------------------------------------------
+    # Caller identity exchange
+    # ------------------------------------------------------------------
+    async def _exchange_caller_identity(
+        self,
+        *,
+        iam_token: str,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        publish_id: int,
+        binding_id: Optional[int] = None,
+    ) -> None:
+        """Exchange and install Caller credential for the container.
+
+        Called after the container is successfully pulled (status == "SUCCESS").
+        Failures are logged but do not interrupt the container startup flow.
+
+        Args:
+            iam_token: IAM token for authentication.
+            user_id: The caller's user ID.
+            bot_id: The bot ID.
+            owner_id: The bot owner's ID.
+            publish_id: The service bot publish record ID.
+            binding_id: The device binding ID (optional).
+        """
+        try:
+            await asyncio.to_thread(
+                self._caller_identity.exchange_caller_identity,
+                iam_token=iam_token,
+                caller_user_id=user_id,
+                bot_id=bot_id,
+                owner_user_id=owner_id,
+                token_provider=self._token_provider,
+                runtime_updater=self._runtime_updater,
+                stage=CallerIdentityStage.ONLINE.value,
+                publish_id=publish_id,
+                entity_id=owner_id,
+                binding_id=binding_id,
+                is_test_exchange=False,
+            )
+            logger.info(
+                "[ExpertChatInstance] Caller identity exchange succeeded: bot=%s owner=%s user=%s",
+                bot_id, owner_id, user_id,
+            )
+        except Exception as e:
+            # Log error but do not interrupt container startup
+            logger.error(
+                "[ExpertChatInstance] Caller identity exchange failed: bot=%s owner=%s user=%s error=%s",
+                bot_id, owner_id, user_id, e,
+            )

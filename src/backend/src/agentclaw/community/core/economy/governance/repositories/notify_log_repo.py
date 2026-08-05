@@ -2,7 +2,7 @@
 
 Collects notification-log SELECT/INSERT access that was previously
 scattered as raw ``session.query(...)`` across the scan, feedback and
-emergency services.
+admin services.
 
 Audit access has been moved to ``GovernanceAuditRepository``
 (see ``audit_repo.py``) — one repo per table (R2).
@@ -26,12 +26,33 @@ from agentclaw.community.core.economy.governance.domain.enums import (
 from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
 from agentclaw.community.core.economy.governance.repositories.orm import (
     GovernanceNotificationOrm,
+    GovernanceTicketOrm,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 
 log = get_logger(__name__)
+
+
+def _update_ticket_delivery_status(
+    session: object, ticket_id: str, status: str,
+) -> None:
+    """同 session 回写 task_record.delivery_status(投递链路状态变更后调)。
+
+    Args:
+        session: 已开启的 ORM session(不自行管理事务,复用调用方的 orm_session)。
+        ticket_id: 工单稳定 UUID。
+        status: 投递状态单值(pending/sent/failed/cancelled)。
+    """
+    if not ticket_id:
+        return
+    session.query(GovernanceTicketOrm).filter(
+        GovernanceTicketOrm.ticket_id == ticket_id,
+    ).update(
+        {GovernanceTicketOrm.delivery_status: status},
+        synchronize_session=False,
+    )
 
 
 class NotifyLogRepository:
@@ -110,8 +131,37 @@ class NotifyLogRepository:
             )
             return [GovernanceNotification.from_orm(r) for r in rows]
 
+    def list_by_ticket(
+        self,
+        ticket_id: str,
+        *,
+        only_pending: bool = False,
+    ) -> list[GovernanceNotification]:
+        """A ticket's notify_log rows (all notify types), newest first — domain models.
+
+        Args:
+            ticket_id: 工单稳定 UUID。
+            only_pending: True → 仅 pending/sending(待回复)通知。
+
+        Returns:
+            该 ticket 关联的通知列表(notification_id/notify_status/...)。
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            q = s.query(GovernanceNotificationOrm).filter(
+                GovernanceNotificationOrm.ticket_id == ticket_id,
+                GovernanceNotificationOrm.env == _env,
+            )
+            if only_pending:
+                q = q.filter(
+                    GovernanceNotificationOrm.notify_status.in_(("pending", "sending")),
+                )
+            rows = q.order_by(GovernanceNotificationOrm.gmt_create.desc()).all()
+            return [GovernanceNotification.from_orm(r) for r in rows]
+
     # ------------------------------------------------------------------
-    # notify_log — emergency-scope queries
+    # notify_log — admin-scope queries
     # ------------------------------------------------------------------
 
     def count_pending(
@@ -297,6 +347,11 @@ class NotifyLogRepository:
                     synchronize_session="fetch",
                 )
             )
+            if count > 0:
+                _update_ticket_delivery_status(
+                    s, ticket_id,
+                    NotifyStatus.CANCELLED.value,
+                )
             return count
 
     def has_pending_or_sending_reminder(
@@ -348,6 +403,15 @@ class NotifyLogRepository:
                     synchronize_session="fetch",
                 )
             )
+            if result == 1:
+                row = s.query(GovernanceNotificationOrm).filter(
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                ).first()
+                if row and row.ticket_id:
+                    _update_ticket_delivery_status(
+                        s, row.ticket_id,
+                        NotifyStatus.PENDING.value,  # sending → pending (投递中仍属待发送态)
+                    )
             return result == 1
 
     def mark_sent(
@@ -375,6 +439,15 @@ class NotifyLogRepository:
                     synchronize_session="fetch",
                 )
             )
+            if result == 1:
+                row = s.query(GovernanceNotificationOrm).filter(
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                ).first()
+                if row and row.ticket_id:
+                    _update_ticket_delivery_status(
+                        s, row.ticket_id,
+                        NotifyStatus.SENT.value,  # 投递成功
+                    )
             return result == 1
 
     def mark_send_failed(
@@ -405,6 +478,16 @@ class NotifyLogRepository:
                     synchronize_session="fetch",
                 )
             )
+            if result == 1:
+                row = s.query(GovernanceNotificationOrm).filter(
+                    GovernanceNotificationOrm.notification_id == notification_id,
+                ).first()
+                if row and row.ticket_id:
+                    fail_status = NotifyStatus.FAILED.value if is_terminal else NotifyStatus.PENDING.value
+                    _update_ticket_delivery_status(
+                        s, row.ticket_id,
+                        fail_status,  # 终态失败/回退待发
+                    )
             return result == 1
 
     # ------------------------------------------------------------------
@@ -477,7 +560,7 @@ class NotifyLogRepository:
             session.flush()
 
     # ------------------------------------------------------------------
-    # Delete path (admin emergency) — self-managed session
+    # Delete path (admin) — self-managed session
     # ------------------------------------------------------------------
 
     def delete_by_notification_ids(
@@ -533,6 +616,44 @@ class NotifyLogRepository:
             existing_ids = {r.notification_id for r in existing}
             not_found = [i for i in notification_ids if i not in existing_ids]
             return len(existing_ids), not_found
+
+    def count_by_ticket_id(self, ticket_id: str) -> int:
+        """Count notify_log rows belonging to a ticket_id (env-scoped).
+
+        Used by ticket-cascade dry-run preview. Returns the number of
+        notification rows that share this ticket_id within the current env.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            return (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .count()
+            )
+
+    def delete_by_ticket_id(self, ticket_id: str) -> int:
+        """Delete all notify_log rows belonging to a ticket_id (env-scoped).
+
+        Single-SQL bulk delete (`WHERE env=? AND ticket_id=?`, backed by
+        ``idx_econ_gov_notify_ticket_id``). Returns the number of rows
+        deleted. Used by ticket-cascade best-effort notify cleanup.
+        """
+        _env = get_current_env()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            deleted = (
+                s.query(GovernanceNotificationOrm)
+                .filter(
+                    GovernanceNotificationOrm.ticket_id == ticket_id,
+                    GovernanceNotificationOrm.env == _env,
+                )
+                .delete(synchronize_session=False)
+            )
+            return deleted
 
     # ------------------------------------------------------------------
     # Command methods (P4 — Service→Repo ORM relocation)

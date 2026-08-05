@@ -33,6 +33,18 @@ async def list_sessions(
         ),
     ),
     query: str | None = Query(default=None, description="Fuzzy search on session name and user input"),
+    biz_scene: str | None = Query(default=None, description="Business scene"),
+    biz_task_id: str | None = Query(default=None, description="Business task ID"),
+    group_id: str | None = Query(default=None, description="BCS group ID"),
+    match_mode: str = Query(default="exact", pattern="^(exact|contains)$"),
+    include_output_match: bool = Query(
+        default=False, description="Include trace output in keyword matching"
+    ),
+    time_scope: str = Query(
+        default="default",
+        pattern="^(default|all)$",
+        description="Use 'all' only for an exact identifier lookup",
+    ),
     from_date: datetime | None = Query(default=None, description="Start time (ISO 8601)"),
     to_date: datetime | None = Query(default=None, description="End time (ISO 8601)"),
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -58,9 +70,17 @@ async def list_sessions(
             session_id=session_id,
             session_key=session_key,
             query=query,
+            biz_scene=biz_scene,
+            biz_task_id=biz_task_id,
+            group_id=group_id,
+            match_mode=match_mode,
+            include_output_match=include_output_match,
+            time_scope=time_scope,
             log_source=log_source,
         )
         return ApiResponse(success=True, message="ok", data=result)
+    except ValueError as e:
+        return ApiResponse(success=False, message=str(e), error_code=4000)
     except LangfuseAPIError as e:
         return ApiResponse(success=False, message=str(e), error_code=5999)
     except Exception as e:

@@ -53,6 +53,19 @@ class BotRepository(Protocol):
         """List all bot records by UUID (all statuses) with tenant+env isolation."""
         ...
 
+    def list_by_bot_uuid_including_deleted(
+        self, bot_uuid: str, tenant: str, env: str
+    ) -> list[BotRecord]:
+        """List all bot records by UUID including soft-deleted ones.
+
+        A successful DESTROY soft-deletes the bot record, which would otherwise
+        hide its publishes (incl. the DESTROY workflow) from the publishes-by-bot
+        listing — blinding client-side adopt-by-query for destroy operations.
+        This variant keeps them visible; ``get_by_id_including_deleted`` exists
+        for the same DESTROY reason.
+        """
+        ...
+
     def get_active_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str
     ) -> BotRecord | None:

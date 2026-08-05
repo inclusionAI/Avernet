@@ -1,0 +1,1910 @@
+//! Session file workspace HTTP routes.
+//!
+//! Surface: 11 handlers covering three-stage upload (prepare / upload /
+//! complete), delete, list, get, capabilities, download (302/stream), share
+//! mint, shared-file meta/content. Mutate authz (delete/share) is resolved in
+//! the HTTP layer (`session_creator` + `driver_bot` + `caller_identities`) and
+//! fed to the service via commands; the HTTP layer never judges ownership.
+//!
+//! Route-registration ordering note: `/files/capabilities` is registered before
+//! `/files/{file_id}` — axum matchit is static-first by default, and an
+//! explicit regression test guards it.
+
+use axum::{
+    Json,
+    body::{Body, BodyDataStream},
+    extract::{Path, Query, State},
+    http::{header, HeaderMap, StatusCode, Uri},
+    response::{IntoResponse, Redirect, Response},
+};
+use bytes::Bytes;
+use futures::Stream;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use bcs_domain::{ActorKind, ActorRef, FileStatus, Participant, SessionFile, SystemMessageEvent};
+use bcs_service_api::application::session_files::{
+    CapabilitiesView, DeleteFileCommand, PrepareUploadCommand, SessionFileUseCaseError,
+    ShareMintCommand,
+};
+use bcs_service_api::port::repo::SessionFileListParams;
+use serde::Deserialize;
+use serde_json::json;
+
+use bcs_storage_api::{ByteStream, ByteStreamTrait};
+
+use crate::routes::group_messages::{resolve_group_chat_caller, GroupChatCaller};
+use crate::state::HttpAppState;
+
+/// Adapts an axum `Body` data stream into a `ByteStream` for proxy upload
+/// ingestion, without buffering the whole request body into memory. This lets
+/// the `PUT .../content` route accept large single-part uploads (bytes stream
+/// straight to the storage backend) and sidesteps axum's default 2 MiB body
+/// limit that a buffering `Bytes` extractor would impose (the route also sets
+/// `DefaultBodyLimit::disable`). When a client sends an oversize body, the
+/// backend's per-chunk cap rejects it mid-stream rather than after buffering.
+struct RequestBodyStream(BodyDataStream);
+
+impl Stream for RequestBodyStream {
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.0).poll_next(cx) {
+            Poll::Ready(Some(Ok(b))) => Poll::Ready(Some(Ok(b))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(std::io::Error::other(e)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+impl ByteStreamTrait for RequestBodyStream {}
+
+// ---------------------------------------------------------------
+// DTOs
+// ---------------------------------------------------------------
+
+#[derive(serde::Serialize)]
+struct ActorRefDto {
+    actor_kind: String,
+    actor_id: String,
+}
+
+#[derive(serde::Serialize)]
+struct SessionFileDto {
+    file_id: String,
+    session_id: String,
+    file_name: String,
+    mime_type: String,
+    size: u64,
+    sha256: Option<String>,
+    owner: ActorRefDto,
+    storage_backend: String,
+    status: String,
+    created_at: u64,
+    updated_at: u64,
+    // NOTE: `object_handle` intentionally omitted — internal only, never leaked.
+}
+
+fn status_slug(status: &FileStatus) -> &'static str {
+    use bcs_domain::FileStatus::*;
+    match status {
+        Pending => "Pending",
+        Ready => "Ready",
+        Deleting => "Deleting",
+        Failed => "Failed",
+    }
+}
+
+/// Wire DTO for the shared-file meta endpoint — omits `session_id` so the
+/// share consumer never learns which session the file belongs to.
+#[derive(serde::Serialize)]
+struct SharedFileMetaDto {
+    file_id: String,
+    file_name: String,
+    mime_type: String,
+    size: u64,
+    sha256: Option<String>,
+    owner: ActorRefDto,
+    storage_backend: String,
+    status: String,
+    created_at: u64,
+    updated_at: u64,
+}
+
+fn to_shared_dto(f: &SessionFile) -> SharedFileMetaDto {
+    SharedFileMetaDto {
+        file_id: f.file_id.clone(),
+        file_name: f.file_name.clone(),
+        mime_type: f.mime_type.clone(),
+        size: f.size,
+        sha256: f.sha256.clone(),
+        owner: ActorRefDto {
+            actor_kind: match f.owner.actor_kind {
+                ActorKind::Bot => "Bot".to_string(),
+                ActorKind::Human => "Human".to_string(),
+            },
+            actor_id: f.owner.actor_id.clone(),
+        },
+        storage_backend: f.storage_backend.clone(),
+        status: status_slug(&f.status).to_string(),
+        created_at: f.created_at,
+        updated_at: f.updated_at,
+    }
+}
+
+fn to_dto(f: &SessionFile) -> SessionFileDto {
+    SessionFileDto {
+        file_id: f.file_id.clone(),
+        session_id: f.session_id.clone(),
+        file_name: f.file_name.clone(),
+        mime_type: f.mime_type.clone(),
+        size: f.size,
+        sha256: f.sha256.clone(),
+        owner: ActorRefDto {
+            actor_kind: match f.owner.actor_kind {
+                ActorKind::Bot => "Bot".to_string(),
+                ActorKind::Human => "Human".to_string(),
+            },
+            actor_id: f.owner.actor_id.clone(),
+        },
+        storage_backend: f.storage_backend.clone(),
+        status: status_slug(&f.status).to_string(),
+        created_at: f.created_at,
+        updated_at: f.updated_at,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PrepareRequest {
+    pub file_name: String,
+    pub size: u64,
+    pub mime_type: String,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ListQuery {
+    #[serde(default)]
+    pub prefix: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct ShareRequest {
+    #[serde(default)]
+    pub ttl_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct DownloadQuery {
+    #[serde(default)]
+    pub ttl: Option<u64>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub show: bool,
+}
+
+// ---------------------------------------------------------------
+// Error mapping
+// ---------------------------------------------------------------
+//
+// Spec error-code table:
+//   NotFound            -> 404 FILE_NOT_FOUND
+//   Forbidden           -> 403 FORBIDDEN
+//   PayloadTooLarge     -> 413 PAYLOAD_TOO_LARGE
+//   InvalidInput        -> 400 INVALID_INPUT
+//   Conflict            -> 409 INVALID_TRANSITION
+//   InvalidState        -> 422 INVALID_STATE
+//   Backend             -> 502 STORAGE_BACKEND
+//   Internal            -> 500 INTERNAL
+
+fn err_to_response(err: SessionFileUseCaseError) -> Response {
+    use SessionFileUseCaseError::*;
+    let (code, status) = match &err {
+        NotFound(_) => ("FILE_NOT_FOUND", StatusCode::NOT_FOUND),
+        Forbidden(_) => ("FORBIDDEN", StatusCode::FORBIDDEN),
+        PayloadTooLarge(_) => ("PAYLOAD_TOO_LARGE", StatusCode::PAYLOAD_TOO_LARGE),
+        InvalidInput(_) => ("INVALID_INPUT", StatusCode::BAD_REQUEST),
+        Conflict(_) => ("INVALID_TRANSITION", StatusCode::CONFLICT),
+        InvalidState(_) => ("INVALID_STATE", StatusCode::UNPROCESSABLE_ENTITY),
+        Backend => ("STORAGE_BACKEND", StatusCode::BAD_GATEWAY),
+        Internal(_) => ("INTERNAL", StatusCode::INTERNAL_SERVER_ERROR),
+    };
+    (
+        status,
+        Json(json!({ "error": code, "message": err.to_string() })),
+    )
+        .into_response()
+}
+
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "error": "UNAUTHORIZED" })),
+    )
+        .into_response()
+}
+
+fn forbidden_not_participant() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({ "error": "FORBIDDEN", "message": "not a session participant" })),
+    )
+        .into_response()
+}
+
+/// Uniform 404 for all `share_consume` failures — closes the token-validity /
+/// file-existence oracle. The underlying `SessionFileUseCaseError` variants
+/// (InvalidInput / InvalidState / NotFound / …) stay distinct at the service
+/// layer for tests; the HTTP surface never distinguishes them.
+fn share_consume_err_to_response() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "error": "NOT_FOUND", "message": "shared file not found" })),
+    )
+        .into_response()
+}
+
+// ---------------------------------------------------------------
+// Caller helpers
+// ---------------------------------------------------------------
+
+fn caller_to_actor_ref(caller: &GroupChatCaller) -> ActorRef {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => ActorRef {
+            actor_kind: ActorKind::Bot,
+            actor_id: bot_uuid.clone(),
+        },
+        GroupChatCaller::Human(h) => ActorRef {
+            actor_kind: ActorKind::Human,
+            actor_id: h.actor_id.clone(),
+        },
+    }
+}
+
+/// Collect the caller actor_id plus any bots owned by that human (for Humans),
+/// or just the bot_uuid (for Bots). Used to feed mutate-authz into the service.
+async fn caller_identities(state: &HttpAppState, caller: &GroupChatCaller) -> Vec<String> {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => vec![bot_uuid.clone()],
+        GroupChatCaller::Human(h) => {
+            let mut ids = vec![h.actor_id.clone()];
+            for b in state
+                .services
+                .registry
+                .list_bots_by_creator(&h.staff_no)
+                .await
+            {
+                ids.push(b.bot_uuid);
+            }
+            ids
+        }
+    }
+}
+
+/// Verify the caller is a member of the session and return the loaded session
+/// for reuse. Returns `None` when the session or its parent group is missing,
+/// or the caller is not a member (handler should 403).
+///
+/// Membership is judged against the session's *own* participants, not the
+/// group's seed: session participants are seeded from the group at creation
+/// and then evolve independently (see `Session::participants`). A participant
+/// may be added to a session without joining the parent group
+/// (`add_session_participant`), and the group's list may change without
+/// affecting an in-flight session. Checking `group.participants` here would
+/// wrongly deny a session-only participant or drift once the session diverges.
+///
+/// Returning the session lets mutate handlers (e.g. share) reuse the already
+/// loaded `participants` for service-layer authz instead of fetching again.
+async fn ensure_session_member(
+    state: &HttpAppState,
+    sid: &str,
+    caller: &GroupChatCaller,
+) -> Option<bcs_service_api::Session> {
+    let sess = match state.services.session_management.get(sid).await {
+        Ok(Some(s)) => s,
+        _ => return None,
+    };
+    // The session is always scoped to a parent group; require it to still
+    // exist. Membership, however, is judged against the session's own
+    // participants — not the group's seed.
+    if state.services.group.get(&sess.group_id).await.is_none() {
+        return None;
+    }
+    let is_member = match caller {
+        GroupChatCaller::Bot { bot_uuid } => sess
+            .participants
+            .iter()
+            .any(|p| &p.bot_uuid == bot_uuid),
+        GroupChatCaller::Human(h) => {
+            crate::routes::sessions::human_has_session_access(
+                state,
+                &sess,
+                &h.actor_id,
+                &h.staff_no,
+            )
+            .await
+        }
+    };
+    if is_member {
+        Some(sess)
+    } else {
+        None
+    }
+}
+
+/// Resolve mutate-authz inputs (session_creator + driver_bot) for delete/share
+/// commands. Returns `(session_creator, driver_bot)`.
+async fn resolve_mutate_authz(
+    state: &HttpAppState,
+    sid: &str,
+) -> (Option<String>, Option<String>) {
+    let sess = state
+        .services
+        .session_management
+        .get(sid)
+        .await
+        .ok()
+        .flatten();
+    let group = match sess.as_ref() {
+        Some(s) => state.services.group.get(&s.group_id).await,
+        None => None,
+    };
+    let session_creator = sess.as_ref().and_then(|s| s.created_by.clone());
+    let driver_bot = group.as_ref().map(|g| g.driver_bot.clone());
+    (session_creator, driver_bot)
+}
+
+// ---------------------------------------------------------------
+// Step 3: prepare_upload
+// ---------------------------------------------------------------
+
+pub async fn prepare_upload(
+    State(state): State<HttpAppState>,
+    Path(sid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    Json(body): Json<PrepareRequest>,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let cmd = PrepareUploadCommand {
+        session_id: sid.clone(),
+        file_name: body.file_name,
+        size: body.size,
+        mime_type: body.mime_type,
+        caller: caller_to_actor_ref(&caller),
+    };
+    match state.services.session_files.prepare_upload(cmd).await {
+        Ok(r) => {
+            let mut v = r.client_target_json.clone();
+            v["file_id"] = json!(r.file.file_id);
+            (StatusCode::CREATED, Json(v)).into_response()
+        }
+        Err(e) => err_to_response(e),
+    }
+}
+
+// ---------------------------------------------------------------
+// Step 5: upload_bytes + complete_upload
+// ---------------------------------------------------------------
+
+pub async fn upload_bytes(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    body: Body,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let part = uri
+        .query()
+        .and_then(|q| q.split('&').find(|p| p.starts_with("part=")))
+        .and_then(|p| p["part=".len()..].parse().ok());
+    // Content-Length is absent for chunked (streamed) request bodies — e.g. the
+    // CLI's `Body::wrap_stream` uploads. Pass 0 = "unknown" so the service
+    // skips its size-equality guard and relies on the backend's per-chunk cap
+    // plus `complete_upload`'s cumulative-size check.
+    let content_length = headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let stream: ByteStream = Box::new(RequestBodyStream(body.into_data_stream()));
+    match state
+        .services
+        .session_files
+        .stream_upload(&sid, &file_id, part, stream, content_length)
+        .await
+    {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(json!({ "file_id": file_id, "status": "Pending" })),
+        )
+            .into_response(),
+        Err(e) => err_to_response(e),
+    }
+}
+
+pub async fn complete_upload(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    let sess = match ensure_session_member(&state, &sid, &caller).await {
+        Some(s) => s,
+        None => return forbidden_not_participant(),
+    };
+    match state
+        .services
+        .session_files
+        .complete_upload(&sid, &file_id)
+        .await
+    {
+        Ok(f) => {
+            notify_file_uploaded(&state, &sess, &sid, &caller, &f).await;
+            (StatusCode::OK, Json(json!(to_dto(&f)))).into_response()
+        }
+        Err(e) => err_to_response(e),
+    }
+}
+
+// ---------------------------------------------------------------
+// Step 6: delete_file + list_files + get_file + capabilities
+// ---------------------------------------------------------------
+
+pub async fn delete_file(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let (session_creator, driver_bot) = resolve_mutate_authz(&state, &sid).await;
+    let cmd = DeleteFileCommand {
+        session_id: sid,
+        file_id,
+        caller: caller_to_actor_ref(&caller),
+        caller_identities: caller_identities(&state, &caller).await,
+        session_creator,
+        driver_bot,
+    };
+    match state.services.session_files.delete_file(cmd).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err_to_response(e),
+    }
+}
+
+pub async fn list_files(
+    State(state): State<HttpAppState>,
+    Path(sid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(q): Query<ListQuery>,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let status: Option<FileStatus> = match q.status.as_deref() {
+        Some("Pending") => Some(FileStatus::Pending),
+        Some("Ready") => Some(FileStatus::Ready),
+        Some("Deleting") => Some(FileStatus::Deleting),
+        Some("Failed") => Some(FileStatus::Failed),
+        Some(invalid) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({
+                "error": "INVALID_INPUT",
+                "message": format!("invalid status value: {invalid}"),
+            }))).into_response();
+        }
+        None => None,
+    };
+    let params = SessionFileListParams {
+        prefix: q.prefix,
+        status,
+        limit: q.limit.unwrap_or(100),
+        offset: q.offset.unwrap_or(0),
+    };
+    match state.services.session_files.list(&sid, params).await {
+        Ok(page) => Json(json!({
+            "items": page.items.iter().map(to_dto).collect::<Vec<_>>(),
+            "total": page.total,
+        }))
+        .into_response(),
+        Err(e) => err_to_response(e),
+    }
+}
+
+pub async fn get_file(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    match state.services.session_files.get(&sid, &file_id).await {
+        Ok(f) => (StatusCode::OK, Json(json!(to_dto(&f)))).into_response(),
+        Err(e) => err_to_response(e),
+    }
+}
+
+pub async fn capabilities(
+    State(state): State<HttpAppState>,
+    Path(sid): Path<String>,
+    headers: HeaderMap,
+    uri: Uri,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    let c: CapabilitiesView = state.services.session_files.capabilities().await;
+    (StatusCode::OK, Json(json!(c))).into_response()
+}
+
+// ---------------------------------------------------------------
+// Step 7: download_content (302 / streaming)
+// ---------------------------------------------------------------
+
+pub async fn download_content(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(q): Query<DownloadQuery>,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    if ensure_session_member(&state, &sid, &caller).await.is_none() {
+        return forbidden_not_participant();
+    }
+    // TTL hidden from frontend: always None → download_route uses share_link_ttl.
+    download_file_by_id(&state, &sid, &file_id, None, q.show).await
+}
+
+/// Shared streaming/redirect logic for both authenticated download_content
+/// and shared_file_content (post share-consume). Resolves the route and either
+/// 302-redirects to the presigned URL or streams the bytes locally with
+/// Content-Disposition / Content-Type / Content-Length.
+async fn download_file_by_id(
+    state: &HttpAppState,
+    sid: &str,
+    file_id: &str,
+    ttl: Option<u64>,
+    show: bool,
+) -> Response {
+    match state
+        .services
+        .session_files
+        .download_route(sid, file_id, ttl, show)
+        .await
+    {
+        Ok((file, route)) => match route.presign {
+            Some(ticket) => Redirect::to(&ticket.download_url).into_response(),
+            None => match state.services.session_files.get_stream(sid, file_id).await {
+                Ok((_f, stream)) => {
+                    let mut h = HeaderMap::new();
+                    if let Ok(v) = file.mime_type.parse() {
+                        h.insert(header::CONTENT_TYPE, v);
+                    }
+                    if let Ok(v) = file.size.to_string().parse() {
+                        h.insert(header::CONTENT_LENGTH, v);
+                    }
+                    let disposition = if show { "inline" } else { "attachment" };
+                    if let Ok(v) = format!(
+                        "{}; filename=\"{}\"",
+                        disposition,
+                        file.file_name.replace('"', "\\\"")
+                    )
+                    .parse()
+                    {
+                        h.insert(header::CONTENT_DISPOSITION, v);
+                    }
+                    (h, Body::from_stream(stream)).into_response()
+                }
+                Err(e) => err_to_response(e),
+            },
+        },
+        Err(e) => err_to_response(e),
+    }
+}
+
+// ---------------------------------------------------------------
+// Step 8: share_mint + shared_file_meta + shared_file_content (no auth)
+// ---------------------------------------------------------------
+
+pub async fn share_mint(
+    State(state): State<HttpAppState>,
+    Path((sid, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    Json(body): Json<ShareRequest>,
+) -> Response {
+    let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
+        Ok(c) => c,
+        Err(_) => return unauthorized(),
+    };
+    let sess = match ensure_session_member(&state, &sid, &caller).await {
+        Some(s) => s,
+        None => return forbidden_not_participant(),
+    };
+    let cmd = ShareMintCommand {
+        session_id: sid,
+        file_id,
+        caller: caller_to_actor_ref(&caller),
+        ttl_seconds: body.ttl_seconds,
+        caller_identities: caller_identities(&state, &caller).await,
+        session_participants: sess
+            .participants
+            .iter()
+            .map(|p| p.bot_uuid.clone())
+            .collect(),
+    };
+    match state.services.session_files.share_mint(cmd).await {
+        Ok(r) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "share_url": r.share_url,
+                "share_token": r.share_token,
+                "expires_at": r.expires_at,
+            })),
+        )
+            .into_response(),
+        Err(e) => err_to_response(e),
+    }
+}
+
+pub async fn shared_file_meta(
+    State(state): State<HttpAppState>,
+    Query(q): Query<DownloadQuery>,
+) -> Response {
+    let Some(token) = q.token else {
+        return unauthorized();
+    };
+    match state.services.session_files.share_consume(&token).await {
+        Ok(r) => (StatusCode::OK, Json(json!(to_shared_dto(&r.file)))).into_response(),
+        Err(_) => share_consume_err_to_response(),
+    }
+}
+
+pub async fn shared_file_content(
+    State(state): State<HttpAppState>,
+    Query(q): Query<DownloadQuery>,
+) -> Response {
+    let Some(token) = q.token else {
+        return unauthorized();
+    };
+    match state.services.session_files.share_consume(&token).await {
+        Ok(r) => {
+            let sid_owned = r.file.session_id.clone();
+            let fid = r.file.file_id.clone();
+            // TTL hidden from frontend: always None so download_route
+            // uses share_link_ttl. q.ttl is accepted-but-ignored.
+            download_file_by_id(&state, &sid_owned, &fid, None, q.show).await
+        }
+        Err(_) => share_consume_err_to_response(),
+    }
+}
+
+// ---------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------
+
+fn human_readable_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut size = bytes as f64;
+    let mut unit = 0usize;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if size.fract() == 0.0 {
+        format!("{:.0} {}", size, UNITS[unit])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit])
+    }
+}
+
+fn file_download_url(state: &HttpAppState, sid: &str, file_id: &str) -> String {
+    let base = state
+        .bcs_endpoint
+        .clone()
+        .unwrap_or_else(|| format!("http://{}:{}", state.bind, state.port));
+    format!(
+        "{}/sessions/{}/files/{}/content",
+        base,
+        urlencoding::encode(sid),
+        file_id,
+    )
+}
+
+fn file_upload_receivers(
+    participants: &[Participant],
+    uploader_actor_id: &str,
+) -> Vec<Participant> {
+    participants
+        .iter()
+        .filter(|p| p.is_bot() && p.bot_uuid != uploader_actor_id)
+        .cloned()
+        .collect()
+}
+
+async fn uploader_display_name(
+    state: &HttpAppState,
+    caller: &GroupChatCaller,
+) -> (&'static str, String) {
+    match caller {
+        GroupChatCaller::Bot { bot_uuid } => {
+            let name = state
+                .services
+                .registry
+                .get(bot_uuid)
+                .await
+                .and_then(|b| b.capabilities.name.clone())
+                .unwrap_or_else(|| bot_uuid.clone());
+            ("Bot", name)
+        }
+        GroupChatCaller::Human(h) => {
+            let name = h.nick_name.clone().unwrap_or_else(|| h.staff_no.clone());
+            ("用户", name)
+        }
+    }
+}
+
+async fn notify_file_uploaded(
+    state: &HttpAppState,
+    sess: &bcs_service_api::Session,
+    sid: &str,
+    caller: &GroupChatCaller,
+    file: &SessionFile,
+) {
+    let (prefix, name) = uploader_display_name(state, caller).await;
+    let readable = human_readable_size(file.size);
+    let url = file_download_url(state, sid, &file.file_id);
+    let message = format!(
+        "{} {} 上传了一个文件 {} ({}，{})，下载链接：{}",
+        prefix, name, file.file_name, file.file_id, readable, url,
+    );
+    let uploader_actor_id = caller_to_actor_ref(caller).actor_id;
+    let receivers = file_upload_receivers(&sess.participants, &uploader_actor_id);
+    if receivers.is_empty() {
+        return;
+    }
+    let event = SystemMessageEvent::GenericNotification {
+        group_id: sess.group_id.clone(),
+        message,
+        receivers,
+    };
+    let _ = state
+        .services
+        .system_message
+        .notify(&sess.group_id, event, sid, &sess.participants)
+        .await;
+}
+
+// ---------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::router::build_api_router;
+    use crate::state::HttpAppState;
+    use axum::body::to_bytes;
+    use axum::http::{header, HeaderValue, Method, Request, StatusCode};
+    use bcs_bot::BotCore;
+    use bcs_bot_store::MemoryBotRepo;
+    use bcs_domain::{
+        ActorKind as DomainActorKind, FileStatus, Session, SessionStatus, SystemMessageEvent,
+    };
+    use bcs_group::GroupCore;
+    use bcs_group_store::MemoryGroupRepo;
+    use bcs_service_api::application::session_files::SessionFileService;
+    use bcs_service_api::port::repo::{
+        GroupRepoPort, SessionFileRepoPort, SessionRepoPort,
+    };
+    use bcs_service_api::{
+        BotCapabilities, BotRegistryCoreService, Group, GroupKind, GroupStatus, Participant,
+        ParticipantRole, ServiceResult, SessionKind, SystemMessageService, Workspace,
+    };
+    use bcs_services_container::Services;
+    use bcs_session::SessionManagementServiceImpl;
+    use bcs_session_file_store::MemorySessionFileRepo;
+    use bcs_session_file::{SessionFileServiceConfig, SessionFileServiceImpl};
+    use bcs_session_store::MemorySessionRepo;
+    use bcs_storage_api::fake::FakeStoragePlugin;
+    use bcs_storage_api::StorageCapabilities;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tower::ServiceExt;
+    use crate::routes::group_messages::HttpGroupCaller;
+    use async_trait::async_trait;
+    use tokio::sync::Mutex;
+
+    // ------------------- Helpers -------------------
+
+    #[derive(Default)]
+    struct RecordingSystemMessage {
+        notifications: Mutex<Vec<SystemMessageEvent>>,
+    }
+
+    #[async_trait]
+    impl SystemMessageService for RecordingSystemMessage {
+        async fn notify(
+            &self,
+            _group_id: &str,
+            event: SystemMessageEvent,
+            _session_id: &str,
+            _session_participants: &[Participant],
+        ) -> ServiceResult<usize> {
+            self.notifications.lock().await.push(event);
+            Ok(1)
+        }
+    }
+
+    fn local_caps() -> StorageCapabilities {
+        StorageCapabilities {
+            supports_presign_put: false,
+            supports_presign_download: false,
+            supports_stream_put: true,
+            supports_stream_get: true,
+            supports_inline_view: true,
+            max_object_size: 1024 * 1024 * 1024,
+        }
+    }
+
+    fn empty_caps() -> BotCapabilities {
+        BotCapabilities {
+            name: Some("test-bot".into()),
+            summary: None,
+            domains: Vec::new(),
+            skills: Vec::new(),
+            scopes: Vec::new(),
+            binding_channels: None,
+            hidden: false,
+            visibility: String::new(),
+            agent_code: None,
+            agent_token: None,
+        }
+    }
+
+    #[test]
+    fn human_readable_size_formats_bytes() {
+        assert_eq!(human_readable_size(0), "0 B");
+        assert_eq!(human_readable_size(500), "500 B");
+        assert_eq!(human_readable_size(1023), "1023 B");
+        assert_eq!(human_readable_size(1024), "1 KB");
+        assert_eq!(human_readable_size(12288), "12 KB");
+        assert_eq!(human_readable_size(12345), "12.1 KB");
+        assert_eq!(human_readable_size(1_048_576), "1 MB");
+        assert_eq!(human_readable_size(1_572_864), "1.5 MB");
+    }
+
+    #[test]
+    fn file_download_url_uses_bcs_endpoint_when_set() {
+        let mut state = HttpAppState::new(Services::builder().build_for_test());
+        state.bcs_endpoint = Some("https://bcn.alipay.com".into());
+        let url = file_download_url(&state, "g1:abcd1234", "fid-1");
+        assert_eq!(
+            url,
+            "https://bcn.alipay.com/sessions/g1%3Aabcd1234/files/fid-1/content"
+        );
+    }
+
+    #[test]
+    fn file_download_url_falls_back_to_bind_port() {
+        let mut state = HttpAppState::new(Services::builder().build_for_test());
+        state.bcs_endpoint = None;
+        state.bind = "127.0.0.1".into();
+        state.port = 21000;
+        let url = file_download_url(&state, "g1:abcd1234", "fid-1");
+        assert_eq!(
+            url,
+            "http://127.0.0.1:21000/sessions/g1%3Aabcd1234/files/fid-1/content"
+        );
+    }
+
+    fn group_participant(bot_uuid: &str) -> Participant {
+        Participant {
+            bot_uuid: bot_uuid.to_string(),
+            bot_name: None,
+            kind: None,
+            role: ParticipantRole::default(),
+            actor_kind: DomainActorKind::Bot,
+            mode: None,
+        }
+    }
+
+    struct TestApp {
+        state: HttpAppState,
+        bot_a_token: String,
+        bot_b_token: String,
+        system_messages: Arc<RecordingSystemMessage>,
+        #[allow(dead_code)]
+        bot_a: String,
+        #[allow(dead_code)]
+        bot_b: String,
+        sid: String,
+    }
+
+    async fn build_test_app() -> TestApp {
+        build_test_app_with_max_size(1024 * 1024).await
+    }
+
+    async fn build_test_app_with_max_size(max_size: u64) -> TestApp {
+        // Registry: two bots registered with stable tokens.
+        let bot_dir = tempfile::tempdir().expect("temp dir for bot registry");
+        let bot_repo = Arc::new(MemoryBotRepo::with_base_dir(PathBuf::from(
+            bot_dir.path(),
+        )));
+        let registry = BotCore::with_repo(bot_repo.clone());
+        registry
+            .register_with_owner_and_token(
+                "bot-a".into(),
+                empty_caps(),
+                "alice",
+                "token-a",
+            )
+            .await
+            .expect("register bot-a");
+        registry
+            .register_with_owner_and_token(
+                "bot-b".into(),
+                empty_caps(),
+                "bob",
+                "token-b",
+            )
+            .await
+            .expect("register bot-b");
+
+        // Group: g1 with bot_a and bot_b as participants, bot_a as driver.
+        let group_repo = Arc::new(MemoryGroupRepo::new());
+        let group_core = GroupCore::with_repo(group_repo.clone());
+        let group = Group {
+            id: "g1".into(),
+            label: None,
+            status: GroupStatus::default(),
+            driver_bot: "bot-a".into(),
+            originator: Some("bot-a".into()),
+            routing_policy: None,
+            context: None,
+            participants: vec![group_participant("bot-a"), group_participant("bot-b")],
+            messages: Vec::new(),
+            workspace: Workspace::default(),
+            service_group_uuid: None,
+            service_mode: None,
+            created_at: 0,
+            updated_at: 0,
+            group_kind: GroupKind::default(),
+            dm_pair_key: None,
+            group_strategy: bcs_service_api::GroupStrategy::default(),
+            service_spec: None,
+            version: 1,
+            record_status: "active".to_string(),
+            visibility: "protected".to_string(),
+        };
+        group_repo.upsert(group).await.expect("upsert group");
+
+        // Session id MUST follow `{group_id}:{8_hex}` per
+        // `bcs_service_api::core::session::validate_session_id`.
+        let sid = "g1:abcd1234".to_string();
+
+        // Session: g1:abcd1234 -> g1, participants [bot-a, bot-b], created_by
+        // "human_alice". Seed via the repo directly to bypass application-layer
+        // validation that would otherwise require a fully wired group store.
+        let session_repo = Arc::new(MemorySessionRepo::new());
+        session_repo
+            .create(
+                "g1",
+                bcs_service_api::port::repo::NewSessionParams {
+                    session_kind: SessionKind::Chat,
+                    participants: vec![group_participant("bot-a"), group_participant("bot-b")],
+                    group_version: Some(1),
+                    caller_id: Some("bot-a".into()),
+                    caller_principal: None,
+                    input: None,
+                    created_by: Some("human_alice".into()),
+                    session_title: None,
+                    id: Some(sid.clone()),
+                    meta: None,
+                },
+            )
+            .await
+            .expect("create session");
+
+        let session_management =
+            SessionManagementServiceImpl::new(session_repo.clone(), group_repo.clone());
+
+        // SessionFileService with FakeStoragePlugin (local caps) + in-memory repo.
+        let storage: Arc<dyn bcs_storage_api::StoragePlugin> =
+            Arc::new(FakeStoragePlugin::new(local_caps()));
+        let file_repo: Arc<dyn SessionFileRepoPort> = Arc::new(MemorySessionFileRepo::new());
+        let session_repo_dyn: Arc<dyn SessionRepoPort> = session_repo.clone();
+        let file_cfg = SessionFileServiceConfig {
+            storage,
+            repo: file_repo,
+            session_repo: session_repo_dyn,
+            env: "local".into(),
+            max_size,
+            // effectively never multipart for tests
+            multipart_threshold: 1024 * 1024 * 1024,
+            bcs_base_url: "http://test.local".into(),
+            share_secret: b"test-secret-32-bytes-0123456789".to_vec(),
+            share_default_ttl: 3600,
+            share_link_ttl: 3600,
+            share_base_url: Some("http://test.local".into()),
+        };
+        let session_files: Arc<dyn SessionFileService> =
+            Arc::new(SessionFileServiceImpl::new(file_cfg));
+
+        let system_messages = Arc::new(RecordingSystemMessage::default());
+        let services = Services::builder()
+            .registry(Arc::new(registry))
+            .group(Arc::new(group_core))
+            .session_management(Arc::new(session_management))
+            .session_files(session_files)
+            .system_message(system_messages.clone())
+            .build_for_test();
+
+        let state = HttpAppState::new(services);
+
+        // Sanity: the session exists and the bots resolve.
+        assert!(
+            state
+                .services
+                .session_management
+                .get(&sid)
+                .await
+                .unwrap()
+                .is_some(),
+            "seed session not found"
+        );
+
+        TestApp {
+            state,
+            bot_a_token: "token-a".into(),
+            bot_b_token: "token-b".into(),
+            system_messages,
+            bot_a: "bot-a".into(),
+            bot_b: "bot-b".into(),
+            sid,
+        }
+    }
+
+    fn auth_request(
+        method: Method,
+        uri: &str,
+        token: &str,
+        body: Option<Vec<u8>>,
+    ) -> Request<Body> {
+        let builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"));
+        if let Some(b) = body {
+            builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(b))
+                .unwrap()
+        } else {
+            builder.body(Body::empty()).unwrap()
+        }
+    }
+
+    async fn send(
+        app: &TestApp,
+        req: Request<Body>,
+    ) -> (StatusCode, serde_json::Value, Option<HeaderValue>) {
+        let router = build_api_router(app.state.clone());
+        let resp = router.oneshot(req).await.expect("router oneshot");
+        let status = resp.status();
+        let cd = resp
+            .headers()
+            .get(header::CONTENT_DISPOSITION)
+            .cloned();
+        let bytes = to_bytes(resp.into_body(), usize::MAX).await.expect("body bytes");
+        let json: serde_json::Value = if bytes.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+        };
+        (status, json, cd)
+    }
+
+    fn post_json(
+        app: &TestApp,
+        uri: &str,
+        token: &str,
+        body: serde_json::Value,
+    ) -> Request<Body> {
+        let _ = app;
+        auth_request(
+            Method::POST,
+            uri,
+            token,
+            Some(serde_json::to_vec(&body).unwrap()),
+        )
+    }
+
+    fn put_bytes(app: &TestApp, uri: &str, token: &str, body: Vec<u8>) -> Request<Body> {
+        let _ = app;
+        let builder = Request::builder()
+            .method(Method::PUT)
+            .uri(uri)
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::CONTENT_LENGTH, body.len().to_string());
+        builder.body(Body::from(body)).unwrap()
+    }
+
+    // ------------------- Tests -------------------
+
+    #[tokio::test]
+    async fn three_stage_upload_complete_download_roundtrip() {
+        let app = build_test_app().await;
+
+        // 1. Prepare
+        let prepare_uri = format!("/sessions/{}/files", app.sid);
+        let req = post_json(
+            &app,
+            &prepare_uri,
+            &app.bot_a_token,
+            json!({
+                "file_name": "hello.txt",
+                "size": 5u64,
+                "mime_type": "text/plain",
+            }),
+        );
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "prepare body: {body:?}");
+        let file_id = body
+            .get("file_id")
+            .and_then(|v| v.as_str())
+            .expect("file_id in prepare response")
+            .to_string();
+        assert!(!file_id.is_empty());
+
+        // For the local proxy backend, FakeStoragePlugin returns ProxyViaBcs,
+        // so the service synthesizes a single-part URL (mode=single).
+        assert_eq!(
+            body.get("mode").and_then(|v| v.as_str()),
+            Some("single")
+        );
+
+        // 2. Upload (single part)
+        let upload_uri = format!(
+            "/sessions/{}/files/{}/content",
+            app.sid, file_id
+        );
+        let req = put_bytes(&app, &upload_uri, &app.bot_a_token, b"hello".to_vec());
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "upload body: {body:?}");
+
+        // 3. Complete
+        let complete_uri = format!(
+            "/sessions/{}/files/{}/complete",
+            app.sid, file_id
+        );
+        let req = post_json(&app, &complete_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "complete body: {body:?}");
+        assert_eq!(
+            body.get("status").and_then(|v| v.as_str()),
+            Some("Ready")
+        );
+        assert_eq!(
+            body.get("file_id").and_then(|v| v.as_str()),
+            Some(file_id.as_str())
+        );
+        assert_eq!(
+            body.get("size").and_then(|v| v.as_u64()),
+            Some(5)
+        );
+
+        // 4. Download — local backend streams via get_stream, no 302.
+        let download_uri = format!(
+            "/sessions/{}/files/{}/content",
+            app.sid, file_id
+        );
+        let req = auth_request(
+            Method::GET,
+            &download_uri,
+            &app.bot_a_token,
+            None,
+        );
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            cd.is_some(),
+            "expected Content-Disposition on streamed download"
+        );
+        let cd = cd.unwrap().to_str().unwrap().to_string();
+        assert!(cd.contains("attachment"), "cd: {cd}");
+        assert!(cd.contains("hello.txt"), "cd: {cd}");
+    }
+
+    #[tokio::test]
+    async fn capabilities_route_not_shadowed_by_file_id() {
+        // Build the router then call GET /sessions/s1/files/capabilities with a
+        // known bot member. The static segment MUST resolve to the
+        // `capabilities` handler returning a CapabilitiesView JSON body — not
+        // be treated as `file_id = "capabilities"`.
+        let app = build_test_app().await;
+        let uri = format!("/sessions/{}/files/capabilities", app.sid);
+        let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "capabilities body: {body:?}");
+        assert!(
+            body.get("storage").is_some(),
+            "expected CapabilitiesView JSON: {body:?}"
+        );
+        assert_eq!(
+            body.get("presign_upload").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            body.get("inline_view").and_then(|v| v.as_bool()),
+            Some(true),
+            "expected inline_view in capabilities: {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_ready_is_204_and_idempotent() {
+        let app = build_test_app().await;
+
+        // Prepare + upload + complete a file owned by bot-a.
+        let (file_id, _) = upload_complete(&app, "del.txt", b"bye").await;
+
+        // First delete -> 204.
+        let uri = format!("/sessions/{}/files/{}", app.sid, file_id);
+        let req = auth_request(Method::DELETE, &uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "delete body: {body:?}");
+
+        // Repeat delete (idempotent) -> 204. Even though the row is gone, the
+        // service's `delete_file` returns Ok(()) for absent rows.
+        let req = auth_request(Method::DELETE, &uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "repeat delete body: {body:?}");
+    }
+
+    #[tokio::test]
+    async fn delete_someone_else_file_is_403() {
+        // bot-a uploads, bot-b attempts to delete — bot-b is a participant but
+        // does not own the file and is neither session_creator nor driver_bot.
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "owned.txt", b"x").await;
+
+        let uri = format!("/sessions/{}/files/{}", app.sid, file_id);
+        let req = auth_request(Method::DELETE, &uri, &app.bot_b_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "expected 403 forbidding bot-b delete, body: {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_mint_then_consume() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share.txt", b"s").await;
+
+        // Mint share token.
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "share mint body: {body:?}");
+        let token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .expect("share_token in mint response")
+            .to_string();
+        assert!(!token.is_empty());
+
+        // Consume via shared_file_meta — 200 with file DTO, no session_id in response.
+        let meta_uri = format!("/sessions/shared-file?token={}", token);
+        let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "share consume body: {body:?}");
+        assert_eq!(
+            body.get("file_id").and_then(|v| v.as_str()),
+            Some(file_id.as_str())
+        );
+        assert_eq!(
+            body.get("status").and_then(|v| v.as_str()),
+            Some("Ready")
+        );
+        // Meta response must NOT contain session_id.
+        assert!(
+            body.get("session_id").is_none(),
+            "shared-file meta response must not expose session_id: {body:?}"
+        );
+
+        // Consume via shared_file_content — token-only (no sid, no member
+        // auth), local backend streams with Content-Disposition.
+        let content_uri = format!("/sessions/shared-file/content?token={}", token);
+        let req = auth_request(Method::GET, &content_uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "share content body: {_body:?}");
+        let cd = cd.expect("content-disposition on shared-file content");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("attachment"), "cd: {s}");
+        assert!(s.contains("share.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn shared_file_show_true_uses_inline_disposition() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share.txt", b"s").await;
+
+        // Mint share token (verbatim steps from share_mint_then_consume).
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "share mint body: {body:?}");
+        let token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .expect("share_token in mint response")
+            .to_string();
+
+        // Consume shared-file content with show=true → inline disposition.
+        let content_uri = format!("/sessions/shared-file/content?token={}&show=true", token);
+        let req = auth_request(Method::GET, &content_uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let cd = cd.expect("content-disposition on shared-file content");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("inline"), "shared-file show=true must be inline, got: {s}");
+        assert!(s.contains("share.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn shared_file_meta_no_token_is_401() {
+        let app = build_test_app().await;
+        let uri = "/sessions/shared-file";
+        let req = auth_request(Method::GET, uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "expected 401 for missing token, body: {body:?}"
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("UNAUTHORIZED")
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_file_content_no_token_is_401() {
+        // Guards the *content* static route wiring: no token ⇒ 401 from the
+        // shared-file handler, not 404 from the `/sessions/{sid}` param route.
+        let app = build_test_app().await;
+        let uri = "/sessions/shared-file/content";
+        let req = auth_request(Method::GET, uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "expected 401 for missing token on content, body: {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn share_consume_expired_token_is_404() {
+        // Mint a valid token, then construct a clone with `exp` in the past via
+        // the domain share encode function. Consume must return uniform 404 —
+        // no 422/410 leakage that reveals the token was expired.
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share-exp.txt", b"e").await;
+
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (_status, body, _) = send(&app, req).await;
+        let valid_token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+
+        // Re-encode an expired token with the same file_id using the app's share secret.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expired_token = bcs_domain::share_token_encode(
+            &bcs_domain::ShareTokenPayload {
+                v: 1,
+                file_id: file_id.clone(),
+                exp: now.saturating_sub(10),
+            },
+            b"test-secret-32-bytes-0123456789",
+        );
+        assert_ne!(valid_token, expired_token);
+
+        let meta_uri = format!("/sessions/shared-file?token={}", expired_token);
+        let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "expected uniform 404 for expired share token, got {status}; body: {body:?}",
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("NOT_FOUND")
+        );
+    }
+
+    #[tokio::test]
+    async fn share_consume_tampered_token_is_404() {
+        // Mint a valid token, tamper one character, consume must return uniform
+        // 404 — no 400/401 leakage that reveals the token was tampered.
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "share-tamper.txt", b"t").await;
+
+        let mint_uri = format!("/sessions/{}/files/{}/share", app.sid, file_id);
+        let req = post_json(&app, &mint_uri, &app.bot_a_token, json!({}));
+        let (_status, body, _) = send(&app, req).await;
+        let token = body
+            .get("share_token")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+
+        let mut chars: Vec<char> = token.chars().collect();
+        let idx = chars.len() - 1;
+        let last = chars[idx];
+        chars[idx] = if last == 'a' { 'b' } else { 'a' };
+        let tampered: String = chars.into_iter().collect();
+
+        let meta_uri = format!("/sessions/shared-file?token={}", tampered);
+        let req = auth_request(Method::GET, &meta_uri, &app.bot_a_token, None);
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "expected uniform 404 for tampered share token, got {status}; body: {body:?}",
+        );
+        assert_eq!(
+            body.get("error").and_then(|v| v.as_str()),
+            Some("NOT_FOUND")
+        );
+    }
+
+    #[tokio::test]
+    async fn local_download_streams_with_content_disposition() {
+        // Build a non-multipart upload, complete, and verify the GET response
+        // carries Content-Disposition: attachment; filename="...".
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "disp.txt", b"abc").await;
+
+        let uri = format!(
+            "/sessions/{}/files/{}/content",
+            app.sid, file_id
+        );
+        let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let cd = cd.expect("content-disposition header");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("attachment"), "cd: {s}");
+        assert!(s.contains("disp.txt"), "cd: {s}");
+    }
+
+    #[tokio::test]
+    async fn local_download_show_true_uses_inline_disposition() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "view.txt", b"abc").await;
+        let uri = format!("/sessions/{}/files/{}/content?show=true", app.sid, file_id);
+        let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+        let (status, _body, cd) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK);
+        let cd = cd.expect("content-disposition header");
+        let s = cd.to_str().unwrap();
+        assert!(s.contains("inline"), "expected inline disposition for show=true, got: {s}");
+        assert!(s.contains("view.txt"), "filename must still be present: {s}");
+    }
+
+    #[tokio::test]
+    async fn local_download_show_false_and_absent_still_attach() {
+        let app = build_test_app().await;
+        let (file_id, _) = upload_complete(&app, "dl.txt", b"abc").await;
+        for q in &["?show=false", ""] {
+            let uri = format!("/sessions/{}/files/{}/content{}", app.sid, file_id, q);
+            let req = auth_request(Method::GET, &uri, &app.bot_a_token, None);
+            let (status, _body, cd) = send(&app, req).await;
+            assert_eq!(status, StatusCode::OK);
+            let s = cd.expect("content-disposition").to_str().unwrap().to_string();
+            assert!(s.contains("attachment"), "absent/show=false must attach: {s}");
+            assert!(s.contains("dl.txt"), "cd: {s}");
+        }
+    }
+
+    #[tokio::test]
+    async fn upload_accepts_large_chunked_body() {
+        // Regression: the proxy `PUT .../content` route must NOT be subject to
+        // axum's default 2 MiB body limit, and must accept a chunked upload
+        // (no Content-Length header) — which is what the CLI sends via
+        // `reqwest::Body::wrap_stream`. Before the fix this returned
+        // 413 "Failed to buffer the request body: length limit exceeded".
+        //
+        // Use a 3 MiB body (>2 MiB default limit) and a max_size large enough
+        // to prepare it. The body is sent as a stream with no Content-Length,
+        // exercising the service's `content_length == 0` (unknown) path that
+        // relies on the backend's per-chunk cap.
+        let app = build_test_app_with_max_size(5 * 1024 * 1024).await;
+        let size: u64 = 3 * 1024 * 1024;
+
+        // 1. Prepare
+        let prepare_uri = format!("/sessions/{}/files", app.sid);
+        let req = post_json(
+            &app,
+            &prepare_uri,
+            &app.bot_a_token,
+            json!({ "file_name": "big.bin", "size": size, "mime_type": "application/octet-stream" }),
+        );
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "prepare body: {body:?}");
+        let file_id = body.get("file_id").and_then(|v| v.as_str()).unwrap().to_string();
+        assert_eq!(body.get("mode").and_then(|v| v.as_str()), Some("single"));
+
+        // 2. Upload — chunked (no Content-Length), 3 MiB body.
+        let upload_uri = format!("/sessions/{}/files/{}/content", app.sid, file_id);
+        let payload = Bytes::from(vec![0u8; size as usize]);
+        let stream = futures::stream::once(async move { Ok::<Bytes, std::io::Error>(payload) });
+        let req = Request::builder()
+            .method(Method::PUT)
+            .uri(&upload_uri)
+            .header(header::AUTHORIZATION, format!("Bearer {}", app.bot_a_token))
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            // NOTE: deliberately NO Content-Length — chunked transfer.
+            .body(Body::from_stream(stream))
+            .unwrap();
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "upload body: {body:?}");
+
+        // 3. Complete — backend-reported size must equal the 3 MiB prepared.
+        let complete_uri = format!("/sessions/{}/files/{}/complete", app.sid, file_id);
+        let req = post_json(&app, &complete_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::OK, "complete body: {body:?}");
+        assert_eq!(body.get("status").and_then(|v| v.as_str()), Some("Ready"));
+        assert_eq!(body.get("size").and_then(|v| v.as_u64()), Some(size));
+    }
+
+    #[test]
+    fn file_upload_receivers_excludes_uploader_bot() {
+        let ps = vec![
+            Participant::bot("bot-a", ParticipantRole::Driver),
+            Participant::bot("bot-b", ParticipantRole::Consultant),
+        ];
+        let r = file_upload_receivers(&ps, "bot-a");
+        let ids: Vec<&str> = r.iter().map(|p| p.bot_uuid.as_str()).collect();
+        assert_eq!(ids, vec!["bot-b"]);
+    }
+
+    #[test]
+    fn file_upload_receivers_keeps_all_bots_when_uploader_is_human() {
+        let ps = vec![
+            Participant::bot("bot-a", ParticipantRole::Driver),
+            Participant::bot("bot-b", ParticipantRole::Consultant),
+            Participant::human("human_alice", ParticipantRole::Observer),
+        ];
+        let r = file_upload_receivers(&ps, "human_alice");
+        let mut ids: Vec<&str> = r.iter().map(|p| p.bot_uuid.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["bot-a", "bot-b"]);
+    }
+
+    #[test]
+    fn file_upload_receivers_empty_when_uploader_is_only_bot() {
+        let ps = vec![Participant::bot("bot-a", ParticipantRole::Driver)];
+        let r = file_upload_receivers(&ps, "bot-a");
+        assert!(r.is_empty());
+    }
+
+    #[tokio::test]
+    async fn uploader_display_name_bot_uses_registry_name() {
+        let app = build_test_app().await;
+        let (prefix, name) = uploader_display_name(
+            &app.state,
+            &GroupChatCaller::Bot { bot_uuid: "bot-a".into() },
+        )
+        .await;
+        assert_eq!(prefix, "Bot");
+        assert_eq!(name, "test-bot"); // empty_caps() sets name Some("test-bot")
+    }
+
+    #[tokio::test]
+    async fn uploader_display_name_bot_falls_back_to_id_when_unregistered() {
+        let app = build_test_app().await;
+        let (prefix, name) = uploader_display_name(
+            &app.state,
+            &GroupChatCaller::Bot { bot_uuid: "ghost-bot".into() },
+        )
+        .await;
+        assert_eq!(prefix, "Bot");
+        assert_eq!(name, "ghost-bot");
+    }
+
+    #[tokio::test]
+    async fn uploader_display_name_human_uses_nick_or_staff_no() {
+        let app = build_test_app().await;
+        let with_nick = GroupChatCaller::Human(HttpGroupCaller {
+            actor_id: "human_alice".into(),
+            staff_no: "alice".into(),
+            nick_name: Some("Alice".into()),
+        });
+        let (prefix, name) = uploader_display_name(&app.state, &with_nick).await;
+        assert_eq!(prefix, "用户");
+        assert_eq!(name, "Alice");
+
+        let no_nick = GroupChatCaller::Human(HttpGroupCaller {
+            actor_id: "human_alice".into(),
+            staff_no: "alice".into(),
+            nick_name: None,
+        });
+        let (prefix, name) = uploader_display_name(&app.state, &no_nick).await;
+        assert_eq!(prefix, "用户");
+        assert_eq!(name, "alice");
+    }
+
+    #[tokio::test]
+    async fn complete_upload_fires_generic_notification_to_other_bots() {
+        let app = build_test_app().await;
+        // bot-a uploads; the session also has bot-b, so receivers must be [bot-b].
+        let (file_id, _status) = upload_complete(&app, "hello.txt", b"hello").await;
+
+        // HttpAppState::new leaves bcs_endpoint=None -> http://127.0.0.1:21000.
+        let expected_url = format!(
+            "http://127.0.0.1:21000/sessions/{}/files/{}/content",
+            urlencoding::encode(&app.sid),
+            file_id,
+        );
+        let expected_message = format!(
+            "Bot test-bot 上传了一个文件 hello.txt ({file_id}，5 B)，下载链接：{expected_url}"
+        );
+
+        let notifications = app.system_messages.notifications.lock().await;
+        assert_eq!(notifications.len(), 1, "expected exactly one system message");
+        match &notifications[0] {
+            SystemMessageEvent::GenericNotification {
+                group_id,
+                message,
+                receivers,
+            } => {
+                assert_eq!(group_id, "g1");
+                assert_eq!(message, &expected_message);
+                let receiver_ids: Vec<String> =
+                    receivers.iter().map(|p| p.bot_uuid.clone()).collect();
+                assert_eq!(receiver_ids, vec!["bot-b".to_string()]);
+            }
+            other => panic!("expected GenericNotification, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_upload_failure_does_not_notify() {
+        let app = build_test_app().await;
+        // Complete a non-existent file_id -> 404; no system message.
+        let uri = format!("/sessions/{}/files/nope/complete", app.sid);
+        let req = post_json(&app, &uri, &app.bot_a_token, json!({}));
+        let (status, _body, _) = send(&app, req).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let notifications = app.system_messages.notifications.lock().await;
+        assert!(notifications.is_empty(), "no notify on failed complete");
+    }
+
+    // ------------------- Internal test helpers -------------------
+
+    /// Run the full prepare→upload→complete sequence and return the file_id
+    /// plus the file's status slug. Uploads as bot-a (the session's driver).
+    async fn upload_complete(app: &TestApp, name: &str, bytes: &[u8]) -> (String, FileStatus) {
+        // Prepare
+        let prepare_uri = format!("/sessions/{}/files", app.sid);
+        let req = post_json(
+            &app,
+            &prepare_uri,
+            &app.bot_a_token,
+            json!({
+                "file_name": name,
+                "size": bytes.len() as u64,
+                "mime_type": "text/plain",
+            }),
+        );
+        let (status, body, _) = send(app, req).await;
+        assert_eq!(status, StatusCode::CREATED, "prepare body: {body:?}");
+        let file_id = body
+            .get("file_id")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+
+        // Upload (single part)
+        let upload_uri = format!(
+            "/sessions/{}/files/{}/content",
+            app.sid, file_id
+        );
+        let req = put_bytes(app, &upload_uri, &app.bot_a_token, bytes.to_vec());
+        let (status, body, _) = send(app, req).await;
+        assert_eq!(status, StatusCode::ACCEPTED, "upload body: {body:?}");
+
+        // Complete
+        let complete_uri = format!(
+            "/sessions/{}/files/{}/complete",
+            app.sid, file_id
+        );
+        let req = post_json(&app, &complete_uri, &app.bot_a_token, json!({}));
+        let (status, body, _) = send(app, req).await;
+        assert_eq!(status, StatusCode::OK, "complete body: {body:?}");
+
+        let status_slug = body
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap()
+            .to_string();
+        let file_status = match status_slug.as_str() {
+            "Ready" => FileStatus::Ready,
+            "Pending" => FileStatus::Pending,
+            "Deleting" => FileStatus::Deleting,
+            _ => FileStatus::Failed,
+        };
+        (file_id, file_status)
+    }
+
+    fn mk_session(group_id: &str, participants: Vec<Participant>) -> Session {
+        Session {
+            id: format!("{group_id}:00000001"),
+            group_id: group_id.to_string(),
+            session_title: None,
+            env: None,
+            status: SessionStatus::Running,
+            session_kind: SessionKind::Chat,
+            participants,
+            group_version: Some(1),
+            caller_id: None,
+            input: None,
+            output: None,
+            error_message: None,
+            callback_status: None,
+            activation_count: 1,
+            caller_principal: None,
+            created_by: None,
+            created_at: 0,
+            updated_at: 0,
+            completed_at: None,
+            meta: None,
+            current_msg_seq: 0,
+            participant_join_seq: None,
+            collected_at: None,
+        }
+    }
+
+    fn mk_session_file(sid: &str, name: &str, size: u64) -> SessionFile {
+        SessionFile {
+            file_id: "fid-1".into(),
+            session_id: sid.into(),
+            file_name: name.into(),
+            mime_type: "text/plain".into(),
+            size,
+            sha256: None,
+            owner: ActorRef {
+                actor_kind: ActorKind::Bot,
+                actor_id: "bot-a".into(),
+            },
+            storage_backend: "local".into(),
+            object_handle: String::new(),
+            status: FileStatus::Ready,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn notify_file_uploaded_skips_when_no_other_bots() {
+        let app = build_test_app().await;
+        // A session whose only bot is the uploader (bot-a).
+        let sess = mk_session(
+            "g1",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        );
+        let caller = GroupChatCaller::Bot { bot_uuid: "bot-a".into() };
+        let file = mk_session_file(&app.sid, "solo.txt", 7);
+        notify_file_uploaded(&app.state, &sess, &app.sid, &caller, &file).await;
+
+        let notifications = app.system_messages.notifications.lock().await;
+        assert!(
+            notifications.is_empty(),
+            "guard must skip notify when there are no other bots (avoid self-inject)"
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_file_uploaded_human_uploader_notifies_all_bots_with_user_prefix() {
+        let app = build_test_app().await;
+        let sess = mk_session(
+            "g1",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::bot("bot-b", ParticipantRole::Consultant),
+            ],
+        );
+        let caller = GroupChatCaller::Human(HttpGroupCaller {
+            actor_id: "human_alice".into(),
+            staff_no: "alice".into(),
+            nick_name: Some("Alice".into()),
+        });
+        // 2048 bytes -> "2 KB".
+        let file = mk_session_file(&app.sid, "doc.md", 2048);
+        notify_file_uploaded(&app.state, &sess, &app.sid, &caller, &file).await;
+
+        let notifications = app.system_messages.notifications.lock().await;
+        assert_eq!(notifications.len(), 1);
+        match &notifications[0] {
+            SystemMessageEvent::GenericNotification {
+                group_id,
+                message,
+                receivers,
+            } => {
+                assert_eq!(group_id, "g1");
+                assert!(
+                    message.starts_with("用户 Alice 上传了一个文件 doc.md "),
+                    "message: {message}"
+                );
+                let mut ids: Vec<String> =
+                    receivers.iter().map(|p| p.bot_uuid.clone()).collect();
+                ids.sort();
+                assert_eq!(ids, vec!["bot-a".to_string(), "bot-b".to_string()]);
+            }
+            other => panic!("expected GenericNotification, got {other:?}"),
+        }
+    }
+}

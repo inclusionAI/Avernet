@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 from agentclaw.community.core.bot_chat.service import (
     BotChatService,
@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_chat.service import (
 )
 from agentclaw.community.core.bot_chat.schemas import ConversationDetail, ConversationObservation, ConversationSession, SessionMetadata
 from agentclaw.community.core.bot_chat.errors import SessionNotFoundError, LangfuseAPIError
+from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.di.config import BotChatConfig
 
 # Langfuse creds are deployment config (BotChatConfig) now, injected into the
@@ -629,6 +630,35 @@ class TestBotChatServiceListSessions:
             with pytest.raises(LangfuseAPIError) as exc_info:
                 await service.list_sessions(owner_id="user1", log_source="langfuse")
             assert exc_info.value.status_code == 500
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_langfuse_enriches_only_the_response_page(
+        self, service
+    ):
+        trace = {
+            "id": "trace-labels",
+            "name": "Session",
+            "timestamp": "2025-01-15T10:00:00Z",
+            "metadata": {"attributes": {}},
+        }
+        service._fetch_traces_from_langfuse = AsyncMock(return_value=([trace], 1))
+        service._db_repo = MagicMock()
+
+        def enrich(rows):
+            rows[0].group_id = "group_fixture"
+            rows[0].biz_scene = "scene_fixture"
+            rows[0].biz_task_id = "task_fixture"
+
+        service._db_repo.enrich_labels.side_effect = enrich
+
+        result = await service.list_sessions(
+            owner_id="user1", log_source="langfuse"
+        )
+
+        assert result.sessions[0].group_id == "group_fixture"
+        assert result.sessions[0].biz_scene == "scene_fixture"
+        assert result.sessions[0].biz_task_id == "task_fixture"
+        service._db_repo.enrich_labels.assert_called_once_with(result.sessions)
 
     @pytest.mark.asyncio
     async def test_list_sessions_with_query_filter(self, service):
@@ -1580,16 +1610,26 @@ class TestBotChatServiceGetSession:
                 await service.get_session(trace_id="trace-1", owner_id="user1", log_source="langfuse")
 
     @pytest.mark.asyncio
-    async def test_get_session_langfuse_default_bot_owner_match(self, service):
-        """Langfuse default-bot traces are accessible when userId matches owner_id."""
+    @pytest.mark.parametrize(
+        "owner_fields",
+        [
+            {"userId": "user1"},
+            {"metadata": {"attributes": {"identity.owner_id": "user1"}}},
+            {"metadata": {"attributes": {"user.id": "user1"}}},
+        ],
+    )
+    async def test_get_session_langfuse_default_bot_owner_match(
+        self, service, owner_fields
+    ):
+        """Default-bot traces accept every supported owner representation."""
         trace_response = AsyncMock()
         trace_response.status = 200
         trace_response.json = AsyncMock(return_value={
             "id": "trace-1",
             "name": "Session",
-            "userId": "user1",
             "timestamp": "2025-01-01T00:00:00Z",
             "success": True,
+            **owner_fields,
         })
         trace_response.__aenter__ = AsyncMock(return_value=trace_response)
         trace_response.__aexit__ = AsyncMock(return_value=False)
@@ -1611,12 +1651,14 @@ class TestBotChatServiceGetSession:
         mock_aiohttp_session.get = mock_get
         mock_aiohttp_session.__aenter__ = AsyncMock(return_value=mock_aiohttp_session)
         mock_aiohttp_session.__aexit__ = AsyncMock(return_value=False)
+        service._db_repo = MagicMock()
 
         with patch("agentclaw.community.core.bot_chat.service.aiohttp.ClientSession", return_value=mock_aiohttp_session):
             result = await service.get_session(trace_id="trace-1", owner_id="user1", log_source="langfuse")
 
         assert result.id == "trace-1"
         assert result.user_id == "user1"
+        service._db_repo.enrich_labels.assert_called_once_with([result])
 
     @pytest.mark.asyncio
     async def test_get_session_langfuse_non_default_bot_unauthorized(self, service):
@@ -1679,6 +1721,8 @@ class TestBotChatServiceGetSession:
 
         service._db_repo = MagicMock()
         service._db_repo.has_bot_access.return_value = True
+        service._db_repo.get_group_labels.return_value = (None, None)
+        service._db_repo.get_bot_name.return_value = "bot-a"
 
         mock_aiohttp_session = AsyncMock()
         mock_aiohttp_session.get = mock_get
@@ -1722,6 +1766,8 @@ class TestBotChatServiceGetSession:
 
         service._db_repo = MagicMock()
         service._db_repo.has_bot_access.return_value = True
+        service._db_repo.get_group_labels.return_value = (None, None)
+        service._db_repo.get_bot_name.return_value = "bot-a"
 
         mock_aiohttp_session = AsyncMock()
         mock_aiohttp_session.get = mock_get
@@ -1736,8 +1782,66 @@ class TestBotChatServiceGetSession:
 
 
 # ---------------------------------------------------------------------------
+# BotChatService open exact queries
+# ---------------------------------------------------------------------------
+
+
+class TestBotChatServiceOpenQueries:
+
+    @pytest.fixture
+    def service(self):
+        return BotChatService(db=MagicMock(), config=_TEST_BOTCHAT_CONFIG)
+
+    @pytest.mark.asyncio
+    async def test_open_group_query_uses_open_scope_without_owner(self, service):
+        service._db_repo = MagicMock()
+        service._db_repo.list_ocb_traces.return_value = ([], 0)
+        service._db_repo.list_traces.return_value = ([], 0)
+
+        await service.list_open_sessions(group_id=" group_fixture ")
+
+        kwargs = service._db_repo.list_ocb_traces.call_args.kwargs
+        assert kwargs["owner_id"] is None
+        assert kwargs["group_id"] == "group_fixture"
+        assert kwargs["query_scope"] == QueryScope.OPEN
+        assert kwargs["match_mode"] == "exact"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {},
+            {"biz_scene": "scene_fixture"},
+            {"biz_task_id": "task_fixture"},
+            {
+                "session_key": "session_fixture",
+                "group_id": "group_fixture",
+            },
+        ],
+    )
+    async def test_open_query_rejects_invalid_mode_combinations(
+        self, service, params
+    ):
+        with pytest.raises(ValueError):
+            await service.list_open_sessions(**params)
+
+    @pytest.mark.asyncio
+    async def test_open_detail_skips_owner_filter(self, service):
+        detail = MagicMock(spec=ConversationDetail)
+        service._get_session_db = AsyncMock(return_value=detail)
+
+        result = await service.get_open_session(" trace_fixture ")
+
+        assert result is detail
+        service._get_session_db.assert_awaited_once_with(
+            "trace_fixture", owner_id=None
+        )
+
+
+# ---------------------------------------------------------------------------
 # BotChatService.health_check
 # ---------------------------------------------------------------------------
+
 
 class TestBotChatServiceHealthCheck:
 
@@ -1793,3 +1897,31 @@ class TestBotChatServiceHealthCheck:
 
         assert result.status == "unhealthy"
         assert result.error is not None
+
+
+# ---------------------------------------------------------------------------
+# _check_bot_access — no "default"/"{user_id}_default" shortcut (Task 6)
+# ---------------------------------------------------------------------------
+
+class TestCheckBotAccessNoDefaultShortcut:
+
+    @pytest.fixture
+    def service(self):
+        mock_db = MagicMock()
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+
+    def test_historical_default_still_goes_through_has_bot_access(self, service):
+        """The retired "default" literal must go through has_bot_access, not short-circuit."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = True
+
+        assert service._check_bot_access("user001", "default") is True
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "default")
+
+    def test_user_default_form_also_uses_has_bot_access(self, service):
+        """The retired "{user_id}_default" form must go through has_bot_access."""
+        service._db_repo = MagicMock()
+        service._db_repo.has_bot_access.return_value = False
+
+        assert service._check_bot_access("user001", "user001_default") is False
+        service._db_repo.has_bot_access.assert_called_once_with("user001", "user001_default")

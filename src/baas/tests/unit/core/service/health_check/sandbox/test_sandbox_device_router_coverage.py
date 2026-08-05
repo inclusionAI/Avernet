@@ -161,7 +161,7 @@ class TestAcBindingHandler:
         result = await handler.warn_device(table_id=1)
         assert result.action == "STOPPED"
         assert result.refresh_fail_count == 10
-        handler._binding_repo.update_status.assert_called_once()
+        handler._binding_repo.update_status.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_warn_device_probe_success_with_ttl(self, handler):
@@ -316,7 +316,8 @@ class TestBaasHandler:
         }
         result = await handler.warn_device(table_id=1)
         assert result.action == "STOPPED"
-        handler._binding_repo.update_baas_device_status_by_id.assert_called_once()
+        # Per current design: threshold escalation only logs, never writes STOPPED to DB.
+        handler._binding_repo.update_baas_device_status_by_id.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_warn_device_probe_success_with_ttl(self, handler):

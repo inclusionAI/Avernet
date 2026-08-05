@@ -6,7 +6,7 @@ See src/engine/docs/heterogeneous-engine-architecture.md §7.2.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Any
 
 
@@ -95,6 +95,15 @@ class SymlinkItem:
     target: str
 
 
+@dataclass(frozen=True, slots=True)
+class PoolSkillMappingIntent:
+    """Path-agnostic mapping resolved by the active Engine implementation."""
+
+    corpus: str
+    relative_path: str
+    link_name: str
+
+
 @dataclass
 class SyncSymlinksRequest:
     """Bulk-sync request for relative-path symlinks under a base dir."""
@@ -174,6 +183,139 @@ class CenterEnsureResult:
     failed: list[CenterEnsureFailure] = field(default_factory=list)
 
 
+@dataclass
+class PoolLayoutActivateRequest:
+    """提交 OpenClaw Pool 数据面所需的稳定 Service API 请求。
+
+    ``registered_local_names`` 用于核对数据库登记事实；运行时还会枚举并
+    迁移 Legacy local 和 active 入口中的完整文件系统事实。
+    """
+
+    migration_generation: str
+    preparation_id: str
+    registered_local_names: list[str] = field(default_factory=list)
+    mappings: list[PoolSkillMappingIntent | SymlinkItem] = field(
+        default_factory=list
+    )
+    mapping_contract_version: str | None = None
+
+
+@dataclass
+class PoolLayoutRollbackRequest:
+    """Explicit Pool→Legacy rollback from the current authoritative Pool."""
+
+    rollback_generation: str
+    registered_local_names: list[str] = field(default_factory=list)
+
+
+@dataclass
+class PoolQuarantineCleanupRequest:
+    migration_generation: str
+
+
+@dataclass
+class PoolQuarantineCleanupResult:
+    status: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {"status": self.status, "evidence": self.evidence}
+
+
+@dataclass
+class PoolLayoutProbeRequest:
+    """运行时 Pool layout 核验请求。"""
+
+    engine: str
+    layout_contract_version: str
+
+
+class PoolLayoutProbeStatus(StrEnum):
+    READY = "READY"
+    NOT_CAPABLE = "NOT_CAPABLE"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    INVALID = "INVALID"
+
+
+@dataclass
+class PoolLayoutProbeResult:
+    """运行时 Pool layout 核验结果。"""
+
+    status: PoolLayoutProbeStatus
+    engine: str
+    layout_contract_version: str
+    preparation_id: str | None
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "engine": self.engine,
+            "layout_contract_version": self.layout_contract_version,
+            "preparation_id": self.preparation_id,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass
+class PoolLayoutActivationResult:
+    """Pool 数据面切换结果。"""
+
+    committed: bool
+    status: PoolLayoutActivationStatus
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "committed": self.committed,
+            "status": self.status.value,
+            "evidence": self.evidence,
+        }
+
+
+class PoolLayoutActivationStatus(StrEnum):
+    """跨 Service/Plugin/HTTP 边界稳定传输的切换状态。"""
+
+    COMMITTED = "COMMITTED"
+    ALREADY_COMMITTED = "ALREADY_COMMITTED"
+    ACTIVE_ENTRY_CONFLICT = "ACTIVE_ENTRY_CONFLICT"
+    DATA_INCONSISTENT = "DATA_INCONSISTENT"
+    INVALID = "INVALID"
+    TRANSIENT_ERROR = "TRANSIENT_ERROR"
+    POST_CUTOVER_SYNC_PENDING = "POST_CUTOVER_SYNC_PENDING"
+    NOT_ATOMIC = "NOT_ATOMIC"
+    UNKNOWN = "UNKNOWN"
+
+
+class PoolMappingSourceLayout(StrEnum):
+    """Layout whose canonical roots mapping sources must use."""
+
+    POOL = "pool"
+    LEGACY = "legacy"
+
+
+@dataclass
+class PoolMappingPublishResult:
+    """Pool mapping 全量发布结果。"""
+
+    published: bool
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {"published": self.published, "evidence": self.evidence}
+
+
+@dataclass
+class PoolMappingVerificationResult:
+    """Pool mapping 当前状态验证结果。"""
+
+    valid: bool
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, Any]:
+        return {"valid": self.valid, "evidence": self.evidence}
+
+
 __all__ = [
     "CenterEnsureFailure",
     "CenterEnsureItem",
@@ -181,6 +323,19 @@ __all__ = [
     "CenterEnsureResult",
     "CleanSymlinksRequest",
     "CleanSymlinksResult",
+    "PoolLayoutActivateRequest",
+    "PoolLayoutActivationResult",
+    "PoolLayoutActivationStatus",
+    "PoolLayoutProbeRequest",
+    "PoolLayoutProbeResult",
+    "PoolLayoutProbeStatus",
+    "PoolLayoutRollbackRequest",
+    "PoolMappingPublishResult",
+    "PoolMappingSourceLayout",
+    "PoolMappingVerificationResult",
+    "PoolQuarantineCleanupRequest",
+    "PoolQuarantineCleanupResult",
+    "PoolSkillMappingIntent",
     "Skill",
     "SkillConfig",
     "SkillExecutionRequest",

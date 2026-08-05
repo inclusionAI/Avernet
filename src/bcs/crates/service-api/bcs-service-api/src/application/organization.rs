@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use bcs_domain::{Organization, OrganizationMember};
 
 use crate::{
-    OrganizationCandidateBot, OrganizationCandidateBotPage, OrganizationCandidatePageQuery,
-    OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
+    OrganizationCandidateBot, OrganizationCandidateBotDetail, OrganizationCandidateBotPage,
+    OrganizationCandidatePageQuery, OrganizationCandidateQuery, OrganizationMemberDetail, OrganizationMemberPage,
     OrganizationMemberProfile, OrganizationMemberProfilePatch, ServiceResult,
 };
 use crate::core::OrganizationMemberPageQuery;
@@ -29,7 +29,7 @@ pub struct CreateOrganizationCommand {
 
 #[derive(Debug, Clone)]
 pub struct UpdateOrganizationCommand {
-    pub auth: OrganizationAuth,
+    pub auth: OrganizationMemberAuth,
     pub organization_code: String,
     pub name: Option<String>,
     pub description: Option<Option<String>>,
@@ -55,7 +55,11 @@ pub struct UpdateOrganizationMemberProfileCommand {
 #[async_trait]
 pub trait OrganizationManagementService: Send + Sync {
     async fn create(&self, command: CreateOrganizationCommand) -> ServiceResult<Organization>;
-    async fn get(&self, auth: OrganizationAuth, code: &str) -> ServiceResult<Organization>;
+    async fn get(
+        &self,
+        auth: OrganizationMemberAuth,
+        code: &str,
+    ) -> ServiceResult<Organization>;
     async fn list(
         &self,
         auth: OrganizationAuth,
@@ -140,6 +144,15 @@ pub trait OrganizationManagementService: Send + Sync {
         auth: OrganizationAuth,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn candidate_bot_detail(
+        &self,
+        auth: OrganizationAuth,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        let _ = (auth, organization_code, bot_uuid);
+        Ok(None)
+    }
     async fn candidate_bots_page(
         &self,
         auth: OrganizationAuth,

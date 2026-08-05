@@ -36,6 +36,19 @@ class BotServiceProtocol(Protocol):
 
     def check_bot_name_exists(self, *args: Any, **kwargs: Any) -> Any: ...
 
+    def check_create_bot_preflight(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    # Whether the owner has no bots yet. ``create_flow`` calls this on the
+    # injected service to choose the first-bot passport application, so it is
+    # part of the surface adapters depend on — not an internal helper.
+    def is_first_bot(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    # The ceiling creation actually enforces (per-user policy, falling back to
+    # the configured allocation limit). Exposed so a surface that *reports* the
+    # quota resolves it the same way, instead of re-deriving the precedence and
+    # drifting from what create rejects on.
+    def get_bots_ceiling_for_owner(self, *args: Any, **kwargs: Any) -> Any: ...
+
     def get_engine_paths(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def get_bot_work_path(self, *args: Any, **kwargs: Any) -> Any: ...

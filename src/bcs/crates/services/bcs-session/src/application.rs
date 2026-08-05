@@ -10,14 +10,209 @@ use bcs_service_api::application::session::{
 };
 use bcs_service_api::port::repo::{GroupRepoPort, SessionRepoPort};
 use bcs_service_api::{
-    BotRuntimeConnectionService, GroupStrategy, Participant, ParticipantMode, ParticipantRole,
-    Session, SessionStatus,
+    BotRuntimeConnectionService, CollaborationRuntimeService, GroupStrategy, Participant,
+    ParticipantMode, ParticipantRole, ServiceError, Session, SessionStatus,
 };
 
 pub struct SessionManagementServiceImpl {
     repo: Arc<dyn SessionRepoPort>,
     group_repo: Arc<dyn GroupRepoPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
+}
+
+pub struct SessionManagementWithRuntimeCleanup {
+    inner: Arc<dyn SessionManagementService>,
+    collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+}
+
+impl SessionManagementWithRuntimeCleanup {
+    pub fn new(
+        inner: Arc<dyn SessionManagementService>,
+        collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
+    ) -> Self {
+        Self {
+            inner,
+            collaboration_runtime,
+        }
+    }
+}
+
+#[async_trait]
+impl SessionManagementService for SessionManagementWithRuntimeCleanup {
+    async fn create_or_reactivate(
+        &self,
+        cmd: CreateOrReactivateCommand,
+    ) -> Result<CreateOrReactivateOutcome, SessionUseCaseError> {
+        self.inner.create_or_reactivate(cmd).await
+    }
+
+    async fn get(&self, session_id: &str) -> Result<Option<Session>, SessionUseCaseError> {
+        self.inner.get(session_id).await
+    }
+
+    async fn belongs_to_group(
+        &self,
+        session_id: &str,
+        group_id: &str,
+    ) -> Result<bool, SessionUseCaseError> {
+        self.inner.belongs_to_group(session_id, group_id).await
+    }
+
+    async fn list_by_group(
+        &self,
+        group_id: &str,
+        status: Option<SessionStatus>,
+        offset: u64,
+        limit: u64,
+        title_contains: Option<&str>,
+        participant_id: Option<&str>,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        self.inner
+            .list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await
+    }
+
+    async fn count_running_service(
+        &self,
+        group_id: &str,
+    ) -> Result<u64, SessionUseCaseError> {
+        self.inner.count_running_service(group_id).await
+    }
+
+    async fn list_running_service(
+        &self,
+        offset: u64,
+        limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        self.inner.list_running_service(offset, limit).await
+    }
+
+    async fn update_callback_status(
+        &self,
+        session_id: &str,
+        status: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.update_callback_status(session_id, status).await
+    }
+
+    async fn complete_if_running(
+        &self,
+        session_id: &str,
+        output: Option<serde_json::Value>,
+        error: Option<String>,
+    ) -> Result<Option<Session>, SessionUseCaseError> {
+        self.inner
+            .complete_if_running(session_id, output, error)
+            .await
+    }
+
+    async fn add_participant(
+        &self,
+        session_id: &str,
+        participant: Participant,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner.add_participant(session_id, participant).await
+    }
+
+    async fn remove_participant(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner.remove_participant(session_id, bot_uuid).await
+    }
+
+    async fn update_participant_mode(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+        mode: ParticipantMode,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner
+            .update_participant_mode(session_id, bot_uuid, mode)
+            .await
+    }
+
+    async fn update_title(
+        &self,
+        session_id: &str,
+        title: Option<String>,
+    ) -> Result<Session, SessionUseCaseError> {
+        self.inner.update_title(session_id, title).await
+    }
+
+    async fn list_group_ids_by_session_participant(
+        &self,
+        bot_uuid: &str,
+    ) -> Result<Vec<String>, SessionUseCaseError> {
+        self.inner
+            .list_group_ids_by_session_participant(bot_uuid)
+            .await
+    }
+
+    async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
+        self.collaboration_runtime
+            .cancel_session_runs(session_id, "session_deleted")
+            .await
+            .map_err(|error| {
+                SessionUseCaseError::Internal(ServiceError::InternalError(format!(
+                    "Failed to cancel active state-machine runs for deleted session '{session_id}': {error}"
+                )))
+            })?;
+        self.inner.delete(session_id).await
+    }
+
+    async fn collect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.collect(session_id, bot_uuid).await
+    }
+
+    async fn uncollect(
+        &self,
+        session_id: &str,
+        bot_uuid: &str,
+    ) -> Result<(), SessionUseCaseError> {
+        self.inner.uncollect(session_id, bot_uuid).await
+    }
+
+    async fn list_collected_by_group(
+        &self,
+        group_id: &str,
+        bot_uuid: &str,
+        status: Option<SessionStatus>,
+        title_contains: Option<&str>,
+        offset: u64,
+        limit: u64,
+    ) -> Result<Vec<Session>, SessionUseCaseError> {
+        self.inner
+            .list_collected_by_group(
+                group_id,
+                bot_uuid,
+                status,
+                title_contains,
+                offset,
+                limit,
+            )
+            .await
+    }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
+        self.inner.collected_at_map(session_ids, bot_uuid).await
+    }
 }
 
 impl SessionManagementServiceImpl {
@@ -105,7 +300,17 @@ impl SessionManagementService for SessionManagementServiceImpl {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> Result<Vec<Session>, SessionUseCaseError> {
-        Ok(self.repo.list_by_group(group_id, status, offset, limit, title_contains, participant_id).await)
+        Ok(self
+            .repo
+            .try_list_by_group(
+                group_id,
+                status,
+                offset,
+                limit,
+                title_contains,
+                participant_id,
+            )
+            .await?)
     }
 
     async fn count_running_service(
@@ -211,7 +416,10 @@ impl SessionManagementService for SessionManagementServiceImpl {
         &self,
         bot_uuid: &str,
     ) -> Result<Vec<String>, SessionUseCaseError> {
-        Ok(self.repo.list_group_ids_by_session_participant(bot_uuid).await)
+        Ok(self
+            .repo
+            .try_list_group_ids_by_session_participant(bot_uuid)
+            .await?)
     }
 
     async fn delete(&self, session_id: &str) -> Result<bool, SessionUseCaseError> {
@@ -255,5 +463,13 @@ impl SessionManagementService for SessionManagementServiceImpl {
             .repo
             .list_collected_by_group(group_id, bot_uuid, status, title_contains, offset, limit)
             .await)
+    }
+
+    async fn collected_at_map(
+        &self,
+        session_ids: &[&str],
+        bot_uuid: &str,
+    ) -> Result<Vec<(String, u64)>, SessionUseCaseError> {
+        Ok(self.repo.collected_at_map(session_ids, bot_uuid).await)
     }
 }

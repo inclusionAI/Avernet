@@ -4,21 +4,25 @@ Uses a minimal FastAPI test app — never imports agentclaw.servers.web.app.
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotService,
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
     BotNameInvalidError,
     BotLimitExceededError,
+    DefaultBotTeclawNotAllowedError,
+    DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
     DeviceLimitError,
 )
 from agentclaw.community.plugin_api.passport import PassportError, PassportPlugin
@@ -36,6 +40,7 @@ def _bind_bot_service(
     auth_rel=None,
     skill_set_factory=None,
     policy_service=None,
+    create_bot_for_others_service=None,
     default_bot_passport_repair_service=None,
 ):
     from agentclaw.community.core.bot_management.repository.protocol import BotRepository
@@ -43,11 +48,19 @@ def _bind_bot_service(
     from agentclaw.community.api.default_bot_passport_repair_service import (
         DefaultBotPassportRepairServiceProtocol,
     )
+    from agentclaw.community.api.create_bot_for_others_service import (
+        CreateBotForOthersServiceProtocol,
+    )
 
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotService, to=svc)
             binder.bind(BotServiceProtocol, to=svc)
+            if create_bot_for_others_service is not None:
+                binder.bind(
+                    CreateBotForOthersServiceProtocol,
+                    to=create_bot_for_others_service,
+                )
             if default_bot_passport_repair_service is not None:
                 binder.bind(
                     DefaultBotPassportRepairServiceProtocol,
@@ -146,6 +159,7 @@ def client(mock_bot_service, mock_passport):
 
     app = FastAPI()
     app.include_router(router)
+    app.dependency_overrides[require_operator] = lambda: MagicMock(staffId="test_user")
 
     # Mirror api/app.py: surface DomainError subclasses as HTTP codes so
     # tests can assert 401 / 403 rather than receiving an unhandled 500.
@@ -169,7 +183,9 @@ def client(mock_bot_service, mock_passport):
         )
     )
     repair_service = MagicMock()
+    create_for_others_service = MagicMock()
     app.state.default_bot_passport_repair_service = repair_service
+    app.state.create_bot_for_others_service = create_for_others_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=MagicMock(),
@@ -177,6 +193,7 @@ def client(mock_bot_service, mock_passport):
         auth=mock_auth,
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        create_bot_for_others_service=create_for_others_service,
         default_bot_passport_repair_service=repair_service,
     )]))
 
@@ -200,7 +217,22 @@ def admin_client(mock_bot_service, mock_passport):
     mock_repo = MagicMock()
     mock_repo.exists_by_owner_and_bot_id.return_value = False
     repair_service = MagicMock()
+    create_for_others_service = MagicMock()
+    create_for_others_service.execute.return_value = {
+        "target_user_id": "u1",
+        "bot_id": "default",
+        "action": "created",
+        "bot": BOT_SAMPLE,
+        "passport": {
+            "status": "ISSUED",
+            "agent_code": "agent-u1",
+            "token_present": True,
+            "source": "applied",
+        },
+        "runtime": {"restart_required": False},
+    }
     app.state.default_bot_passport_repair_service = repair_service
+    app.state.create_bot_for_others_service = create_for_others_service
     attach_injector(app, Injector([_bind_bot_service(
         mock_bot_service,
         bot_repo=mock_repo,
@@ -208,6 +240,7 @@ def admin_client(mock_bot_service, mock_passport):
         auth=MagicMock(),
         auth_rel=MagicMock(),
         skill_set_factory=_stub_skill_set_factory(),
+        create_bot_for_others_service=create_for_others_service,
         default_bot_passport_repair_service=repair_service,
     )]))
 
@@ -624,6 +657,16 @@ class TestUpdateBot:
         assert "不能为空" in body["message"]
         svc.update_bot.assert_not_called()
 
+    def test_legacy_name_empty_rejected(self, client):
+        # 兼容旧字段 name，不能静默忽略空名称并返回成功。
+        tc, svc, _ = client
+        resp = tc.put("/api/bots/default", json={"name": ""})
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        assert "不能为空" in body["message"]
+        svc.update_bot.assert_not_called()
+
     def test_invalid_name_too_long_rejected(self, client):
         tc, svc, _ = client
         resp = tc.put("/api/bots/default", json={"bot_name": "x" * 33})
@@ -840,6 +883,22 @@ class TestSwitchEngine:
         resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
         assert resp.json()["error_code"] == 400
 
+    def test_default_teclaw_error_preserves_business_message(self, client):
+        tc, svc, _ = client
+        svc.switch_engine.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots/switch-engine",
+            json={"bot_id": "default", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
+
 
 # ---------------------------------------------------------------------------
 # POST /api/bots/restart-scheduler
@@ -1009,18 +1068,42 @@ class TestCreateForOthers:
 
     def test_creates_bot_when_no_default_exists(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.return_value = BOT_SAMPLE
-        resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            headers={"cookie": "session-cookie"},
+            json={
+                "target_user_id": " u1 ",
+                "target_nick_name": " Alice ",
+                "bot_type": "personal",
+            },
+        )
         data = resp.json()
         assert data["success"] is True
         assert data["data"]["action"] == "created"
+        tc.app.state.create_bot_for_others_service.execute.assert_called_once_with(
+            target_user_id="u1",
+            target_nick_name="Alice",
+            bot_type="personal",
+            operator_user_id="100000",
+            operator_name="Test User",
+            cookie="session-cookie",
+        )
 
     def test_skips_if_active_default_bot_exists(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = True
-        active_bot = {**BOT_SAMPLE, "bot_id": "default", "status": "ACTIVE"}
-        mock_repo.list_by_owner.return_value = (1, [active_bot])
+        tc.app.state.create_bot_for_others_service.execute.return_value = {
+            "target_user_id": "u1",
+            "bot_id": "default",
+            "status": "ACTIVE",
+            "action": "skipped",
+            "passport": {
+                "status": "ISSUED",
+                "agent_code": "agent-u1",
+                "token_present": True,
+                "source": "existing",
+            },
+            "runtime": {"restart_required": False},
+        }
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
         data = resp.json()
         assert data["success"] is True
@@ -1028,17 +1111,53 @@ class TestCreateForOthers:
 
     def test_device_limit_error(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.side_effect = DeviceLimitError("limit")
+        tc.app.state.create_bot_for_others_service.execute.side_effect = DeviceLimitError("limit")
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
+        assert resp.json()["error_code"] == 429
+
+    def test_bot_limit_error(self, admin_client):
+        tc, _, _, _ = admin_client
+        tc.app.state.create_bot_for_others_service.execute.side_effect = (
+            BotLimitExceededError("limit")
+        )
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            json={"target_user_id": "u1", "target_nick_name": "Alice"},
+        )
         assert resp.json()["error_code"] == 429
 
     def test_device_allocation_error(self, admin_client):
         tc, svc, _, mock_repo = admin_client
-        mock_repo.exists_by_owner_and_bot_id.return_value = False
-        svc.create_bot.side_effect = DeviceAllocationError("alloc fail")
+        tc.app.state.create_bot_for_others_service.execute.side_effect = DeviceAllocationError("alloc fail")
         resp = tc.post("/api/bots/create-for-others", json={"target_user_id": "u1", "target_nick_name": "Alice"})
         assert resp.json()["error_code"] == 500
+
+    def test_passport_preparation_error_preserves_control_plane_error_code(
+        self, admin_client
+    ):
+        from agentclaw.community.core.bot_management.errors import (
+            CreateBotForOthersError,
+        )
+
+        tc, _, _, _ = admin_client
+        tc.app.state.create_bot_for_others_service.execute.side_effect = (
+            CreateBotForOthersError(
+                "apply_first_agent_passport returned no token",
+                error_code=5401,
+            )
+        )
+
+        resp = tc.post(
+            "/api/bots/create-for-others",
+            json={"target_user_id": "u1", "target_nick_name": "Alice"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": "apply_first_agent_passport returned no token",
+            "error_code": 5401,
+            "data": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1260,10 +1379,11 @@ class TestCreateBot:
         # MCP codes still passed through independently of CLI items
         assert passport_kwargs["mcp_codes"] == ["mcp.remote.1"]
         cli_codes = [c["cli_code"] for c in passport_kwargs["cli_items"]]
-        assert len(cli_codes) == 8
+        assert len(cli_codes) == 9
         assert "antcode-cli" in cli_codes
         assert "adev-cli" in cli_codes
         assert "derisk-cli" in cli_codes
+        assert "yuque-cli" in cli_codes
 
     def test_create_passport_carries_default_cli_items_for_claude_code_coding_templates(
         self, mock_bot_service, mock_passport
@@ -1307,8 +1427,8 @@ class TestCreateBot:
         kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
         assert kwargs["engine_type"] == "claude_code"
         cli_codes = [c["cli_code"] for c in kwargs["cli_items"]]
-        assert len(cli_codes) == 8
-        assert {"antcode-cli", "adev-cli", "derisk-cli"} <= set(cli_codes)
+        assert len(cli_codes) == 9
+        assert {"antcode-cli", "adev-cli", "derisk-cli", "yuque-cli"} <= set(cli_codes)
 
         # applicationCoding → 同样走 aicoding CLI 链路。
         mock_passport.apply_first_agent_passport.reset_mock()
@@ -1323,7 +1443,7 @@ class TestCreateBot:
             )
         kwargs = mock_passport.apply_first_agent_passport.call_args.kwargs
         assert kwargs["engine_type"] == "claude_code"
-        assert len(kwargs["cli_items"]) == 8
+        assert len(kwargs["cli_items"]) == 9
 
         # claude_code 不带 template_type / 带 service 等非研发模板 → fail-closed 空。
         mock_passport.apply_first_agent_passport.reset_mock()
@@ -1343,6 +1463,23 @@ class TestCreateBot:
         passport.apply_first_agent_passport.side_effect = PassportError("auth fail")
         resp = tc.post("/api/bots", json={"bot_name": "NewBot"})
         assert resp.json()["error_code"] == 5400
+
+    def test_default_teclaw_service_guard_preserves_business_message(self, client):
+        tc, svc, passport = client
+        passport.apply_first_agent_passport.return_value = {"token": "tok123"}
+        svc.create_bot.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots",
+            json={"bot_name": "NewBot", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
 
     def test_device_allocation_error(self, client):
         tc, svc, passport = client
@@ -1387,6 +1524,33 @@ class TestCreateBot:
         assert data["success"] is False
         assert data["error_code"] == 400
         passport.apply_first_agent_passport.assert_not_called()
+        svc.create_bot.assert_not_called()
+
+    def test_default_teclaw_is_rejected_before_passport(self, client):
+        tc, svc, passport = client
+        svc.check_create_bot_preflight.side_effect = (
+            DefaultBotTeclawNotAllowedError()
+        )
+
+        resp = tc.post(
+            "/api/bots",
+            json={"bot_name": "NewBot", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
+        svc.check_create_bot_preflight.assert_called_once_with(
+            user_id="test_user",
+            bot_id="default",
+            engine_type="teclaw",
+            bot_name="NewBot",
+        )
+        passport.apply_first_agent_passport.assert_not_called()
+        passport.apply_agent_passport.assert_not_called()
         svc.create_bot.assert_not_called()
 
     def test_bot_count_limit_returns_429(self, client):
@@ -1512,6 +1676,23 @@ class TestGetAuthStatus:
         data = resp.json()
         assert data["success"] is False
         assert data["error_code"] == 400
+
+    def test_issued_default_teclaw_returns_business_error(self, client):
+        tc, svc, passport = client
+        passport.query_auth_status.return_value = {"status": "ISSUED", "token": "tok"}
+        svc.create_bot.side_effect = DefaultBotTeclawNotAllowedError()
+
+        resp = tc.post(
+            "/api/bots/auth-status",
+            json={"bot_id": "default", "engine_type": "teclaw"},
+        )
+
+        assert resp.json() == {
+            "success": False,
+            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
+            "error_code": 400,
+            "data": None,
+        }
 
     def test_issued_bot_limit_exceeded_returns_429(self, client):
         tc, svc, passport = client
@@ -1670,6 +1851,21 @@ class TestListDomainBots:
         assert data["error_code"] == 500
         assert "查询失败" in data["message"] or "失败" in data["message"]
 
+    def test_list_domain_bots_strips_iam_token(self, client):
+        """iam_token 是调用方 IAM 凭据,公开域 Bot 列表响应中必须剔除。"""
+        tc, svc, _ = client
+        bot_with_token = {**BOT_SAMPLE, "ext": {"iam_token": "secret-token", "is_domain_bot": True}}
+        svc.list_domain_bots.return_value = {"total": 1, "items": [bot_with_token]}
+
+        resp = tc.get("/api/bots/search/domain-bots")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        item = data["data"]["items"][0]
+        assert "iam_token" not in item["ext"]
+        assert item["ext"]["is_domain_bot"] is True
+
 
 # ---------------------------------------------------------------------------
 # GET /api/bots/{bot_id}/appcoding-bots
@@ -1724,7 +1920,9 @@ class TestListCodingBotsByArchitect:
 def _engine_config_app(mock_bot_service, mock_svc):
     """An app with the bot-management router + a mocked EngineConfigService bound."""
     from agentclaw.community.adapters.http.bot_management.router import router
-    from agentclaw.community.core.services.engine_config import EngineConfigService
+    from agentclaw.community.api.engine_config_service import (
+        EngineConfigServiceProtocol,
+    )
 
     app = FastAPI()
     app.include_router(router)
@@ -1732,7 +1930,7 @@ def _engine_config_app(mock_bot_service, mock_svc):
 
     class _Extra(Module):
         def configure(self, binder):
-            binder.bind(EngineConfigService, to=mock_svc)
+            binder.bind(EngineConfigServiceProtocol, to=mock_svc)
 
     attach_injector(app, Injector([
         _bind_bot_service(mock_bot_service, bot_repo=MagicMock(), auth=MagicMock()),
@@ -1770,6 +1968,26 @@ class TestUpdateEngineConfig:
         body = resp.json()
         assert body["success"] is False
         assert body["error_code"] == 500
+
+    def test_invalid_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put(
+            "/api/bots/default/engine-config",
+            content="this is not valid json {{{",
+            headers={"content-type": "application/json"},
+        )
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
+
+    def test_non_object_json_rejected(self, engine_cfg_client):
+        tc, svc = engine_cfg_client
+        resp = tc.put("/api/bots/default/engine-config", json=["not", "an", "object"])
+        body = resp.json()
+        assert body["success"] is False
+        assert body["error_code"] == 400
+        svc.write_bot_config.assert_not_awaited()
 
 
 class TestGetEngineConfig:

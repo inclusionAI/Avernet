@@ -35,6 +35,7 @@ def _make_service(
     device_provider=None,
     baas_service=None,
     transport=None,
+    instance_service=None,
 ):
     """Construct ExpertChatService with mocked deps (含 Task 2.5 新增依赖)."""
     return ExpertChatService(
@@ -45,6 +46,7 @@ def _make_service(
         resolver=resolver or MagicMock(),
         collaborator_service=collaborator_service or MagicMock(),
         transport=transport or MagicMock(invoke=AsyncMock()),
+        instance_service=instance_service or MagicMock(),
     )
 
 

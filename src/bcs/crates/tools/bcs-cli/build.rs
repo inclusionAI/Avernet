@@ -4,6 +4,8 @@ fn main() {
     println!("cargo:rustc-env=GIT_COMMIT_HASH={hash}");
     println!("cargo:rustc-env=BUILD_DATE={date}");
     println!("cargo:rerun-if-changed=../../../.git/HEAD");
+    println!("cargo:rerun-if-env-changed=BCS_CLI_DEFAULT_PRE_URL");
+    println!("cargo:rerun-if-env-changed=BCS_CLI_DEFAULT_PROD_URL");
 }
 
 fn git_commit_hash() -> String {

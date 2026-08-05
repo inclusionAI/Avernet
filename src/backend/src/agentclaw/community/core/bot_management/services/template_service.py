@@ -20,12 +20,13 @@ The repository is injected via constructor (DI), following the same pattern
 as BotService / BotRepository.
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
 from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -92,15 +93,29 @@ class TemplateService:
             raise TemplateValidationError("Template ext content cannot be empty")
 
     def _encrypt_token_field(
-        self, template_config: Dict[str, Any], template_type: Optional[str]
+        self,
+        template_config: Dict[str, Any],
+        template_type: Optional[str],
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """仅 applicationCoding 且 token 为明文时加密 token 字段。幂等。
+        """按引擎策略决定是否加密 token 字段。幂等。
 
-        门控由显式 template_type 参数决定（不依赖 template_config 字典内键），
-        与 DeviceService.apply_device 读取门控对称。master_key 空（singlebox）
-        时 vault.encrypt 退化为原样返回，无需在此特判。
+        历史调用链只传 ``template_type``，因此这里通过 registry 的
+        ``resolve_for_context`` 做兼容解析；coding 模板规则集中在
+        AicodingProvisioningStrategy，TemplateService 不再硬编码具体模板。
         """
-        if template_type != "applicationCoding":
+        # Legacy call chain only passes template_type; pass empty identity
+        # fields (required by BotProvisioningContext) — should_encrypt only
+        # consults template_type/template_config.
+        ctx, strategy = resolve_provisioning(
+            bot_id="",
+            owner_id="",
+            bot_type="",
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        if not strategy.should_encrypt_template_token(ctx):
             return template_config
         token = template_config.get("token")
         if not isinstance(token, str) or not token or token.startswith(CIPHER_PREFIX):
@@ -112,6 +127,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new template record for a bot.
 
@@ -122,8 +138,10 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: Template configuration dictionary (stored in ext field)
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when the engine provisioning
+                strategy supports runtime tokens, ``token`` is encrypted before persist.
+            active_engine: Optional engine gate used for user-created AC templates
+                whose template_type is not known by this backend.
 
         Returns:
             Created template record
@@ -137,7 +155,9 @@ class TemplateService:
         try:
             # Validate ext content (template_config is stored in the ext field)
             self._validate_ext_content(template_config)
-            template_config = self._encrypt_token_field(template_config, template_type)
+            template_config = self._encrypt_token_field(
+                template_config, template_type, active_engine
+            )
 
             template_data = {
                 "bot_id": bot_id,
@@ -190,6 +210,25 @@ class TemplateService:
             )
             return None
 
+    def list_templates_by_bot_ids(self, bot_ids: List[str]) -> List[Dict[str, Any]]:
+        """List template records by bot IDs.
+
+        This is used by bot list APIs to attach ac_templates.ext as
+        template_config in batch, avoiding N+1 calls to get_template().
+        Failures are treated as non-fatal so list APIs can still return bots.
+        """
+        if not bot_ids:
+            return []
+
+        try:
+            return self._repository.list_by_bot_ids(bot_ids)
+        except Exception as e:
+            logger.error(
+                "[template_service.list_templates_by_bot_ids] Failed to list templates for %d bots: %s",
+                len(bot_ids), e, exc_info=True,
+            )
+            return []
+
     def get_template_config(
         self,
         bot_id: str,
@@ -233,7 +272,7 @@ class TemplateService:
 
         门控与 ``_encrypt_token_field`` 对称：仅 applicationCoding bot 的 token
         才落库加密；调用方（``BotService.update_bot``）应先校验
-        ``bot.template_type == "applicationCoding"`` 再调用本方法。此处只负责
+        对应引擎策略允许 runtime token 后再调用本方法。此处只负责
         取值与解密，前缀缺失时 ``decrypt_or_passthrough`` 原样透传（兼容历史明文）。
 
         Args:
@@ -264,6 +303,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update template configuration for a bot.
 
@@ -274,8 +314,8 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: New template configuration dictionary
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when the engine provisioning
+                strategy supports runtime tokens, ``token`` is encrypted before persist.
 
         Returns:
             Updated template record or None if not found
@@ -290,7 +330,9 @@ class TemplateService:
         try:
             # Validate ext content (template_config is stored in the ext field)
             self._validate_ext_content(template_config)
-            template_config = self._encrypt_token_field(template_config, template_type)
+            template_config = self._encrypt_token_field(
+                template_config, template_type, active_engine
+            )
 
             # Check if template exists
             if not self.exists_template(bot_id):
@@ -429,6 +471,7 @@ class TemplateService:
         bot_id: str,
         template_config: Dict[str, Any],
         template_type: Optional[str] = None,
+        active_engine: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create or update template configuration for a bot.
 
@@ -440,8 +483,8 @@ class TemplateService:
         Args:
             bot_id: Bot ID
             template_config: Template configuration dictionary
-            template_type: Optional template type gate; when ``applicationCoding``,
-                the ``token`` field of template_config is encrypted before persist.
+            template_type: Optional template type gate; when the engine provisioning
+                strategy supports runtime tokens, ``token`` is encrypted before persist.
 
         Returns:
             Created or updated template record
@@ -462,14 +505,18 @@ class TemplateService:
                     "[template_service.create_or_update_template] Template exists, updating for bot %s",
                     bot_id,
                 )
-                return self.update_template(bot_id, template_config, template_type)
+                return self.update_template(
+                    bot_id, template_config, template_type, active_engine
+                )
             else:
                 # Create new template
                 logger.debug(
                     "[template_service.create_or_update_template] Template not found, creating for bot %s",
                     bot_id,
                 )
-                return self.create_template(bot_id, template_config, template_type)
+                return self.create_template(
+                    bot_id, template_config, template_type, active_engine
+                )
         except TemplateValidationError:
             logger.warning(
                 "[template_service.create_or_update_template] Validation error for bot %s",

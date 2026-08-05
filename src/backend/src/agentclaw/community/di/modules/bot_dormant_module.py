@@ -15,6 +15,8 @@ BotServiceProtocol explicitly.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_service import BotServiceProtocol as _ApiBotServiceProtocol
@@ -29,6 +31,9 @@ from agentclaw.community.core.bot_dormant.protocols import (
 from agentclaw.community.core.bot_dormant.scan_policy import DormantScanPolicyService
 from agentclaw.community.core.bot_dormant.service import DormantBotService
 from agentclaw.community.core.bot_dormant.whitelist_service import WhitelistService
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError as BotManagementNotFoundError,
+)
 from agentclaw.community.core.common_config import CommonWhiteListService
 from agentclaw.community.di.config import (
     DormantConfig,
@@ -58,6 +63,28 @@ logger = get_logger()
 # NOTE: this is intentionally a publicly-visible string — it only ever
 # gates singlebox/local where no real authority decision is at stake.
 _SINGLEBOX_FALLBACK_TOKEN = "singlebox-dormant-token-local"
+
+
+class _DormantBotServiceAdapter:
+    """Normalize BotService behavior to the dormant module's local contract."""
+
+    def __init__(self, bot_service: _ApiBotServiceProtocol) -> None:
+        self._bot_service = bot_service
+
+    def get_bot(self, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return self._bot_service.get_bot(*args, **kwargs)
+        except BotManagementNotFoundError:
+            return None
+
+    def update_status(self, *args: Any, **kwargs: Any) -> Any:
+        return self._bot_service.update_status(*args, **kwargs)
+
+    def stop_bot(self, *args: Any, **kwargs: Any) -> Any:
+        return self._bot_service.stop_bot(*args, **kwargs)
+
+    def start_bot(self, *args: Any, **kwargs: Any) -> Any:
+        return self._bot_service.start_bot(*args, **kwargs)
 
 
 class BotDormantModule(Module):
@@ -95,11 +122,8 @@ class BotDormantModule(Module):
         self,
         bot_service: _ApiBotServiceProtocol,
     ) -> _DormantBotServiceProtocol:
-        """Bridge the api-layer BotServiceProtocol to the dormant local
-        BotServiceProtocol. The same singleton instance backs both keys,
-        but core/bot_dormant code only refers to the local protocol so the
-        four-layer rule (core must not import api) holds."""
-        return bot_service
+        """Adapt the API service to the dormant module's local contract."""
+        return _DormantBotServiceAdapter(bot_service)
 
     @singleton
     @provider

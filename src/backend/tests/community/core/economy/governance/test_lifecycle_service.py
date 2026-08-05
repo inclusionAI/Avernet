@@ -9,7 +9,7 @@ so it CAN import from conftest).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from agentclaw.community.core.economy.governance.domain.enums import (
     CloseReason,
@@ -27,6 +27,7 @@ from agentclaw.community.core.economy.governance.repositories.notify_log_repo im
 )
 from agentclaw.community.core.economy.governance.repositories.orm import (
     Base,
+    GovernanceNotificationOrm,
     GovernanceTicketOrm,
 )
 from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
@@ -64,7 +65,8 @@ def _build_svc():
 
 
 def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
-                 worker="owner-1:bot-1"):
+                 worker="owner-1:bot-1", owner_name=None, token_baseline=None,
+                 repair_deadline=None):
     """Insert a task_record row directly via ORM for test seeding.
 
     ``worker`` sets both ``worker_id`` and ``active_worker``; the table has a
@@ -94,15 +96,18 @@ def _seed_ticket(db, *, ticket_id="T-100", status="open", remind_at=None,
             worker_id=worker,
             bot_id=bot_id,
             owner_id=owner_id,
+            owner_name=owner_name,
             bot_name="Bot1",
             dt_version="20260711",
             governance_decision="actionable",
             latest_decision="actionable",
             governance_status=status,
             active_worker=worker,
+            token_baseline=token_baseline,
             last_sync_at=datetime.now(),  # nullable=False, no default
             remind_at=remind_at,
             remind_count=0,
+            repair_deadline=repair_deadline,
         )
         s.add(row)
 
@@ -114,6 +119,7 @@ def _make_ticket_model(*, ticket_id="T-NEW") -> GovernanceTicket:
         worker_id="owner-2:bot-2",
         bot_id="bot-2",
         owner_id="owner-2",
+        owner_name=None,
         bot_name="Bot2",
         snapshot=MutableSnapshot(
             dt_version="20260711",
@@ -152,25 +158,229 @@ class TestOpenTicket:
         assert persisted.governance_status == GovernanceStatus.OPEN
         assert persisted.bot_id == "bot-2"
 
+    def test_open_ticket_persists_owner_name_and_baseline(self) -> None:
+        """create 路径须经 add_ticket 落盘 owner_name / token_baseline(防回归:曾因 add_ticket 标量签名缺失而丢值)。"""
+        svc, db, _ = _build_svc()
+        ticket = GovernanceTicket.create(
+            ticket_id="T-create-fields",
+            worker_id="owner-2:bot-2",
+            bot_id="bot-2",
+            owner_id="owner-2",
+            owner_name="Owner Two",
+            bot_name="Bot2",
+            snapshot=MutableSnapshot(
+                dt_version="20260711", initial_decision="actionable",
+                current_decision="actionable", triggered_dimensions="cost",
+                hit_dimensions_count=1, severity="P1", estimated_saving_tokens=5000,
+                saving_ratio=0.5, task_summary="high cost", notification_structured="{}",
+                analysis_status="done", consecutive_normal_days=0,
+                last_decision_dt_version=None, last_seen_at=None,
+                last_sync_at=datetime(2026, 7, 11), token_baseline=987654,
+            ),
+        )
+        svc.open_ticket(ticket=ticket)
+        persisted = svc._task_repo.find_by_ticket_id("T-create-fields")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.owner_name == "Owner Two"
+        assert persisted.snapshot.token_baseline == 987654
+
 
 # ---------------------------------------------------------------------------
-# close_for_whitelist_hit (offline-batch entry)
+# open_observed_ticket (offline-batch entry — 白名单观察单新建)
 # ---------------------------------------------------------------------------
 
 
-class TestCloseForWhitelistHit:
-    def test_closes_open_ticket(self) -> None:
+class TestOpenObservedTicket:
+    """建观察单瘦路径:OBSERVED 状态、assignee=None、不建 notify_log。
+
+    "白名单不发通知"不变式的核心落点 — 本方法是观察单的唯一来源(三路之一:
+    off-batch 命中无活跃单新建),若它建了 notify 行,整条链路上的不发通知
+    语义就破了。钉死零 notify。
+    """
+
+    def test_observed_row_persisted_with_observed_status(self) -> None:
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-new")
+        returned_id = svc.open_observed_ticket(ticket=ticket)
+
+        assert returned_id == "T-obs-new"
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-new")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None  # 观察不占治理人力
+        assert persisted.close_reason is None  # 非关单转态,不设 close_reason
+
+    def test_no_notify_log_row_created(self) -> None:
+        """关键不变式:建观察单不创建任何 notify_log 行(不发通知)。"""
+        svc, db, engine = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nonotify")
+        svc.open_observed_ticket(ticket=ticket)
+
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            count = s.query(GovernanceNotificationOrm).filter_by(
+                ticket_id="T-obs-nonotify",
+            ).count()
+        assert count == 0  # 零 notify — 白名单不发通知
+
+    def test_delivery_status_not_written(self) -> None:
+        """观察单不调 update_delivery_status:delivery_status 列保持默认 'none'
+        (未被 first_send 写成 pending)。领域模型读时归一 none→pending(读侧),但
+        列本身没被写 — 用 ORM 直查列值验证。"""
+        svc, db, engine = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-nodelivery")
+        svc.open_observed_ticket(ticket=ticket)
+
+        # ORM 直查列 raw 值(未经 from_orm 归一化):列默认 'none',没被写
+        Session = sessionmaker(bind=engine, expire_on_commit=False)
+        with Session() as s:
+            row = s.query(GovernanceTicketOrm).filter_by(
+                ticket_id="T-obs-nodelivery",
+            ).one()
+            assert row.delivery_status == "none"  # 列默认,未被 first_send 写成 pending
+        # 领域模型读时把 none 归一为 pending(读侧归一,非写入)
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-nodelivery")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.delivery_status == "pending"
+
+    def test_open_observed_ticket_uses_enter_observed(self) -> None:
+        """open_observed_ticket 复用 enter_observed(单一入口):建单后字段与
+        enter_observed 状态机动作完全一致 — status=OBSERVED + assignee=None +
+        close_reason=None(建单非关单)+ closed_at=None(非关闭)。"""
+        svc, db, _ = _build_svc()
+        ticket = _make_ticket_model(ticket_id="T-obs-enter")
+        svc.open_observed_ticket(ticket=ticket)
+
+        persisted = svc._task_repo.find_by_ticket_id("T-obs-enter")  # noqa: SLF001
+        assert persisted is not None
+        assert persisted.governance_status == GovernanceStatus.OBSERVED
+        assert persisted.assignee is None      # enter_observed 释放
+        assert persisted.close_reason is None   # 建单非关单,close_reason 不设
+        assert persisted.closed_at is None      # OBSERVED 非关闭,不设 closed_at
+
+
+# ---------------------------------------------------------------------------
+# observe_for_whitelist (加白→转 OBSERVED 单条语义,offline-batch 路1 entry)
+# ---------------------------------------------------------------------------
+
+
+class TestObserveForWhitelist:
+    def test_observes_open_ticket(self) -> None:
+        """scan 兜底关残留活跃单 → OBSERVED(scan_whitelisted),不设 closed_at。"""
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-wl", status="open")
         now = datetime.now()
-        assert svc.close_for_whitelist_hit("T-wl", now=now) is True
+        assert svc.observe_for_whitelist(
+            "T-wl", close_reason=CloseReason.SCAN_WHITELISTED, now=now,
+        ) is True
         t = svc._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
-        assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.WHITELIST_FILTERED
+        assert t.governance_status == GovernanceStatus.OBSERVED
+        assert t.close_reason == CloseReason.SCAN_WHITELISTED
+        assert t.closed_at is None  # OBSERVED 非关闭,不设 closed_at
+        assert t.assignee is None   # 释放 active_worker(观察不占治理人力)
 
     def test_not_found_returns_false(self) -> None:
         svc, _, _ = _build_svc()
-        assert svc.close_for_whitelist_hit("nope", now=datetime.now()) is False
+        assert svc.observe_for_whitelist(
+            "nope", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
+
+
+# ---------------------------------------------------------------------------
+# close_observed_for_removal (whitelist delete 收尾 — OBSERVED→CLOSED)
+# ---------------------------------------------------------------------------
+
+
+class TestCloseObservedForRemoval:
+    """删白收尾:OBSERVED → CLOSED(whitelist_approved) 不设 cooldown + cancel pending。
+
+    四分支钉死:find=None / 非 OBSERVED 态幂等 no-op / 成功转换 / 非法转换。
+    """
+
+    def test_observed_to_closed_success(self) -> None:
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-obs-rm", status="observed")
+        ok = svc.close_observed_for_removal("T-obs-rm", now=datetime.now())
+        assert ok is True
+        t = svc._task_repo.find_by_ticket_id("T-obs-rm")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_reason == CloseReason.WHITELIST_APPROVED
+        assert t.closed_at is not None
+        assert t.cooldown_until is None  # 删白不设 cooldown
+
+    def test_not_found_returns_false(self) -> None:
+        svc, _, _ = _build_svc()
+        assert svc.close_observed_for_removal("nope", now=datetime.now()) is False
+
+    def test_non_observed_idempotent_noop(self) -> None:
+        """非 OBSERVED 态(closed/活跃)→ 幂等 no-op,不强行转,状态不动。"""
+        svc, db, _ = _build_svc()
+        # closed 单(已终态)→ 不该被删白收尾碰
+        _seed_ticket(db, ticket_id="T-closed-rm", status="closed")
+        assert svc.close_observed_for_removal("T-closed-rm", now=datetime.now()) is False
+        t = svc._task_repo.find_by_ticket_id("T-closed-rm")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED  # 未被误改
+
+        # open 活跃单 → 也不该被删白收尾碰(观察收尾只动 OBSERVED)
+        # 用不同 worker 避开 active_worker 唯一约束
+        _seed_ticket(db, ticket_id="T-open-rm", status="open", worker="owner-1:bot-2")
+        assert svc.close_observed_for_removal("T-open-rm", now=datetime.now()) is False
+        t2 = svc._task_repo.find_by_ticket_id("T-open-rm")  # noqa: SLF001
+        assert t2.governance_status == GovernanceStatus.OPEN  # 未被误转
+
+
+# ---------------------------------------------------------------------------
+# bulk_observe_by_ticket_ids (批量加白→转 OBSERVED,单一驱动收口)
+# ---------------------------------------------------------------------------
+
+
+class TestBulkObserveByTicketIds:
+    """批量加白收口:逐条 observe_for_whitelist 守卫激活,幂等。
+
+    钉死:批量转 OBSERVED + close_reason=WHITELIST_APPROVED + 幂等(已 OBSERVED/
+    CLOSED/not-found 不计)+ 不设 closed_at。
+    """
+
+    def test_observes_active_tickets(self) -> None:
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo1", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-bo2", status="scheduled", worker="o2:b2")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo1", "T-bo2"], now=datetime.now(),
+        )
+        assert count == 2
+        for tid in ("T-bo1", "T-bo2"):
+            t = svc._task_repo.find_by_ticket_id(tid)  # noqa: SLF001
+            assert t.governance_status == GovernanceStatus.OBSERVED
+            assert t.close_reason == CloseReason.WHITELIST_APPROVED
+            assert t.closed_at is None
+
+    def test_idempotent_on_already_observed(self) -> None:
+        """含已 OBSERVED 单 → 经 enter_observed 守卫(非法转换)返 False 不计,不重转。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo-open", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-bo-obs", status="observed", worker="o2:b2")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo-open", "T-bo-obs"], now=datetime.now(),
+        )
+        assert count == 1  # 仅 open 单转,已 OBSERVED 单幂等跳过
+
+    def test_not_found_not_counted(self) -> None:
+        svc, _, _ = _build_svc()
+        assert svc.bulk_observe_by_ticket_ids(
+            ["nope"], now=datetime.now(),
+        ) == 0
+
+    def test_closed_not_reobserved(self) -> None:
+        """已 CLOSED 单 → OBSERVED 守卫拒绝(CLOSED 终态空出度),幂等不计。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-bo-closed", status="closed", worker="o1:b1")
+        count = svc.bulk_observe_by_ticket_ids(
+            ["T-bo-closed"], now=datetime.now(),
+        )
+        assert count == 0
+        t = svc._task_repo.find_by_ticket_id("T-bo-closed")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED  # 未被误改
 
 
 # ---------------------------------------------------------------------------
@@ -260,13 +470,72 @@ class TestAcceptFeedback:
         t = svc._task_repo.find_by_ticket_id("T-wlfb")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.WAITING_REVIEW
 
+    def test_accept_feedback_cancels_pending_notify(self) -> None:
+        """契约:转 waiting_review 时取消该工单的 pending 通知(待审静默)。
+
+        待审静默普适于三入口(用户反馈/admin 暂停/排期到期),均经
+        ``_cancel_pending``。本 test 用用户反馈入口固化:一张 open 工单
+        挂一条 PENDING 通知 → accept_feedback 转态后该通知变 cancelled。
+        """
+        from contextlib import contextmanager
+
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-silence", status="open",
+                     worker="owner-s:bot-s")
+
+        @contextmanager
+        def _sess():
+            sf = db._sf  # noqa: SLF001 — test access to FakeDB session factory
+            s = sf()
+            try:
+                yield s
+                s.commit()
+            except Exception:
+                s.rollback()
+                raise
+            finally:
+                s.close()
+
+        with _sess() as s:
+            s.add(GovernanceNotificationOrm(
+                notification_id="N-silence-pending",
+                ticket_id="T-silence",
+                bot_id="bot-s",
+                owner_id="owner-s",
+                worker_id="owner-s:bot-s",
+                dt_version="20260711",
+                governance_decision="actionable",
+                governance_cycle_id="cycle-s",
+                governance_status="open",
+                notify_status="pending",
+                notify_type="first_send",
+                notify_source="offline_batch",
+                latest_decision="actionable",
+            ))
+        assert svc.accept_feedback(
+            "T-silence",
+            user_feedback="optimized",
+            feedback_at=datetime.now(),
+            feedback_source="http_api",
+            target_status=GovernanceStatus.WAITING_REVIEW,
+            review_reason="user_optimized",
+            actor_id="owner-s",
+        ) is True
+        with _sess() as s:
+            row = (
+                s.query(GovernanceNotificationOrm)
+                .filter_by(notification_id="N-silence-pending")
+                .one()
+            )
+            assert row.notify_status == "cancelled"
+
 
 # ---------------------------------------------------------------------------
-# pause / review / emergency_close (ticket-review entry)
+# pause / review / admin_close (ticket-review entry)
 # ---------------------------------------------------------------------------
 
 
-class TestPauseReviewEmergency:
+class TestPauseReviewAdmin:
     def test_pause_open_to_waiting_review(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-pause", status="open")
@@ -287,23 +556,98 @@ class TestPauseReviewEmergency:
         assert t.review_decision == "approve_close"
         assert t.reviewed_by == "admin-1"
 
-    def test_emergency_close_open_to_closed(self) -> None:
+    def test_review_approve_scheduled_to_scheduled(self) -> None:
+        """approve_scheduled → SCHEDULED(不关单),close_reason='schedule_approved'。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-sch", status="waiting_review")
+        assert svc.review_ticket(
+            "T-sch", review_decision="approve_scheduled",
+            reviewed_by="admin-1", review_remark="排期 ok",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED
+        assert t.review_decision == "approve_scheduled"
+        assert t.close_reason == "schedule_approved"
+        assert t.reviewed_by == "admin-1"
+
+    def test_review_approve_scheduled_sets_mute_until(self) -> None:
+        """approve_scheduled 设 resume_at=repair_deadline(→mute_until),
+        让 cron list_scheduled_due 到期能扫到触发 schedule_due②。纯 repair_deadline,
+        不加 cooldown(否则 approve_close 时重复冷却)。"""
+        svc, db, _ = _build_svc()
+        deadline = datetime.now() + timedelta(days=7)
+        _seed_ticket(
+            db, ticket_id="T-sch-mute", status="waiting_review",
+            repair_deadline=deadline,
+        )
+        assert svc.review_ticket(
+            "T-sch-mute", review_decision="approve_scheduled",
+            reviewed_by="admin-1",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch-mute")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED
+        # resume_at (→ mute_until) = 纯 repair_deadline,不加 cooldown。
+        assert t.resume_at == deadline
+        # 落库后能被 list_scheduled_due(mute_until<=now 且 IS NOT NULL)扫到:
+        # 未来日 deadline > now,当前不在 due;但 mute_until 已非空。
+        assert t.resume_at is not None
+
+    def test_review_approve_scheduled_without_repair_deadline_warns(self) -> None:
+        """repair_deadline 缺失(异常数据,need_time 本该必填)时,领域静默不设
+        resume_at,审批仍完成(进 SCHEDULED);lifecycle 兜 warn,不 raise。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-sch-nomute", status="waiting_review")
+        # 不带 repair_deadline(默认 None)
+        assert svc.review_ticket(
+            "T-sch-nomute", review_decision="approve_scheduled",
+            reviewed_by="admin-1",
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-sch-nomute")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.SCHEDULED  # 审批完成
+        assert t.resume_at is None  # 防御:无 repair_deadline 不设 mute
+
+    def test_admin_close_open_to_closed(self) -> None:
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg", status="open")
-        assert svc.emergency_close("T-emg", now=datetime.now()) is True
+        assert svc.admin_close("T-emg", now=datetime.now()) is True
         t = svc._task_repo.find_by_ticket_id("T-emg")  # noqa: SLF001
         assert t.governance_status == GovernanceStatus.CLOSED
-        assert t.close_reason == CloseReason.EMERGENCY_CLOSED
+        assert t.close_reason == CloseReason.ADMIN_CLOSED
 
-    def test_emergency_close_idempotent_on_closed(self) -> None:
+    def test_admin_close_attaches_conclusion_and_payload(self) -> None:
+        """admin_close 透传 close_conclusion/close_payload 到领域 close()。"""
+        import json as _json
+        from agentclaw.community.core.economy.governance.domain.enums import AdminCloseConclusion
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-cc", status="open")
+        assert svc.admin_close(
+            "T-cc", now=datetime.now(),
+            close_conclusion=AdminCloseConclusion.FALSE_POSITIVE.value,
+            close_payload=_json.dumps({"remark": "误报"}),
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-cc")  # noqa: SLF001
+        assert t.governance_status == GovernanceStatus.CLOSED
+        assert t.close_conclusion == AdminCloseConclusion.FALSE_POSITIVE.value
+        assert _json.loads(t.close_payload or "{}")["remark"] == "误报"
+
+    def test_admin_close_without_conclusion_leaves_none(self) -> None:
+        """不传 conclusion(非 admin/旧路径)→ 留 None,关单仍成功。"""
+        svc, db, _ = _build_svc()
+        _seed_ticket(db, ticket_id="T-nocon", status="open")
+        assert svc.admin_close("T-nocon", now=datetime.now()) is True
+        t = svc._task_repo.find_by_ticket_id("T-nocon")  # noqa: SLF001
+        assert t.close_conclusion is None
+        assert t.close_payload is None
+
+    def test_admin_close_idempotent_on_closed(self) -> None:
         """Already-closed → no-op returns False (idempotent guard in driver)."""
         svc, db, _ = _build_svc()
         _seed_ticket(db, ticket_id="T-emg2", status="closed")
-        assert svc.emergency_close("T-emg2", now=datetime.now()) is False
+        assert svc.admin_close("T-emg2", now=datetime.now()) is False
 
-    def test_emergency_close_not_found(self) -> None:
+    def test_admin_close_not_found(self) -> None:
         svc, _, _ = _build_svc()
-        assert svc.emergency_close("nope", now=datetime.now()) is False
+        assert svc.admin_close("nope", now=datetime.now()) is False
 
 
 # ---------------------------------------------------------------------------
@@ -318,12 +662,42 @@ class TestBulkCloseOpen:
         _seed_ticket(db, ticket_id="T-b2", status="scheduled", worker="o2:b2")
         _seed_ticket(db, ticket_id="T-b3", status="closed", worker="o3:b3")
         count = svc.bulk_close_open(
-            close_reason=CloseReason.EMERGENCY_CLOSED, now=datetime.now(),
+            close_reason=CloseReason.ADMIN_CLOSED, now=datetime.now(),
         )
         assert count == 2  # open + scheduled; closed excluded by WHERE
         for tid in ("T-b1", "T-b2", "T-b3"):
             t = svc._task_repo.find_by_ticket_id(tid)  # noqa: SLF001
             assert t.governance_status == GovernanceStatus.CLOSED
+
+    def test_bulk_close_does_not_touch_waiting_review_or_observed(self) -> None:
+        """bulk_close_open 的 SQL WHERE 谓词 (open,scheduled) 钉死 — waiting_review /
+        observed 单不被 batch 关(防 WHERE 被改宽误含)。
+
+        守护:若有人把 WHERE 谓词放宽(如误引 ACTIVE_STATUSES 含 waiting_review,
+        或误含 observed),本测试能抓。
+        """
+        svc, db, _ = _build_svc()
+        # 五态各一条,不同 worker 避 active_worker 唯一约束
+        _seed_ticket(db, ticket_id="T-wl-open", status="open", worker="o1:b1")
+        _seed_ticket(db, ticket_id="T-wl-sched", status="scheduled", worker="o2:b2")
+        _seed_ticket(db, ticket_id="T-wl-wr", status="waiting_review", worker="o3:b3")
+        _seed_ticket(db, ticket_id="T-wl-obs", status="observed", worker="o4:b4")
+        _seed_ticket(db, ticket_id="T-wl-closed", status="closed", worker="o5:b5")
+
+        count = svc.bulk_close_open(
+            close_reason=CloseReason.ADMIN_CLOSED, now=datetime.now(),
+        )
+        assert count == 2  # 仅 open + scheduled
+
+        # waiting_review 不被 batch 关 — 仍原态,close_reason 未被设成 admin_closed
+        wr = svc._task_repo.find_by_ticket_id("T-wl-wr")  # noqa: SLF001
+        assert wr.governance_status == GovernanceStatus.WAITING_REVIEW
+        assert wr.close_reason != CloseReason.ADMIN_CLOSED.value
+
+        # observed 不被 batch 关 — 仍原态,close_reason 未被设成 admin_closed
+        obs = svc._task_repo.find_by_ticket_id("T-wl-obs")  # noqa: SLF001
+        assert obs.governance_status == GovernanceStatus.OBSERVED
+        assert obs.close_reason != CloseReason.ADMIN_CLOSED.value
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +713,24 @@ class TestNonTransitions:
         t = svc._task_repo.find_by_ticket_id("T-rs")  # noqa: SLF001
         assert t.dt_version == "20260712"
         assert t.governance_status == GovernanceStatus.OPEN  # status unchanged
+
+    def test_refresh_snapshot_owner_name_baseline_guard(self) -> None:
+        """owner_name / token_baseline 走覆盖 guard:incoming 非 None 覆盖,None 保留 older。"""
+        svc, db, _ = _build_svc()
+        # seed 直接写已有值
+        _seed_ticket(db, ticket_id="T-guard", status="open", owner_name="Old", token_baseline=111)
+        # incoming None → 保留
+        assert svc.refresh_snapshot("T-guard", dt_version="20260712") is True
+        t = svc._task_repo.find_by_ticket_id("T-guard")  # noqa: SLF001
+        assert t.owner_name == "Old"
+        assert t.snapshot.token_baseline == 111
+        # incoming 非 None → 覆盖
+        assert svc.refresh_snapshot(
+            "T-guard", dt_version="20260713", owner_name="New", token_baseline=222,
+        ) is True
+        t = svc._task_repo.find_by_ticket_id("T-guard")  # noqa: SLF001
+        assert t.owner_name == "New"
+        assert t.snapshot.token_baseline == 222
 
     def test_advance_reminder_sets_remind_at(self) -> None:
         svc, db, _ = _build_svc()

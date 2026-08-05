@@ -9,8 +9,6 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from opentelemetry.context import Context
-
 
 @dataclass
 class _SessionState:
@@ -22,8 +20,9 @@ class _SessionState:
     last_stream_is_assistant: bool = False
     chat_complete: asyncio.Event = field(default_factory=asyncio.Event)
     agent_complete: asyncio.Event = field(default_factory=asyncio.Event)
-    # 请求注册时的 OTel trace context，用于回调中恢复 trace 关联
-    trace_context: Context | None = None
+    # 请求注册时的 trace context，用于回调中恢复 trace 关联。
+    # 类型由 TracerPlugin 实现决定（OTel Context / OpenTracing span 等）。
+    trace_context: Any = None
     # 流式模式专用：_on_chat/_on_agent push StreamChunk 到此 queue，
     # send_message_stream 从中消费。仅流式请求时创建，非流式为 None。
     stream_queue: asyncio.Queue[Any] | None = None

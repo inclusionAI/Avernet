@@ -22,12 +22,9 @@ from __future__ import annotations
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
-from agentclaw.community.core.files.factory import BotFileServiceFactory
-from agentclaw.community.core.files.repository.protocol import FileRepositoryProtocol
 from agentclaw.community.core.resources.factory import ResourceServiceFactory
 from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.file_repository import FileRepository
 from agentclaw.community.plugins.resource_repository import (
     ResourceRepository as UnifiedResourceRepository,
 )
@@ -58,13 +55,6 @@ class ResourcesModule(Module):
             ResourceRepositoryProtocol,
             to=UnifiedResourceRepository,
             scope=singleton,
-        )
-        # Teclaw workspace-file metadata (ac_file): same unified-ORM pattern.
-        binder.bind(
-            FileRepositoryProtocol, to=FileRepository, scope=singleton
-        )
-        binder.bind(
-            BotFileServiceFactory, to=BotFileServiceFactory, scope=singleton
         )
 
     @singleton

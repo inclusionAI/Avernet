@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Callable, Optional
 
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.events.bus import get_event_bus
+from agentclaw.community.core.events.types import BaasPublishCompletedEvent
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry, TaskOutcome
+from agentclaw.community.core.task_queue.types import (
+    Complete,
+    Fail,
+    Reschedule,
+    Retry,
+    TaskOutcome,
+)
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
@@ -19,6 +29,27 @@ _CREATE_INIT_DEADLINE_SECONDS = 86400
 _PUBLISH_PROGRESS_TRANSIENT_ERROR = "get_publish_progress transient error"
 
 logger = get_logger()
+
+
+def _publish_baas_completed(
+    *,
+    binding_id: int,
+    bot_id: str,
+    owner_id: str,
+    publish_id: int,
+    publish_kind: str,
+) -> None:
+    """Publish an identity-only wake-up after the guarded BaaS success path."""
+
+    get_event_bus().publish(
+        BaasPublishCompletedEvent(
+            binding_id=binding_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            publish_id=publish_id,
+            publish_kind=publish_kind,
+        )
+    )
 
 
 def build_create_publish_poll_payload(
@@ -231,11 +262,22 @@ class BaasCreateInitTaskHandler:
             return Fail(f"invalid payload: {exc}")
 
         binding = self._binding_repository.get_by_id(binding_id)
-        if _binding_is_terminal(binding):
+        if binding is None:
             return Complete()
         if getattr(binding, "device_provider", None) != "baas":
             return Complete()
         if not _payload_publish_id_matches(binding, publish_id, "publish_id"):
+            return Complete()
+        if getattr(binding, "status", None) == DeviceBindingStatus.ACTIVE.value:
+            _publish_baas_completed(
+                binding_id=binding_id,
+                bot_id=payload["bot_id"],
+                owner_id=payload["owner_id"],
+                publish_id=publish_id,
+                publish_kind="create",
+            )
+            return Complete()
+        if getattr(binding, "status", None) == DeviceBindingStatus.FAILED.value:
             return Complete()
         success, message = self._baas_device_service.run_create_init_once(
             binding_id=binding_id,
@@ -247,6 +289,14 @@ class BaasCreateInitTaskHandler:
             self._baas_device_service._mark_service_start_failed(
                 binding_id=binding_id,
                 error=message,
+            )
+        else:
+            _publish_baas_completed(
+                binding_id=binding_id,
+                bot_id=payload["bot_id"],
+                owner_id=payload["owner_id"],
+                publish_id=publish_id,
+                publish_kind="create",
             )
         return Complete()
 
@@ -281,6 +331,24 @@ class BaasRestartPublishPollHandler:
         binding_id, bot_id, owner_id, publish_id, started_at_epoch_s, bot_uuid = parsed
 
         binding = self._binding_repository.get_by_id(binding_id)
+        if (
+            binding is not None
+            and getattr(binding, "status", None) == DeviceBindingStatus.ACTIVE.value
+            and getattr(binding, "device_provider", None) == "baas"
+            and _payload_publish_id_matches(
+                binding,
+                publish_id,
+                "restart_publish_id",
+            )
+        ):
+            _publish_baas_completed(
+                binding_id=binding_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                publish_id=publish_id,
+                publish_kind="restart",
+            )
+            return Complete()
         preflight = self._preflight(binding=binding, publish_id=publish_id)
         if preflight is not None:
             return preflight
@@ -365,9 +433,11 @@ class BaasRestartPublishPollHandler:
     ) -> TaskOutcome:
         if status == DeviceBindingStatus.ACTIVE.value:
             codefuse_token = self._read_codefuse_token(bot_id=bot_id, bot=bot)
-            write_err = self._baas_device_service.refresh_codefuse_token_on_publish_success(
-                bot_uuid=bot_uuid,
-                codefuse_token=codefuse_token,
+            write_err = (
+                self._baas_device_service.refresh_codefuse_token_on_publish_success(
+                    bot_uuid=bot_uuid,
+                    codefuse_token=codefuse_token,
+                )
             )
             if write_err is not None:
                 logger.warning(
@@ -390,6 +460,13 @@ class BaasRestartPublishPollHandler:
                 binding_id=binding_id,
                 status=DeviceBindingStatus.ACTIVE.value,
                 publish_id=publish_id,
+            )
+            _publish_baas_completed(
+                binding_id=binding_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                publish_id=publish_id,
+                publish_kind="restart",
             )
             return Complete()
         if status == DeviceBindingStatus.FAILED.value:
@@ -430,29 +507,19 @@ class BaasRestartPublishPollHandler:
         publish_id: int,
         failure_message: str | None = None,
     ) -> None:
-        try:
-            update_data = self._build_bot_update(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                status=status,
-                publish_id=publish_id,
-                failure_message=failure_message,
-            )
-            if self._bot_repository is not None:
-                self._bot_repository.update_by_owner(bot_id, owner_id, update_data)
-            self._binding_repository.update_status(
-                binding_id=binding_id,
-                status=status,
-            )
-        except Exception as exc:
-            logger.warning(
-                "[BaasRestartPublishPollHandler] failed to persist "
-                "status=%s for bot_id=%s binding_id=%s: %s",
-                status,
-                bot_id,
-                binding_id,
-                exc,
-            )
+        update_data = self._build_bot_update(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            status=status,
+            publish_id=publish_id,
+            failure_message=failure_message,
+        )
+        if self._bot_repository is not None:
+            self._bot_repository.update_by_owner(bot_id, owner_id, update_data)
+        self._binding_repository.update_status(
+            binding_id=binding_id,
+            status=status,
+        )
 
     def _build_bot_update(
         self,
@@ -508,7 +575,16 @@ class BaasRestartPublishPollHandler:
     def _read_codefuse_token(self, *, bot_id: str, bot: Any) -> str | None:
         if not isinstance(bot, dict):
             return None
-        if bot.get("template_type") != "applicationCoding":
+        base_ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=bot.get("owner_id") or "",
+            active_engine=bot.get("active_engine"),
+            bot_type=bot.get("bot_type") or "",
+            template_type=bot.get("template_type"),
+            template_config=None,
+        )
+        # Fast no-op for engines/templates that never deploy runtime tokens.
+        if not strategy.should_encrypt_template_token(base_ctx):
             return None
         if self._template_service is None:
             return None
@@ -524,8 +600,8 @@ class BaasRestartPublishPollHandler:
             return None
         if not isinstance(template_config, dict):
             return None
-        token = template_config.get("token")
-        return token if isinstance(token, str) and token else None
+        ctx = replace(base_ctx, template_config=template_config)
+        return strategy.extract_runtime_token(ctx)
 
 
 class BaasPublishTaskLifecycle(LifecycleBase):

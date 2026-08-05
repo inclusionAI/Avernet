@@ -612,6 +612,15 @@ impl OrganizationCoreService for NoopOrganizationCoreService {
         Err(service_not_configured("organization service"))
     }
 
+    async fn candidate_bot_detail_for_manager(
+        &self,
+        _managing_provider_id: &str,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        Err(service_not_configured("organization service"))
+    }
+
     async fn require_effective_member(
         &self,
         _organization_code: &str,
@@ -663,7 +672,11 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         Err(service_not_configured("organization service"))
     }
 
-    async fn get(&self, _auth: OrganizationAuth, _code: &str) -> ServiceResult<Organization> {
+    async fn get(
+        &self,
+        _auth: OrganizationMemberAuth,
+        _code: &str,
+    ) -> ServiceResult<Organization> {
         Err(service_not_configured("organization service"))
     }
 
@@ -735,6 +748,15 @@ impl OrganizationManagementService for NoopOrganizationManagementService {
         _auth: OrganizationAuth,
         _query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>> {
+        Err(service_not_configured("organization service"))
+    }
+
+    async fn candidate_bot_detail(
+        &self,
+        _auth: OrganizationAuth,
+        _organization_code: &str,
+        _bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
         Err(service_not_configured("organization service"))
     }
 }
@@ -1132,6 +1154,13 @@ impl CollaborationRuntimeService for NoopCollaborationRuntimeService {
         _run_id: &str,
     ) -> Result<Option<StateMachineRunView>, CollaborationRuntimeError> {
         Ok(None)
+    }
+
+    async fn handle_session_human_input(
+        &self,
+        _cmd: HandleSessionHumanInputCommand,
+    ) -> Result<HandleSessionHumanInputOutcome, CollaborationRuntimeError> {
+        Ok(HandleSessionHumanInputOutcome::NotStateMachine)
     }
 
     async fn get_state_machine_session_history(
@@ -1855,6 +1884,7 @@ impl ChannelDeliveryPort for NoopChannelDeliveryPort {
     ) -> ServiceResult<ChannelDeliveryResult> {
         Ok(ChannelDeliveryResult {
             delivered: false,
+            provider_message_ref: None,
             error: None,
         })
     }
@@ -1971,8 +2001,8 @@ impl SystemMessageProducerService for NoopSystemMessageProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         _participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
-        vec![]
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
+        (vec![], None)
     }
 }
 
@@ -1994,6 +2024,8 @@ fn service_not_configured(name: &str) -> ServiceError {
 }
 
 pub use bcs_session::NoopSessionManagementService;
+
+pub use bcs_session_file::NoopSessionFileService;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopSecretService;

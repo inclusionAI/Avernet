@@ -1,6 +1,6 @@
-"""Open API Run 路由
+"""Open API Run Router
 
-提供单次对话的 Open API 端点。
+Provides Open API endpoints for single-turn conversations.
 """
 
 import time
@@ -37,21 +37,21 @@ from secbaas.community.logger import get_logger
 
 logger = get_logger("router-open-api")
 
-router = APIRouter(prefix="/openapi/v1", tags=["Open API Run"])
+router = APIRouter(prefix="/openapi/v1", tags=["runs"])
 
 
 @router.post(
     "/runs",
     response_model=RunResponse,
-    summary="单次对话",
-    description="通过 Bearer Token 认证的 API Key 调用 Bot 进行单次对话",
+    summary="Single-turn conversation",
+    description="Invoke a Bot for a single-turn conversation using a Bearer Token-authenticated API Key",
     responses={
-        200: {"description": "对话成功"},
-        400: {"description": "参数错误"},
-        401: {"description": "认证失败"},
-        404: {"description": "Bot 不存在"},
-        503: {"description": "Bot 不可用"},
-        500: {"description": "服务内部错误"},
+        200: {"description": "Conversation successful"},
+        400: {"description": "Invalid parameters"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Bot not found"},
+        503: {"description": "Bot unavailable"},
+        500: {"description": "Internal server error"},
     },
 )
 @inject
@@ -61,16 +61,16 @@ async def run_chat(
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> RunResponse:
-    """单次对话端点
+    """Single-turn conversation endpoint
 
     Args:
-        request: 对话请求
-        api_key_record: 从 API Key 验证获取的记录，包含 bot_id (app_id)、api_key_prefix 等
-        context: 请求上下文（身份认证、调用者信息等）
-        bot_runner: BotRunner 实例
+        request: Conversation request
+        api_key_record: Record from API Key validation, containing bot_id (app_id), api_key_prefix, etc.
+        context: Request context (identity authentication, caller info, etc.)
+        bot_runner: BotRunner instance
 
     Returns:
-        RunResponse: 对话响应
+        RunResponse: Conversation response
     """
     try:
         metadata = request.metadata or {}
@@ -94,7 +94,7 @@ async def run_chat(
             f"elapsed={elapsed_ms:.1f}ms"
         )
 
-        # 3. 构造响应
+        # 3. Build response
         return RunResponse(
             code=0, message="success", data=RunResponseData(run_id=run_id)
         )
@@ -146,19 +146,19 @@ async def run_chat(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": 50001, "message": f"服务内部错误: {str(e)}"},
+            detail={"code": 50001, "message": f"Internal server error: {str(e)}"},
         )
 
 
 @router.get(
     "/runs/{run_id}",
     response_model=RunResultResponse,
-    summary="查询对话结果",
-    description="根据 run_id 查询对话任务的执行结果",
+    summary="Query conversation result",
+    description="Query the execution result of a conversation task by run_id",
     responses={
-        200: {"description": "查询成功"},
-        401: {"description": "认证失败"},
-        404: {"description": "Run 不存在"},
+        200: {"description": "Query successful"},
+        401: {"description": "Authentication failed"},
+        404: {"description": "Run not found"},
     },
 )
 @inject
@@ -167,15 +167,15 @@ async def get_run_result(
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
 ) -> RunResultResponse:
-    """查询对话结果端点
+    """Query conversation result endpoint
 
     Args:
-        run_id: 运行 ID
-        api_key_record: 从 API Key 验证获取的记录
-        bot_runner: BotRunner 实例
+        run_id: Run ID
+        api_key_record: Record from API Key validation
+        bot_runner: BotRunner instance
 
     Returns:
-        RunResultResponse: 运行结果响应
+        RunResultResponse: Run result response
     """
     try:
         logger.info(
@@ -184,7 +184,7 @@ async def get_run_result(
 
         run_info = bot_runner.get_result(run_id)
 
-        # 校验 run 归属，防止横向越权
+        # Verify run ownership to prevent horizontal privilege escalation
         if (
             run_info.api_key_prefix != api_key_record.api_key_prefix
             or run_info.bot_id != api_key_record.app_id
@@ -200,7 +200,7 @@ async def get_run_result(
                 data=None,
             )
 
-        # 构造结果数据
+        # Build result data
         result_data = None
         if run_info.result_content:
             extra = None

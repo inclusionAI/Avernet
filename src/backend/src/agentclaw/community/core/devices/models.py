@@ -49,6 +49,7 @@ class DeviceBindingStatus(StrEnum):
     """Device binding status enumeration."""
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
+    STOPPED = "STOPPED"
     FAILED = "FAILED"
     RELEASED = "RELEASED"
 
@@ -128,11 +129,45 @@ class DeviceConnectionInfo:
     tenant: str = ""
     engine_port: int = 20003
     url: str = ""
-    """HTTP base_url（如 "http://10.0.0.1:20010"）—— plan-01 新增字段。
+    """连接 URL；随模式返回 HTTP base URL 或 WebSocket URL。
 
-    由 LocalDeviceService._compose_device_conn_info 通过 BaaS get_http_info 填充；
+    LocalDeviceService 通过 BaaS get_http_info 填充 HTTP URL；BaaS relay
+    WebSocket 链路透传 ws-info 返回的 ws_url。BaaS 非 relay 模式保持为空。
     expert_chat 等 3 处 caller 已用 `conn.get("url") or f"http://{conn['target']}"`
-    模式优先取 url，故 plan-01 填它即可让 caller 自动走 BaaS 路由（无需 caller 改动）。
+    模式优先取 url，保持现有调用方兼容。
+    """
+    expires_at: str = ""
+    """``token`` 的过期时间（ISO 8601），由签发方给出；未知时为空串。
+
+    只在该值确实描述本对象返回的那个 ``token`` 时填充：BaaS 链路返回
+    ws-info 的 token，因此透传 ws-info 的 expires_at；LocalDeviceService
+    正常路径返回的是 http-info 的 token（BaaS 未给过期时间），只有在
+    http-info 失败回落到 ws-info token 时才填。空串表示"签发方没说"，
+    caller 不得据此推断"永不过期"。
+    """
+    ws_target: str = ""
+    """WebSocket 路由目标；未单独提供时 caller 回退到 ``target``。
+
+    LocalDeviceService 的 HTTP-info 与 WS-info 会签发不同的 target/token
+    组合，因此必须像凭据一样分别携带，不能把 HTTP target 与 WS token
+    拼在一起。
+    """
+    ws_token: str = ""
+    """WebSocket 凭据 —— 开 socket 的 caller 用这个，不要用 ``token``.
+
+    ``token`` 是 *HTTP* 侧的凭据：LocalDeviceService 正常路径返回的是
+    http-info 的 token，WebSocket 则使用 ``ws_target/ws_token`` 这一对
+    （见下方 ``ws_expires_at``）。
+
+    只在它与 ``token`` **不同**时填：LocalDeviceService 正常路径填 ws-info 的
+    token；BaaS 链路的 ``token`` 本就是 ws token，留空。空串的含义是"``token``
+    就是它"，caller 一律 ``ws_token or token``。
+    """
+    ws_expires_at: str = ""
+    """``ws_token`` 的过期时间（ISO 8601）；未知时为空串。
+
+    与 ``expires_at`` 分开是因为它们描述的是两个 token：http-info 不给
+    过期时间，ws-info 给，二者不能互相顶替。
     """
 
 

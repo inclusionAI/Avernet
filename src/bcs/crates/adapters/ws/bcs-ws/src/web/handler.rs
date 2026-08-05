@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::web::{
     dispatch_client_frame, WebClientConnectionState, WebDispatchOutcome, WebDispatchState,
-    WebWsDispatchError,
+    WebWsDispatchError, WorkbenchConnectionAuth,
 };
 
 static CLIENT_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -29,7 +29,7 @@ struct PingFrame {
 pub async fn handle_client_connection(
     socket: WebSocket,
     state: Arc<WebDispatchState>,
-    bound_actor_id: Option<String>,
+    auth: WorkbenchConnectionAuth,
     metrics_hook: Arc<dyn WsLifecycleInstrumentationHook>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
@@ -39,6 +39,7 @@ pub async fn handle_client_connection(
     let client_id = CLIENT_COUNTER.fetch_add(1, Ordering::Relaxed);
     let send_error_seen = Arc::new(AtomicBool::new(false));
     let mut close_reason = WsCloseReason::Unknown;
+    let mut flush_server_close = false;
     metrics_hook
         .accepted(WsPeer::Frontend, crate::web::FRONTEND_WS_ENDPOINT)
         .await;
@@ -59,7 +60,7 @@ pub async fn handle_client_connection(
 
     info!(
         client_id = client_id,
-        bound_actor_id = ?bound_actor_id,
+        bound_actor_id = ?auth.actor_id(),
         "New frontend WebSocket connection established"
     );
 
@@ -81,27 +82,35 @@ pub async fn handle_client_connection(
                             &text,
                             &client_tx,
                             &mut connection_state,
-                            bound_actor_id.as_deref(),
+                            &auth,
                         ).await {
                             Ok(outcome) => {
                                 debug!(client_id = client_id, "Frame dispatched successfully");
-                                if let WebDispatchOutcome::ClientConnect { subscribed } = outcome {
-                                    if subscribed {
-                                        metrics_hook
-                                            .registered(
-                                                WsPeer::Frontend,
-                                                crate::web::FRONTEND_WS_ENDPOINT,
-                                            )
-                                            .await;
-                                    } else {
-                                        metrics_hook
-                                            .error(
-                                                WsPeer::Frontend,
-                                                crate::web::FRONTEND_WS_ENDPOINT,
-                                                WsErrorKind::RegisterRejected,
-                                            )
-                                            .await;
+                                match outcome {
+                                    WebDispatchOutcome::ClientConnect { subscribed } => {
+                                        if subscribed {
+                                            metrics_hook
+                                                .registered(
+                                                    WsPeer::Frontend,
+                                                    crate::web::FRONTEND_WS_ENDPOINT,
+                                                )
+                                                .await;
+                                        } else {
+                                            metrics_hook
+                                                .error(
+                                                    WsPeer::Frontend,
+                                                    crate::web::FRONTEND_WS_ENDPOINT,
+                                                    WsErrorKind::RegisterRejected,
+                                                )
+                                                .await;
+                                        }
                                     }
+                                    WebDispatchOutcome::Close => {
+                                        close_reason = WsCloseReason::ProtocolError;
+                                        flush_server_close = true;
+                                        break;
+                                    }
+                                    WebDispatchOutcome::Dispatched => {}
                                 }
                             }
                             Err(e) => {
@@ -224,7 +233,12 @@ pub async fn handle_client_connection(
         "Frontend client disconnected"
     );
 
-    write_handle.abort();
+    if flush_server_close {
+        drop(client_tx);
+        let _ = tokio::time::timeout(Duration::from_secs(1), write_handle).await;
+    } else {
+        write_handle.abort();
+    }
     metrics_hook
         .closed(
             WsPeer::Frontend,

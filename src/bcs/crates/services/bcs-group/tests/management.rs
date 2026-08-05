@@ -7,6 +7,7 @@ use async_trait::async_trait;
 
 use bcs_service_api::{
     ActorKind, AgentCredentials, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
+    ChannelBindingCleanupPort,
     BotDeliveryTarget, BotRuntimeConnectCommand, BotRuntimeConnectOutcome,
     BotRuntimeConnectionService, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand,
     BotRuntimeStatusOutcome, BotUseCaseError, DefaultDelivery, DmCreateCommand,
@@ -25,6 +26,34 @@ use bcs_service_api::{
 use bcs_group::{GroupConfig, GroupManagement, GroupStore};
 use bcs_test_support::NoopSystemMessageService;
 use tokio::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingChannelBindingCleanup {
+    deleted_group_ids: Mutex<Vec<String>>,
+    fail: bool,
+}
+
+impl RecordingChannelBindingCleanup {
+    fn failing() -> Self {
+        Self {
+            deleted_group_ids: Mutex::new(Vec::new()),
+            fail: true,
+        }
+    }
+}
+
+#[async_trait]
+impl ChannelBindingCleanupPort for RecordingChannelBindingCleanup {
+    async fn delete_bindings_for_group(&self, group_id: &str) -> ServiceResult<u64> {
+        self.deleted_group_ids.lock().await.push(group_id.to_string());
+        if self.fail {
+            return Err(ServiceError::InternalError(
+                "channel binding cleanup failed".to_string(),
+            ));
+        }
+        Ok(1)
+    }
+}
 
 #[tokio::test]
 async fn create_group_authorizes_human_caller_with_any_driver() {
@@ -66,6 +95,27 @@ async fn create_group_authorizes_human_caller_with_any_driver() {
         .await
         .expect_err("bot caller must be the driver itself");
     assert!(matches!(forbidden, GroupUseCaseError::Forbidden(_)));
+}
+
+#[tokio::test]
+async fn create_group_without_explicit_id_uses_native_namespace() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+    let mut cmd = create_cmd(
+        Some("driver"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.group_id = None;
+
+    let created = service
+        .create_group(cmd)
+        .await
+        .expect("generated group should be created");
+
+    assert!(created.group_id.starts_with("bcs_grp_"));
+    assert!(!created.group_id.starts_with("bcs_grp_dm_"));
+    assert_eq!(created.group_id.chars().count(), 40);
 }
 
 #[tokio::test]
@@ -174,6 +224,42 @@ async fn create_state_machine_group_auto_creates_service_invocation_session() {
         Some(&serde_json::json!({ "query": "写一篇宣传 BCN 的文章" }))
     );
     assert_eq!(params.session_title.as_deref(), Some("新会话"));
+}
+
+#[tokio::test]
+async fn create_state_machine_group_with_human_caller_adds_present_human_to_initial_session() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", Some("alice"));
+    let session = test_session(
+        "group-under-test:abcdef12",
+        "group-under-test",
+        vec![Participant::bot("driver", ParticipantRole::Driver)],
+    );
+    let session_management = Arc::new(StaticSessionManagement::new(session));
+    let service = fixture
+        .service_with_limits_and_session(5, 10, 10, session_management.clone());
+
+    let mut cmd = create_cmd(
+        Some("human_alice"),
+        "driver",
+        vec![participant("driver", Some("driver"))],
+    );
+    cmd.group_strategy = Some(GroupStrategy::StateMachine);
+
+    service.create_group(cmd).await.unwrap();
+
+    let commands = session_management.commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    let params = &commands[0].params;
+    assert_eq!(params.created_by.as_deref(), Some("driver"));
+    assert_eq!(params.caller_principal.as_deref(), Some("human_alice"));
+    let human = params
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("authenticated Human caller must join the initial state-machine session");
+    assert!(human.is_human());
+    assert_eq!(human.role, ParticipantRole::Observer);
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
 }
 
 #[tokio::test]
@@ -793,12 +879,9 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             bot_id: "private-friend".to_string(),
             role: Some("consultant".to_string()),
         })
-        .await;
-    assert!(matches!(
-        private_friend,
-        Err(GroupUseCaseError::Service(ServiceError::BotNotFound(bot_id)))
-            if bot_id == "private-friend"
-    ));
+        .await
+        .expect("private friend target is reachable");
+    assert_eq!(private_friend.member.bot_uuid, "private-friend");
 
     let wrong_human_owner = service
         .add_member(GroupAddMemberCommand {
@@ -1203,6 +1286,33 @@ async fn create_dm_creates_and_reuses_human_bot_pair() {
 }
 
 #[tokio::test]
+async fn create_dm_without_explicit_id_uses_dm_namespace() {
+    let fixture = Fixture::new().with_human("human_alice", "Alice").with_bot(
+        "assistant",
+        "Assistant",
+        "public",
+        Some("alice"),
+    );
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let created = service
+        .create_dm(DmCreateCommand {
+            group_id: None,
+            caller_actor_id: Some("human_alice".to_string()),
+            driver_bot: None,
+            target_actor_id: "assistant".to_string(),
+            label: None,
+            topic: None,
+            context: None,
+        })
+        .await
+        .expect("owner human should create generated Human-Bot DM");
+
+    assert!(created.group.group_id.starts_with("bcs_grp_dm_"));
+    assert_eq!(created.group.group_id.chars().count(), 43);
+}
+
+#[tokio::test]
 async fn create_dm_enforces_human_to_bot_reachability() {
     let protected = Fixture::new()
         .with_human("human_bob", "Bob")
@@ -1390,6 +1500,89 @@ async fn delete_group_enforces_legacy_driver_and_dm_rules() {
         GroupUseCaseError::InvalidProposal(message)
             if message.contains("DM groups")
     ));
+}
+
+#[tokio::test]
+async fn delete_group_is_idempotent_when_group_is_missing() {
+    let fixture = Fixture::new();
+    let result = fixture
+        .service_with_limits(5, 10, 10)
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "missing-group".to_string(),
+        })
+        .await
+        .expect("missing group deletion should be idempotent");
+
+    assert_eq!(result.group_id, "missing-group");
+    assert!(!result.deleted);
+}
+
+#[tokio::test]
+async fn delete_group_cleans_up_channel_bindings() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let cleanup = Arc::new(RecordingChannelBindingCleanup::default());
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_channel_binding_cleanup(cleanup.clone());
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
+
+    let deleted = service
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "group-under-test".to_string(),
+        })
+        .await
+        .expect("group and channel bindings should be deleted together");
+
+    assert!(deleted.deleted);
+    assert!(fixture.group.get("group-under-test").await.is_none());
+    assert_eq!(
+        cleanup.deleted_group_ids.lock().await.as_slice(),
+        ["group-under-test"]
+    );
+}
+
+#[tokio::test]
+async fn delete_group_restores_group_when_channel_binding_cleanup_fails() {
+    let fixture = Fixture::new().with_bot("driver", "Driver", "public", None);
+    let cleanup = Arc::new(RecordingChannelBindingCleanup::failing());
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_channel_binding_cleanup(cleanup);
+    service
+        .create_group(create_cmd(
+            Some("driver"),
+            "driver",
+            vec![participant("driver", Some("driver"))],
+        ))
+        .await
+        .unwrap();
+
+    let error = service
+        .delete_group(GroupDeleteCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "group-under-test".to_string(),
+        })
+        .await
+        .expect_err("binding cleanup failure must fail group deletion");
+
+    assert!(matches!(
+        error,
+        GroupUseCaseError::Service(ServiceError::InternalError(ref message))
+            if message == "channel binding cleanup failed"
+    ));
+    assert!(
+        fixture.group.get("group-under-test").await.is_some(),
+        "group must be restored when binding cleanup fails"
+    );
 }
 
 #[tokio::test]
@@ -1962,6 +2155,7 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         meta: None,
         current_msg_seq: 0,
         participant_join_seq: None,
+        collected_at: None,
     }
 }
 

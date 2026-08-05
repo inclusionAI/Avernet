@@ -8,7 +8,7 @@ import zlib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -23,13 +23,20 @@ if TYPE_CHECKING:
         DeviceFilesystemDispatcher,
     )
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.core.mcp.services._defaults import get_default_mcp_server_codes, get_default_mcp_servers
+from agentclaw.community.core.mcp.services._defaults import (
+    get_default_mcp_config,
+    get_default_mcp_server_codes,
+    get_default_mcp_servers,
+)
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
 )
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
+from agentclaw.community.core.skill_center.path_resolution import (
+    canonical_pool_local_path,
+)
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
@@ -148,6 +155,11 @@ class SkillSetService:
         device_plugin: DeviceAccessor | None = None,
         *,
         path_factory: WorkspacePathFactory,
+        pool_layout_paths: Callable[
+            [str, str, str],
+            tuple[str, str, str] | None,
+        ]
+        | None = None,
     ):
         """
         Args:
@@ -176,6 +188,7 @@ class SkillSetService:
         self._bot_repo = bot_repo
 
         self.bot_id = bot_id or "default"
+        self.user_id = user_id
         self.entity_id = entity_id
         self.entity_type = entity_type or "staff"
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
@@ -194,7 +207,7 @@ class SkillSetService:
         self.is_desktop = False
         if user_id or entity_id:
             try:
-                owner_id = entity_id if entity_id else user_id
+                owner_id = user_id or entity_id
                 bot = self._bot_repo.get_by_id_and_owner(self.bot_id, owner_id)
                 if bot and bot.get("bot_type") == "desktop":
                     self.is_desktop = True
@@ -221,6 +234,22 @@ class SkillSetService:
             self.repo_dir = repo_dir or SKILLS_REPO_DIR
             self.local_dir = local_dir or SKILLS_LOCAL_DIR
 
+        self._pool_layout_paths = pool_layout_paths or (
+            lambda _owner_id, _bot_id, _engine: None
+        )
+        effective_owner = user_id or entity_id
+        if effective_owner is not None:
+            pool_paths = self._pool_layout_paths(
+                str(effective_owner),
+                str(self.bot_id),
+                self.engine_type,
+            )
+            if pool_paths is not None:
+                active_path, local_path, repo_path = pool_paths
+                self.skills_dir = Path(active_path)
+                self.local_dir = Path(local_path)
+                self.repo_dir = Path(repo_path)
+
         self.CURRENT_SET_FILE = self.skills_dir / ".current_skill_set"
 
         self._resolver = resolver
@@ -232,7 +261,7 @@ class SkillSetService:
         try:
             # 优先从数据库查询
             active_set = self.skill_set_repo.get_active_skill_set(
-                user_id=self.entity_id,
+                user_id=self.user_id or self.entity_id,
                 bolt_id=self.bot_id,
                 engine_type=self.engine_type
             )
@@ -286,6 +315,10 @@ class SkillSetService:
         except Exception as e:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
+
+    def sync_runtime(self) -> bool:
+        """Reconcile this Bot's desired Skill mapping to its runtime."""
+        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
 
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
@@ -563,6 +596,34 @@ class SkillSetService:
                     results["failed"].append({"skill_id": skill_id, "error": "Skill not found"})
                     continue
 
+            # Local skills are stored in a per-Bot workspace and must never be
+            # associated with another Bot's skill set. Numeric skill IDs are
+            # globally resolvable, so a stale caller bot_id could otherwise
+            # create a cross-Bot association here.
+            skill_git_path = skill.get("git_path", "")
+            target_bot_id = skill_set.get("bolt_id") or self.bot_id
+            if (
+                skill_git_path.startswith("local://")
+                and skill.get("bolt_id") is not None
+                and skill.get("bolt_id") != target_bot_id
+            ):
+                results["failed"].append(
+                    {
+                        "skill_id": skill_id,
+                        "error": "Skill belongs to another bot",
+                    }
+                )
+                logger.warning(
+                    "[add_skills_to_set] Rejected cross-Bot local skill: "
+                    "skill_id=%s, skill_bot_id=%s, skill_set_id=%s, "
+                    "skill_set_bot_id=%s",
+                    skill_id,
+                    skill.get("bolt_id"),
+                    skill_set_id,
+                    target_bot_id,
+                )
+                continue
+
             # Check if already associated in the same skill set
             existing_skills = self.skill_set_repo.get_skills_in_set(skill_set_id)
             already_exists = any(s.get('id') == skill.get('id') for s in existing_skills)
@@ -590,7 +651,13 @@ class SkillSetService:
                 continue
 
             # Create association using repository
-            self.skill_set_repo.add_skill_to_set(skill_set_id, skill.get('id'))
+            if not self.skill_set_repo.add_skill_to_set(
+                skill_set_id, skill.get('id')
+            ):
+                results["failed"].append(
+                    {"skill_id": skill_id, "error": "Failed to add skill to skill set"}
+                )
+                continue
             results["success"].append({"skill_id": skill.get('id'), "name": skill.get('name')})
 
         # Update metadata file
@@ -640,6 +707,17 @@ class SkillSetService:
                             "name": skill_name,
                             "reason": str(result)
                         })
+                    elif result is not True:
+                        logger.warning(
+                            "[add_skills_to_set] Auto-activation source is "
+                            "unavailable for skill %s",
+                            skill_name,
+                        )
+                        activation_failed.append({
+                            "skill_id": skill_id,
+                            "name": skill_name,
+                            "reason": "activation source is unavailable",
+                        })
                     else:
                         logger.debug(f"[add_skills_to_set] Auto-activated skill {skill_name}: {result}")
 
@@ -648,8 +726,11 @@ class SkillSetService:
                     results["activation_failed"] = activation_failed
                     logger.warning(f"[add_skills_to_set] {len(activation_failed)} skills failed to auto-activate")
 
-            # 关键修复：同步软链到设备（本地模式和 Arca 模式都需要）
-            self._sync_symlinks_to_device_if_needed(user_id)
+            # Do not publish a mapping set containing a missing source. A
+            # failed local activation is intentionally fail-closed so the
+            # runtime never receives a dangling active link.
+            if not results["activation_failed"]:
+                self._sync_symlinks_to_device_if_needed(user_id)
 
         return results
 
@@ -750,11 +831,13 @@ class SkillSetService:
                 git_path = skill['git_path']
                 if git_path.startswith("git://"):
                     rel_path = git_path[6:]
+                    link_name = self.skill_service.get_link_name(rel_path)
                 elif git_path.startswith("local://"):
                     rel_path = git_path[8:]
+                    link_name = rel_path.rstrip('/').split('/')[-1]
                 else:
                     rel_path = git_path
-                link_name = self.skill_service.get_link_name(rel_path)
+                    link_name = self.skill_service.get_link_name(rel_path)
                 try:
                     await self.skill_service.deactivate_skill(
                         link_name, bolt_id=self.bot_id, user_id=user_id
@@ -968,7 +1051,7 @@ class SkillSetService:
             ]
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        effective_user_id = user_id if user_id else self.entity_id
+        effective_user_id = user_id if user_id else self.user_id or self.entity_id
 
         logger.info(f"[get_all_skill_sets_with_skills] user_id={effective_user_id}, bolt_id={effective_bolt_id}")
 
@@ -1167,6 +1250,17 @@ class SkillSetService:
         skills_repo_dir = Path(
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
+        pool_layout_paths = None
+        if self.entity_id is not None:
+            pool_layout_paths = self._pool_layout_paths(
+                str(self.entity_id),
+                str(self.bot_id),
+                self.engine_type,
+            )
+        if pool_layout_paths is not None:
+            active_path, local_path, repo_path = pool_layout_paths
+            base_skills_dir = Path(active_path)
+            skills_repo_dir = Path(repo_path)
 
         # singlebox 本机模式: engine adapter 跑在宿主 macOS,容器视图 /home/admin/...
         # 不存在。把容器路径前缀替换成宿主 per-bot workspace 路径
@@ -1203,6 +1297,8 @@ class SkillSetService:
             )
 
         skills_local_dir = base_skills_dir / "skills-local"
+        if pool_layout_paths is not None:
+            skills_local_dir = Path(local_path)
 
         # 5. 解析 git_path 生成 SynlinkMappingInfo 列表（使用绝对路径）
         symlinks = []
@@ -1227,12 +1323,21 @@ class SkillSetService:
                 # 从路径中提取技能名称（最后一个目录名）
                 if path_part.startswith('/'):
                     # 绝对路径格式: /aidesktop/.../skills-local/skill-name
-                    skill_name = path_part.rstrip('/').split('/')[-1]
+                    link_name = skill_name or path_part.rstrip('/').split('/')[-1]
+                    source = (
+                        canonical_pool_local_path(path_part, skills_local_dir)
+                        if pool_layout_paths is not None
+                        else path_part.rstrip('/')
+                    )
                 else:
                     # 相对名称格式: skill-name
-                    skill_name = path_part.split('/')[-1] if '/' in path_part else path_part
-                source = str(skills_local_dir / skill_name)
-                target = str(base_skills_dir / skill_name)
+                    source_name = path_part.split('/')[-1] if '/' in path_part else path_part
+                    # Replacement packages are staged under a temporary
+                    # directory (for example ``.foo.replacement-*``), but
+                    # their runtime link must retain the logical Skill name.
+                    link_name = skill_name or source_name
+                    source = str(skills_local_dir / source_name)
+                target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
         logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(symlinks)}")
@@ -1291,7 +1396,20 @@ class SkillSetService:
         # Create association (store server_code, name, description and icon)
         from agentclaw.community.utils.env_utils import get_current_env
         current_env = get_current_env()
-        self.skill_set_repo.add_mcp_to_set(skill_set_id, server_code, mcp_name, mcp_description, mcp_icon, user_id, env=current_env)
+        if not self.skill_set_repo.add_mcp_to_set(
+            skill_set_id,
+            server_code,
+            mcp_name,
+            mcp_description,
+            mcp_icon,
+            user_id,
+            env=current_env,
+        ):
+            return {
+                "success": False,
+                "error": "Failed to add MCP server to skill set",
+                "server_code": server_code,
+            }
 
         # Sync to device (blocking - must succeed for operation to be considered successful)
         # Note: API key is NOT passed during initial add, user should configure it separately
@@ -1516,12 +1634,13 @@ class SkillSetService:
                     # 分配 mock id，避免前端因 id 为 None 导致 checkbox key 冲突
                     # 用 adler32 保证同一 server_code 的 mock id 稳定，不受列表顺序/排除项影响
                     mock_id = (zlib.adler32(code.encode("utf-8")) % 99999) + 1
+                    default_cfg = get_default_mcp_config(effective_engine, code) or {}
                     associations.append({
                         "id": mock_id,
                         "server_code": code,
-                        "name": code.split(".")[-1],
-                        "description": "默认 MCP",
-                        "icon": None,
+                        "name": default_cfg.get("name") or code.split(".")[-1],
+                        "description": default_cfg.get("description", "默认 MCP"),
+                        "icon": default_cfg.get("icon"),
                         "is_default": True,
                     })
 
@@ -1591,10 +1710,12 @@ class SkillSetService:
                 continue  # Skip user-excluded default MCPs
             mcp_entry = {
                 "server_code": server_code,
-                "name": server_code,
-                "description": "Default MCP",
+                "name": config.get("name") or server_code,
+                "description": config.get("description", "Default MCP"),
                 "status": "ONLINE",
             }
+            if "icon" in config and config.get("icon"):
+                mcp_entry["icon"] = config["icon"]
             if "headers" in config:
                 mcp_entry["headers"] = config["headers"]
             default_mcps.append(mcp_entry)
@@ -1657,10 +1778,12 @@ class SkillSetService:
                 continue  # Skip user-excluded default MCPs
             mcp_entry = {
                 "server_code": server_code,
-                "name": server_code,
-                "description": "Default MCP",
+                "name": config.get("name") or server_code,
+                "description": config.get("description", "Default MCP"),
                 "status": "ONLINE",
             }
+            if "icon" in config and config.get("icon"):
+                mcp_entry["icon"] = config["icon"]
             if "headers" in config:
                 mcp_entry["headers"] = config["headers"]
             default_mcps.append(mcp_entry)
@@ -1963,6 +2086,11 @@ class SkillSetSwitcher(_DeviceSyncMixin):
             skills_dir=self.skills_dir, repo_dir=self.repo_dir, local_dir=self.local_dir,
             user_id=user_id, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type
         )
+        if isinstance(self.skill_set_service.skills_dir, Path):
+            self.skills_dir = self.skill_set_service.skills_dir
+            self.repo_dir = self.skill_set_service.repo_dir
+            self.local_dir = self.skill_set_service.local_dir
+            self.CURRENT_SET_FILE = self.skills_dir / ".current_skill_set"
 
     def get_current_skill_set(self) -> dict[str, Any] | None:
         """Get the currently active skill set."""
@@ -2439,6 +2567,10 @@ class SkillSetActivator(_DeviceSyncMixin):
             skills_dir=self.skills_dir, repo_dir=self.repo_dir, local_dir=self.local_dir,
             user_id=user_id, entity_id=entity_id, bot_id=bot_id, engine_type=engine_type
         )
+        if isinstance(self.skill_set_service.skills_dir, Path):
+            self.skills_dir = self.skill_set_service.skills_dir
+            self.repo_dir = self.skill_set_service.repo_dir
+            self.local_dir = self.skill_set_service.local_dir
 
     async def activate_skill_set(
         self,
@@ -2472,7 +2604,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         if is_default:
             result.success = True
             result.message = f"默认技能集 '{skill_set_name}' 已启用"
-            logger.info(f"[SkillSetActivator.activate] Default skill set always enabled (ac_user_default_skill_set dropped)")
+            logger.info("[SkillSetActivator.activate] Default skill set always enabled (ac_user_default_skill_set dropped)")
             return result
         else:
             # 3. 普通能力集：检查 is_active 状态
@@ -2584,7 +2716,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         if is_default:
             result.success = False
             result.message = f"默认技能集 '{skill_set_name}' 无法禁用，所有默认技能集保持启用状态"
-            logger.info(f"[SkillSetActivator.deactivate] Default skill set cannot be disabled (ac_user_default_skill_set dropped)")
+            logger.info("[SkillSetActivator.deactivate] Default skill set cannot be disabled (ac_user_default_skill_set dropped)")
             return result
         else:
             # 3. 普通能力集：检查 is_active 状态

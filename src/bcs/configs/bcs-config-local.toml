@@ -37,6 +37,14 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Local launchers inject an explicit test value; every other deployment must
+# provide real secret material through this lookup.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "http://localhost:8000",
@@ -70,6 +78,12 @@ type = "sqlite"
 [database.sqlite]
 path = "bcs.db"
 
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
 [collaboration.templates]
 storage_type = "file"
 base_dir = "seeds/collaboration-templates"
@@ -78,6 +92,15 @@ default_language = "zh-CN"
 [logging]
 default_level = "debug"
 console = true
+
+[[logging.outputs]]
+name = "common-error"
+path = "./logs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
+max_keep_days = 7
 
 [[logging.outputs]]
 name = "messages"
@@ -165,6 +188,19 @@ default_ttl_seconds = 86400
 base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"
 session_link_url = "http://localhost:8000/sessions/{session_id}"
+
+[session_files]
+storage_backend = "local"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+
+[session_files.backend]
+data_dir = "./data/session-files"
+
+[session_files.share]
+token_secret = "local-development-only-share-token-secret"
+default_ttl_seconds = 86400
+share_base_url = "http://127.0.0.1:21000"
 
 [manifest]
 schema_version = 1

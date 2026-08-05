@@ -43,7 +43,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError as BotManagementNotFoundError,
 )
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
@@ -274,7 +274,9 @@ async def get_publish_engine_config(
     user: AuthenticatedUser = Depends(get_current_user),
     publish_repo: BotPublishRepositoryProtocol = Injected(BotPublishRepositoryProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
-    engine_config_service: EngineConfigService = Injected(EngineConfigService),
+    engine_config_service: EngineConfigServiceProtocol = Injected(
+        EngineConfigServiceProtocol
+    ),
 ) -> ApiResponse:
     """根据服务 Bot 发布单读取发布阶段引擎配置.
 
@@ -736,7 +738,7 @@ async def scale_publish_bot(
             f"[scale_publish_bot] Scaling: publish_id={publish_id}, user_id={user_id}, "
         )
 
-        result = flow_service.scale_bot(
+        result = await flow_service.scale_bot(
             publish_id=publish_id,
             operator=user_id,
         )
@@ -1447,6 +1449,127 @@ async def delete_service_bot(
     except Exception as e:
         logger.error(f"[delete_service_bot] Unexpected error: {e}")
         return ApiResponse(success=False, message=f"删除失败: {str(e)}", error_code=500, data=None)
+
+
+@router.get(
+    "/{publish_id}/can-restore-draft",
+    response_model=ApiResponse,
+    summary="检查草稿是否可以从上一版本恢复",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+    persist_audit_log=False,
+))
+async def can_restore_draft(
+    publish_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+    publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+) -> ApiResponse:
+    """Check whether the DRAFT has an immediately previous artifact."""
+    try:
+        if not user.staffId or user.staffId == "anonymous":
+            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+        can_restore, reason, source = publish_service.can_restore_draft(publish_id)
+        return ApiResponse(
+            success=True,
+            data={
+                "can_restore_draft": can_restore,
+                "reason": None if can_restore else reason,
+                "restore_source": source,
+            },
+            message="查询成功",
+        )
+    except Exception as e:
+        logger.error(f"[can_restore_draft] Unexpected error: {e}")
+        return ApiResponse(success=False, message=f"查询失败: {e}", error_code=500, data=None)
+
+
+@router.get(
+    "/{publish_id}/draft-restore-operations/{operation_id}",
+    response_model=ApiResponse,
+    summary="查询草稿恢复操作状态",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+    persist_audit_log=False,
+))
+async def get_draft_restore_status(
+    publish_id: int,
+    operation_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+    publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+) -> ApiResponse:
+    """Read one durable draft-restore attempt for frontend polling."""
+    try:
+        if not user.staffId or user.staffId == "anonymous":
+            return ApiResponse(
+                success=False,
+                message="无法获取用户信息",
+                error_code=400,
+                data=None,
+            )
+        result = publish_service.get_draft_restore_status(
+            publish_id=publish_id,
+            operation_id=operation_id,
+        )
+        return ApiResponse(
+            success=True,
+            data=result,
+            message="查询草稿恢复状态成功",
+        )
+    except PublishNotFoundError as e:
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+    except BotPublishServiceError as e:
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except Exception as e:
+        logger.error(f"[get_draft_restore_status] Unexpected error: {e}")
+        return ApiResponse(
+            success=False,
+            message=f"查询草稿恢复状态失败: {e}",
+            error_code=500,
+            data=None,
+        )
+
+
+@router.post(
+    "/{publish_id}/restore-draft",
+    response_model=ApiResponse,
+    summary="使用上一版本构造物恢复草稿容器",
+)
+@with_interceptors(CollaboratorPermissionInterceptor(
+    required_level=PermissionLevel.ADMIN,
+    params_extractor=extract_from_publish_id,
+    extractor_params={"publish_id": "$publish_id"},
+))
+async def restore_draft(
+    publish_id: int,
+    user: AuthenticatedUser = Depends(get_current_user),
+    publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
+) -> ApiResponse:
+    """Restore the current draft container from the previous version artifact.
+
+    ARCA restores the versioned workspace snapshot; Teclaw hot-updates the
+    historical draft artifact into the existing draft bot. Publish state and
+    verify/online containers are unchanged.
+    """
+    try:
+        if not user.staffId or user.staffId == "anonymous":
+            return ApiResponse(success=False, message="无法获取用户信息", error_code=400, data=None)
+        result = await publish_service.restore_draft(
+            publish_id=publish_id, operator=user.staffId
+        )
+        return ApiResponse(success=True, data=result, message="草稿恢复已启动")
+    except PublishNotFoundError as e:
+        return ApiResponse(success=False, message=str(e), error_code=404, data=None)
+    except (PublishStatusInvalidError, BotPublishServiceError) as e:
+        return ApiResponse(success=False, message=str(e), error_code=400, data=None)
+    except PublishFlowServiceError as e:
+        return ApiResponse(success=False, message=str(e), error_code=500, data=None)
+    except Exception as e:
+        logger.error(f"[restore_draft] Unexpected error: {e}")
+        return ApiResponse(success=False, message=f"恢复草稿失败: {e}", error_code=500, data=None)
 
 
 @router.get(

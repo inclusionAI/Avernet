@@ -149,6 +149,7 @@ class BotManageService(Protocol):
         operator: str,
         request_id: str,
         auto_approve_publish: bool = False,
+        bot_config: BotConfig | None = None,
     ) -> ScaleBotResponse:
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN)."""
         ...

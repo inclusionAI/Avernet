@@ -2604,7 +2604,7 @@ async def delete_template(
 # async def llm_chat(body: LLMChatRequest):
 #     """Send a chat prompt to the configured LLM. For testing / dev use.
 #
-#     Returns [llm disabled] when LLM_BASE_URL / LLM_AUTH_TOKEN are missing.
+#     Returns [llm disabled] when the configured base_url / token are missing.
 #     """
 #     try:
 #         llm = get_llm()

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.coverage*
+htmlcov/
+
+# IDE / agent tooling
+.idea/
+.codefuse/
+
+# Configs / runtime
+*.log
+logs/
+openspec
+
+# Generated OpenAPI artifacts (produced by dump_openapi / pulled from OSS)
+# configs/schemas/*.openapi.json

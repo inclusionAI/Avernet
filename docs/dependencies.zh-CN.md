@@ -20,13 +20,13 @@
 ./scripts/singlebox.sh install-tools
 ```
 
-`install-tools` 可能安装 Node.js、uv、OpenClaw、Rust/Cargo、protobuf/protoc，并写入用户目录或调用本机包管理器。当前脚本会在安装 OpenClaw、Rust/Cargo、protobuf/protoc 前询问确认；Node.js 缺失或版本过低时会通过 nvm 安装 Node.js 22，uv 缺失时会尝试通过 `pip` 或官方安装脚本安装。执行前请确认这些本机写入可以接受。
+`install-tools` 会先检查基础编译环境；如果编译器或 `make` 缺失，会输出适合当前系统的手动安装指引。它会在安装缺失的系统命令和开发库、OpenClaw、Rust/Cargo 以及 protobuf/protoc 前询问确认。Node.js 和 uv 是当前的例外：Node.js 22+ 缺失或版本过低时，脚本会自动通过 nvm 安装；uv 缺失时，会自动尝试 `pip`，然后尝试官方安装脚本。系统包安装被权限策略拒绝或执行失败时，脚本会输出可手动执行的命令。macOS 如果没有 Homebrew，会引导用户前往 [brew.sh](https://brew.sh/) 安装后重新运行。执行前请确认所有这些本机写入（包括 Node.js 和 uv 的自动安装路径）可以接受。
 
 运行 `singlebox.sh` 时也会安装仓库级 pre-push hook，即设置 `core.hooksPath=.githooks`。如果某次命令需要跳过 hook 安装，可以设置 `OCB_SKIP_GIT_HOOKS=1`。
 
 ## 安全规则
 
-- 执行 `sudo`、全局安装、`brew link --force`、`curl | sh` 或等价的系统级写入前，必须停下确认。
+- 除上文已说明的 `install-tools` Node.js / uv 自动安装路径外，执行 `sudo`、全局安装、`brew link --force`、`curl | sh` 或等价的系统级写入前，必须停下确认。
 - 创建目录、软链、生成文件或日志前，先打印写入路径。
 - 启动长期进程前，先检查端口。
 - 任一步失败即停止；不要自动修复、自动换源或杀掉无关进程。
@@ -54,7 +54,7 @@
 | --- | --- | --- |
 | 通过 `corepack` 启用的 `pnpm` | 开发其他 plugin workspace 包 | quick start 不需要。 |
 | Docker 和 Docker Compose | 使用 Docker 源码构建路径 | Docker Desktop 自带 Compose；Linux 可安装 Docker Engine 和 Compose plugin。详见 [Docker Guide](docker.zh-CN.md)。 |
-| 模型 API endpoint 和 key | 测试 bot 真实调用模型回复，或结构化协同里使用 LLM judge 节点 | 不要提交 key，也不要写入 shell rc。 |
+| 模型 API endpoint 和 key | 测试 bot 真实调用模型回复，或自定义协作里使用 LLM judge 节点 | 不要提交 key，也不要写入 shell rc。 |
 | `USE_CN_MIRROR=1` | 中国大陆网络加速 | 只有明确想把 npm、PyPI、nvm、rustup、corepack 等下载源切到公开镜像时使用。 |
 
 ## 安装指引

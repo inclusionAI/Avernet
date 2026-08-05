@@ -60,6 +60,7 @@ class InterceptorContext:
     metadata: dict = field(default_factory=dict)
     result: Any | None = None
     injector: Injector | None = None
+    request: Request | None = None
 
 
 @runtime_checkable
@@ -201,6 +202,7 @@ def with_interceptors(
                 user=user,
                 route_kwargs=kwargs,
                 injector=injector,
+                request=request,
             )
 
             # 预加载服务：从 ctx.injector 获取

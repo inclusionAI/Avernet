@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import TYPE_CHECKING, Any, override
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, Protocol, override
 
+from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,
@@ -22,6 +24,10 @@ from agentclaw.community.core.devices.services.baas_device_lifecycle_executor im
     BaasDeviceLifecycleError,
     BaasDeviceLifecycleExecutor,
 )
+from agentclaw.community.core.devices.services.baas_device_header_updater import (
+    BaasDeviceHeaderUpdateError,
+    BaasDeviceHeaderUpdater,
+)
 from agentclaw.community.core.devices.services.baas_container_init import (
     BaasContainerInitializer,
     _deserialize_symbol,
@@ -36,9 +42,6 @@ from agentclaw.community.core.devices.services.device_service import (
     BAAS_DEVICE_PROVIDER,
     DEFAULT_ENGINE_TYPE,
     DeviceService,
-)
-from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
-    TECLAW_DEVICE_PROVIDER,
 )
 from agentclaw.community.log import get_logger
 
@@ -71,6 +74,12 @@ class BaasDeviceServiceError(DeviceServiceError):
         self.message = message
 
 
+class TemplateConfigReader(Protocol):
+    """Minimal template service surface needed by BaaS create-init tasks."""
+
+    def get_template_config(self, bot_id: str) -> dict[str, Any] | None: ...
+
+
 class BaasDeviceService(DeviceService):
     """BaaS 设备服务 - 与 BaaS 层 API 交互。
 
@@ -94,6 +103,7 @@ class BaasDeviceService(DeviceService):
         lifecycle_executor: BaasDeviceLifecycleExecutor | None = None,
         vault: "TokenVault | None" = None,
         task_queue_service: "TaskQueueService | None" = None,
+        template_service: TemplateConfigReader | None = None,
     ):
         super().__init__(
             repository=repository,
@@ -106,11 +116,13 @@ class BaasDeviceService(DeviceService):
             task_queue_service=task_queue_service,
         )
         self._baas_service = baas_service
+        self._header_updater = BaasDeviceHeaderUpdater(baas_service)
         self._lifecycle_executor = lifecycle_executor or BaasDeviceLifecycleExecutor(
             baas_service
         )
         self._container_initializer = BaasContainerInitializer(baas_service)
         self._template_resolver = template_resolver
+        self._template_service = template_service
         logger.info("[BaasDeviceService] Initialized")
 
     # ------------------------------------------------------------------
@@ -506,7 +518,8 @@ class BaasDeviceService(DeviceService):
         if bot is None:
             return False, f"bot not found for binding_id={binding_id}"
 
-        resolved_engine = str(bot.get("active_engine") or "").strip() or DEFAULT_ENGINE_TYPE
+        raw_active_engine = str(bot.get("active_engine") or "").strip() or None
+        resolved_engine = raw_active_engine or DEFAULT_ENGINE_TYPE
         resolved_bot_type = str(bot.get("bot_type") or "")
         resolved_bot_id = str(bot.get("bot_id") or bot_id or "")
         resolved_owner_id = str(bot.get("owner_id") or owner_id or "")
@@ -515,20 +528,6 @@ class BaasDeviceService(DeviceService):
             admins = None
 
         template_type = bot.get("template_type")
-        template_config = bot.get("template_config")
-        if not isinstance(template_config, dict):
-            template_config = {}
-
-        raw_codefuse_token = (
-            template_config.get("token")
-            if template_type == "applicationCoding"
-            else None
-        )
-        codefuse_token = (
-            self._vault.decrypt_or_passthrough(raw_codefuse_token)
-            if raw_codefuse_token
-            else None
-        )
 
         bot_uuid = str(props.get("bot_uuid") or "")
         if not bot_uuid:
@@ -538,6 +537,51 @@ class BaasDeviceService(DeviceService):
             device_id=binding.device_id,
             device_provider=binding.device_provider,
             device_props=props,
+        )
+
+        # ac_bots only owns template_type; token/model/runtime live in
+        # ac_templates.ext.  Create-init runs from a durable task after the
+        # synchronous create path, so reload template_config from TemplateService
+        # just like the BaaS restart path does.
+        base_provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=raw_active_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=None,
+        )
+        if (
+            self._template_service is None
+            and provisioning_strategy.should_encrypt_template_token(base_provisioning_ctx)
+        ):
+            return False, (
+                "template_service required for coding bot create init: "
+                f"bot_id={resolved_bot_id}"
+            )
+
+        template_config = None
+        if self._template_service is not None:
+            try:
+                template_config = self._template_service.get_template_config(resolved_bot_id)
+            except Exception as exc:
+                logger.warning(
+                    "[run_create_init_once] failed to reload template config "
+                    "for bot_id=%s: %s",
+                    resolved_bot_id,
+                    exc,
+                )
+        if not isinstance(template_config, dict):
+            template_config = {}
+
+        # Reuse the base ctx, swapping in the freshly loaded template_config
+        # (same bot/engine/template_type as base_provisioning_ctx above).
+        provisioning_ctx = replace(base_provisioning_ctx, template_config=template_config)
+        raw_codefuse_token = provisioning_strategy.extract_runtime_token(provisioning_ctx)
+        codefuse_token = (
+            self._vault.decrypt_or_passthrough(raw_codefuse_token)
+            if raw_codefuse_token
+            else None
         )
 
         try:
@@ -713,6 +757,7 @@ class BaasDeviceService(DeviceService):
         ttl: int | None = None,
         device_uuid: str | None = None,
         ws_conn_mode: str | None = None,
+        path: str | None = None,
     ) -> DeviceConnectionInfo:
         """获取设备连接信息。
 
@@ -725,6 +770,8 @@ class BaasDeviceService(DeviceService):
             ttl: TTL（BaaS 层忽略，由服务端决定）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
             ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
+            path: 目标 in-device 路径（可选）；BaaS 用它拼 ``ws_url``，故 relay 下它
+                决定 URL 指向哪个引擎 socket，不传落到默认 ``api/openclaw/ws``
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
@@ -744,6 +791,8 @@ class BaasDeviceService(DeviceService):
                 device_affinity=operator.staff_id,
                 device_uuid=device_uuid,
                 ws_conn_mode=ws_conn_mode,
+                # Only override when asked; None would blank get_ws_info's default.
+                **({"path": path.lstrip("/")} if path else {}),
             )
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")
@@ -762,10 +811,14 @@ class BaasDeviceService(DeviceService):
             target=ws_info.target,
             token=ws_info.token,
             engine_type=engine_type,
+            url=ws_info.ws_url if ws_conn_mode == "relay" else "",
             baas_base_url=ws_info.baas_base_url,
             bot_uuid=ws_info.bot_uuid,
             tenant=ws_info.tenant,
             engine_port=ws_info.engine_port,
+            # 服务端签发；ttl 入参本层忽略，caller 自行推算必然与真 token 不符。
+            # 本链路 token 就是 ws token，故不另填 ws_*（留空即"用 token"）。
+            expires_at=ws_info.expires_at,
         )
 
         logger.info(
@@ -801,149 +854,15 @@ class BaasDeviceService(DeviceService):
         device: AllocatedDevice,
         agent_pass_token: str = "",
         agent_code: str = "",
+        active_only: bool = False,
     ) -> list[dict]:
-        """热更新 BaaS 设备出站 header 规则。
-
-        通过 BaaS 层 PUT /paas/devices/{paas_device_id}/outbound-rule 接口更新，
-        不再直接调用 Arca SDK。
-
-        说明：BaaS 侧一个逻辑 Bot 可能对应多台 Arca 物理设备实例，ocb 侧 bot 粒度与 BaaS 侧不同。
-        因此支持两种更新粒度：
-        1. 单设备实例：按 device_uuid 精确更新一台设备（device_uuid 是 BaaS
-           侧的概念，如 DEVICE-xxx，用于查询设备信息）。
-           例如：bootstrap_device_auth 回调时，刚启动的这台设备需要拿到 agent_code 和
-           passport token，此时只更新它自身，不影响该 Bot 下的其他设备。
-        2. Bot 维度批量：按 BaaS 侧 bot_uuid 查出该 Bot 下全部设备，全部更新。
-           例如：定时刷新 passport token（refresh token）时，需要把该 Bot 下的所有
-           设备批量更新为新 token。
-
-        Args:
-            device: 已分配设备信息
-            agent_pass_token: Agent Passport token
-            agent_code: Agent Passport agent_code
-
-        Returns:
-            成功更新的设备列表，每项包含 device_uuid 和 paas_device_id
-
-        Raises:
-            BaasDeviceServiceError: 更新失败
-        """
-        # 从 device 中提取关键字段
-        bolt_id = device.device_props.get("bolt_id", "")
-        owner_id = device.device_props.get("entity_id", "")
-        device_uuid = device.device_props.get("device_uuid", "")
-
-        logger.info(
-            f"[BaasDeviceService.update_device_headers] Start: "
-            f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-            f"has_device_uuid={'yes' if device_uuid else 'no'}"
-        )
-
-        # Teclaw 由 BaaS 托管，只构造身份认证（identity-auth）出站规则；
-        # 其他 BaaS 设备保持完整的 outbound-rule 规则包。规则内容由注入的
-        # OutboundRuleProvider 决定（corp 才有网关域名/secret，community 为空）。
+        """热更新 BaaS 设备出站 header 规则。"""
         try:
-            if device.device_provider == TECLAW_DEVICE_PROVIDER:
-                outbound_rule = self._baas_service._build_teclaw_outbound_operation_rule(
-                    agent_pass_token=agent_pass_token,
-                )
-            else:
-                outbound_rule = self._baas_service._build_outbound_operation_rule(
-                    bot_id=bolt_id,
-                    owner_id=owner_id,
-                    agent_pass_token=agent_pass_token,
-                    agent_code=agent_code,
-                )
-        except Exception as e:
-            logger.error(
-                f"[BaasDeviceService.update_device_headers] Build rule failed: "
-                f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, error={e}"
+            return self._header_updater.update(
+                device=device,
+                agent_pass_token=agent_pass_token,
+                agent_code=agent_code,
+                active_only=active_only,
             )
-            raise BaasDeviceServiceError(f"构建 outbound rule 失败: {e}") from e
-
-        if outbound_rule is None:
-            return []
-
-        updated_devices: list[dict] = []
-
-        try:
-            if device_uuid:
-                # ========== 单设备场景：按 device_uuid 精确更新 ==========
-                logger.info(
-                    f"[BaasDeviceService.update_device_headers] Single device mode: "
-                    f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                    f"device_uuid={device_uuid}"
-                )
-                # 通过 device_uuid 查询 BaaS 设备信息，获取 PaaS 层设备 ID
-                device_info = self._baas_service.get_device_by_uuid(device_uuid)
-                paas_device_id = device_info.get("provider_device_id")
-                if not paas_device_id:
-                    raise BaasDeviceServiceError(
-                        f"BaaS 设备缺少 provider_device_id: device_uuid={device_uuid}"
-                    )
-                # 调用 BaaS 接口更新该设备的出站 header 规则
-                self._baas_service.update_device_outbound_rule(paas_device_id, outbound_rule)
-                updated_devices.append({
-                    "baas_device_uuid": device_uuid,
-                    "paas_device_id": paas_device_id,
-                })
-                logger.info(
-                    f"[BaasDeviceService.update_device_headers] Single device updated: "
-                    f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                    f"device_uuid={device_uuid}, paas_device_id={paas_device_id}"
-                )
-            else:
-                # ========== 批量场景：按 bot_uuid 全量更新 ==========
-                # 优先用 device_props.bot_uuid(个人 bot via BaaS 写入);否则
-                # 兼容老的"device_id 就是 bot_uuid"约定(桌面 bot 在用)。
-                bot_uuid = device.device_props.get("bot_uuid") or device.device_id
-                logger.info(
-                    f"[BaasDeviceService.update_device_headers] Batch mode: "
-                    f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                    f"bot_uuid={bot_uuid}"
-                )
-                # 查询该 Bot 下的全部 BaaS 设备
-                devices = self._baas_service.list_devices_by_bot_uuid(bot_uuid)
-                if not devices:
-                    logger.warning(
-                        f"[BaasDeviceService.update_device_headers] No devices found: "
-                        f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                        f"bot_uuid={bot_uuid}"
-                    )
-                    return updated_devices
-
-                # 遍历设备列表，逐台更新出站规则
-                for dev in devices:
-                    paas_device_id = dev.get("provider_device_id")
-                    dev_uuid = dev.get("device_uuid", "")
-                    if not paas_device_id:
-                        logger.warning(
-                            f"[BaasDeviceService.update_device_headers] Skip device: "
-                            f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                            f"device_uuid={dev_uuid}"
-                        )
-                        continue
-                    self._baas_service.update_device_outbound_rule(paas_device_id, outbound_rule)
-                    updated_devices.append({
-                        "device_uuid": dev_uuid,
-                        "paas_device_id": paas_device_id,
-                    })
-                    logger.info(
-                        f"[BaasDeviceService.update_device_headers] Device updated: "
-                        f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                        f"device_uuid={dev_uuid}, paas_device_id={paas_device_id}"
-                    )
-
-            logger.info(
-                f"[BaasDeviceService.update_device_headers] Done: "
-                f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, "
-                f"updated_count={len(updated_devices)}"
-            )
-            return updated_devices
-
-        except Exception as e:
-            logger.error(
-                f"[BaasDeviceService.update_device_headers] BaaS API error: "
-                f"device_id={device.device_id}, bolt_id={bolt_id}, owner_id={owner_id}, error={e}"
-            )
-            raise BaasDeviceServiceError(f"BaaS 设备 header 更新失败: {e}") from e
+        except BaasDeviceHeaderUpdateError as e:
+            raise BaasDeviceServiceError(str(e)) from e

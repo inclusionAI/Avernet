@@ -43,9 +43,9 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         group: &Group,
         registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::BotJoined { actor, .. } = event else {
-            return vec![];
+            return (vec![], None);
         };
 
         let new_bot_uuid = actor.bot_uuid.clone();
@@ -63,6 +63,7 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         // 2. Notification to other bots.
         let registered = registry.get(&new_bot_uuid).await;
         let summary = format_notification(&new_bot_uuid, registered.as_ref());
+        let user_message = Some(summary.clone());
         let others: Vec<String> = participants
             .iter()
             .filter(|p| p.bot_uuid != new_bot_uuid)
@@ -75,7 +76,7 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
                 delivery_type: DeliveryType::Inject,
             });
         }
-        messages
+        (messages, user_message)
     }
 }
 

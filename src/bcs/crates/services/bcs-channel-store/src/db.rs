@@ -42,7 +42,39 @@
 //!   im_user_id   VARCHAR(128) NOT NULL,
 //!   actor_id     VARCHAR(256) NOT NULL,
 //!   display_name VARCHAR(256) DEFAULT NULL,
-//!   PRIMARY KEY (channel_type, account_ref, im_user_id)
+//!   PRIMARY KEY (channel_type, account_ref, im_user_id),
+//! );
+//!
+//! CREATE TABLE bcs_human_input_requests (
+//!   request_id             VARCHAR(512) PRIMARY KEY,
+//!   gmt_create             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+//!   gmt_modified           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+//!   session_id             VARCHAR(128) NOT NULL,
+//!   run_id                 VARCHAR(128) NOT NULL,
+//!   node_id                VARCHAR(128) NOT NULL,
+//!   binding_id             VARCHAR(64) NOT NULL,
+//!   channel_type           VARCHAR(32) NOT NULL,
+//!   account_ref            VARCHAR(128) NOT NULL,
+//!   notification_mode      VARCHAR(32) NOT NULL,
+//!   reply_scope_key        VARCHAR(768) NOT NULL,
+//!   active_slot_key        VARCHAR(768) DEFAULT NULL,
+//!   assignee_actor_id      VARCHAR(256) NOT NULL,
+//!   im_conversation_id     VARCHAR(256) NOT NULL,
+//!   im_conversation_type   VARCHAR(16) NOT NULL,
+//!   im_user_id             VARCHAR(128) DEFAULT NULL,
+//!   node_display_name      VARCHAR(256) NOT NULL,
+//!   notification_text      TEXT NOT NULL,
+//!   deadline_ms            BIGINT NOT NULL,
+//!   status                 VARCHAR(32) NOT NULL,
+//!   provider_message_ref   VARCHAR(256) DEFAULT NULL,
+//!   delivery_attempts      BIGINT NOT NULL DEFAULT 0,
+//!   last_delivery_error    TEXT DEFAULT NULL,
+//!   created_at             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+//!   activated_at           BIGINT DEFAULT NULL,
+//!   responded_at           BIGINT DEFAULT NULL,
+//!   UNIQUE KEY uk_human_input_active_slot (active_slot_key),
+//!   INDEX idx_human_input_scope_status (reply_scope_key, status, deadline_ms, created_at),
+//!   INDEX idx_human_input_run_node (run_id, node_id)
 //! );
 //! ```
 //!
@@ -57,10 +89,12 @@ use tracing::warn;
 use bcs_db_api::{DbError, DbPlugin, DbRow, DbSqlFlavor, DbStatement, DbValue};
 use bcs_domain::{
     BindingStatus, BindingTarget, ChannelBinding, ChannelType, ConversationSessionMap,
-    GroupChatScope, ImParticipantMap, SessionScope, Visibility,
+    GroupChatScope, HumanInputNotificationMode, HumanInputRequest, HumanInputRequestStatus,
+    ImParticipantMap, SessionScope, Visibility,
 };
 use bcs_service_api::port::repo::{
-    ChannelBindingRepoPort, ConversationSessionRepoPort, ImParticipantRepoPort,
+    ChannelBindingRepoPort, ConversationSessionRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort,
 };
 use bcs_service_api::{ServiceError, ServiceResult};
 
@@ -69,19 +103,28 @@ pub type ChannelSqlFlavor = DbSqlFlavor;
 pub struct DbChannelBindingStore {
     db: Arc<dyn DbPlugin>,
     flavor: ChannelSqlFlavor,
+    env: String,
 }
 
 impl DbChannelBindingStore {
-    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
-        Self { db, flavor }
+    pub fn new(
+        db: Arc<dyn DbPlugin>,
+        flavor: ChannelSqlFlavor,
+        env: impl Into<String>,
+    ) -> Self {
+        Self {
+            db,
+            flavor,
+            env: env.into(),
+        }
     }
 
-    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
-        Self::new(db, ChannelSqlFlavor::Mysql)
+    pub fn mysql(db: Arc<dyn DbPlugin>, env: impl Into<String>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql, env)
     }
 
-    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
-        Self::new(db, ChannelSqlFlavor::Sqlite)
+    pub fn sqlite(db: Arc<dyn DbPlugin>, env: impl Into<String>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite, env)
     }
 
     pub fn flavor(&self) -> ChannelSqlFlavor {
@@ -111,6 +154,13 @@ impl DbChannelBindingStore {
 #[async_trait]
 impl ChannelBindingRepoPort for DbChannelBindingStore {
     async fn create(&self, binding: ChannelBinding) -> ServiceResult<()> {
+        // 以下为安全注释COSEC：拒绝跨环境写入，避免调用方绕过 repository 的环境隔离。
+        if binding.env != self.env {
+            return Err(ServiceError::InternalError(format!(
+                "channel binding env '{}' does not match repository env '{}'",
+                binding.env, self.env
+            )));
+        }
         let target_json = serde_json::to_string(&binding.target)?;
         let config_json = serde_json::to_string(&binding.config)?;
 
@@ -146,8 +196,8 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
-                     FROM bcs_channel_bindings WHERE id = ? LIMIT 1",
-                    vec![DbValue::from(id)],
+                     FROM bcs_channel_bindings WHERE id = ? AND env = ? LIMIT 1",
+                    vec![DbValue::from(id), DbValue::from(self.env.as_str())],
                 ),
             )
             .await?;
@@ -170,9 +220,11 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
                      FROM bcs_channel_bindings \
-                     WHERE channel_type = ? AND account_ref = ? AND status = 'active' \
+                     WHERE env = ? AND channel_type = ? AND account_ref = ? \
+                       AND status = 'active' \
                      LIMIT 1",
                     vec![
+                        DbValue::from(self.env.as_str()),
                         DbValue::from(channel_type.as_str()),
                         DbValue::from(account_ref),
                     ],
@@ -190,10 +242,11 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         let rows = self
             .query(
                 "list_bindings",
-                DbStatement::new(
+                DbStatement::with_params(
                     "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                      visibility, env, status, created_by, config_json \
-                     FROM bcs_channel_bindings ORDER BY id",
+                     FROM bcs_channel_bindings WHERE env = ? ORDER BY id",
+                    vec![DbValue::from(self.env.as_str())],
                 ),
             )
             .await?;
@@ -211,18 +264,42 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
                 "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                  visibility, env, status, created_by, config_json \
                  FROM bcs_channel_bindings \
-                 WHERE target_json = ? AND channel_type = ? ORDER BY id",
-                vec![DbValue::from(target_json), DbValue::from(channel_type)],
+                 WHERE env = ? AND target_json = ? AND channel_type = ? ORDER BY id",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(target_json),
+                    DbValue::from(channel_type),
+                ],
             ),
             None => DbStatement::with_params(
                 "SELECT id, channel_type, account_ref, target_json, group_chat_scope, \
                  visibility, env, status, created_by, config_json \
-                 FROM bcs_channel_bindings WHERE target_json = ? ORDER BY id",
-                vec![DbValue::from(target_json)],
+                 FROM bcs_channel_bindings \
+                 WHERE env = ? AND target_json = ? ORDER BY id",
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(target_json),
+                ],
             ),
         };
         let rows = self.query("list_bindings_by_target", statement).await?;
         rows.iter().map(row_to_binding).collect()
+    }
+
+    async fn delete_by_target(&self, target: &BindingTarget) -> ServiceResult<u64> {
+        let target_json = serde_json::to_string(target)?;
+        // 以下为安全注释COSEC：删除范围固定为 repository env，禁止调用方选择其他环境。
+        self.execute(
+            "delete_bindings_by_target",
+            DbStatement::with_params(
+                "DELETE FROM bcs_channel_bindings WHERE target_json = ? AND env = ?",
+                vec![
+                    DbValue::from(target_json),
+                    DbValue::from(self.env.as_str()),
+                ],
+            ),
+        )
+        .await
     }
 
     async fn set_status(&self, id: &str, active: bool) -> ServiceResult<()> {
@@ -235,10 +312,14 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
             "set_binding_status",
             DbStatement::with_params(
                 format!(
-                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ?",
+                    "UPDATE bcs_channel_bindings SET status = ?, {} WHERE id = ? AND env = ?",
                     self.flavor.set_modified_now()
                 ),
-                vec![DbValue::from(binding_status_to_str(status)), DbValue::from(id)],
+                vec![
+                    DbValue::from(binding_status_to_str(status)),
+                    DbValue::from(id),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await?;
@@ -251,10 +332,14 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
             "set_binding_config",
             DbStatement::with_params(
                 format!(
-                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ?",
+                    "UPDATE bcs_channel_bindings SET config_json = ?, {} WHERE id = ? AND env = ?",
                     self.flavor.set_modified_now()
                 ),
-                vec![DbValue::from(config_json), DbValue::from(id)],
+                vec![
+                    DbValue::from(config_json),
+                    DbValue::from(id),
+                    DbValue::from(self.env.as_str()),
+                ],
             ),
         )
         .await?;
@@ -265,8 +350,8 @@ impl ChannelBindingRepoPort for DbChannelBindingStore {
         self.execute(
             "delete_binding",
             DbStatement::with_params(
-                "DELETE FROM bcs_channel_bindings WHERE id = ?",
-                vec![DbValue::from(id)],
+                "DELETE FROM bcs_channel_bindings WHERE id = ? AND env = ?",
+                vec![DbValue::from(id), DbValue::from(self.env.as_str())],
             ),
         )
         .await?;
@@ -435,6 +520,35 @@ impl ConversationSessionRepoPort for DbConversationSessionStore {
         .await?;
         Ok(())
     }
+
+    async fn delete_if_session(
+        &self,
+        binding_id: &str,
+        im_conversation_id: &str,
+        session_scope: SessionScope,
+        im_user_id: Option<&str>,
+        expected_bcs_session_id: &str,
+    ) -> ServiceResult<bool> {
+        let affected = self
+            .execute(
+                "delete_conversation_if_session",
+                DbStatement::with_params(
+                    "DELETE FROM bcs_channel_conversations \
+                     WHERE binding_id = ? AND im_conversation_id = ? \
+                       AND session_scope = ? AND im_user_id = ? \
+                       AND bcs_session_id = ?",
+                    vec![
+                        DbValue::from(binding_id),
+                        DbValue::from(im_conversation_id),
+                        DbValue::from(session_scope_to_str(session_scope)),
+                        DbValue::from(im_user_id_value(im_user_id)),
+                        DbValue::from(expected_bcs_session_id),
+                    ],
+                ),
+            )
+            .await?;
+        Ok(affected == 1)
+    }
 }
 
 pub struct DbImParticipantStore {
@@ -542,6 +656,442 @@ impl ImParticipantRepoPort for DbImParticipantStore {
     }
 }
 
+pub struct DbHumanInputRequestStore {
+    db: Arc<dyn DbPlugin>,
+    flavor: ChannelSqlFlavor,
+}
+
+impl DbHumanInputRequestStore {
+    pub fn new(db: Arc<dyn DbPlugin>, flavor: ChannelSqlFlavor) -> Self {
+        Self { db, flavor }
+    }
+
+    pub fn mysql(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Mysql)
+    }
+
+    pub fn sqlite(db: Arc<dyn DbPlugin>) -> Self {
+        Self::new(db, ChannelSqlFlavor::Sqlite)
+    }
+
+    async fn execute(&self, operation: &'static str, statement: DbStatement) -> ServiceResult<u64> {
+        self.db
+            .execute(statement)
+            .await
+            .map(|result| result.affected_rows)
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    async fn query(
+        &self,
+        operation: &'static str,
+        statement: DbStatement,
+    ) -> ServiceResult<Vec<DbRow>> {
+        self.db
+            .query(statement)
+            .await
+            .map_err(|err| service_db_error(operation, err))
+    }
+
+    async fn insert(
+        &self,
+        request: &HumanInputRequest,
+        status: HumanInputRequestStatus,
+        active_slot_key: Option<&str>,
+    ) -> ServiceResult<()> {
+        self.execute(
+            "insert_human_input_request",
+            DbStatement::with_params(
+                "INSERT INTO bcs_human_input_requests (
+                    request_id, session_id, run_id, node_id, binding_id, channel_type,
+                    account_ref, notification_mode, reply_scope_key, active_slot_key,
+                    assignee_actor_id, im_conversation_id, im_conversation_type, im_user_id,
+                    node_display_name, notification_text, deadline_ms, status,
+                    provider_message_ref, delivery_attempts, last_delivery_error,
+                    activated_at, responded_at
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                vec![
+                    DbValue::from(request.request_id.as_str()),
+                    DbValue::from(request.session_id.as_str()),
+                    DbValue::from(request.run_id.as_str()),
+                    DbValue::from(request.node_id.as_str()),
+                    DbValue::from(request.binding_id.as_str()),
+                    DbValue::from(request.channel_type.as_str()),
+                    DbValue::from(request.account_ref.as_str()),
+                    DbValue::from(human_input_notification_mode_to_str(
+                        request.notification_mode,
+                    )),
+                    DbValue::from(request.reply_scope_key.as_str()),
+                    DbValue::from(active_slot_key),
+                    DbValue::from(request.assignee_actor_id.as_str()),
+                    DbValue::from(request.im_conversation_id.as_str()),
+                    DbValue::from(request.im_conversation_type.as_str()),
+                    DbValue::from(request.im_user_id.as_deref()),
+                    DbValue::from(request.node_display_name.as_str()),
+                    DbValue::from(request.notification_text.as_str()),
+                    DbValue::from(request.deadline_ms),
+                    DbValue::from(human_input_request_status_to_str(status)),
+                    DbValue::from(request.provider_message_ref.as_deref()),
+                    DbValue::from(u64::from(request.delivery_attempts)),
+                    DbValue::from(request.last_delivery_error.as_deref()),
+                    optional_u64_value(request.activated_at),
+                    optional_u64_value(request.responded_at),
+                ],
+            ),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn active_slot_exists(&self, reply_scope_key: &str) -> ServiceResult<bool> {
+        let rows = self
+            .query(
+                "find_human_input_active_slot",
+                DbStatement::with_params(
+                    "SELECT request_id FROM bcs_human_input_requests \
+                     WHERE active_slot_key = ? AND status IN ('notifying', 'active') LIMIT 1",
+                    vec![DbValue::from(reply_scope_key)],
+                ),
+            )
+            .await?;
+        Ok(!rows.is_empty())
+    }
+}
+
+#[async_trait]
+impl HumanInputRequestRepoPort for DbHumanInputRequestStore {
+    async fn enqueue(
+        &self,
+        request: HumanInputRequest,
+    ) -> ServiceResult<HumanInputEnqueueDisposition> {
+        if let Some(existing) = self.get(&request.request_id).await? {
+            return Ok(if matches!(
+                existing.status,
+                HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+            ) {
+                HumanInputEnqueueDisposition::Notifying
+            } else {
+                HumanInputEnqueueDisposition::Queued
+            });
+        }
+
+        let first_error = match self
+            .insert(
+                &request,
+                HumanInputRequestStatus::Notifying,
+                Some(&request.reply_scope_key),
+            )
+            .await
+        {
+            Ok(()) => return Ok(HumanInputEnqueueDisposition::Notifying),
+            Err(error) => error,
+        };
+        if let Some(existing) = self.get(&request.request_id).await? {
+            return Ok(if matches!(
+                existing.status,
+                HumanInputRequestStatus::Notifying | HumanInputRequestStatus::Active
+            ) {
+                HumanInputEnqueueDisposition::Notifying
+            } else {
+                HumanInputEnqueueDisposition::Queued
+            });
+        }
+        if !self.active_slot_exists(&request.reply_scope_key).await? {
+            return Err(first_error);
+        }
+        self.insert(&request, HumanInputRequestStatus::Queued, None)
+            .await?;
+        Ok(HumanInputEnqueueDisposition::Queued)
+    }
+
+    async fn get(&self, request_id: &str) -> ServiceResult<Option<HumanInputRequest>> {
+        let rows = self
+            .query(
+                "get_human_input_request",
+                DbStatement::with_params(
+                    human_input_request_select_sql(
+                        self.flavor,
+                        "WHERE request_id = ? LIMIT 1",
+                    ),
+                    vec![DbValue::from(request_id)],
+                ),
+            )
+            .await?;
+        rows.first().map(row_to_human_input_request).transpose()
+    }
+
+    async fn list_by_run(&self, run_id: &str) -> ServiceResult<Vec<HumanInputRequest>> {
+        let rows = self
+            .query(
+                "list_human_input_requests_by_run",
+                DbStatement::with_params(
+                    human_input_request_select_sql(
+                        self.flavor,
+                        "WHERE run_id = ? ORDER BY created_at, request_id",
+                    ),
+                    vec![DbValue::from(run_id)],
+                ),
+            )
+            .await?;
+        rows.iter().map(row_to_human_input_request).collect()
+    }
+
+    async fn find_active_by_scope(
+        &self,
+        reply_scope_key: &str,
+    ) -> ServiceResult<Option<HumanInputRequest>> {
+        let rows = self
+            .query(
+                "find_active_human_input_request",
+                DbStatement::with_params(
+                    human_input_request_select_sql(
+                        self.flavor,
+                        "WHERE reply_scope_key = ? AND status = 'active' LIMIT 1",
+                    ),
+                    vec![DbValue::from(reply_scope_key)],
+                ),
+            )
+            .await?;
+        rows.first().map(row_to_human_input_request).transpose()
+    }
+
+    async fn mark_active(
+        &self,
+        request_id: &str,
+        provider_message_ref: Option<&str>,
+        activated_at: u64,
+    ) -> ServiceResult<bool> {
+        let affected = self
+            .execute(
+                "mark_human_input_active",
+                DbStatement::with_params(
+                    format!(
+                        "UPDATE bcs_human_input_requests \
+                         SET status = 'active', provider_message_ref = ?, \
+                             delivery_attempts = delivery_attempts + 1, activated_at = ?, {} \
+                         WHERE request_id = ? AND status = 'notifying'",
+                        self.flavor.set_modified_now()
+                    ),
+                    vec![
+                        DbValue::from(provider_message_ref),
+                        DbValue::from(activated_at),
+                        DbValue::from(request_id),
+                    ],
+                ),
+            )
+            .await?;
+        Ok(affected == 1)
+    }
+
+    async fn mark_delivery_failed(
+        &self,
+        request_id: &str,
+        error: &str,
+    ) -> ServiceResult<bool> {
+        let affected = self
+            .execute(
+                "mark_human_input_delivery_failed",
+                DbStatement::with_params(
+                    format!(
+                        "UPDATE bcs_human_input_requests \
+                         SET status = 'delivery_failed', active_slot_key = NULL, \
+                             delivery_attempts = delivery_attempts + 1, \
+                             last_delivery_error = ?, {} \
+                         WHERE request_id = ? AND status = 'notifying'",
+                        self.flavor.set_modified_now()
+                    ),
+                    vec![DbValue::from(error), DbValue::from(request_id)],
+                ),
+            )
+            .await?;
+        Ok(affected == 1)
+    }
+
+    async fn mark_responded(
+        &self,
+        request_id: &str,
+        responded_at: u64,
+    ) -> ServiceResult<bool> {
+        let affected = self
+            .execute(
+                "mark_human_input_responded",
+                DbStatement::with_params(
+                    format!(
+                        "UPDATE bcs_human_input_requests \
+                         SET status = 'responded', active_slot_key = NULL, responded_at = ?, {} \
+                         WHERE request_id = ? AND status = 'active'",
+                        self.flavor.set_modified_now()
+                    ),
+                    vec![DbValue::from(responded_at), DbValue::from(request_id)],
+                ),
+            )
+            .await?;
+        Ok(affected == 1)
+    }
+
+    async fn promote_next(
+        &self,
+        reply_scope_key: &str,
+        now_ms: u64,
+    ) -> ServiceResult<Option<HumanInputRequest>> {
+        self.execute(
+            "expire_queued_human_input_requests",
+            DbStatement::with_params(
+                format!(
+                    "UPDATE bcs_human_input_requests \
+                     SET status = 'expired', {} \
+                     WHERE reply_scope_key = ? AND status = 'queued' AND deadline_ms <= ?",
+                    self.flavor.set_modified_now()
+                ),
+                vec![DbValue::from(reply_scope_key), DbValue::from(now_ms)],
+            ),
+        )
+        .await?;
+        if self.active_slot_exists(reply_scope_key).await? {
+            return Ok(None);
+        }
+        let rows = self
+            .query(
+                "select_next_human_input_request",
+                DbStatement::with_params(
+                    "SELECT request_id FROM bcs_human_input_requests \
+                     WHERE reply_scope_key = ? AND status = 'queued' \
+                     ORDER BY deadline_ms, created_at, request_id LIMIT 1",
+                    vec![DbValue::from(reply_scope_key)],
+                ),
+            )
+            .await?;
+        let Some(request_id) = rows
+            .first()
+            .map(|row| required_string(row, "request_id"))
+            .transpose()?
+        else {
+            return Ok(None);
+        };
+        let affected = self
+            .execute(
+                "promote_human_input_request",
+                DbStatement::with_params(
+                    format!(
+                        "UPDATE bcs_human_input_requests \
+                         SET status = 'notifying', active_slot_key = ?, {} \
+                         WHERE request_id = ? AND status = 'queued'",
+                        self.flavor.set_modified_now()
+                    ),
+                    vec![
+                        DbValue::from(reply_scope_key),
+                        DbValue::from(request_id.as_str()),
+                    ],
+                ),
+            )
+            .await?;
+        if affected != 1 {
+            return Ok(None);
+        }
+        self.get(&request_id).await
+    }
+
+    async fn count_queued(&self, reply_scope_key: &str) -> ServiceResult<usize> {
+        let rows = self
+            .query(
+                "count_queued_human_input_requests",
+                DbStatement::with_params(
+                    "SELECT request_id FROM bcs_human_input_requests \
+                     WHERE reply_scope_key = ? AND status = 'queued'",
+                    vec![DbValue::from(reply_scope_key)],
+                ),
+            )
+            .await?;
+        Ok(rows.len())
+    }
+
+    async fn close_for_run_node(
+        &self,
+        run_id: &str,
+        node_id: &str,
+        status: HumanInputRequestStatus,
+    ) -> ServiceResult<u64> {
+        if !matches!(
+            status,
+            HumanInputRequestStatus::Expired | HumanInputRequestStatus::Cancelled
+        ) {
+            return Err(ServiceError::InvalidOperation {
+                message: "HumanInput request can only be closed as expired or cancelled"
+                    .to_string(),
+                request_id: None,
+            });
+        }
+        self.execute(
+            "close_human_input_request",
+            DbStatement::with_params(
+                format!(
+                    "UPDATE bcs_human_input_requests \
+                     SET status = ?, active_slot_key = NULL, {} \
+                     WHERE run_id = ? AND node_id = ? \
+                       AND status IN ('queued', 'notifying', 'active')",
+                    self.flavor.set_modified_now()
+                ),
+                vec![
+                    DbValue::from(human_input_request_status_to_str(status)),
+                    DbValue::from(run_id),
+                    DbValue::from(node_id),
+                ],
+            ),
+        )
+        .await
+    }
+}
+
+fn human_input_request_select_sql(flavor: ChannelSqlFlavor, suffix: &str) -> String {
+    let created_at = flavor.unix_ts("created_at");
+    format!(
+        "SELECT request_id, session_id, run_id, node_id, binding_id, channel_type, \
+         account_ref, notification_mode, reply_scope_key, active_slot_key, \
+         assignee_actor_id, im_conversation_id, im_conversation_type, im_user_id, \
+         node_display_name, notification_text, deadline_ms, status, provider_message_ref, \
+         delivery_attempts, last_delivery_error, ({created_at} * 1000) AS created_at, \
+         activated_at, responded_at \
+         FROM bcs_human_input_requests {suffix}"
+    )
+}
+
+fn row_to_human_input_request(row: &DbRow) -> ServiceResult<HumanInputRequest> {
+    let delivery_attempts = row_u64(row, "delivery_attempts")?;
+    Ok(HumanInputRequest {
+        request_id: required_string(row, "request_id")?,
+        session_id: required_string(row, "session_id")?,
+        run_id: required_string(row, "run_id")?,
+        node_id: required_string(row, "node_id")?,
+        binding_id: required_string(row, "binding_id")?,
+        channel_type: required_string(row, "channel_type")?,
+        account_ref: required_string(row, "account_ref")?,
+        notification_mode: parse_human_input_notification_mode(&required_string(
+            row,
+            "notification_mode",
+        )?)?,
+        reply_scope_key: required_string(row, "reply_scope_key")?,
+        active_slot_key: optional_string(row, "active_slot_key"),
+        assignee_actor_id: required_string(row, "assignee_actor_id")?,
+        im_conversation_id: required_string(row, "im_conversation_id")?,
+        im_conversation_type: required_string(row, "im_conversation_type")?,
+        im_user_id: optional_string(row, "im_user_id"),
+        node_display_name: required_string(row, "node_display_name")?,
+        notification_text: required_string(row, "notification_text")?,
+        deadline_ms: row_u64(row, "deadline_ms")?,
+        status: parse_human_input_request_status(&required_string(row, "status")?)?,
+        provider_message_ref: optional_string(row, "provider_message_ref"),
+        delivery_attempts: u32::try_from(delivery_attempts).map_err(|_| {
+            ServiceError::InternalError(format!(
+                "delivery_attempts exceeds u32: {delivery_attempts}"
+            ))
+        })?,
+        last_delivery_error: optional_string(row, "last_delivery_error"),
+        created_at: row_u64(row, "created_at")?,
+        activated_at: optional_u64(row, "activated_at")?,
+        responded_at: optional_u64(row, "responded_at")?,
+    })
+}
+
 fn row_to_binding(row: &DbRow) -> ServiceResult<ChannelBinding> {
     let target_json = required_string(row, "target_json")?;
     let config_json = required_string(row, "config_json")?;
@@ -551,7 +1101,9 @@ fn row_to_binding(row: &DbRow) -> ServiceResult<ChannelBinding> {
         channel_type: required_string(row, "channel_type")?,
         account_ref: required_string(row, "account_ref")?,
         target: serde_json::from_str::<BindingTarget>(&target_json)?,
-        group_chat_scope: parse_group_chat_scope(optional_string(row, "group_chat_scope").as_deref())?,
+        group_chat_scope: parse_group_chat_scope(
+            optional_string(row, "group_chat_scope").as_deref(),
+        )?,
         outbound_visibility: parse_visibility(&required_string(row, "visibility")?)?,
         env: required_string(row, "env")?,
         status: parse_binding_status(&required_string(row, "status")?)?,
@@ -609,11 +1161,71 @@ fn row_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
     })
 }
 
-fn im_user_id_value(im_user_id: Option<&str>) -> &str {
-    match im_user_id {
-        Some(value) => value,
-        None => "",
+fn optional_u64(row: &DbRow, column: &'static str) -> ServiceResult<Option<u64>> {
+    let Some(value) = row
+        .get_i64(column)
+        .map_err(|err| service_db_error(column, err))?
+    else {
+        return Ok(None);
+    };
+    u64::try_from(value).map(Some).map_err(|_| {
+        ServiceError::InternalError(format!(
+            "channel column {} must be non-negative, got {}",
+            column, value
+        ))
+    })
+}
+
+fn optional_u64_value(value: Option<u64>) -> DbValue {
+    value.map(DbValue::from).unwrap_or(DbValue::Null)
+}
+
+fn human_input_notification_mode_to_str(mode: HumanInputNotificationMode) -> &'static str {
+    match mode {
+        HumanInputNotificationMode::FixedGroup => "fixed_group",
+        HumanInputNotificationMode::DirectAssignee => "direct_assignee",
     }
+}
+
+fn parse_human_input_notification_mode(value: &str) -> ServiceResult<HumanInputNotificationMode> {
+    match value {
+        "fixed_group" => Ok(HumanInputNotificationMode::FixedGroup),
+        "direct_assignee" => Ok(HumanInputNotificationMode::DirectAssignee),
+        other => Err(ServiceError::InternalError(format!(
+            "unknown HumanInput notification mode {other}"
+        ))),
+    }
+}
+
+fn human_input_request_status_to_str(status: HumanInputRequestStatus) -> &'static str {
+    match status {
+        HumanInputRequestStatus::Queued => "queued",
+        HumanInputRequestStatus::Notifying => "notifying",
+        HumanInputRequestStatus::Active => "active",
+        HumanInputRequestStatus::Responded => "responded",
+        HumanInputRequestStatus::Expired => "expired",
+        HumanInputRequestStatus::Cancelled => "cancelled",
+        HumanInputRequestStatus::DeliveryFailed => "delivery_failed",
+    }
+}
+
+fn parse_human_input_request_status(value: &str) -> ServiceResult<HumanInputRequestStatus> {
+    match value {
+        "queued" => Ok(HumanInputRequestStatus::Queued),
+        "notifying" => Ok(HumanInputRequestStatus::Notifying),
+        "active" => Ok(HumanInputRequestStatus::Active),
+        "responded" => Ok(HumanInputRequestStatus::Responded),
+        "expired" => Ok(HumanInputRequestStatus::Expired),
+        "cancelled" => Ok(HumanInputRequestStatus::Cancelled),
+        "delivery_failed" => Ok(HumanInputRequestStatus::DeliveryFailed),
+        other => Err(ServiceError::InternalError(format!(
+            "unknown HumanInput request status {other}"
+        ))),
+    }
+}
+
+fn im_user_id_value(im_user_id: Option<&str>) -> &str {
+    im_user_id.unwrap_or_default()
 }
 
 fn group_chat_scope_to_str(scope: GroupChatScope) -> &'static str {
@@ -700,7 +1312,10 @@ mod tests {
 
     use bcs_db_api::{DbError, DbStatement};
     use bcs_db_local::LocalSqliteDbPlugin;
-    use bcs_domain::{BindingStatus, BindingTarget, GroupChatScope, Visibility};
+    use bcs_domain::{
+        BindingStatus, BindingTarget, GroupChatScope, HumanInputNotificationMode,
+        HumanInputRequest, HumanInputRequestStatus, Visibility,
+    };
 
     fn test_db_error(operation: &'static str, err: DbError) -> ServiceError {
         ServiceError::InternalError(format!("test db {}: {}", operation, err))
@@ -714,8 +1329,7 @@ mod tests {
     }
 
     async fn sqlite_db() -> ServiceResult<Arc<LocalSqliteDbPlugin>> {
-        let db = LocalSqliteDbPlugin::new()
-            .map_err(|err| test_db_error("open sqlite", err))?;
+        let db = LocalSqliteDbPlugin::new().map_err(|err| test_db_error("open sqlite", err))?;
 
         execute_schema(
             &db,
@@ -770,6 +1384,44 @@ mod tests {
             )",
         )
         .await?;
+        execute_schema(
+            &db,
+            "CREATE TABLE bcs_human_input_requests (
+                request_id TEXT PRIMARY KEY,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                session_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                binding_id TEXT NOT NULL,
+                channel_type TEXT NOT NULL,
+                account_ref TEXT NOT NULL,
+                notification_mode TEXT NOT NULL,
+                reply_scope_key TEXT NOT NULL,
+                active_slot_key TEXT,
+                assignee_actor_id TEXT NOT NULL,
+                im_conversation_id TEXT NOT NULL,
+                im_conversation_type TEXT NOT NULL,
+                im_user_id TEXT,
+                node_display_name TEXT NOT NULL,
+                notification_text TEXT NOT NULL,
+                deadline_ms INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                provider_message_ref TEXT,
+                delivery_attempts INTEGER NOT NULL DEFAULT 0,
+                last_delivery_error TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                activated_at INTEGER,
+                responded_at INTEGER
+            )",
+        )
+        .await?;
+        execute_schema(
+            &db,
+            "CREATE UNIQUE INDEX uk_human_input_active_slot
+             ON bcs_human_input_requests(active_slot_key)",
+        )
+        .await?;
 
         Ok(Arc::new(db))
     }
@@ -783,7 +1435,7 @@ mod tests {
         let db_plugin: Arc<dyn DbPlugin> = db;
 
         Ok((
-            Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone())),
+            Arc::new(DbChannelBindingStore::sqlite(db_plugin.clone(), "dev")),
             Arc::new(DbConversationSessionStore::sqlite(db_plugin.clone())),
             Arc::new(DbImParticipantStore::sqlite(db_plugin)),
         ))
@@ -841,6 +1493,42 @@ mod tests {
         }
     }
 
+    fn human_input_request(
+        request_id: &str,
+        reply_scope_key: &str,
+        run_id: &str,
+        node_id: &str,
+        deadline_ms: u64,
+        created_at: u64,
+    ) -> HumanInputRequest {
+        HumanInputRequest {
+            request_id: request_id.to_string(),
+            session_id: "session_1".to_string(),
+            run_id: run_id.to_string(),
+            node_id: node_id.to_string(),
+            binding_id: "binding_1".to_string(),
+            channel_type: "dingtalk".to_string(),
+            account_ref: "robot_1".to_string(),
+            notification_mode: HumanInputNotificationMode::FixedGroup,
+            reply_scope_key: reply_scope_key.to_string(),
+            active_slot_key: None,
+            assignee_actor_id: "human_1".to_string(),
+            im_conversation_id: "conversation_1".to_string(),
+            im_conversation_type: "group".to_string(),
+            im_user_id: None,
+            node_display_name: "Review".to_string(),
+            notification_text: "Please review".to_string(),
+            deadline_ms,
+            status: HumanInputRequestStatus::Queued,
+            provider_message_ref: None,
+            delivery_attempts: 0,
+            last_delivery_error: None,
+            created_at,
+            activated_at: None,
+            responded_at: None,
+        }
+    }
+
     #[tokio::test]
     async fn sqlite_binding_crud_round_trip() -> ServiceResult<()> {
         let (binding_repo, _, _) = sqlite_stores().await?;
@@ -860,7 +1548,10 @@ mod tests {
         let active = binding_repo
             .find_active_by_account("dingtalk".to_string(), "robot_1")
             .await?;
-        assert_eq!(active.as_ref().map(|binding| binding.id.as_str()), Some("binding_1"));
+        assert_eq!(
+            active.as_ref().map(|binding| binding.id.as_str()),
+            Some("binding_1")
+        );
 
         binding_repo.set_status("binding_1", false).await?;
 
@@ -882,7 +1573,10 @@ mod tests {
 
     #[tokio::test]
     async fn sqlite_binding_list_by_target_filters_target_and_channel() -> ServiceResult<()> {
-        let (binding_repo, _, _) = sqlite_stores().await?;
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
+        let other_env_repo = DbChannelBindingStore::sqlite(db_plugin, "pre");
 
         let group_dingtalk = binding();
         binding_repo.create(group_dingtalk).await?;
@@ -892,6 +1586,13 @@ mod tests {
         group_other_channel.account_ref = "account_2".to_string();
         group_other_channel.channel_type = "test_im".to_string();
         binding_repo.create(group_other_channel).await?;
+
+        let mut group_other_env = binding();
+        group_other_env.id = "binding_other_env".to_string();
+        group_other_env.account_ref = "account_pre".to_string();
+        group_other_env.channel_type = "test_im".to_string();
+        group_other_env.env = "pre".to_string();
+        other_env_repo.create(group_other_env).await?;
 
         let mut other_group = binding();
         other_group.id = "binding_other_group".to_string();
@@ -913,6 +1614,76 @@ mod tests {
         assert_eq!(dingtalk.len(), 1);
         assert_eq!(dingtalk[0].id, "binding_1");
 
+        assert_eq!(binding_repo.delete_by_target(&group_target).await?, 2);
+        let remaining_group_bindings = binding_repo.list_by_target(&group_target, None).await?;
+        assert!(remaining_group_bindings.is_empty());
+        assert!(other_env_repo.get("binding_other_env").await?.is_some());
+        assert!(binding_repo.get("binding_other_group").await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_binding_repo_isolates_environment_reads_and_writes() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let db_plugin: Arc<dyn DbPlugin> = db;
+        let pre_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "pre");
+        let prod_repo = DbChannelBindingStore::sqlite(db_plugin, "prod");
+
+        let mut pre_binding = binding();
+        pre_binding.id = "binding_pre".to_string();
+        pre_binding.env = "pre".to_string();
+        pre_repo.create(pre_binding).await?;
+
+        let mut prod_binding = binding();
+        prod_binding.id = "binding_prod".to_string();
+        prod_binding.env = "prod".to_string();
+        prod_repo.create(prod_binding.clone()).await?;
+
+        let pre_items = pre_repo.list().await?;
+        assert_eq!(pre_items.len(), 1);
+        assert_eq!(pre_items[0].id, "binding_pre");
+        assert_eq!(pre_repo.get("binding_prod").await?, None);
+
+        let target = BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        };
+        let pre_target_items = pre_repo
+            .list_by_target(&target, Some("dingtalk"))
+            .await?;
+        assert_eq!(pre_target_items.len(), 1);
+        assert_eq!(pre_target_items[0].id, "binding_pre");
+
+        let pre_active = pre_repo
+            .find_active_by_account("dingtalk".to_string(), "robot_1")
+            .await?;
+        assert_eq!(
+            pre_active.as_ref().map(|binding| binding.id.as_str()),
+            Some("binding_pre")
+        );
+
+        pre_repo.set_status("binding_prod", false).await?;
+        pre_repo
+            .set_config("binding_prod", serde_json::json!({"changed": true}))
+            .await?;
+        pre_repo.delete("binding_prod").await?;
+
+        let unchanged_prod = prod_repo
+            .get("binding_prod")
+            .await?
+            .expect("prod binding must remain visible in prod");
+        assert_eq!(unchanged_prod.status, BindingStatus::Active);
+        assert_eq!(unchanged_prod.config, prod_binding.config);
+
+        let mut mismatched = binding();
+        mismatched.id = "binding_mismatched".to_string();
+        mismatched.env = "prod".to_string();
+        let error = pre_repo
+            .create(mismatched)
+            .await
+            .expect_err("repository must reject a cross-environment write");
+        assert!(error.to_string().contains("does not match repository env"));
+
         Ok(())
     }
 
@@ -920,15 +1691,22 @@ mod tests {
     async fn sqlite_channel_tables_populate_audit_timestamps() -> ServiceResult<()> {
         let db = sqlite_db().await?;
         let db_plugin: Arc<dyn DbPlugin> = db;
-        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
         let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
         let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
 
         binding_repo.create(binding()).await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_1", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_1",
+                100,
+            ))
             .await?;
-        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        participant_repo
+            .upsert(participant("actor_1", "Alice"))
+            .await?;
 
         for table in [
             "bcs_channel_bindings",
@@ -986,7 +1764,7 @@ mod tests {
     async fn sqlite_write_paths_refresh_gmt_modified() -> ServiceResult<()> {
         let db = sqlite_db().await?;
         let db_plugin: Arc<dyn DbPlugin> = db;
-        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone());
+        let binding_repo = DbChannelBindingStore::sqlite(db_plugin.clone(), "dev");
         let conversation_repo = DbConversationSessionStore::sqlite(db_plugin.clone());
         let participant_repo = DbImParticipantStore::sqlite(db_plugin.clone());
 
@@ -1005,7 +1783,10 @@ mod tests {
 
         force_old_modified(db_plugin.as_ref(), "bcs_channel_bindings").await?;
         binding_repo
-            .set_config("binding_1", serde_json::json!({"send_mode": {"mode": "normal"}}))
+            .set_config(
+                "binding_1",
+                serde_json::json!({"send_mode": {"mode": "normal"}}),
+            )
             .await?;
         assert_ne!(
             query_string(
@@ -1018,11 +1799,21 @@ mod tests {
         );
 
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_old",
+                100,
+            ))
             .await?;
         force_old_modified(db_plugin.as_ref(), "bcs_channel_conversations").await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_new",
+                200,
+            ))
             .await?;
         assert_ne!(
             query_string(
@@ -1035,9 +1826,13 @@ mod tests {
             "2000-01-01 00:00:00"
         );
 
-        participant_repo.upsert(participant("actor_1", "Alice")).await?;
+        participant_repo
+            .upsert(participant("actor_1", "Alice"))
+            .await?;
         force_old_modified(db_plugin.as_ref(), "bcs_channel_im_participants").await?;
-        participant_repo.upsert(participant("actor_2", "Alice New")).await?;
+        participant_repo
+            .upsert(participant("actor_2", "Alice New"))
+            .await?;
         assert_ne!(
             query_string(
                 db_plugin.as_ref(),
@@ -1057,14 +1852,29 @@ mod tests {
         let (_, conversation_repo, _) = sqlite_stores().await?;
 
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_old", 100))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_old",
+                100,
+            ))
             .await?;
         conversation_repo
-            .upsert(conversation(SessionScope::Conversation, None, "session_new", 200))
+            .upsert(conversation(
+                SessionScope::Conversation,
+                None,
+                "session_new",
+                200,
+            ))
             .await?;
 
         let shared = conversation_repo
-            .get("binding_1", "conversation_1", SessionScope::Conversation, None)
+            .get(
+                "binding_1",
+                "conversation_1",
+                SessionScope::Conversation,
+                None,
+            )
             .await?;
         match shared {
             Some(shared) => {
@@ -1138,6 +1948,168 @@ mod tests {
             }
             None => panic!("expected participant mapping"),
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_human_input_requests_queue_activate_and_respond() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let repo = DbHumanInputRequestStore::sqlite(db);
+        let first =
+            human_input_request("request_1", "scope_1", "run_queue", "review_1", 1_000, 10);
+        let mut second =
+            human_input_request("request_2", "scope_1", "run_queue", "review_2", 2_000, 20);
+        second.notification_mode = HumanInputNotificationMode::DirectAssignee;
+        second.im_user_id = Some("staff_1".to_string());
+
+        assert_eq!(
+            repo.enqueue(first.clone()).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert_eq!(
+            repo.enqueue(first).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert!(repo.mark_active("request_1", Some("message_1"), 100).await?);
+        assert!(!repo.mark_active("request_1", None, 101).await?);
+
+        let active = repo
+            .find_active_by_scope("scope_1")
+            .await?
+            .expect("active request");
+        assert_eq!(active.request_id, "request_1");
+        assert_eq!(active.status, HumanInputRequestStatus::Active);
+        assert_eq!(active.provider_message_ref.as_deref(), Some("message_1"));
+        assert_eq!(active.delivery_attempts, 1);
+        assert_eq!(active.activated_at, Some(100));
+
+        assert_eq!(
+            repo.enqueue(second.clone()).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(
+            repo.enqueue(second).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(repo.count_queued("scope_1").await?, 1);
+        assert!(repo.promote_next("scope_1", 200).await?.is_none());
+
+        let by_run = repo.list_by_run("run_queue").await?;
+        assert_eq!(by_run.len(), 2);
+        assert_eq!(
+            by_run[1].notification_mode,
+            HumanInputNotificationMode::DirectAssignee
+        );
+        assert_eq!(by_run[1].im_user_id.as_deref(), Some("staff_1"));
+
+        assert!(repo.mark_responded("request_1", 300).await?);
+        assert!(!repo.mark_responded("request_1", 301).await?);
+        let responded = repo.get("request_1").await?.expect("responded request");
+        assert_eq!(responded.status, HumanInputRequestStatus::Responded);
+        assert_eq!(responded.responded_at, Some(300));
+
+        let promoted = repo
+            .promote_next("scope_1", 400)
+            .await?
+            .expect("queued request promoted");
+        assert_eq!(promoted.request_id, "request_2");
+        assert_eq!(promoted.status, HumanInputRequestStatus::Notifying);
+        assert_eq!(promoted.active_slot_key.as_deref(), Some("scope_1"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_human_input_requests_fail_expire_promote_and_close() -> ServiceResult<()> {
+        let db = sqlite_db().await?;
+        let repo = DbHumanInputRequestStore::sqlite(db);
+
+        assert_eq!(
+            repo.enqueue(human_input_request(
+                "failed",
+                "scope_failed",
+                "run_failed",
+                "review",
+                1_000,
+                10,
+            ))
+            .await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert!(
+            repo.mark_delivery_failed("failed", "provider unavailable")
+                .await?
+        );
+        assert!(
+            !repo
+                .mark_delivery_failed("failed", "provider unavailable")
+                .await?
+        );
+        let failed = repo.get("failed").await?.expect("failed request");
+        assert_eq!(failed.status, HumanInputRequestStatus::DeliveryFailed);
+        assert_eq!(failed.delivery_attempts, 1);
+        assert_eq!(
+            failed.last_delivery_error.as_deref(),
+            Some("provider unavailable")
+        );
+
+        let holder =
+            human_input_request("holder", "scope_fifo", "run_holder", "review", 1_000, 10);
+        let expired =
+            human_input_request("expired", "scope_fifo", "run_expired", "review", 20, 20);
+        let live = human_input_request("live", "scope_fifo", "run_live", "review", 200, 30);
+        assert_eq!(
+            repo.enqueue(holder).await?,
+            HumanInputEnqueueDisposition::Notifying
+        );
+        assert_eq!(
+            repo.enqueue(expired).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(
+            repo.enqueue(live).await?,
+            HumanInputEnqueueDisposition::Queued
+        );
+        assert_eq!(repo.count_queued("scope_fifo").await?, 2);
+
+        assert_eq!(
+            repo.close_for_run_node(
+                "run_holder",
+                "review",
+                HumanInputRequestStatus::Cancelled,
+            )
+            .await?,
+            1
+        );
+        assert_eq!(
+            repo.get("holder").await?.expect("cancelled holder").status,
+            HumanInputRequestStatus::Cancelled
+        );
+
+        let promoted = repo
+            .promote_next("scope_fifo", 50)
+            .await?
+            .expect("live request promoted");
+        assert_eq!(promoted.request_id, "live");
+        assert_eq!(
+            repo.get("expired").await?.expect("expired request").status,
+            HumanInputRequestStatus::Expired
+        );
+        assert_eq!(repo.count_queued("scope_fifo").await?, 0);
+
+        assert_eq!(
+            repo.close_for_run_node("run_live", "review", HumanInputRequestStatus::Expired)
+                .await?,
+            1
+        );
+        assert!(repo.promote_next("scope_fifo", 300).await?.is_none());
+
+        let error = repo
+            .close_for_run_node("run_live", "review", HumanInputRequestStatus::Responded)
+            .await
+            .expect_err("responded is not a valid close status");
+        assert!(matches!(error, ServiceError::InvalidOperation { .. }));
 
         Ok(())
     }

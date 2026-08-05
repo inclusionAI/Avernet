@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::ser::SerializeStruct;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::group::ParticipantRole;
@@ -230,10 +230,31 @@ pub struct StateMachineDefinition {
     pub projection: ProjectionPolicy,
     #[serde(default)]
     pub defaults: StateMachineDefaults,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_input_channel: Option<HumanInputChannelDefinition>,
     #[serde(default)]
     pub nodes: BTreeMap<String, StateMachineNodeDefinition>,
     #[serde(default)]
     pub extensions: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HumanInputChannelDefinition {
+    pub channel_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_group: Option<HumanInputFixedGroupDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HumanInputFixedGroupDefinition {
+    pub conversation_type: HumanInputConversationType,
+    pub conversation_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanInputConversationType {
+    Group,
 }
 
 fn default_state_machine_version() -> i32 {
@@ -308,6 +329,8 @@ pub struct StateMachineNodeDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignee: Option<StateMachineAssignee>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notification: Option<HumanInputNotificationDefinition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instruction: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_contract: Option<OutputContract>,
@@ -327,6 +350,18 @@ pub struct StateMachineNodeDefinition {
     pub final_output: bool,
     #[serde(default)]
     pub extensions: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HumanInputNotificationDefinition {
+    pub mode: HumanInputNotificationMode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum HumanInputNotificationMode {
+    FixedGroup,
+    DirectAssignee,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -429,7 +464,12 @@ pub struct StateMachineNodeRun {
     pub timeout_deadline_ms: Option<u64>,
     #[serde(default = "default_max_attempts")]
     pub max_attempts: i32,
-    pub assignee_bot_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee_bot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub responded_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

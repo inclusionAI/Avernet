@@ -13,12 +13,15 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use bcs_domain::{ActorKind, SystemMessageEvent};
-use bcs_service_api::{GroupChatCommand, StartStateMachineRunCommand, StartStateMachineRunOutcome};
+use bcs_domain::{ActorKind, DeliveryType, SystemMessageEvent};
+use bcs_service_api::{
+    AuthenticatedHumanCaller, GroupChatCommand, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome,
+};
 
 use crate::routes::collaboration_runs::collaboration_error_to_response;
 use crate::routes::group_messages::{
-    delivery_results_json, group_chat_caller_context, resolve_group_chat_caller, GroupChatCaller,
+    GroupChatCaller, delivery_results_json, group_chat_caller_context, resolve_group_chat_caller,
 };
 use crate::state::HttpAppState;
 
@@ -62,6 +65,7 @@ async fn start_state_machine_run_for_session(
     group: &bcs_service_api::Group,
     session: &bcs_service_api::Session,
     caller_id: Option<String>,
+    authenticated_human: Option<AuthenticatedHumanCaller>,
 ) -> Result<Option<StartStateMachineRunOutcome>, Response> {
     if group.group_strategy != bcs_service_api::GroupStrategy::StateMachine
         || session.session_kind != bcs_service_api::SessionKind::ServiceInvocation
@@ -77,8 +81,10 @@ async fn start_state_machine_run_for_session(
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: session.input.clone().unwrap_or(Value::Null),
             caller_id,
+            authenticated_human,
         })
         .await
         .map(Some)
@@ -92,13 +98,37 @@ async fn start_state_machine_run_for_session(
 ///
 /// Mirrors legacy `crate::ws::human_has_group_access` semantics
 /// (server.rs:12300-12320 + ws/mod.rs).
-async fn human_has_group_access(
+pub(crate) async fn human_has_group_access(
     state: &HttpAppState,
     group: &bcs_service_api::Group,
     actor_id: &str,
     staff_no: &str,
 ) -> bool {
-    if group
+    if group.participants.iter().any(|p| p.bot_uuid == actor_id) {
+        return true;
+    }
+    let owned = state.services.registry.list_bots_by_creator(staff_no).await;
+    owned
+        .iter()
+        .any(|b| group.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
+}
+
+/// Check whether the Human identified by `actor_id` / `staff_no` has access
+/// to the given session. The Human has access if any of:
+///   1. The Human's actor_id is a participant in the session.
+///   2. The Human owns at least one bot that is a participant in the session.
+///
+/// Session participants are the authoritative set for session-scoped access
+/// (seeded from the group at creation, then evolving independently); this
+/// mirrors `human_has_group_access` but judges membership against
+/// `session.participants` rather than `group.participants`.
+pub(crate) async fn human_has_session_access(
+    state: &HttpAppState,
+    session: &bcs_service_api::Session,
+    actor_id: &str,
+    staff_no: &str,
+) -> bool {
+    if session
         .participants
         .iter()
         .any(|p| p.bot_uuid == actor_id)
@@ -108,7 +138,7 @@ async fn human_has_group_access(
     let owned = state.services.registry.list_bots_by_creator(staff_no).await;
     owned
         .iter()
-        .any(|b| group.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
+        .any(|b| session.participants.iter().any(|p| p.bot_uuid == b.bot_uuid))
 }
 
 pub fn session_error_to_response(err: &bcs_service_api::SessionUseCaseError) -> Response {
@@ -150,6 +180,12 @@ pub struct CreateSessionRequest {
     pub created_by: Option<String>,
     #[serde(default)]
     pub caller_role: Option<String>,
+    /// Optional delivery override for the driver bot's `[GROUP CONTEXT]`
+    /// message: `"send"` (default, driver is asked to respond) or
+    /// `"inject"` (driver observes silently). Other participants always
+    /// receive the context via `chat.inject`.
+    #[serde(default)]
+    pub group_context_delivery: Option<DeliveryType>,
 }
 
 pub async fn create_session_for_group(
@@ -163,7 +199,11 @@ pub async fn create_session_for_group(
     let caller = match resolve_group_chat_caller(&state, &headers, &uri).await {
         Ok(c) => c,
         Err(_) => {
-            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "unauthorized"}))).into_response()
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": "unauthorized"})),
+            )
+                .into_response();
         }
     };
 
@@ -189,17 +229,27 @@ pub async fn create_session_for_group(
         }
     };
     if !has_access {
-        return (StatusCode::FORBIDDEN, Json(serde_json::json!({"error": "forbidden", "message": "caller is not a participant"}))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(
+                serde_json::json!({"error": "forbidden", "message": "caller is not a participant"}),
+            ),
+        )
+            .into_response();
     }
 
     // Validate caller_role for public group non-member callers
     if is_public_group && body.caller_role.is_some() {
         let role = body.caller_role.as_deref().unwrap();
         if role == "driver" {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-                "error": "invalid_role",
-                "message": "Non-member actors cannot use the driver role"
-            }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": "invalid_role",
+                    "message": "Non-member actors cannot use the driver role"
+                })),
+            )
+                .into_response();
         }
         let valid_roles = ["consultant", "manager", "worker", "observer"];
         if !valid_roles.contains(&role) {
@@ -210,13 +260,28 @@ pub async fn create_session_for_group(
         }
     }
 
-    let caller_nick_name = if let GroupChatCaller::Human(h) = &caller { h.nick_name.clone() } else { None };
+    let caller_nick_name = if let GroupChatCaller::Human(h) = &caller {
+        h.nick_name.clone()
+    } else {
+        None
+    };
+    // COSEC: only server-authenticated caller context may become a Human
+    // session participant; never trust a Human actor ID from the request body.
+    let authenticated_human = match &caller {
+        GroupChatCaller::Human(h) => Some(AuthenticatedHumanCaller {
+            actor_id: h.actor_id.clone(),
+            display_name: h.nick_name.clone(),
+        }),
+        GroupChatCaller::Bot { .. } => None,
+    };
 
     // Ensure human actor exists in DB for public group access
     if is_public_group {
         if let GroupChatCaller::Human(h) = &caller {
             let display = h.nick_name.as_deref().unwrap_or(&h.staff_no);
-            let _ = state.services.registry
+            let _ = state
+                .services
+                .registry
                 .ensure_human_actor(&h.staff_no, display)
                 .await;
         }
@@ -231,18 +296,17 @@ pub async fn create_session_for_group(
     let creator = match body.created_by.as_deref() {
         None => requester.clone(),
         Some(target) if target == requester => requester.clone(),
-        Some(target) if target.starts_with("human_") => {
-            match &caller {
-                GroupChatCaller::Human(h) if h.actor_id == target => target.to_string(),
-                _ => return (
-                    StatusCode::FORBIDDEN,
-                    Json(serde_json::json!({
-                        "error": "forbidden",
-                        "message": format!("caller is not authorized to create session as {}", target)
-                    })),
-                ).into_response(),
-            }
-        }
+        Some(target) if target.starts_with("human_") => match &caller {
+            GroupChatCaller::Human(h) if h.actor_id == target => target.to_string(),
+            _ => return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "error": "forbidden",
+                    "message": format!("caller is not authorized to create session as {}", target)
+                })),
+            )
+                .into_response(),
+        },
         Some(target) => {
             // bot_xxx: caller must be that bot, or own that bot
             let owns_bot = match &caller {
@@ -262,7 +326,8 @@ pub async fn create_session_for_group(
                         "error": "forbidden",
                         "message": format!("caller does not own bot {}", target)
                     })),
-                ).into_response();
+                )
+                    .into_response();
             }
             target.to_string()
         }
@@ -306,7 +371,9 @@ pub async fn create_session_for_group(
     // was explicitly passed in the request body. When the creator was
     // inferred from the cookie/header (not in the body), do NOT auto-add
     // — the frontend is just proxying a bot action.
-    let explicit_human_creator = body.created_by.as_ref()
+    let explicit_human_creator = body
+        .created_by
+        .as_ref()
         .map_or(false, |cb| cb.starts_with("human_"));
 
     // Step 5: create or reactivate the session
@@ -332,6 +399,22 @@ pub async fn create_session_for_group(
         })
         .collect();
 
+    // State-machine Human input is handled by the authenticated Workbench
+    // user even when the session itself is created by that user's driver Bot.
+    if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine
+        && session_kind == bcs_service_api::SessionKind::ServiceInvocation
+        && let Some(human) = authenticated_human.as_ref()
+    {
+        session_participants.retain(|participant| participant.bot_uuid != human.actor_id);
+        let mut participant = bcs_service_api::Participant::human(
+            human.actor_id.clone(),
+            bcs_service_api::ParticipantRole::Observer,
+        );
+        participant.bot_name = human.display_name.clone();
+        participant.mode = Some(bcs_service_api::ParticipantMode::Present);
+        session_participants.push(participant);
+    }
+
     // For public groups, pre-add the creator (not the caller) to session
     // participants so the session is created with the creator already included.
     if is_public_group {
@@ -344,7 +427,11 @@ pub async fn create_session_for_group(
                 _ => bcs_service_api::ParticipantRole::Consultant,
             };
             let is_human = creator.starts_with("human_");
-            let actor_kind = if is_human { ActorKind::Human } else { ActorKind::Bot };
+            let actor_kind = if is_human {
+                ActorKind::Human
+            } else {
+                ActorKind::Bot
+            };
             let mode = if is_human {
                 Some(bcs_service_api::ParticipantMode::Present)
             } else {
@@ -353,7 +440,11 @@ pub async fn create_session_for_group(
             let bot_name = if is_human {
                 caller_nick_name.clone()
             } else {
-                state.services.registry.get(&creator).await
+                state
+                    .services
+                    .registry
+                    .get(&creator)
+                    .await
                     .and_then(|b| b.capabilities.name.clone())
             };
             session_participants.push(bcs_service_api::Participant {
@@ -386,9 +477,18 @@ pub async fn create_session_for_group(
                 ..Default::default()
             },
         };
-        match state.services.session_management.create_or_reactivate(cmd).await {
+        match state
+            .services
+            .session_management
+            .create_or_reactivate(cmd)
+            .await
+        {
             Ok(outcome) => {
-                let code = if outcome.created { StatusCode::CREATED } else { StatusCode::OK };
+                let code = if outcome.created {
+                    StatusCode::CREATED
+                } else {
+                    StatusCode::OK
+                };
                 let sess = outcome.session;
 
                 let run = match start_state_machine_run_for_session(
@@ -396,6 +496,7 @@ pub async fn create_session_for_group(
                     &group,
                     &sess,
                     Some(requester.clone()),
+                    authenticated_human.clone(),
                 )
                 .await
                 {
@@ -405,7 +506,8 @@ pub async fn create_session_for_group(
                 return (
                     code,
                     Json(session_to_json_with_state_machine_run(&sess, run.as_ref())),
-                ).into_response();
+                )
+                    .into_response();
             }
             Err(e) => return session_error_to_response(&e),
         }
@@ -428,9 +530,18 @@ pub async fn create_session_for_group(
         },
     };
 
-    match state.services.session_management.create_or_reactivate(cmd).await {
+    match state
+        .services
+        .session_management
+        .create_or_reactivate(cmd)
+        .await
+    {
         Ok(outcome) => {
-            let code = if outcome.created { StatusCode::CREATED } else { StatusCode::OK };
+            let code = if outcome.created {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            };
             let mut sess = outcome.session;
 
             // Auto-add human creator to session participants when the
@@ -471,6 +582,7 @@ pub async fn create_session_for_group(
                 &group,
                 &sess,
                 Some(requester.clone()),
+                authenticated_human,
             )
             .await
             {
@@ -484,6 +596,7 @@ pub async fn create_session_for_group(
                 let sid = sess.id.clone();
                 let session_input = sess.input.clone();
                 let session_participants = sess.participants.clone();
+                let driver_delivery = body.group_context_delivery;
                 let reason = group
                     .label
                     .clone()
@@ -498,6 +611,7 @@ pub async fn create_session_for_group(
                                 reason,
                                 session_input,
                                 task_ledger: None,
+                                driver_delivery,
                             },
                             &sid,
                             &session_participants,
@@ -509,7 +623,8 @@ pub async fn create_session_for_group(
             (
                 code,
                 Json(session_to_json_with_state_machine_run(&sess, run.as_ref())),
-            ).into_response()
+            )
+                .into_response()
         }
         Err(e) => session_error_to_response(&e),
     }
@@ -606,7 +721,15 @@ pub async fn list_sessions_for_group(
         };
         let items: Vec<Value> = collected_sessions
             .iter()
-            .map(|s| session_to_json(s))
+            .map(|s| {
+                let mut v = session_to_json(s);
+                if let Some(obj) = v.as_object_mut() {
+                    // This branch only returns collected sessions, so every item
+                    // is collected=true. collected_at was populated by the store.
+                    obj.insert("collected".into(), Value::Bool(true));
+                }
+                v
+            })
             .collect();
         return Json(serde_json::json!({
             "items": items,
@@ -748,7 +871,12 @@ pub async fn list_sessions_for_group(
                         ..Default::default()
                     },
                 };
-                match state.services.session_management.create_or_reactivate(cmd).await {
+                match state
+                    .services
+                    .session_management
+                    .create_or_reactivate(cmd)
+                    .await
+                {
                     Ok(outcome) => vec![session_to_json(&outcome.session)],
                     Err(e) => {
                         tracing::warn!(
@@ -763,6 +891,45 @@ pub async fn list_sessions_for_group(
         }
     } else {
         visible.iter().map(|s| session_to_json(s)).collect()
+    };
+
+    // When the request explicitly specifies a participant, surface that
+    // participant's per-session collected state on each item: collected (bool)
+    // for every item, and collected_at (epoch ms) for the collected ones. When
+    // no participant is given, neither field is added.
+    let items: Vec<Value> = if let Some(p) = params.participant.as_deref() {
+        let ids: Vec<&str> = items
+            .iter()
+            .filter_map(|v| v.get("id").and_then(|i| i.as_str()))
+            .collect();
+        let collected_map: std::collections::HashMap<String, u64> = state
+            .services
+            .session_management
+            .collected_at_map(&ids, p)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        items
+            .into_iter()
+            .map(|mut v| {
+                if let Some(obj) = v.as_object_mut() {
+                    // Query the map by &str directly (String: Borrow<str>),
+                    // avoiding a per-item String allocation.
+                    if let Some(sid) = obj.get("id").and_then(|i| i.as_str()) {
+                        if let Some(ts) = collected_map.get(sid) {
+                            obj.insert("collected".into(), Value::Bool(true));
+                            obj.insert("collected_at".into(), Value::from(*ts));
+                        } else {
+                            obj.insert("collected".into(), Value::Bool(false));
+                        }
+                    }
+                }
+                v
+            })
+            .collect()
+    } else {
+        items
     };
 
     Json(serde_json::json!({
@@ -939,9 +1106,7 @@ pub async fn complete_session(
 
     // 6. Complete via CAS
     let output = body.get("output").cloned();
-    let error = body
-        .get("error")
-        .and_then(|v| v.as_str().map(String::from));
+    let error = body.get("error").and_then(|v| v.as_str().map(String::from));
 
     match state
         .services
@@ -987,7 +1152,10 @@ pub async fn add_session_participant(
     uri: Uri,
     Json(body): Json<AddParticipantRequest>,
 ) -> impl IntoResponse {
-    if resolve_group_chat_caller(&state, &headers, &uri).await.is_err() {
+    if resolve_group_chat_caller(&state, &headers, &uri)
+        .await
+        .is_err()
+    {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "unauthorized"})),
@@ -1125,11 +1293,28 @@ pub async fn remove_session_participant(
         .await
         .ok()
         .flatten()
-        .map(|sess| (Some(sess.group_id.clone()), sess.created_by.clone(), sess.caller_principal.clone()))
+        .map(|sess| {
+            (
+                Some(sess.group_id.clone()),
+                sess.created_by.clone(),
+                sess.caller_principal.clone(),
+            )
+        })
         .unwrap_or((None, None, None));
 
-    // Authorization: self, session creator/caller_principal, or coordinator
+    // Authorization: self, owner, session creator/caller_principal, or coordinator.
     let is_self = caller_id == bot_uuid;
+    // A Human caller may remove a bot they own (mirrors delete_session authz).
+    let is_bot_owner = match &caller {
+        GroupChatCaller::Human(h) => state
+            .services
+            .registry
+            .list_bots_by_creator(&h.staff_no)
+            .await
+            .iter()
+            .any(|b| b.bot_uuid == bot_uuid),
+        GroupChatCaller::Bot { .. } => false,
+    };
     let is_session_creator = session_created_by
         .as_deref()
         .map(|c| caller_id == format!("human_{}", c) || caller_id == c)
@@ -1147,16 +1332,18 @@ pub async fn remove_session_participant(
     } else {
         false
     };
-    if !is_self && !is_session_creator && !is_session_principal && !is_coordinator {
+    if !is_self && !is_bot_owner && !is_session_creator && !is_session_principal && !is_coordinator {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Caller is not authorized to remove this participant"})),
+            Json(
+                serde_json::json!({"error": "Caller is not authorized to remove this participant"}),
+            ),
         )
             .into_response();
     }
 
-    // Session creator/principal cannot remove the driver bot.
-    if (is_session_creator || is_session_principal) && !is_self && !is_coordinator {
+    // Session creator/principal/owner cannot remove the driver bot.
+    if (is_session_creator || is_session_principal || is_bot_owner) && !is_self && !is_coordinator {
         if let Some(ref gid) = group_id {
             if let Some(group) = state.services.group.get(gid).await {
                 if bot_uuid == group.driver_bot {
@@ -1234,7 +1421,10 @@ pub async fn update_session_participant_mode(
     uri: Uri,
     Json(body): Json<UpdateParticipantModeRequest>,
 ) -> impl IntoResponse {
-    if resolve_group_chat_caller(&state, &headers, &uri).await.is_err() {
+    if resolve_group_chat_caller(&state, &headers, &uri)
+        .await
+        .is_err()
+    {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({"error": "unauthorized"})),
@@ -1254,7 +1444,7 @@ pub async fn update_session_participant_mode(
                     "error": format!("unknown mode: {}", body.mode)
                 })),
             )
-                .into_response()
+                .into_response();
         }
     };
 
@@ -1402,14 +1592,14 @@ pub async fn session_chat(
     Json(body): Json<SessionChatRequest>,
 ) -> impl IntoResponse {
     // 1. Look up session
-    let sess = match state.services.session_management.get(&sid).await {
+    let mut sess = match state.services.session_management.get(&sid).await {
         Ok(Some(s)) => s,
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "session not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => return session_error_to_response(&e),
     };
@@ -1431,53 +1621,125 @@ pub async fn session_chat(
                 StatusCode::UNAUTHORIZED,
                 Json(serde_json::json!({"error": "unauthorized"})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
     // 4. Caller must be a session participant
     let caller_id = match &caller {
-        GroupChatCaller::Bot { bot_uuid } => bot_uuid.as_str(),
-        GroupChatCaller::Human(h) => h.actor_id.as_str(),
+        GroupChatCaller::Bot { bot_uuid } => bot_uuid.clone(),
+        GroupChatCaller::Human(h) => h.actor_id.clone(),
     };
-    let is_participant = sess.participants.iter().any(|p| p.bot_uuid == caller_id);
+    let is_participant = sess
+        .participants
+        .iter()
+        .any(|p| p.bot_uuid == caller_id);
     if !is_participant {
-        return (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "caller is not a session participant"})),
-        )
+        // COSEC: only the authenticated Human may self-enroll. Bot callers
+        // remain fail-closed so a valid Bot token cannot expand membership.
+        let GroupChatCaller::Human(human) = &caller else {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "caller is not a session participant"})),
+            )
+                .into_response();
+        };
+        let mut participant = bcs_service_api::Participant::human(
+            &human.actor_id,
+            bcs_service_api::ParticipantRole::Observer,
+        );
+        participant.mode = Some(bcs_service_api::ParticipantMode::Present);
+        participant.bot_name = human
+            .nick_name
+            .clone()
+            .or_else(|| Some(human.staff_no.clone()));
+        sess = match state
+            .services
+            .session_management
+            .add_participant(&sid, participant.clone())
+            .await
+        {
+            Ok(updated) => updated,
+            Err(error) => return session_error_to_response(&error),
+        };
+        let event = SystemMessageEvent::HumanJoined {
+            group_id: sess.group_id.clone(),
+            actor: participant.into(),
+        };
+        let _ = state
+            .services
+            .system_message
+            .notify(&sess.group_id, event, &sid, &sess.participants)
+            .await;
+    }
+
+    // COSEC: caller_id was resolved from the authenticated caller above. The
+    // optional request body `from` field must never select a Human responder.
+    match state
+        .services
+        .collaboration_runtime
+        .handle_session_human_input(bcs_service_api::HandleSessionHumanInputCommand {
+            group_id: sess.group_id.clone(),
+            session_id: Some(sid.clone()),
+            caller_actor_id: caller_id.to_string(),
+            content: body.message.clone(),
+            source: bcs_service_api::HumanResponseSource::Http,
+        })
+        .await
+    {
+        Ok(bcs_service_api::HandleSessionHumanInputOutcome::NotStateMachine) => {}
+        Ok(bcs_service_api::HandleSessionHumanInputOutcome::Consumed { response }) => {
+            return Json(serde_json::json!({
+                "delivered": true,
+                "handled_as": "human_input",
+                "session_id": sid,
+                "group_id": sess.group_id,
+                "state_machine_run_id": response.run.run_id,
+                "node_id": response.node.node_id,
+                "outcome": response.node.outcome,
+            }))
             .into_response();
+        }
+        Err(error) => {
+            return collaboration_error_to_response(error);
+        }
     }
 
     // 5. Route via MessageFlowService with session_id pinned from path
+    // COSEC: Human messages are always bound to the authenticated actor, even
+    // when the request supplies `from`; Bot callers retain legacy validation.
+    let requested_sender_id = match &caller {
+        GroupChatCaller::Human(human) => Some(human.actor_id.clone()),
+        GroupChatCaller::Bot { .. } => body.from,
+    };
     let cmd = GroupChatCommand {
         caller: group_chat_caller_context(&caller),
         group_id: sess.group_id.clone(),
-        requested_sender_id: body.from,
+        requested_sender_id,
         message: body.message,
         session_id: Some(sid.clone()),
     };
 
     match state.services.message_flow.handle_group_chat(cmd).await {
-        Ok(outcome) => {
-            Json(serde_json::json!({
-                "delivered": outcome.delivered_count > 0,
-                "session_id": sid,
-                "group_id": outcome.group_id,
-                "driver_bot": outcome.driver_bot_id,
-                "delivered_count": outcome.delivered_count,
-                "failed_count": outcome.failed_count,
-                "delivery_results": delivery_results_json(&outcome.delivery_results),
-                "mentions": outcome.mentions,
-            }))
-            .into_response()
-        }
+        Ok(outcome) => Json(serde_json::json!({
+            "delivered": outcome.delivered_count > 0,
+            "session_id": sid,
+            "group_id": outcome.group_id,
+            "driver_bot": outcome.driver_bot_id,
+            "delivered_count": outcome.delivered_count,
+            "failed_count": outcome.failed_count,
+            "delivery_results": delivery_results_json(&outcome.delivery_results),
+            "mentions": outcome.mentions,
+        }))
+        .into_response(),
         Err(e) => {
             let (code, msg) = match &e {
                 bcs_service_api::ServiceError::GroupNotFound(gid) => {
                     (StatusCode::NOT_FOUND, format!("group not found: {gid}"))
                 }
-                bcs_service_api::ServiceError::Unauthorized(m) => (StatusCode::FORBIDDEN, m.clone()),
+                bcs_service_api::ServiceError::Unauthorized(m) => {
+                    (StatusCode::FORBIDDEN, m.clone())
+                }
                 bcs_service_api::ServiceError::Forbidden(m) => (StatusCode::FORBIDDEN, m.clone()),
                 bcs_service_api::ServiceError::InvalidOperation { .. } => {
                     (StatusCode::BAD_REQUEST, e.to_string())
@@ -1536,7 +1798,7 @@ pub async fn get_session_messages(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "session not found"})),
             )
-                .into_response()
+                .into_response();
         }
         Err(e) => return session_error_to_response(&e),
     };
@@ -1549,22 +1811,21 @@ pub async fn get_session_messages(
                 StatusCode::NOT_FOUND,
                 Json(serde_json::json!({"error": "group not found"})),
             )
-                .into_response()
+                .into_response();
         }
     };
 
-    // 3. Resolve caller context (only when view_bot_id is provided, matching old behavior)
-    let caller = if query.view_bot_id.is_some() {
-        match resolve_session_caller(&state, &group, &headers, &uri).await {
-            Ok(c) => c,
-            Err(response) => return response,
-        }
-    } else {
-        bcs_service_api::CallerContext::Public
+    // 3. Resolve caller context before any session history read.
+    let caller = match resolve_session_caller(&state, &group, &headers, &uri).await {
+        Ok(c) => c,
+        Err(response) => return response,
     };
 
     let limit = query.limit.unwrap_or(u64::MAX);
     if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
+        if let Err(response) = authorize_state_machine_session_history(&state, &sess, &caller).await {
+            return response;
+        }
         return match state
             .services
             .collaboration_runtime
@@ -1572,7 +1833,10 @@ pub async fn get_session_messages(
             .await
         {
             Ok(Some(result)) => (StatusCode::OK, Json(result.messages)).into_response(),
-            Ok(None) => (StatusCode::OK, Json(Vec::<bcs_service_api::GroupMessage>::new()))
+            Ok(None) => (
+                StatusCode::OK,
+                Json(Vec::<bcs_service_api::GroupMessage>::new()),
+            )
                 .into_response(),
             Err(error) => collaboration_error_to_response(error),
         };
@@ -1589,12 +1853,58 @@ pub async fn get_session_messages(
         before: query.before,
     };
 
-    match state.services.group_message_history.get_session_history(cmd).await {
+    match state
+        .services
+        .group_message_history
+        .get_session_history(cmd)
+        .await
+    {
         Ok(result) => (StatusCode::OK, Json(result.messages)).into_response(),
         Err(e) => {
             let (status, body) = session_history_error_to_response(&e);
             (status, Json(body)).into_response()
         }
+    }
+}
+
+async fn authorize_state_machine_session_history(
+    state: &HttpAppState,
+    session: &bcs_service_api::Session,
+    caller: &bcs_service_api::CallerContext,
+) -> Result<(), Response> {
+    let authorized = match caller {
+        bcs_service_api::CallerContext::Human(human) => {
+            human_has_session_access(state, session, &human.actor_id, &human.staff_no).await
+        }
+        bcs_service_api::CallerContext::Bot(bot) => session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == bot.bot_uuid),
+        bcs_service_api::CallerContext::Public => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "unauthorized",
+                    "message": "valid Human identity or Bot token is required for session history"
+                })),
+            )
+                .into_response());
+        }
+        bcs_service_api::CallerContext::Integration(_)
+        | bcs_service_api::CallerContext::Admin(_) => true,
+    };
+
+    if authorized {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "forbidden",
+                "message": "caller is not a session participant and owns no Bot in this session"
+            })),
+        )
+            .into_response())
     }
 }
 
@@ -1604,30 +1914,39 @@ async fn resolve_session_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<bcs_service_api::CallerContext, Response> {
-    // Try to extract a human caller from headers
-    if let Some(identity) = state.user_identity.extract(headers, uri).await {
-        if let Some(staff_no) = &identity.staff_no {
-            return Ok(bcs_service_api::CallerContext::Human(
-                bcs_service_api::HumanActor {
-                    actor_id: format!("human_{}", staff_no),
-                    staff_no: staff_no.clone(),
-                },
-            ));
-        }
-    }
-
-    // Try to extract a bot caller from token
+    // Try to extract a bot caller from token first so bearer Bot tokens are not
+    // accidentally treated as an ambient Human identity in local/static auth setups.
     if let Some(bot_id) = state.bot_uuid_from_headers(headers).await {
         return Ok(bcs_service_api::CallerContext::Bot(
             bcs_service_api::BotActor { bot_uuid: bot_id },
         ));
     }
 
-    // Default: public caller — allow through but with no ownership verification
-    Ok(bcs_service_api::CallerContext::Public)
+    // Try to extract a human caller from headers.
+    if let Some(identity) = state.user_identity.extract(headers, uri).await {
+        if let Some(staff_no) = identity.staff_no.filter(|staff_no| !staff_no.is_empty()) {
+            return Ok(bcs_service_api::CallerContext::Human(
+                bcs_service_api::HumanActor {
+                    actor_id: format!("human_{}", staff_no),
+                    staff_no,
+                },
+            ));
+        }
+    }
+
+    Err((
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({
+            "error": "unauthorized",
+            "message": "valid Human identity or Bot token is required for this session history request"
+        })),
+    )
+        .into_response())
 }
 
-fn session_history_error_to_response(e: &bcs_service_api::GroupUseCaseError) -> (StatusCode, Value) {
+fn session_history_error_to_response(
+    e: &bcs_service_api::GroupUseCaseError,
+) -> (StatusCode, Value) {
     match e {
         bcs_service_api::GroupUseCaseError::Forbidden(msg) => (
             StatusCode::FORBIDDEN,
@@ -1655,9 +1974,9 @@ fn session_history_error_to_response(e: &bcs_service_api::GroupUseCaseError) -> 
 // ---------------------------------------------------------------
 // DELETE /sessions/{sid}
 //
-// Auth: bot_id query param must be the session creator, or if
-// bot_id is a human, any bot owned by that human must be the
-// session creator.
+// Auth: bot_id query param must be the session creator, the group's driver
+// bot, or — for a human caller — a bot they own that is the session creator
+// or the group's driver bot.
 // ---------------------------------------------------------------
 
 pub async fn delete_session(
@@ -1678,13 +1997,24 @@ pub async fn delete_session(
 
     let caller_id = &query.bot_id;
     let session_creator = sess.created_by.as_deref().unwrap_or("");
+    let driver_bot = state
+        .services
+        .group
+        .get(&sess.group_id)
+        .await
+        .map(|g| g.driver_bot);
+    let driver_bot = driver_bot.as_deref().unwrap_or("");
 
-    let authorized = if session_creator == caller_id {
+    // The session creator, the driver bot, or a human who owns the creator or
+    // driver bot may delete the session.
+    let authorized = if caller_id == session_creator || caller_id == driver_bot {
         true
     } else if caller_id.starts_with("human_") {
         let staff_no = caller_id.trim_start_matches("human_");
         let owned_bots = state.services.registry.list_bots_by_creator(staff_no).await;
-        owned_bots.iter().any(|b| b.bot_uuid == session_creator)
+        owned_bots
+            .iter()
+            .any(|b| b.bot_uuid == session_creator || b.bot_uuid == driver_bot)
     } else {
         false
     };
@@ -1696,15 +2026,34 @@ pub async fn delete_session(
                 "error": "forbidden",
                 "message": format!("caller {} is not authorized to delete this session", caller_id)
             })),
-        ).into_response();
+        )
+            .into_response();
     }
 
     match state.services.session_management.delete(&sid).await {
-        Ok(true) => Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response(),
+        Ok(true) => {
+            // Best-effort session-file cleanup: count logged on success, error
+            // logged but not fatal — orphan sweep reconciles later. MUST NOT
+            // fail the session-delete response.
+            match state.services.session_files.delete_all_for_session(&sid).await {
+                Ok(n) => tracing::info!(
+                    session_id = %sid,
+                    deleted = n,
+                    "cleaned up session files after session delete"
+                ),
+                Err(e) => tracing::warn!(
+                    error = ?e,
+                    session_id = %sid,
+                    "session file cleanup partial failure (orphan sweep will reconcile)"
+                ),
+            }
+            Json(serde_json::json!({"deleted": true, "session_id": sid})).into_response()
+        }
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "not_found", "message": "session not found"})),
-        ).into_response(),
+        )
+            .into_response(),
         Err(e) => session_error_to_response(&e),
     }
 }

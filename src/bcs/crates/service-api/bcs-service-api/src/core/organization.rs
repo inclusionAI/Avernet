@@ -20,6 +20,7 @@ pub struct OrganizationCandidateBot {
 
 #[derive(Debug, Clone, Default)]
 pub struct OrganizationCandidateQuery {
+    pub organization_code: String,
     pub q: Option<String>,
     pub provider_id: Option<String>,
 }
@@ -48,6 +49,14 @@ pub struct OrganizationMemberBotDetail {
     pub created_by: Option<String>,
     pub actor_kind: ActorKind,
     pub env: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OrganizationCandidateBotDetail {
+    pub organization_code: String,
+    pub bot_uuid: String,
+    pub is_member: bool,
+    pub bot: OrganizationMemberBotDetail,
 }
 
 #[derive(Debug, Clone)]
@@ -190,6 +199,15 @@ pub trait OrganizationCoreService: Send + Sync {
         managing_provider_id: &str,
         query: OrganizationCandidateQuery,
     ) -> ServiceResult<Vec<OrganizationCandidateBot>>;
+    async fn candidate_bot_detail_for_manager(
+        &self,
+        managing_provider_id: &str,
+        organization_code: &str,
+        bot_uuid: &str,
+    ) -> ServiceResult<Option<OrganizationCandidateBotDetail>> {
+        let _ = (managing_provider_id, organization_code, bot_uuid);
+        Ok(None)
+    }
     async fn candidate_bots_page(
         &self,
         managing_provider_id: &str,

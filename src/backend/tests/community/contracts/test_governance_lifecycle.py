@@ -119,6 +119,7 @@ def _make_ticket_model(ticket_id="T-NEW") -> GovernanceTicket:
         worker_id="o2:b2",
         bot_id="b2",
         owner_id="o2",
+        owner_name=None,
         bot_name="Bot2",
         snapshot=MutableSnapshot(
             dt_version="20260711",
@@ -172,13 +173,16 @@ class TestLegalTransitionsEndToEnd:
         assert row.governance_status == GovernanceStatus.CLOSED
         assert row.close_reason == CloseReason.AUTO_SILENCED_NORMAL
 
-    def test_close_for_whitelist_hit_open_to_closed(self):
+    def test_observe_for_whitelist_open_to_observed(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-wl", status="open")
-        assert driver.close_for_whitelist_hit("T-wl", now=datetime.now()) is True
+        assert driver.observe_for_whitelist(
+            "T-wl", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is True
         row = driver._task_repo.find_by_ticket_id("T-wl")  # noqa: SLF001
-        assert row.governance_status == GovernanceStatus.CLOSED
-        assert row.close_reason == CloseReason.WHITELIST_FILTERED
+        assert row.governance_status == GovernanceStatus.OBSERVED
+        assert row.close_reason == CloseReason.SCAN_WHITELISTED
+        assert row.closed_at is None  # OBSERVED 非关闭,不设 closed_at
 
     def test_accept_feedback_open_to_waiting_review(self):
         driver, db, _ = _build_driver()
@@ -214,13 +218,13 @@ class TestLegalTransitionsEndToEnd:
         assert row.governance_status == GovernanceStatus.CLOSED
         assert row.review_decision == "approve_close"
 
-    def test_emergency_close_any_to_closed(self):
+    def test_admin_close_any_to_closed(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-emg", status="open")
-        assert driver.emergency_close("T-emg", now=datetime.now()) is True
+        assert driver.admin_close("T-emg", now=datetime.now()) is True
         row = driver._task_repo.find_by_ticket_id("T-emg")  # noqa: SLF001
         assert row.governance_status == GovernanceStatus.CLOSED
-        assert row.close_reason == CloseReason.EMERGENCY_CLOSED
+        assert row.close_reason == CloseReason.ADMIN_CLOSED
 
 
 # ---------------------------------------------------------------------------
@@ -241,14 +245,18 @@ class TestIllegalTransitionsRejected:
     def test_close_already_closed_returns_false(self):
         driver, db, _ = _build_driver()
         _seed_ticket(db, ticket_id="T-c2", status="closed")
-        assert driver.close_for_whitelist_hit("T-c2", now=datetime.now()) is False
-        assert driver.emergency_close("T-c2", now=datetime.now()) is False
+        assert driver.observe_for_whitelist(
+            "T-c2", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
+        assert driver.admin_close("T-c2", now=datetime.now()) is False
 
     def test_not_found_returns_false(self):
         driver, _, _ = _build_driver()
         assert driver.transition_schedule_due("nope", now=datetime.now()) is False
-        assert driver.emergency_close("nope", now=datetime.now()) is False
-        assert driver.close_for_whitelist_hit("nope", now=datetime.now()) is False
+        assert driver.admin_close("nope", now=datetime.now()) is False
+        assert driver.observe_for_whitelist(
+            "nope", close_reason=CloseReason.SCAN_WHITELISTED, now=datetime.now(),
+        ) is False
 
     def test_resume_from_closed_illegal_at_model(self):
         """领域模型 resume() 从 CLOSED 是非法转移 → ValueError(IllegalTicketTransitionError)。

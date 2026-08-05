@@ -9,12 +9,12 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 use bcs_service_api::port::repo::GroupRepoPort;
-use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 use bcs_service_api::{
-    Group as DomainGroup, GroupKind, GroupMessage, GroupStatus, GroupStrategy, Participant,
-    ParticipantMode,
-    ServiceError, ServiceResult, ServiceSpec, Workspace,
+    Group as DomainGroup, GroupKind, GroupMessage, GroupMutableFieldsPatch, GroupStatus,
+    GroupStrategy, Participant, ParticipantMode, ServiceError, ServiceResult, ServiceSpec,
+    Workspace, generated_group_id,
 };
+use bcs_service_api::{GroupMetricCount, GroupMetricsSnapshotPort};
 
 /// In-memory implementation of [`GroupRepoPort`].
 #[derive(Debug, Default)]
@@ -75,6 +75,37 @@ impl GroupRepoPort for MemoryGroupRepo {
         Ok(())
     }
 
+    async fn patch_mutable_fields(
+        &self,
+        id: &str,
+        patch: GroupMutableFieldsPatch,
+    ) -> ServiceResult<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        if let Some(label) = patch.label {
+            group.label = Some(label);
+        }
+        if let Some(context) = patch.context {
+            group.context = Some(context);
+        }
+        if let Some(visibility) = patch.visibility {
+            group.visibility = visibility;
+        }
+        if let Some(delivery) = patch.default_bot_final_delivery {
+            group
+                .routing_policy
+                .get_or_insert_with(Default::default)
+                .default_bot_final_delivery = delivery;
+        }
+        group.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        Ok(())
+    }
+
     async fn get(&self, id: &str) -> Option<DomainGroup> {
         let groups = self.groups.read().await;
         groups.get(id).cloned()
@@ -114,6 +145,36 @@ impl GroupRepoPort for MemoryGroupRepo {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
         }
+        Ok(())
+    }
+
+    async fn add_participant_with_visibility_guard(
+        &self,
+        id: &str,
+        participant: Participant,
+        actor_is_public: bool,
+    ) -> ServiceResult<()> {
+        let mut groups = self.groups.write().await;
+        let group = groups
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::GroupNotFound(id.to_string()))?;
+        if group
+            .participants
+            .iter()
+            .any(|existing| existing.bot_uuid == participant.bot_uuid)
+        {
+            return Ok(());
+        }
+        if participant.is_bot() && group.visibility == "public" && !actor_is_public {
+            return Err(ServiceError::ExistNonPublicBots {
+                bots: vec![(participant.bot_uuid, participant.bot_name)],
+            });
+        }
+        group.participants.push(participant);
+        group.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
         Ok(())
     }
 
@@ -269,13 +330,9 @@ impl GroupRepoPort for MemoryGroupRepo {
             .filter(|g| g.participants.iter().any(|p| p.bot_uuid == bot_uuid))
             .filter(|g| kind.is_none_or(|kind| g.group_kind == kind))
             .filter(|g| {
-                label_query_lower.as_deref().is_none_or(|q| {
-                    g.label
-                        .as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(q)
-                })
+                label_query_lower
+                    .as_deref()
+                    .is_none_or(|q| g.label.as_deref().unwrap_or("").to_lowercase().contains(q))
             })
             .cloned()
             .collect()
@@ -358,13 +415,21 @@ impl GroupRepoPort for MemoryGroupRepo {
         label: Option<&str>,
     ) -> u64 {
         let groups = self.groups.read().await;
-        groups.values()
+        groups
+            .values()
             .filter(|g| kind.is_none_or(|k| g.group_kind == k))
             .filter(|g| visibility.is_none_or(|v| g.visibility == v))
             .filter(|g| {
-                label.map(str::trim).filter(|l| !l.is_empty()).is_none_or(|l| {
-                    g.label.as_deref().unwrap_or("").to_lowercase().contains(&l.to_lowercase())
-                })
+                label
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .is_none_or(|l| {
+                        g.label
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&l.to_lowercase())
+                    })
             })
             .count() as u64
     }
@@ -378,18 +443,30 @@ impl GroupRepoPort for MemoryGroupRepo {
         label: Option<&str>,
     ) -> Vec<DomainGroup> {
         let groups = self.groups.read().await;
-        let mut filtered: Vec<DomainGroup> = groups.values()
+        let mut filtered: Vec<DomainGroup> = groups
+            .values()
             .filter(|g| kind.is_none_or(|k| g.group_kind == k))
             .filter(|g| visibility.is_none_or(|v| g.visibility == v))
             .filter(|g| {
-                label.map(str::trim).filter(|l| !l.is_empty()).is_none_or(|l| {
-                    g.label.as_deref().unwrap_or("").to_lowercase().contains(&l.to_lowercase())
-                })
+                label
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty())
+                    .is_none_or(|l| {
+                        g.label
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&l.to_lowercase())
+                    })
             })
             .cloned()
             .collect();
         DomainGroup::sort_by_updated_at_desc(&mut filtered);
-        filtered.into_iter().skip(offset as usize).take(limit as usize).collect()
+        filtered
+            .into_iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .collect()
     }
 
     async fn find_dm_by_pair_key(&self, dm_pair_key: &str) -> Option<DomainGroup> {
@@ -484,7 +561,9 @@ impl GroupBuilder {
 
     /// Build the group.
     pub fn build(self) -> DomainGroup {
-        let id = self.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        let id = self
+            .id
+            .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -520,6 +599,14 @@ impl GroupBuilder {
 mod tests {
     use super::*;
     use bcs_domain::{GroupMessageType, MessageRole, ParticipantRole};
+
+    #[test]
+    fn group_builder_uses_canonical_generated_id() {
+        let group = GroupBuilder::new("driver").build();
+
+        assert!(group.id.starts_with("bcs_grp_"));
+        assert_eq!(group.id.chars().count(), 40);
+    }
 
     #[tokio::test]
     async fn test_group_store_crud() {
@@ -1035,6 +1122,45 @@ mod tests {
 
         let retrieved = store.get("test-group").await.unwrap();
         assert_eq!(retrieved.label, Some("Updated Label".to_string()));
+    }
+
+    #[tokio::test]
+    async fn mutable_patch_preserves_unrelated_routing_fields() {
+        let store = MemoryGroupRepo::new();
+        let mut group = GroupBuilder::new("driver").id("test-group").build();
+        group.routing_policy = Some(bcs_service_api::RoutingPolicy {
+            mode: bcs_service_api::RoutingMode::Structured,
+            default_bot_final_delivery: bcs_service_api::DefaultDelivery::SendToDriver,
+            sender_routes: HashMap::from([("worker".to_string(), vec!["driver".to_string()])]),
+        });
+        store.upsert(group).await.unwrap();
+
+        store
+            .patch_mutable_fields(
+                "test-group",
+                GroupMutableFieldsPatch {
+                    label: Some("Renamed".to_string()),
+                    default_bot_final_delivery: Some(
+                        bcs_service_api::DefaultDelivery::InjectObservers,
+                    ),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let stored = store.get("test-group").await.unwrap();
+        let routing = stored.routing_policy.unwrap();
+        assert_eq!(stored.label.as_deref(), Some("Renamed"));
+        assert_eq!(routing.mode, bcs_service_api::RoutingMode::Structured);
+        assert_eq!(
+            routing.sender_routes.get("worker"),
+            Some(&vec!["driver".to_string()])
+        );
+        assert_eq!(
+            routing.default_bot_final_delivery,
+            bcs_service_api::DefaultDelivery::InjectObservers
+        );
     }
 
     #[tokio::test]

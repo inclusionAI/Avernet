@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.devices.services.baas_template_resolver import (
+    BAAS_TEMPLATE_MAPPING_CATEGORY,
     BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY,
     PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
     BaasTemplateResolveError,
@@ -879,14 +880,55 @@ def test_whitelist_config_read_error_does_not_block():
     assert result.source == "system_config"
 
 
-def test_whitelist_skipped_for_service_bot():
-    """Whitelist override is NOT applied for service bots."""
+def test_whitelist_override_hit_for_service_bot():
+    """Service bot owners in the whitelist use the configured override UUID."""
     mapping = {
         "selectors": [{"engine": "openclaw", "template_uid": "default_template"}],
         "templates": {"default_template": {"template_uuid": "TEMPLATE-default"}},
     }
+    whitelist_config = {
+        "staff_ids": ["405935"],
+        "template_uuid": "TEMPLATE-service-override",
+    }
     system_config = MagicMock()
-    system_config.get_config.return_value = mapping
+    system_config.get_config.side_effect = lambda *, category, config_key, env: (
+        mapping
+        if config_key == BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY
+        else whitelist_config
+    )
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template(
+        bot_id="bot001",
+        user_id="405935",
+        env="pre",
+        bot_type="service",
+        engine_type="openclaw",
+        template_type=None,
+        template_config=None,
+    )
+
+    assert result.template_uuid == "TEMPLATE-service-override"
+    assert result.template_uid == "__whitelist_override__"
+    assert result.source == "whitelist"
+
+
+def test_whitelist_override_miss_for_service_bot_falls_through():
+    """Service bot owners outside the whitelist keep normal template routing."""
+    mapping = {
+        "selectors": [{"engine": "openclaw", "template_uid": "default_template"}],
+        "templates": {"default_template": {"template_uuid": "TEMPLATE-default"}},
+    }
+    whitelist_config = {
+        "staff_ids": ["168944"],
+        "template_uuid": "TEMPLATE-service-override",
+    }
+    system_config = MagicMock()
+    system_config.get_config.side_effect = lambda *, category, config_key, env: (
+        mapping
+        if config_key == BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY
+        else whitelist_config
+    )
     resolver = SystemConfigBaasTemplateResolver(system_config)
 
     result = resolver.resolve_template(
@@ -901,6 +943,44 @@ def test_whitelist_skipped_for_service_bot():
 
     assert result.template_uuid == "TEMPLATE-default"
     assert result.source == "system_config"
+
+
+def test_resolve_template_override_reads_existing_database_config():
+    """Restart lookups reuse the same system_config record as creation."""
+    system_config = MagicMock()
+    system_config.get_config.return_value = {
+        "staff_ids": [405935],
+        "template_uuid": "TEMPLATE-shared-config",
+    }
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template_override(
+        env="pre",
+        user_id="405935",
+        bot_type="service",
+    )
+
+    assert result == "TEMPLATE-shared-config"
+    system_config.get_config.assert_called_once_with(
+        category=BAAS_TEMPLATE_MAPPING_CATEGORY,
+        config_key=PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
+        env="pre",
+    )
+
+
+def test_resolve_template_override_skips_unsupported_bot_type():
+    """Unsupported bot types preserve their original path without a DB read."""
+    system_config = MagicMock()
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template_override(
+        env="pre",
+        user_id="405935",
+        bot_type="desktop",
+    )
+
+    assert result is None
+    system_config.get_config.assert_not_called()
 
 
 def test_whitelist_staff_ids_type_coercion():

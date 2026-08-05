@@ -13,12 +13,18 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.avernet_tenant import (
+    DEFAULT_AVERNET_TENANT,
+    avernet_tenant_scope,
+)
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -29,6 +35,51 @@ if TYPE_CHECKING:
 
 
 logger = get_logger()
+
+
+# Gateway appends this opaque compatibility value to only these Caller reads
+# and writes. Strip it at the ASGI boundary before authentication, business
+# middleware, and Uvicorn's completion-time access log can observe it.
+_CTOKEN_COMPATIBILITY_PATHS = (
+    re.compile(r"^/api/bots/[^/]+/caller-context$"),
+    re.compile(r"^/api/bots/[^/]+/mcps/[^/]+/call-type$"),
+    re.compile(r"^/api/v1/user-lists/(?:check|correct)$"),
+)
+
+
+def _remove_compatibility_ctoken(scope: dict) -> None:
+    """Remove only the opaque gateway ``ctoken`` from opted-in endpoints.
+
+    Mutating the original ASGI scope is intentional: subsequent request
+    objects, auth context construction, and Uvicorn's access logger all use
+    this same scope. Other query parameters remain available for normal
+    validation, including the strict unknown-parameter checks on Caller APIs.
+    """
+    if scope.get("type") != "http":
+        return
+    path = scope.get("path", "")
+    if not any(pattern.fullmatch(path) for pattern in _CTOKEN_COMPATIBILITY_PATHS):
+        return
+
+    raw_query_string = scope.get("query_string", b"")
+    if not raw_query_string:
+        return
+    pairs = parse_qsl(
+        raw_query_string.decode("latin-1"),
+        keep_blank_values=True,
+    )
+    filtered_pairs = [(key, value) for key, value in pairs if key != "ctoken"]
+    if len(filtered_pairs) == len(pairs):
+        return
+    scope["query_string"] = urlencode(filtered_pairs, doseq=True).encode("ascii")
+
+
+class CompatibilityCtokenMiddleware(BaseHTTPMiddleware):
+    """Erase gateway-only ctoken before any authentication or logging layer."""
+
+    async def dispatch(self, request: Request, call_next):
+        _remove_compatibility_ctoken(request.scope)
+        return await call_next(request)
 
 
 # =============================================================================
@@ -60,6 +111,53 @@ class UserContextMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         return response
+
+
+# =============================================================================
+# AvernetTenantMiddleware
+# =============================================================================
+class AvernetTenantMiddleware:
+    """Bind each request's data-isolation tenant for the request's lifetime.
+
+    Public-API requests (``/openapi/v1/*``) resolve their tenant through the
+    single seam ``resolve_avernet_tenant``; every other path — the internal API
+    and anything non-public — is the default tenant. ``avernet_tenant_scope``
+    resets on the way out (including on error), so a tenant never survives its
+    request or leaks into the next one that reuses the worker.
+
+    Deliberately a **pure ASGI middleware, not ``BaseHTTPMiddleware``**. The
+    tenant lives in a ``ContextVar``, and ``BaseHTTPMiddleware`` has a fragile
+    history with context propagation (it runs the downstream app in a child
+    anyio task, so which context a ``set``/``reset`` lands in has depended on the
+    Starlette version). A pure ASGI middleware sets the ``ContextVar`` in the
+    exact coroutine/context that then awaits the downstream app and resets it in
+    that same context — no task hop, so visibility downstream and a correct
+    reset are guaranteed regardless of Starlette internals.
+
+    Installed *outside* ``UserContextMiddleware`` (see ``install_middleware``) so
+    the auth plugin's own DB reads already run under the request's tenant.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if scope["path"].startswith("/openapi/v1/"):
+            # Lazy import: the openapi_v1 package pulls in every public router,
+            # so keep it off the middleware module-load path.
+            from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+                resolve_avernet_tenant,
+            )
+            tenant = resolve_avernet_tenant(Request(scope))
+        else:
+            tenant = DEFAULT_AVERNET_TENANT
+
+        with avernet_tenant_scope(tenant):
+            await self.app(scope, receive, send)
 
 
 # =============================================================================
@@ -195,8 +293,18 @@ def install_middleware(
     # 注入用户上下文中间件（在 CORS 之后，tracer 之前）
     app.add_middleware(UserContextMiddleware, auth_plugin=auth_plugin)
 
+    # Establish the request's avernet_tenant. Added right after (so, outside)
+    # UserContextMiddleware — Starlette prepends, so a later add is outer — so
+    # the auth plugin's own DB reads run under the request's tenant. No injected
+    # dependency: resolve_avernet_tenant is one function for every profile.
+    app.add_middleware(AvernetTenantMiddleware)
+
     # 关联前端 X-Request-ID 与 trace id（在 tracer 中间件内部运行）
     app.add_middleware(TraceIdMappingMiddleware, tracer=tracer)
 
     # 安装 tracer 插件的中间件（由 DI 按 profile 绑定的实现决定行为）
     tracer.install(app)
+
+    # Add last so it is outermost: it must sanitize the shared ASGI scope
+    # before tracer, auth context, and default access logging use it.
+    app.add_middleware(CompatibilityCtokenMiddleware)

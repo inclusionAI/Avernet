@@ -5,11 +5,11 @@ Single source of truth for both executors:
   - 路 B: tests/acceptance/bot_chat/ via flow_runner_live.run_flow_live (real backend)
 and for the E3 coverage guard (tests/architecture/test_e2e_module_coverage.py).
 
-bot_chat is READ-ONLY chat-trace querying — flows do NOT create data through
-the API. The test runner seeds aw_langfuse_traces + ac_bots rows directly into
-SQLite before the flow runs (see tests/e2e/test_bot_chat_flows.py for the seed
-helper); the flow asserts the API surfaces them. This matches how the module is
-used in prod (traces emitted by chat engines, backend only queries).
+These shared query flows are read-only. The in-process runner seeds
+aw_langfuse_traces + ac_bots rows directly into SQLite before the flow runs
+(see tests/e2e/test_bot_chat_flows.py), then asserts the API surfaces them.
+Live OTLP ingestion and relation writes are covered separately by
+tests/acceptance/bot_chat/test_otel_roundtrip_lifecycle.py.
 
 LOCAL+SQLITE, mock-free for the db source. The langfuse source (log_source=langfuse)
 and /health endpoint hit an external Langfuse HTTP API (https://example.com)

@@ -30,28 +30,12 @@ from ._container import (
 _container: ApplicationContainer | None = None
 
 
-def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
-    """Inject enterprise plugin options into a container instance's Selectors.
-
-    Runs at instance level (not class level) so that only this container
-    is affected.  Called after every container creation.
-    """
-    try:
-        from secbaas.community.plugin_registry import (
-            has_enterprise_plugins,
-            inject_into_plugin_container,
-        )
-
-        if has_enterprise_plugins():
-            inject_into_plugin_container(container)
-    except ImportError:
-        pass
-
-
 def get_container() -> ApplicationContainer:
     global _container
     if _container is None:
         _container = ApplicationContainer()
+        from ._container import _inject_enterprise_plugins
+
         _inject_enterprise_plugins(_container)
     return _container
 
@@ -62,6 +46,8 @@ def set_container(container: ApplicationContainer) -> None:
     Called by app.py's lifespan after creating and config-populating a container.
     """
     global _container
+    from ._container import _inject_enterprise_plugins
+
     _inject_enterprise_plugins(container)
     _container = container
 

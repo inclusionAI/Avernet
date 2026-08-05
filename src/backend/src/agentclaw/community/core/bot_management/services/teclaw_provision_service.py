@@ -25,7 +25,10 @@ yet — instead of reading through to baas on every status read, ``provision``
 enqueues a durable publish-poll task. The task persists the resolved
 ``ACTIVE``/``FAILED`` onto the bot row + binding, making the stored column the
 authoritative, eventually-consistent source of truth for list, detail, and
-search reads (no per-read baas probe).
+search reads (no per-read baas probe). That same task also pushes the bot's
+passport-token outbound rule to the started container — the container's PaaS device
+does not exist until BaaS executes the create publish, so it cannot be pushed
+from ``provision`` (see the note there).
 
 The container's *boot from artifact* and secbaas's ``start_device`` TECLAW arm
 are the teclaw owner's side (in parallel); this wiring is built against the
@@ -122,7 +125,7 @@ class TeclawProvisionService:
         return bool(engine) and engine in self._teclaw_engine_types
 
     def provision(
-        self, *, bot: Dict[str, Any], owner_id: str, agent_pass_token: str = ""
+        self, *, bot: Dict[str, Any], owner_id: str
     ) -> TeclawProvisionResult:
         """Eagerly provision the teclaw container for a freshly created bot.
 
@@ -269,28 +272,14 @@ class TeclawProvisionService:
                 config_artifact=config_artifact,
             )
 
-        try:
-            updated = self._baas.update_teclaw_outbound_rule_by_bot_uuid(
-                bot_uuid,
-                agent_pass_token=agent_pass_token,
-            )
-            if updated:
-                logger.info(
-                    "[TeclawProvisionService.provision] Teclaw outbound rule updated: "
-                    "bot_id=%s, bot_uuid=%s, updated_count=%s",
-                    bot_id,
-                    bot_uuid,
-                    len(updated),
-                )
-        except Exception as e:
-            logger.warning(
-                "[TeclawProvisionService.provision] Teclaw outbound rule update failed: "
-                "bot_id=%s, bot_uuid=%s, error=%s",
-                bot_id,
-                bot_uuid,
-                e,
-            )
-
+        # The passport-token outbound rule is NOT pushed here: BaaS only mints the
+        # container's PaaS device (``provider_device_id``) while it executes the
+        # create publish, and under all-auto approval (#197) both ``create`` and
+        # the client ``approve`` return before that. A push here would query BaaS
+        # for devices that have no ``provider_device_id`` yet and silently write
+        # nothing. It rides on the create publish poll instead —
+        # ``TeclawPublishTaskHandler`` pushes it once the publish is observed
+        # SUCCESS, mirroring the publish path's poll-success refresh.
         logger.info(
             "[TeclawProvisionService.provision] Provisioned teclaw container: "
             "bot_id=%s, bot_uuid=%s, publish_id=%s, binding_id=%s",

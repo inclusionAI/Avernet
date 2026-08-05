@@ -91,6 +91,9 @@ from agentclaw.community.core.devices.services.oss_to_nas_switch_service import 
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
 from agentclaw.community.core.notify.protocol import NotifyBotLister
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    CollaboratorRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,
@@ -168,12 +171,30 @@ class DevicesModule(Module):
         self,
         binding_repo: DeviceBindingRepository,
         bot_repo: BotRepository,
+        collaborator_repo: CollaboratorRepositoryProtocol,
     ) -> NotifyBotLister:
         # Neutral default: resolve notify targets from active device bindings.
         # Works for corp (ARCA/BaaS bindings) and community (BaaS bindings)
         # alike. The test/singlebox column overrides this with the bots-table
         # LocalNotifyBotLister (last-installed-wins).
-        return RepositoryNotifyBotLister(binding_repo=binding_repo, bot_repo=bot_repo)
+        # Collaborator bots are folded in via the collaborator repo so that
+        # the notify endpoint covers bots the user collaboratively manages,
+        # mirroring /api/bots/by-owner-or-collaborator.
+        #
+        # collaborator_repo is intentionally a hard (non-optional) dependency:
+        # injector 0.24 does NOT honor `= None` defaults on @inject params
+        # (it always resolves the annotated type), so making it optional-by-
+        # default would not change resolution. It is safe because
+        # BotCollaboratorModule is base-installed for EVERY profile
+        # (di/container.py), so CollaboratorRepositoryProtocol is always
+        # bound whenever this provider is the winning binding. The
+        # singlebox/test columns override notify_bot_lister with
+        # LocalNotifyBotLister (no collaborator dep) instead.
+        return RepositoryNotifyBotLister(
+            binding_repo=binding_repo,
+            bot_repo=bot_repo,
+            collaborator_repo=collaborator_repo,
+        )
 
     @singleton
     @provider
@@ -207,6 +228,7 @@ class DevicesModule(Module):
         mcp_sync_service: MCPSyncService,
         token_vault: TokenVault,
         task_queue_service: TaskQueueService,
+        template_service: TemplateService,
     ) -> BaasDeviceService:
         # Explicit provider: BaasDeviceService takes ``bot_query`` /
         # ``bot_sync`` / ``mcp_sync`` typed as Protocols, which
@@ -224,6 +246,7 @@ class DevicesModule(Module):
             template_resolver=SystemConfigBaasTemplateResolver(system_config_service),
             vault=token_vault,
             task_queue_service=task_queue_service,
+            template_service=template_service,
         )
 
     @singleton

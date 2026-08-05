@@ -11,18 +11,16 @@ use bcs_domain::{
 use bcs_protocol::CreateGroupRequest;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::{
-    BotDetailCommand, BotGroupListCommand, CallbackChannelConfig,
-    CollaborationRuntimeError, ConfigureGroupRuntimeCommand,
-    DefaultDelivery, DmCreateCommand, GroupAddMemberCommand, GroupCreateCommand,
-    GroupCreateParticipantCommand, GroupDeleteCommand, GroupDetailCommand, GroupDetailResult,
-    GroupKind, GroupListCommand, GroupListEntry, GroupParticipantModeCommand,
-    GroupPatchSettingsCommand, GroupRemoveMemberCommand,
-    GroupRoutingPolicyCommand, GroupStatus,
+    BotDetailCommand, BotGroupListCommand, CallbackChannelConfig, CollaborationRuntimeError,
+    ConfigureGroupRuntimeCommand, DefaultDelivery, DmCreateCommand, GroupAddMemberCommand,
+    GroupCreateCommand, GroupCreateParticipantCommand, GroupDeleteCommand, GroupDetailCommand,
+    GroupDetailResult, GroupKind, GroupListCommand, GroupListEntry, GroupParticipantModeCommand,
+    GroupPatchSettingsCommand, GroupRemoveMemberCommand, GroupRoutingPolicyCommand, GroupStatus,
     GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
     GroupUpdateVisibilityCommand, GroupUpdateWorkspaceCommand, GroupUseCaseError,
-    GroupWorkspaceQueryCommand, ParticipantMode, RoutingMode, RoutingPolicy,
-    MAX_COLLABORATION_DEFINITION_YAML_BYTES, PatchGroupCollaborationDefinitionCommand,
-    ServiceError, ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
+    GroupWorkspaceQueryCommand, MAX_COLLABORATION_DEFINITION_YAML_BYTES, ParticipantMode,
+    PatchGroupCollaborationDefinitionCommand, RoutingMode, RoutingPolicy, ServiceError,
+    ServiceSpec, SessionKind, SessionStatus, StartStateMachineRunCommand,
     UpgradeGroupCollaborationDefinitionCommand, Workspace,
 };
 use serde::{Deserialize, Serialize};
@@ -33,10 +31,11 @@ use crate::error::HttpAdapterError;
 use crate::state::HttpAppState;
 
 use super::{
-    bots::bot_use_case_error_to_http,
-    authenticated_bot_from_headers, reject_judge_definition_when_unavailable,
-    reject_judge_yaml_when_unavailable, validate_container_header,
+    authenticated_bot_from_headers, bots::bot_use_case_error_to_http,
+    reject_judge_definition_when_unavailable, reject_judge_yaml_when_unavailable,
+    validate_container_header,
 };
+use super::collaboration_runs::optional_authenticated_human;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -71,6 +70,40 @@ pub struct ListBotGroupsQuery {
     pub group_kind: GroupKindFilter,
     #[serde(default)]
     pub q: Option<String>,
+    /// Include groups where the actor participates only through a session.
+    /// Defaults to true for backward compatibility.
+    #[serde(default = "default_include_session_groups")]
+    pub include_session_groups: bool,
+}
+
+fn default_include_session_groups() -> bool {
+    true
+}
+
+fn formal_only_group_query(mut query: ListBotGroupsQuery) -> ListBotGroupsQuery {
+    query.include_session_groups = false;
+    query
+}
+
+#[cfg(test)]
+mod list_my_groups_query_tests {
+    use super::{GroupKindFilter, ListBotGroupsQuery, formal_only_group_query};
+
+    #[test]
+    fn my_groups_forces_session_only_groups_off() {
+        let query = formal_only_group_query(ListBotGroupsQuery {
+            offset: Some(4),
+            limit: Some(5),
+            group_kind: GroupKindFilter::default(),
+            q: Some("topic".to_string()),
+            include_session_groups: true,
+        });
+
+        assert!(!query.include_session_groups);
+        assert_eq!(query.offset, Some(4));
+        assert_eq!(query.limit, Some(5));
+        assert_eq!(query.q.as_deref(), Some("topic"));
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,10 +168,10 @@ pub async fn create_group(
     uri: Uri,
     Json(req): Json<CreateGroupRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    let start_initial_run = req.start_initial_run.unwrap_or(true);
     let caller_actor_id = resolve_group_create_caller(&state, &headers, &uri).await?;
     let collaboration_definition_yaml = req.collaboration_definition_yaml.clone();
-    let auto_start_on_service_invocation =
-        req.auto_start_on_service_invocation.unwrap_or(false);
+    let auto_start_on_service_invocation = req.auto_start_on_service_invocation.unwrap_or(false);
     let group_kind = req
         .group_kind
         .as_deref()
@@ -233,25 +266,24 @@ pub async fn create_group(
         &participants,
         &req.participant_bindings,
     )?;
-    let collaboration_definition_ref =
-        if let (Some(definition), Some(source_yaml)) = (
-            collaboration_definition.as_ref(),
-            collaboration_definition_yaml.clone(),
-        ) {
-            let definition_ref = CollaborationDefinitionRef {
-                id: definition.id.clone(),
-                version: definition.version,
-            };
-            state
-                .services
-                .collaboration_runtime
-                .upsert_definition_with_source_yaml(definition.clone(), source_yaml)
-                .await
-                .map_err(collaboration_runtime_error_to_http)?;
-            Some(definition_ref)
-        } else {
-            None
+    let collaboration_definition_ref = if let (Some(definition), Some(source_yaml)) = (
+        collaboration_definition.as_ref(),
+        collaboration_definition_yaml.clone(),
+    ) {
+        let definition_ref = CollaborationDefinitionRef {
+            id: definition.id.clone(),
+            version: definition.version,
         };
+        state
+            .services
+            .collaboration_runtime
+            .upsert_definition_with_source_yaml(definition.clone(), source_yaml)
+            .await
+            .map_err(collaboration_runtime_error_to_http)?;
+        Some(definition_ref)
+    } else {
+        None
+    };
     let cmd = GroupCreateCommand {
         group_id: req.id,
         caller_actor_id: caller_actor_id.clone(),
@@ -264,7 +296,10 @@ pub async fn create_group(
         participants,
         member_bot_ids,
         group_kind,
-        service_spec: req.service_spec.clone().and_then(|v| serde_json::from_value(v).ok()),
+        service_spec: req
+            .service_spec
+            .clone()
+            .and_then(|v| serde_json::from_value(v).ok()),
         group_strategy,
         visibility: req.visibility,
     };
@@ -289,11 +324,15 @@ pub async fn create_group(
             })
             .await
             .map_err(collaboration_runtime_error_to_http)?;
-        if result.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
+        if start_initial_run
+            && result.group_strategy == bcs_service_api::GroupStrategy::StateMachine
+        {
+            let authenticated_human = optional_authenticated_human(&state, &headers, &uri).await;
             if let Some(run_id) = start_initial_state_machine_run_for_group(
                 &state,
                 &result,
                 caller_actor_id.clone(),
+                authenticated_human,
             )
             .await?
             {
@@ -322,6 +361,7 @@ async fn start_initial_state_machine_run_for_group(
     state: &HttpAppState,
     group: &GroupDetailResult,
     caller_id: Option<String>,
+    authenticated_human: Option<bcs_service_api::AuthenticatedHumanCaller>,
 ) -> Result<Option<String>, HttpAdapterError> {
     let Some(session_id) = group.latest_running_session_id.as_deref() else {
         return Ok(None);
@@ -354,8 +394,10 @@ async fn start_initial_state_machine_run_for_group(
             definition_yaml: None,
             definition: None,
             definition_ref: None,
+            participant_bindings: None,
             input: session.input.clone().unwrap_or(Value::Null),
             caller_id,
+            authenticated_human,
         })
         .await
         .map_err(collaboration_runtime_error_to_http)?;
@@ -409,8 +451,17 @@ pub async fn get_group(
 
     // Only expose latest_running_session_id for non-service groups
     if group.service_spec.is_none() {
-        if let Ok(Some(session)) = state.services.session_management
-            .list_by_group(&group.group_id, Some(SessionStatus::Running), 0, 1, None, None)
+        if let Ok(Some(session)) = state
+            .services
+            .session_management
+            .list_by_group(
+                &group.group_id,
+                Some(SessionStatus::Running),
+                0,
+                1,
+                None,
+                None,
+            )
             .await
             .map(|v| v.into_iter().next())
         {
@@ -423,8 +474,14 @@ pub async fn get_group(
     let (driver_bot_owner, driver_bot_owner_name) =
         resolve_driver_bot_owner(&state, &group.driver_bot_id).await;
     if let Some(obj) = json.as_object_mut() {
-        obj.insert("driver_bot_owner".to_string(), serde_json::json!(driver_bot_owner));
-        obj.insert("driver_bot_owner_name".to_string(), serde_json::json!(driver_bot_owner_name));
+        obj.insert(
+            "driver_bot_owner".to_string(),
+            serde_json::json!(driver_bot_owner),
+        );
+        obj.insert(
+            "driver_bot_owner_name".to_string(),
+            serde_json::json!(driver_bot_owner_name),
+        );
     }
 
     Ok(Json(json))
@@ -514,6 +571,47 @@ pub async fn list_bot_groups(
     Path(bot_uuid): Path<String>,
     Query(query): Query<ListBotGroupsQuery>,
 ) -> Result<Json<Value>, HttpAdapterError> {
+    let page = list_actor_groups(&state, &bot_uuid, query).await?;
+
+    Ok(Json(serde_json::json!({
+        "bot_uuid": bot_uuid,
+        "items": page.items,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+    })))
+}
+
+pub async fn list_my_groups(
+    State(state): State<HttpAppState>,
+    headers: HeaderMap,
+    uri: Uri,
+    Query(query): Query<ListBotGroupsQuery>,
+) -> Result<Json<Value>, HttpAdapterError> {
+    let actor_id = resolve_actor_caller(&state, &headers, &uri).await?;
+    let page = list_actor_groups(&state, &actor_id, formal_only_group_query(query)).await?;
+
+    Ok(Json(serde_json::json!({
+        "actor_id": actor_id,
+        "items": page.items,
+        "total": page.total,
+        "offset": page.offset,
+        "limit": page.limit,
+    })))
+}
+
+struct ActorGroupListPage {
+    items: Vec<Value>,
+    total: u64,
+    offset: u64,
+    limit: u64,
+}
+
+async fn list_actor_groups(
+    state: &HttpAppState,
+    actor_id: &str,
+    query: ListBotGroupsQuery,
+) -> Result<ActorGroupListPage, HttpAdapterError> {
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(10);
     let kind_filter = group_kind_filter(query.group_kind);
@@ -522,7 +620,7 @@ pub async fn list_bot_groups(
         .services
         .group_query
         .list_bot_groups(BotGroupListCommand {
-            bot_id: bot_uuid.clone(),
+            bot_id: actor_id.to_string(),
             group_kind: kind_filter,
             q: query.q.clone(),
             offset,
@@ -531,19 +629,30 @@ pub async fn list_bot_groups(
         .await
         .map_err(group_use_case_error_to_http)?;
 
+    if !query.include_session_groups {
+        let items: Vec<Value> = result
+            .items
+            .into_iter()
+            .map(bot_group_list_entry_to_legacy_json)
+            .collect();
+
+        return Ok(ActorGroupListPage {
+            items,
+            total: result.total,
+            offset: result.offset,
+            limit: result.limit,
+        });
+    }
+
     // Union: include groups where the actor is only a session participant
     // (not in group.participants), so humans added to a session via PATCH
     // can still see the group in their listing.
-    let existing_ids: HashSet<String> = result
-        .items
-        .iter()
-        .map(|e| e.group_id.clone())
-        .collect();
+    let existing_ids: HashSet<String> = result.items.iter().map(|e| e.group_id.clone()).collect();
     let mut session_extra: Vec<GroupListEntry> = Vec::new();
     if let Ok(session_group_ids) = state
         .services
         .session_management
-        .list_group_ids_by_session_participant(&bot_uuid)
+        .list_group_ids_by_session_participant(actor_id)
         .await
     {
         for gid in session_group_ids {
@@ -553,7 +662,9 @@ pub async fn list_bot_groups(
             let group = match state
                 .services
                 .group_query
-                .get_group(GroupDetailCommand { group_id: gid.clone() })
+                .get_group(GroupDetailCommand {
+                    group_id: gid.clone(),
+                })
                 .await
             {
                 Ok(group) => group,
@@ -595,13 +706,12 @@ pub async fn list_bot_groups(
             .map(bot_group_list_entry_to_legacy_json)
             .collect();
 
-        return Ok(Json(serde_json::json!({
-            "bot_uuid": bot_uuid,
-            "items": items,
-            "total": result.total,
-            "offset": result.offset,
-            "limit": result.limit,
-        })));
+        return Ok(ActorGroupListPage {
+            items,
+            total: result.total,
+            offset: result.offset,
+            limit: result.limit,
+        });
     }
 
     let session_extra_len = session_extra.len() as u64;
@@ -618,13 +728,12 @@ pub async fn list_bot_groups(
         .map(bot_group_list_entry_to_legacy_json)
         .collect();
 
-    Ok(Json(serde_json::json!({
-        "bot_uuid": bot_uuid,
-        "items": items,
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    })))
+    Ok(ActorGroupListPage {
+        items,
+        total,
+        offset,
+        limit,
+    })
 }
 
 fn group_detail_matches_bot_group_query(group: &GroupDetailResult, q: Option<&str>) -> bool {
@@ -986,7 +1095,12 @@ fn group_create_participants(
     state_machine_group: bool,
 ) -> Result<Vec<GroupCreateParticipantCommand>, HttpAdapterError> {
     if !req.participants.is_empty() {
-        if state_machine_group && req.participants.iter().any(|participant| participant.role.is_some()) {
+        if state_machine_group
+            && req
+                .participants
+                .iter()
+                .any(|participant| participant.role.is_some())
+        {
             return Err(HttpAdapterError::BadRequest(
                 "state-machine group participants.role is inferred by BCS and must not be provided"
                     .to_string(),
@@ -1002,7 +1116,10 @@ fn group_create_participants(
             .map(|participant| GroupCreateParticipantCommand {
                 bot_id: participant.bot_uuid.clone(),
                 role: if state_machine_group {
-                    Some(inferred_participant_role_wire(&participant.bot_uuid, driver_bot).to_string())
+                    Some(
+                        inferred_participant_role_wire(&participant.bot_uuid, driver_bot)
+                            .to_string(),
+                    )
                 } else {
                     participant.role.clone()
                 },
@@ -1197,7 +1314,7 @@ fn validate_state_machine_runtime_bindings_before_create(
         }
         if referenced_slots.contains(slot) && bot_ids.len() != 1 {
             return Err(HttpAdapterError::BadRequest(format!(
-                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in MVP"
+                "participant slot {slot} is assigned to a node and must resolve to exactly one bot in the current runtime"
             )));
         }
         resolved_slots.insert(slot.clone());
@@ -1254,7 +1371,7 @@ fn referenced_participant_slots(
         _ => {
             return Err(HttpAdapterError::BadRequest(
                 "runtime.kind must be state_machine".to_string(),
-            ))
+            ));
         }
     };
     let mut slots = HashSet::new();
@@ -1273,7 +1390,13 @@ fn validate_definition_has_legacy_bot_ids(
         return Ok(());
     };
     for (binding_id, binding) in &definition.participants {
-        if binding.bot_id.as_deref().map(str::trim).filter(|bot_id| !bot_id.is_empty()).is_none() {
+        if binding
+            .bot_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|bot_id| !bot_id.is_empty())
+            .is_none()
+        {
             return Err(HttpAdapterError::BadRequest(format!(
                 "collaboration_definition_yaml participant '{}' must define bot_id or be provided via participant_bindings",
                 binding_id
@@ -1378,6 +1501,7 @@ fn group_detail_to_create_json(result: GroupDetailResult, created: bool) -> Valu
         "participants": result.participants.iter().map(|p| &p.bot_uuid).collect::<Vec<_>>(),
         "context_injected": result.context_injected,
         "chat_url": result.chat_url,
+        "session_id": result.latest_running_session_id,
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "created": created
@@ -1408,26 +1532,25 @@ fn group_use_case_error_to_http(error: GroupUseCaseError) -> HttpAdapterError {
             ))
         }
         GroupUseCaseError::Service(ServiceError::ExistNonPublicBots { bots }) => {
-                let bot_list: Vec<Value> = bots
-                    .iter()
-                    .map(|(uuid, name)| {
-                        serde_json::json!({
-                            "bot_uuid": uuid,
-                            "bot_name": name.as_deref().unwrap_or(uuid),
-                        })
+            let bot_list: Vec<Value> = bots
+                .iter()
+                .map(|(uuid, name)| {
+                    serde_json::json!({
+                        "bot_uuid": uuid,
+                        "bot_name": name.as_deref().unwrap_or(uuid),
                     })
-                    .collect();
-                HttpAdapterError::BadRequestStructured {
-                    message: "Group contains non-public bots preventing visibility change"
-                        .into(),
-                    params: serde_json::json!({
-                        "code": "exist_none_public_bots",
-                        "bots": bot_list,
-                    }),
-                }
+                })
+                .collect();
+            HttpAdapterError::BadRequestStructured {
+                message: "Group contains non-public bots preventing visibility change".into(),
+                params: serde_json::json!({
+                    "code": "exist_none_public_bots",
+                    "bots": bot_list,
+                }),
             }
-            GroupUseCaseError::Conflict(message) => HttpAdapterError::Conflict(message),
-            GroupUseCaseError::Service(error) => HttpAdapterError::Service(error),
+        }
+        GroupUseCaseError::Conflict(message) => HttpAdapterError::Conflict(message),
+        GroupUseCaseError::Service(error) => HttpAdapterError::Service(error),
     }
 }
 
@@ -1435,15 +1558,24 @@ fn collaboration_runtime_error_to_http(error: CollaborationRuntimeError) -> Http
     match error {
         CollaborationRuntimeError::InvalidDefinition(message)
         | CollaborationRuntimeError::InvalidParticipantBinding(message)
-        | CollaborationRuntimeError::InvalidRequest(message) => HttpAdapterError::BadRequest(message),
-        CollaborationRuntimeError::DefinitionNotFound(id, version) => {
-            HttpAdapterError::NotFound(format!(
-                "CollaborationDefinition '{}@{}' not found",
-                id, version
-            ))
+        | CollaborationRuntimeError::InvalidRequest(message) => {
+            HttpAdapterError::BadRequest(message)
         }
+        CollaborationRuntimeError::DefinitionNotFound(id, version) => HttpAdapterError::NotFound(
+            format!("CollaborationDefinition '{}@{}' not found", id, version),
+        ),
         CollaborationRuntimeError::RunNotFound(run_id) => {
             HttpAdapterError::NotFound(format!("StateMachineRun '{}' not found", run_id))
+        }
+        CollaborationRuntimeError::NodeNotFound { run_id, node_id } => HttpAdapterError::NotFound(
+            format!("StateMachineNodeRun '{run_id}/{node_id}' not found"),
+        ),
+        CollaborationRuntimeError::Unauthenticated => {
+            HttpAdapterError::Unauthorized("authentication is required".to_string())
+        }
+        CollaborationRuntimeError::Forbidden(message) => HttpAdapterError::Forbidden(message),
+        CollaborationRuntimeError::JudgeUnavailable(message) => {
+            HttpAdapterError::Service(ServiceError::InternalError(message))
         }
         CollaborationRuntimeError::Conflict(message) => HttpAdapterError::Conflict(message),
         CollaborationRuntimeError::Internal(error) => HttpAdapterError::Service(error),
@@ -1515,7 +1647,9 @@ async fn resolve_group_member_caller(
     let group = state
         .services
         .group_query
-        .get_group(GroupDetailCommand { group_id: group_id.to_string() })
+        .get_group(GroupDetailCommand {
+            group_id: group_id.to_string(),
+        })
         .await
         .map_err(group_use_case_error_to_http)?;
 
@@ -1531,13 +1665,11 @@ async fn resolve_group_member_caller(
         b.bot_uuid == group.driver_bot_id || group.originator.as_deref() == Some(&b.bot_uuid)
     });
 
-    coordinator
-        .map(|b| b.bot_uuid.clone())
-        .ok_or_else(|| {
-            HttpAdapterError::Forbidden(
-                "human caller does not own a coordinator bot in this group".to_string(),
-            )
-        })
+    coordinator.map(|b| b.bot_uuid.clone()).ok_or_else(|| {
+        HttpAdapterError::Forbidden(
+            "human caller does not own a coordinator bot in this group".to_string(),
+        )
+    })
 }
 
 async fn resolve_actor_caller(
@@ -1545,12 +1677,25 @@ async fn resolve_actor_caller(
     headers: &HeaderMap,
     uri: &Uri,
 ) -> Result<String, HttpAdapterError> {
-    if let Ok(bot_id) = authenticated_bot_from_headers(state, headers).await {
-        return Ok(bot_id);
+    let explicit_bot_token = headers.contains_key("X-BCS-Bot-Token");
+    match authenticated_bot_from_headers(state, headers).await {
+        Ok(bot_id) if !bot_id.trim().is_empty() => return Ok(bot_id),
+        Ok(_) if explicit_bot_token => {
+            return Err(HttpAdapterError::Unauthorized(
+                "valid bot token is required".to_string(),
+            ));
+        }
+        Err(error) if explicit_bot_token => return Err(error),
+        _ => {}
     }
+
     extract_human_actor_id(state, headers, uri)
         .await
-        .ok_or_else(|| HttpAdapterError::Unauthorized("valid bot token or human cookie is required".to_string()))
+        .ok_or_else(|| {
+            HttpAdapterError::Unauthorized(
+                "valid bot token or human cookie is required".to_string(),
+            )
+        })
 }
 
 fn group_use_case_error_to_mode_response(error: GroupUseCaseError) -> (StatusCode, Json<Value>) {
@@ -1679,14 +1824,20 @@ fn group_list_entry_to_legacy_json(group: GroupListEntry) -> Value {
     let driver_bot_name = if group.driver_bot_id.is_empty() {
         None
     } else {
-        group.participants.iter()
+        group
+            .participants
+            .iter()
             .find(|p| p.bot_uuid == group.driver_bot_id)
             .and_then(|p| p.bot_name.clone())
     };
-    let originator_name = group.originator.as_ref()
+    let originator_name = group
+        .originator
+        .as_ref()
         .filter(|id| !id.is_empty())
         .and_then(|id| {
-            group.participants.iter()
+            group
+                .participants
+                .iter()
                 .find(|p| p.bot_uuid == *id)
                 .and_then(|p| p.bot_name.clone())
         });
@@ -1836,11 +1987,13 @@ pub async fn patch_group_settings(
     // immutability / route-field-lock validation; the outbound URL guard is an
     // adapter-level network policy and lives at the route boundary.
     if let Some(ref spec_patch) = body.service_spec {
-        if let Err(e) = validate_service_spec_callback_urls(
-            &state.outbound_url_guard,
-            spec_patch.as_ref(),
-        ) {
-            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": e})))
+        if let Err(e) =
+            validate_service_spec_callback_urls(&state.outbound_url_guard, spec_patch.as_ref())
+        {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": e})),
+            )
                 .into_response();
         }
     }
@@ -1866,14 +2019,15 @@ pub async fn patch_group_settings(
         Err(GroupUseCaseError::Conflict(message)) => {
             // The use case JSON-encodes a `GroupPatchSettingsConflict` into
             // the message; surface it verbatim so clients recover the detail.
-            let conflict: Value =
-                serde_json::from_str(&message).unwrap_or_else(|_| serde_json::json!({"error": message}));
+            let conflict: Value = serde_json::from_str(&message)
+                .unwrap_or_else(|_| serde_json::json!({"error": message}));
             (StatusCode::CONFLICT, Json(conflict)).into_response()
         }
-        Err(GroupUseCaseError::Service(ServiceError::GroupNotFound(_))) => {
-            (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "group not found"})))
-                .into_response()
-        }
+        Err(GroupUseCaseError::Service(ServiceError::GroupNotFound(_))) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "group not found"})),
+        )
+            .into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": error.to_string()})),

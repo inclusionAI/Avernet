@@ -322,7 +322,7 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
     assert_eq!(chat_send["channel"]["actor_name"], "Source Bot");
     assert_eq!(chat_send["session_context"]["from"], "api-user");
     assert_eq!(chat_send["session_context"]["from_bot_id"], "bot-source");
-    assert_eq!(chat_send["timeout_ms"], serde_json::json!(10_000));
+    assert_eq!(chat_send["timeout_ms"], serde_json::json!(7_200_000));
     assert_eq!(chat_send["tags"], serde_json::json!(["tag1", "tag2"]));
     assert_eq!(chat_send["extensions"]["caller_wait_mode"], "detached");
 }
@@ -1108,6 +1108,19 @@ async fn protected_target_requires_friendship_in_a2a_service() {
 
     assert!(matches!(err, ServiceError::NotFriends(bot_ids) if bot_ids == vec!["bot-target"]));
     assert!(delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
+async fn protected_target_allows_self_chat_without_friendship() {
+    let (service, delivery, _) = build_service(
+        vec![("bot-source", "protected", Some("owner-1"))],
+        vec![],
+    )
+    .await;
+
+    service.chat(chat_command("bot-source")).await.unwrap();
+
+    assert_eq!(delivery.frames().await.len(), 1);
 }
 
 #[tokio::test]

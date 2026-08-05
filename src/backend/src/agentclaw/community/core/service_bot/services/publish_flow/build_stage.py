@@ -97,7 +97,7 @@ class BuildStageRunner:
 
             # Provider-specific post-build file staging (teclaw snapshots the
             # running source container's files into OSS and embeds the refs;
-            # ARCA/baas mirror to ac_file already → no-op).
+            # ARCA/baas write the live FS the build already sees → no-op).
             await behavior.stage_build_files(
                 artifact=artifact, bot=bot, bot_id=bot_id,
                 owner_id=owner_id, publish_id=publish_id,

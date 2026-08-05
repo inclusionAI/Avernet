@@ -23,6 +23,20 @@ def test_claude_code_has_its_own_list():
     assert isinstance(servers, list)
 
 
+CLAUDE_CODE_REQUIRED_DEFAULT_MCPS = (
+    "mcp.ant.archassistant-mcp.appmcp",
+    "mcp.ant.antcodemcp.code.mcpserver",
+    "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
+    "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver",
+)
+
+
+def test_claude_code_includes_required_coding_mcps_exactly_once():
+    codes = get_default_mcp_server_codes("claude_code")
+    for code in CLAUDE_CODE_REQUIRED_DEFAULT_MCPS:
+        assert codes.count(code) == 1, f"expected exactly one claude_code default MCP: {code}"
+
+
 def test_claude_code_merges_aicoding_research_mcps():
     servers = get_default_mcp_servers("claude_code")
     codes = [s["server_code"] for s in servers]
@@ -35,7 +49,6 @@ def test_claude_code_merges_aicoding_research_mcps():
         "mcp.ant.zlatan.yuntumcpserver",
         "mcp.ant.alipaybase-antlogsmcp.mcp-server",
         "mcp.ant.arkai.assistantmcpserver",
-        "mcp.ant.agentix.112858.aixAicoding",
         "mcp.ant.faas.aixjiter.AixCodingMemoryMCP",
         "mcp.ant.rgmcpserver.rgfastcheckmcpserver",
     )
@@ -43,8 +56,8 @@ def test_claude_code_merges_aicoding_research_mcps():
         assert code in codes, f"missing aicoding-only MCP in claude_code: {code}"
     # 无重复。
     assert len(codes) == len(set(codes))
-    # 12 原有 + 6 新增 = 18。
-    assert len(codes) == 18
+    # 12 原有 + 5 研发 MCP + 1 应用信息 MCP + 1 clawmind = 19。
+    assert len(codes) == 19
 
 
 def test_aicoding_has_its_own_list():
@@ -73,6 +86,13 @@ def test_hitl_is_default_for_mcp_enabled_engines():
     assert "hitl" in get_default_mcp_server_codes("hermes")
     assert "hitl" in get_default_mcp_server_codes("aicoding")
     assert "hitl" not in get_default_mcp_server_codes("moltis")
+
+
+def test_clawmind_is_default_for_claude_code_only():
+    assert "clawmind" in get_default_mcp_server_codes("claude_code")
+    assert "clawmind" not in get_default_mcp_server_codes("openclaw")
+    assert "clawmind" not in get_default_mcp_server_codes("hermes")
+    assert "clawmind" not in get_default_mcp_server_codes("aicoding")
 
 
 def test_bcs_mcp_is_default_for_mcp_enabled_engines():
@@ -167,6 +187,7 @@ from agentclaw.community.core.mcp.services._defaults import (
 _EXPECTED_CLI_CODES = (
     "adev-cli", "acli", "antcode-cli", "linke-cli",
     "linkw-cli", "qmx-invoke-cli", "serverless", "derisk-cli",
+    "yuque-cli",
 )
 
 
@@ -221,6 +242,27 @@ def test_default_cli_items_none_engine_returns_empty():
     assert get_default_cli_items(None) == []
     assert get_default_cli_items(None, "personalCoding") == []
     assert get_default_cli_items("") == []
+
+
+def test_yuque_cli_is_default_entry():
+    """yuque-cli is the newest default entry: full shape, last position, no dupes."""
+    items = get_default_cli_items("aicoding")
+    yuque = [it for it in items if it["cli_code"] == "yuque-cli"]
+    assert len(yuque) == 1
+    assert yuque[0] == {
+        "cli_code": "yuque-cli",
+        "cli_name": "yuque-cli",
+        "cli_desc": "yuque cli",
+    }
+    codes = [it["cli_code"] for it in items]
+    # appended last (stable ordering matters for downstream passport merge).
+    assert codes[-1] == "yuque-cli"
+    assert len(codes) == len(set(codes))
+    # the claude_code coding templates share the same aicoding link, so the
+    # new entry flows through that path too.
+    codes_cc = [it["cli_code"] for it in get_default_cli_items("claude_code", "applicationCoding")]
+    assert "yuque-cli" in codes_cc
+    assert codes_cc[-1] == "yuque-cli"
 
 
 def test_default_cli_items_returns_copy():

@@ -103,6 +103,87 @@ test_backend_wait_fails_when_started_process_exits() {
   assert_eq "backend_stop" "$(cat "$events_file")" "exited backend process should trigger cleanup"
 }
 
+test_frontend_start_prepares_dependencies_before_launch() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export FRONTEND_LOG="${LOG_DIR}/frontend.log"
+  export FRONTEND_PID_FILE="${DEP_DIR}/frontend.pid"
+  export FRONTEND_PORT=8000
+  export BCS_PORT=21000
+  export BCSFUSE_PORT=8765
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local events_file result
+  events_file="$(mktemp)"
+  frontend_setup() {
+    printf '%s\n' "setup:frontend" >> "$events_file"
+    return 23
+  }
+  stop_port_processes_if_owned() {
+    printf '%s\n' "stop:frontend" >> "$events_file"
+  }
+
+  if frontend_start; then
+    result=0
+  else
+    result=$?
+  fi
+
+  assert_eq "1" "$result" "frontend_start should fail when dependency setup fails"
+  assert_eq "setup:frontend" "$(cat "$events_file")" \
+    "frontend_start should prepare dependencies before touching the running service"
+)
+
+test_frontend_deps_require_dev_commands() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export FRONTEND_PORT=8000
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local package
+  mkdir -p "${FRONTEND_DIR}/node_modules/.bin"
+  printf '%s\n' '{"name":"frontend-test"}' > "${FRONTEND_DIR}/package.json"
+  for package in adapters core ui; do
+    mkdir -p "${FRONTEND_DIR}/node_modules/@aix-chat/${package}"
+    printf '%s\n' "{\"name\":\"@aix-chat/${package}\"}" \
+      > "${FRONTEND_DIR}/node_modules/@aix-chat/${package}/package.json"
+  done
+  touch "${FRONTEND_DIR}/node_modules/.package-lock.json"
+
+  if frontend_deps_ready; then
+    fail "frontend dependencies without cross-env/max should be treated as incomplete"
+  fi
+
+  printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${FRONTEND_DIR}/node_modules/.bin/cross-env"
+  printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "${FRONTEND_DIR}/node_modules/.bin/max"
+  chmod +x \
+    "${FRONTEND_DIR}/node_modules/.bin/cross-env" \
+    "${FRONTEND_DIR}/node_modules/.bin/max"
+
+  frontend_deps_ready || fail "complete frontend dependencies should be reusable"
+)
+
+test_frontend_install_includes_dev_dependencies() (
+  setup_env
+  export FRONTEND_DIR="$(mktemp -d)"
+  export NPM_REGISTRY_URL="https://registry.npmjs.org"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/frontend.sh"
+
+  local npm_args
+  npm_args="$(mktemp)"
+  touch "${FRONTEND_DIR}/package-lock.json"
+  npm() { printf '%s\n' "$*" > "$npm_args"; }
+
+  install_frontend_deps || fail "mock frontend install should succeed"
+  case "$(cat "$npm_args")" in
+    *"ci --include=dev "*) ;;
+    *) fail "frontend install should explicitly include devDependencies" ;;
+  esac
+)
+
 test_service_modules_use_ownership_aware_stop_helpers() {
   local offenders
   offenders="$(
@@ -311,12 +392,17 @@ test_baas_start_refuses_root_bots_dir() (
   # shellcheck source=/dev/null
   source "${ROOT}/scripts/modules/baas.sh"
 
-  local events_file result
+  local events_file plugin_dir result
   events_file="$(mktemp)"
+  plugin_dir="$(mktemp -d)"
+  mkdir -p "${plugin_dir}/dist/esm"
+  : > "${plugin_dir}/dist/esm/index.js"
   stop_port_processes_if_owned() { return 0; }
   stop_matching_processes_if_owned() { return 0; }
   require_port_available_after_owned_stop() { return 0; }
   check_directory_exists() { return 0; }
+  setup_bcn_plugin() { return 0; }
+  bots_bcn_plugin_load_dir() { printf '%s\n' "$plugin_dir"; }
   baas_prepare_bcs_session_backup() { return 0; }
   baas_restore_bcs_sessions() { return 0; }
   rm() { printf 'rm %s\n' "$*" >> "$events_file"; }
@@ -333,11 +419,91 @@ test_baas_start_refuses_root_bots_dir() (
   [ ! -s "$events_file" ] || fail "baas_start must reject root before calling rm"
 )
 
+test_baas_start_passes_bcn_runtime_configuration() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=false
+  export CHAT_ENGINE="openclaw"
+  export BCS_PORT="21099"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local plugin_dir captured_env sequence_file
+  plugin_dir="$(mktemp -d)"
+  mkdir -p "${plugin_dir}/dist/esm"
+  : > "${plugin_dir}/dist/esm/index.js"
+  captured_env="$(mktemp)"
+  sequence_file="$(mktemp)"
+
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  setup_bcn_plugin() { printf '%s\n' "setup" >> "$sequence_file"; }
+  bots_bcn_plugin_load_dir() { printf '%s\n' "resolve" >> "$sequence_file"; printf '%s\n' "$plugin_dir"; }
+  env() { printf '%s\n' "start" >> "$sequence_file"; printf '%s\n' "$*" > "$captured_env"; return 0; }
+
+  baas_start
+
+  grep -F "BCN_PLUGIN_PATH=${plugin_dir}" "$captured_env" >/dev/null || \
+    fail "baas_start must pass the built BCN plugin path to BAAS"
+  grep -F "BCS_PORT=21099" "$captured_env" >/dev/null || \
+    fail "baas_start must pass the selected BCS port to BAAS"
+  assert_eq $'setup\nresolve\nstart' "$(cat "$sequence_file")" \
+    "baas_start must prepare the BCN plugin before launching BAAS"
+)
+
+test_baas_start_aborts_when_bcn_plugin_setup_fails() (
+  setup_env
+  export RUNTIME_DATA_DIR="$(mktemp -d)"
+  export LOCAL_AIDESKTOP_DIR="$(mktemp -d)"
+  export LOCAL_MODE=false
+  export CHAT_ENGINE="openclaw"
+  export BCS_PORT="21000"
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  local started=false
+  stop_port_processes_if_owned() { return 0; }
+  stop_matching_processes_if_owned() { return 0; }
+  require_port_available_after_owned_stop() { return 0; }
+  check_directory_exists() { return 0; }
+  setup_bcn_plugin() { return 1; }
+  env() { started=true; return 0; }
+
+  if baas_start; then
+    fail "baas_start must fail when BCN plugin setup fails"
+  fi
+  [ "$started" = false ] || fail "BAAS must not launch after BCN plugin setup failure"
+)
+
 test_5bot_openclaw_config_is_written_private() {
   grep -F 'umask 077' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be written under umask 077"
   grep -F 'chmod 600 "$config_file"' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh" >/dev/null || \
     fail "5bot openclaw config should be chmod 600"
+}
+
+test_local_bcs_launchers_supply_required_signing_keys() {
+  local singlebox_start five_bot_start group_secret_default principal_secret_default
+  singlebox_start="$(sed -n '/^start_bcs_binary()/,/^}/p' "${ROOT}/scripts/modules/bcs.sh")"
+  five_bot_start="$(sed -n '/^start_bcs()/,/^}/p' "${ROOT}/src/bcs/scripts/start_bcs_bots.sh")"
+  group_secret_default='export BCS_SECRET_BCN_GROUP_SESSION_WS_JWT="${BCS_SECRET_BCN_GROUP_SESSION_WS_JWT:-local-only-bcn-group-session-ws-jwt-signing-key}"'
+  principal_secret_default='export AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE="${AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE:-avernet-dev-signing-key-NOT-FOR-PROD}"'
+
+  grep -F 'if [ "${BCS_SERVER_ENV}" = "local" ]; then' <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must scope the group-session key default to local mode"
+  grep -F "$group_secret_default" <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must provide an overridable local group-session key"
+  grep -F "$principal_secret_default" <<<"$singlebox_start" >/dev/null || \
+    fail "singlebox BCS launcher must explicitly provide an overridable local Principal key"
+  grep -F 'if [ "$SERVER_ENV" = "local" ]; then' <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must scope the group-session key default to local mode"
+  grep -F "$group_secret_default" <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must provide an overridable local group-session key"
+  grep -F "$principal_secret_default" <<<"$five_bot_start" >/dev/null || \
+    fail "5bot BCS launcher must explicitly provide an overridable local Principal key"
 }
 
 test_ready_banner_describes_full_stack() {
@@ -376,6 +542,9 @@ test_backend_separates_profile_env_and_workspace_folder() {
 test_all_start_rolls_back_started_services_on_failure
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
+test_frontend_start_prepares_dependencies_before_launch
+test_frontend_deps_require_dev_commands
+test_frontend_install_includes_dev_dependencies
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
@@ -386,7 +555,10 @@ test_baas_session_backup_refuses_to_overwrite_stale_backup
 test_baas_session_backup_recovers_stale_backup_before_snapshot
 test_baas_session_scan_failure_keeps_source_and_backup
 test_baas_start_refuses_root_bots_dir
+test_baas_start_passes_bcn_runtime_configuration
+test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
+test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
 test_backend_separates_profile_env_and_workspace_folder
 

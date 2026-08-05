@@ -18,6 +18,8 @@ runs for real. Implementations:
 """
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from dataclasses import dataclass
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from agentclaw.community.plugin_api.base import Plugin
@@ -25,6 +27,30 @@ from agentclaw.community.plugin_api.base import Plugin
 
 class DeviceAdapterTimeoutError(TimeoutError):
     """The adapter transport exceeded its request deadline."""
+
+
+class DeviceAdapterEndpointNotFoundError(ValueError):
+    """The current runtime does not expose the requested adapter endpoint."""
+
+
+class DeviceAdapterHTTPStatusError(ValueError):
+    """The adapter returned a non-success HTTP status other than 404."""
+
+    def __init__(self, status_code: int, response_text: str) -> None:
+        self.status_code = status_code
+        super().__init__(
+            f"Adapter returned HTTP {status_code}: {response_text}"
+        )
+
+
+@dataclass(frozen=True)
+class DeviceAdapterStreamResponse:
+    """A lazily consumed adapter response with deterministic cleanup."""
+
+    status_code: int
+    headers: Mapping[str, str]
+    body: AsyncIterator[bytes]
+    close: Callable[[], Awaitable[None]]
 
 
 @runtime_checkable
@@ -59,8 +85,28 @@ class DeviceAdapterTransport(Plugin, Protocol):
             ``{"success": bool, "data": ...}``).
 
         Raises:
+            DeviceAdapterEndpointNotFoundError: The runtime has no such endpoint.
+            DeviceAdapterHTTPStatusError: The runtime returned another HTTP error.
             DeviceAdapterTimeoutError: When an explicit ``timeout`` is exceeded.
             ValueError: On transport/HTTP failure (prod impl), so callers
                 can surface a uniform error envelope.
+        """
+        ...
+
+    async def stream(
+        self,
+        conn_info: dict[str, Any],
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        timeout: float | None = None,
+    ) -> DeviceAdapterStreamResponse:
+        """Issue a request without eagerly reading the adapter response body.
+
+        The caller owns ``response.close`` and must call it after the body is
+        exhausted or abandoned. Implementations must not expose request-only
+        credentials in the response headers.
         """
         ...

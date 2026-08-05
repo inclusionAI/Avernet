@@ -3,9 +3,12 @@
 pub mod metrics;
 pub mod bot_terminal_observer;
 
+use bcs_domain::HumanInputNotificationMode;
 use bcs_service_api::{
     BotDeliveryPort, ChatRunCleanupPort, ChatRunEventPort, FrontendDeliveryPort,
-    GroupHistoryBotRequestPort, LeaderElectionPort, LeaderStatus,
+    GroupHistoryBotRequestPort, HumanInputReadyEvent, LeaderElectionPort, LeaderStatus,
+    SessionChannelDeliveryOutcome, SessionChannelOutboundPort, StateMachineResultPublishCommand,
+    StateMachineResultPublisherPort,
 };
 
 pub use metrics::{
@@ -44,6 +47,59 @@ pub async fn leader_election_port_contract_tests<T: LeaderElectionPort + ?Sized>
 
     let current = port.current_leader().await.expect("current_leader");
     if is_leader {
-        assert!(current.is_some(), "leader implementations must expose leader info");
+        assert!(
+            current.is_some(),
+            "leader implementations must expose leader info"
+        );
     }
+}
+
+pub async fn session_channel_outbound_port_contract_tests<
+    T: SessionChannelOutboundPort + ?Sized,
+>(
+    port: &T,
+) {
+    let result = port
+        .publish_human_input_ready(HumanInputReadyEvent {
+            event_id: "contract-event".to_string(),
+            group_id: "contract-group".to_string(),
+            session_id: "contract-group:00000001".to_string(),
+            run_id: "contract-run".to_string(),
+            node_id: "human-review".to_string(),
+            display_name: "Human review".to_string(),
+            instruction: "Review the upstream result".to_string(),
+            assignee_actor_id: "contract-human".to_string(),
+            channel_type: "contract-channel".to_string(),
+            notification_mode: HumanInputNotificationMode::DirectAssignee,
+            fixed_group_conversation_id: None,
+            response_ref: "contract-run:human-review".to_string(),
+            upstream_artifacts: Vec::new(),
+            judge_outcomes: Vec::new(),
+            timeout_deadline_ms: None,
+        })
+        .await;
+
+    match result {
+        Ok(SessionChannelDeliveryOutcome::NotApplicable) => {}
+        Err(bcs_service_api::ServiceError::InvalidOperation { .. }) => {}
+        other => panic!(
+            "an unconfigured HumanInput channel must be not-applicable or explicitly rejected, got {other:?}"
+        ),
+    }
+}
+
+pub async fn state_machine_result_publisher_port_contract_tests<
+    T: StateMachineResultPublisherPort + ?Sized,
+>(
+    port: &T,
+) {
+    port.publish_state_machine_result(StateMachineResultPublishCommand {
+        run_id: "contract-run".to_string(),
+        group_id: "contract-group".to_string(),
+        session_id: "contract-group:00000001".to_string(),
+        sender_bot_id: "contract-initiator".to_string(),
+        content: "contract final result".to_string(),
+    })
+    .await
+    .expect("publish state-machine result under the initiating Bot identity");
 }

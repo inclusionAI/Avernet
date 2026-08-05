@@ -37,6 +37,13 @@ dingtalk_accounts = []
 api_keys = []
 allowed_switch_provider_ids = []
 
+[gateway_principal]
+issuer = "gateway"
+audience = "bcs"
+key_id = "bare"
+# Runtime lookup only; set this environment variable to real secret material.
+signing_key_env = "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE"
+
 [cors]
 allowed_origins = [
   "https://bcs.example.com",
@@ -47,6 +54,15 @@ allowed_origins = [
 enabled = true
 mode = "pull"
 endpoint_path = "/metrics"
+
+[telemetry]
+enabled = true
+service_name = "bcn"
+# Complete OTLP traces endpoint; include /v1/traces.
+otlp_traces_endpoint = "http://otel-collector.example.com:4318/v1/traces"
+
+[telemetry.extra_headers]
+x-collector-route = "collector-local"
 
 [llm]
 type = "none"
@@ -61,6 +77,21 @@ structured_output = "json_schema"
 
 [database]
 type = "mysql"
+
+# Select a linked secret backend in deployments that do not use environment
+# variables. Group-session WebSocket JWT signing material is resolved through
+# [group_session_ws].signing_key_secret. The default logical name remains
+# "bcn-group-session-ws-jwt" for backward compatibility.
+[secret]
+provider = "env"
+
+[secret.providers.env]
+prefix = "BCS_SECRET_"
+
+[group_session_ws]
+# Optional. Override when the deployment secret backend uses a different
+# logical secret name for group-session WebSocket JWT signing material.
+signing_key_secret = "bcn-group-session-ws-jwt"
 
 [cache]
 type = "redis"
@@ -103,6 +134,15 @@ file = "bcs.log"
 level = "info"
 rotation = "daily"
 targets = ["*", "!bcs_chat_digest", "!bcs_sse_detail"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "common-error"
+path = "/var/log/bcs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
 max_keep_days = 7
 
 [[logging.outputs]]
@@ -212,6 +252,26 @@ default_ttl_seconds = 86400
 base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"
 session_link_url = "https://botchat.example.com/sessions/{session_id}"
+
+[session_files]
+storage_backend = "local"      # or "baas"
+multipart_threshold = 104857600
+max_file_size = 5368709120
+
+[session_files.backend]
+# local:
+data_dir = "/var/bcs/session-files"
+# baas (when storage_backend = "baas"):
+# endpoint = "http://baas.xxx.xxx:8080"
+# tenant = "teamclaw"
+# health_probe_path = ""
+# [session_files.backend.headers]
+# X-Baas-Token = "..."
+
+[session_files.share]
+token_secret = "replace-with-share-token-secret"
+default_ttl_seconds = 86400
+share_base_url = "https://bcs.example.com"
 
 [manifest]
 schema_version = 1

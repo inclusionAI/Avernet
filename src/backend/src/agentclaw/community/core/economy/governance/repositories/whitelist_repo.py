@@ -87,7 +87,7 @@ class GovernanceWhitelistRepository:
             owner_id: 负责人 ID。
             created_by: 操作人 ID。
             whitelist_type: 白名单类型(默认 ``governance``)。
-            source: 来源(manual / owner / admin / system / emergency)。
+            source: 来源(manual / owner / admin / system / card_callback)。
             reason: 加白原因。
             expires_at: 过期时间(None 表示永不过期)。
 
@@ -241,6 +241,65 @@ class GovernanceWhitelistRepository:
                 )
                 .count()
             )
+
+    def list_all(
+        self,
+        *,
+        whitelist_type: str = "governance",
+        owner_id: str | None = None,
+        bot_id: str | None = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[WhitelistEntry], int]:
+        """全量分页查询白名单(可选 owner/bot 筛选 + 过期开关 + total)。
+
+        Args:
+            whitelist_type: 白名单类型(默认 ``governance``)。
+            owner_id: 可选,按负责人精确筛选。
+            bot_id: 可选,按 bot 精确筛选。
+            include_expired: False(默认)排除已过期项(基于 ``expires_at``);
+                True 返回含过期项的全量视图。
+            limit: 分页大小。
+            offset: 偏移量。
+
+        Returns:
+            ``(条目领域模型列表, 筛选条件下的总数)``。
+        """
+        _env = get_current_env()
+        now = datetime.now()
+        with self._db.orm_session() as s:
+            s.expire_on_commit = False
+            base_filters = [
+                WhitelistEntryOrm.whitelist_type == whitelist_type,
+                WhitelistEntryOrm.env == _env,
+            ]
+            if owner_id is not None:
+                base_filters.append(WhitelistEntryOrm.owner_id == owner_id)
+            if bot_id is not None:
+                base_filters.append(WhitelistEntryOrm.bot_id == bot_id)
+            if not include_expired:
+                base_filters.append(
+                    or_(
+                        WhitelistEntryOrm.expires_at.is_(None),
+                        WhitelistEntryOrm.expires_at > now,
+                    )
+                )
+
+            total = (
+                s.query(WhitelistEntryOrm)
+                .filter(*base_filters)
+                .count()
+            )
+            rows = (
+                s.query(WhitelistEntryOrm)
+                .filter(*base_filters)
+                .order_by(WhitelistEntryOrm.gmt_create.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+            return [WhitelistEntry.from_orm(r) for r in rows], total
 
     @staticmethod
     def _parse_expires_at(value: object) -> datetime | None:

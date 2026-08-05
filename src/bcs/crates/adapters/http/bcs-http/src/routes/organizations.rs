@@ -5,8 +5,9 @@ use axum::{
 };
 use bcs_domain::{ActorKind, Organization, OrganizationMember};
 use bcs_protocol::{
-    CreateOrganizationRequest, OrganizationCandidateBotListResponse,
-    OrganizationCandidateBotResponse, OrganizationListResponse, OrganizationMemberListResponse,
+    CreateOrganizationRequest, OrganizationCandidateBotDetailResponse,
+    OrganizationCandidateBotListResponse, OrganizationCandidateBotResponse,
+    OrganizationListResponse, OrganizationMemberListResponse,
     OrganizationMemberBotResponse, OrganizationMemberDetailResponse, OrganizationMemberResponse,
     OrganizationMemberProfileResponse, OrganizationResponse,
     PatchOrganizationMemberProfileRequest, PatchOrganizationRequest, PutOrganizationMemberRequest,
@@ -41,12 +42,18 @@ pub struct ListMembersQuery {
 
 #[derive(Debug, Deserialize)]
 pub struct CandidateBotsQuery {
+    organization_code: String,
     q: Option<String>,
     provider_id: Option<String>,
     #[serde(default)]
     offset: Option<u64>,
     #[serde(default)]
     limit: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CandidateBotDetailQuery {
+    organization_code: String,
 }
 
 pub async fn create_organization(
@@ -72,10 +79,10 @@ pub async fn create_organization(
 
 pub async fn get_organization(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<OrganizationResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let organization = state
         .services
         .organization_management
@@ -105,11 +112,11 @@ pub async fn list_organizations(
 
 pub async fn patch_organization(
     State(state): State<HttpAppState>,
-    Path((provider_id, organization_code)): Path<(String, String)>,
+    Path(organization_code): Path<String>,
     headers: HeaderMap,
     Json(req): Json<PatchOrganizationRequest>,
 ) -> Result<Json<OrganizationResponse>, HttpAdapterError> {
-    let auth = organization_auth(provider_id, &headers)?;
+    let auth = organization_member_auth(&headers)?;
     let organization = state
         .services
         .organization_management
@@ -277,7 +284,11 @@ pub async fn candidate_bots(
         .candidate_bots_page(
             auth,
             OrganizationCandidatePageQuery {
-                candidate: OrganizationCandidateQuery { q: query.q, provider_id: query.provider_id },
+                candidate: OrganizationCandidateQuery {
+                    organization_code: query.organization_code,
+                    q: query.q,
+                    provider_id: query.provider_id,
+                },
                 offset,
                 limit,
             },
@@ -289,6 +300,30 @@ pub async fn candidate_bots(
         offset: page.offset,
         limit: page.limit,
         total: page.total,
+    }))
+}
+
+pub async fn candidate_bot_detail(
+    State(state): State<HttpAppState>,
+    Path((provider_id, bot_uuid)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(query): Query<CandidateBotDetailQuery>,
+) -> Result<Json<OrganizationCandidateBotDetailResponse>, HttpAdapterError> {
+    let auth = organization_auth(provider_id, &headers)?;
+    let detail = state
+        .services
+        .organization_management
+        .candidate_bot_detail(auth, &query.organization_code, &bot_uuid)
+        .await
+        .map_err(organization_error)?
+        .ok_or_else(|| {
+            HttpAdapterError::NotFound("organization candidate bot not found".to_string())
+        })?;
+    Ok(Json(OrganizationCandidateBotDetailResponse {
+        organization_code: detail.organization_code,
+        bot_uuid: detail.bot_uuid,
+        is_member: detail.is_member,
+        bot: member_bot_to_response(detail.bot),
     }))
 }
 
@@ -375,6 +410,6 @@ fn candidate_to_response(bot: OrganizationCandidateBot) -> OrganizationCandidate
     OrganizationCandidateBotResponse {
         bot_uuid: bot.bot_uuid,
         provider_id: bot.provider_id,
-        capabilities: to_wire_capabilities(bot.capabilities),
+        name: bot.capabilities.name,
     }
 }

@@ -8,7 +8,23 @@ from ._exceptions import (
     SessionClosedError,
     SessionError,
     SessionNotFoundError,
+    StagingObjectNotFoundError,
     TooManyRequestsError,
+    TransferNotTerminalError,
+    TransferStateConflictError,
+)
+from ._file_transfer_models import (
+    CancelUploadResponse,
+    CompleteUploadResponse,
+    DeleteTransferResponse,
+    GetDownloadUrlRequest,
+    GetDownloadUrlResponse,
+    GetTransferStatusResponse,
+    GetUploadUrlRequest,
+    GetUploadUrlResponse,
+    ShareLinkRequest,
+    ShareLinkResponse,
+    TransferNotFoundError,
 )
 from ._http_connection_info import HttpConnectionInfo
 from ._models import (
@@ -23,6 +39,7 @@ from ._models import (
 from ._protocols import (
     BotCmdDispatcher,
     BotFetchStartProgressDispatcher,
+    BotFileTransferDispatcher,
     BotHttpConnInfoDispatcher,
     BotHttpDispatcher,
     BotOpenFolderDispatcher,
@@ -39,10 +56,13 @@ __all__ = [
     "BotServiceError",
     "NoActiveDevicesError",
     "NoDevicesFoundError",
+    "StagingObjectNotFoundError",
     "SessionClosedError",
     "SessionError",
     "SessionNotFoundError",
     "TooManyRequestsError",
+    "TransferNotTerminalError",
+    "TransferStateConflictError",
     # Models
     "BotBindingInfo",
     "BotChatContext",
@@ -56,9 +76,22 @@ __all__ = [
     # Protocols
     "BotCmdDispatcher",
     "BotFetchStartProgressDispatcher",
+    "BotFileTransferDispatcher",
     "BotHttpConnInfoDispatcher",
     "BotHttpDispatcher",
     "BotWssDispatcher",
     "BotOpenFolderDispatcher",
     "BotRunner",
+    # File Transfer Models
+    "CancelUploadResponse",
+    "CompleteUploadResponse",
+    "DeleteTransferResponse",
+    "GetDownloadUrlRequest",
+    "GetDownloadUrlResponse",
+    "GetTransferStatusResponse",
+    "GetUploadUrlRequest",
+    "GetUploadUrlResponse",
+    "ShareLinkRequest",
+    "ShareLinkResponse",
+    "TransferNotFoundError",
 ]

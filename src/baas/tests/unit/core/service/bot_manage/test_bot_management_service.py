@@ -9,8 +9,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from secbaas.community.api.bot_manage import BotConfig, BotStatus, StopBotResponse
+from secbaas.community.api.bot_manage import (
+    BotConfig,
+    BotStatus,
+    StopBotResponse,
+    UpdateDevicesResponse,
+)
 from secbaas.community.api.bot_runtime import BotNotFoundError
+from secbaas.community.api.device_manage import DeployConfig
+from secbaas.community.api.device_manage._models import ResourceSpecification
 from secbaas.community.api.publish_manage import (
     DEFAULT_CALLBACK_TIMEOUT_SECONDS,
     PublishStatus,
@@ -21,6 +28,7 @@ from secbaas.community.core.service.bot_manage import (
     DefaultBotManagementService as BotManagementService,
 )
 from secbaas.community.core.service.bot_manage import (
+    merge_deploy_config,
     resolve_callback_timeout,
 )
 
@@ -34,8 +42,14 @@ def _make_service(
     health_checker=None,
 ):
     """Create a DefaultBotManagementService instance with mocked dependencies."""
+    if bot_repo is None:
+        bot_repo = MagicMock()
+        # Ensure list_by_bot_uuid returns records with valid extra_config for config resolution
+        default_record = MagicMock()
+        default_record.extra_config = {}
+        bot_repo.list_by_bot_uuid.return_value = [default_record]
     return BotManagementService(
-        bot_repo=bot_repo if bot_repo is not None else MagicMock(),
+        bot_repo=bot_repo,
         device_repo=device_repo if device_repo is not None else MagicMock(),
         system_config_repo=system_config_repo
         if system_config_repo is not None
@@ -628,6 +642,60 @@ class TestListBots:
         assert call_kwargs["page_size"] == 100
 
 
+class TestMergeDeployConfig:
+    """Tests for merge_deploy_config field-level merge behavior."""
+
+    def test_merge_current_none_returns_override_only(self):
+        """When current is None, result is equivalent to the override alone."""
+        override = DeployConfig(ttl_in_minutes=120, docker_image="img:v2")
+        result = merge_deploy_config(None, override)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+        assert result.envs is None
+        assert result.mount_points is None
+
+    def test_merge_override_none_fields_preserved(self):
+        """Current fields NOT in override are preserved."""
+        current = DeployConfig(
+            envs={"KEY": "val"},
+            mount_points=[],
+            ttl_in_minutes=60,
+            resource_spec=ResourceSpecification(cpu=2, memory=4096),
+        )
+        override = DeployConfig(docker_image="img:v2", ttl_in_minutes=120)
+        result = merge_deploy_config(current, override)
+        assert result.envs == {"KEY": "val"}
+        assert result.mount_points == []
+        assert result.resource_spec == ResourceSpecification(cpu=2, memory=4096)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+
+    def test_merge_override_only_fields(self):
+        """Override-only fields are set without touching current fields."""
+        current = DeployConfig(ttl_in_minutes=60)
+        override = DeployConfig(docker_image="img:v2")
+        result = merge_deploy_config(current, override)
+        assert result.ttl_in_minutes == 60
+        assert result.docker_image == "img:v2"
+
+    def test_merge_dict_override(self):
+        """Plain dict override works the same as DeployConfig instance."""
+        current = DeployConfig(envs={"K": "V"}, ttl_in_minutes=60)
+        override_dict = {"ttl_in_minutes": 120, "docker_image": "img:v2"}
+        result = merge_deploy_config(current, override_dict)
+        assert result.envs == {"K": "V"}
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v2"
+
+    def test_merge_current_empty_none_fields(self):
+        """When current's fields are all None, override fills everything."""
+        current = DeployConfig()
+        override = DeployConfig(ttl_in_minutes=120)
+        result = merge_deploy_config(current, override)
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image is None
+
+
 class TestScaleBot:
     """Tests for BotManagementService.scale_bot"""
 
@@ -998,6 +1066,316 @@ class TestScaleBot:
         call_kwargs = mock_publish_service.create_publish.call_args.kwargs
         assert call_kwargs["config"].auto_approve is False
         mock_publish_service.approve_stage.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_with_bot_config_provided(self):
+        """scale_bot with bot_config merges config and passes deploy_config to PublishConfig."""
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 789
+
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        mock_bot_repo = MagicMock()
+        mock_record = MagicMock()
+        mock_record.extra_config = {}
+        mock_bot_repo.list_by_bot_uuid.return_value = [mock_record]
+
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+        bot_config = BotConfig(
+            sla_grade="enterprise",
+            callback_timeout_seconds=600,
+            auto_approve_publish=True,
+            entity_id="entity-123",
+            entity_type="workspace",
+            share_policy={"public": True},
+            deploy_config=DeployConfig(ttl_in_minutes=120),
+        )
+
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                target_count=3,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                auto_approve_publish=True,
+                bot_config=bot_config,
+            )
+
+        assert result.publish_id == 789
+        assert result.target_count == 3
+
+        call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+        publish_config = call_kwargs["config"]
+        assert publish_config.auto_approve is True
+        assert publish_config.callback_timeout_seconds == 600
+        assert publish_config.deploy_config is not None
+        assert publish_config.deploy_config.ttl_in_minutes == 120
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_deploy_config_field_level_merge(self):
+        """scale_bot with partial deploy_config override preserves non-overridden fields."""
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 789
+
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        mock_bot_repo = MagicMock()
+        mock_record = MagicMock()
+        mock_record.extra_config = {
+            "deploy_config": {
+                "envs": {"EXISTING": "val"},
+                "mount_points": [],
+                "ttl_in_minutes": 60,
+            }
+        }
+        mock_bot_repo.list_by_bot_uuid.return_value = [mock_record]
+
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        bot_config = BotConfig(
+            deploy_config=DeployConfig(ttl_in_minutes=120, docker_image="img:v2"),
+        )
+
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                target_count=3,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                bot_config=bot_config,
+            )
+
+        call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+        publish_config = call_kwargs["config"]
+        assert publish_config.deploy_config is not None
+        assert publish_config.deploy_config.envs == {"EXISTING": "val"}
+        assert publish_config.deploy_config.mount_points == []
+        assert publish_config.deploy_config.ttl_in_minutes == 120
+        assert publish_config.deploy_config.docker_image == "img:v2"
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_without_bot_config_reads_db_config(self):
+        """scale_bot without bot_config reads extra_config from DB for PublishConfig."""
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 789
+
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        mock_bot_repo = MagicMock()
+        mock_record = MagicMock()
+        mock_record.extra_config = {
+            "callback_timeout_seconds": 300,
+            "sla_grade": "enterprise",
+        }
+        mock_bot_repo.list_by_bot_uuid.return_value = [mock_record]
+
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                target_count=3,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+            )
+
+        assert result.publish_id == 789
+
+        call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+        publish_config = call_kwargs["config"]
+        assert publish_config.callback_timeout_seconds == 300
+        assert publish_config.auto_approve is False
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_with_partial_bot_config_merges(self):
+        """scale_bot with partial bot_config merges: provided field overrides, missing keeps DB."""
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.bot_uuid = "BOT-001"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 789
+
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+
+        mock_bot_repo = MagicMock()
+        mock_record = MagicMock()
+        mock_record.extra_config = {
+            "callback_timeout_seconds": 300,
+            "sla_grade": "standard",
+        }
+        mock_bot_repo.list_by_bot_uuid.return_value = [mock_record]
+
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        bot_config = BotConfig(sla_grade="enterprise")
+
+        with patch.object(
+            service, "get_bot", new_callable=AsyncMock, return_value=mock_bot_response
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                target_count=3,
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                bot_config=bot_config,
+            )
+
+        assert result.publish_id == 789
+
+        call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+        publish_config = call_kwargs["config"]
+        assert publish_config.callback_timeout_seconds == 300  # from DB, not overridden
 
 
 class TestUpdateBot:
@@ -3082,8 +3460,106 @@ class TestUpdateBotConfigUpdate:
                 request_id="test-request-id-12345678901234567890",
             )
 
-            assert result is not None
-            assert result.publish_id == 888
+        assert result is not None
+        assert result.publish_id == 888
+
+    @pytest.mark.asyncio
+    async def test_update_devices_merges_callback_timeout_seconds(self):
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {
+            "share_policy": {"old": "value"},
+            "callback_timeout_seconds": 1800,
+        }
+        mock_record.model_dump = MagicMock(
+            return_value={"id": 1, "bot_uuid": "BOT-001"}
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 889
+
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.status = "ACTIVE"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+            }
+        )
+
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.get_by_bot_uuid.return_value = mock_record
+        mock_device_repo = MagicMock()
+        mock_device = MagicMock()
+        mock_device.device_uuid = "DEV-001"
+        mock_device_repo.list_by_bot_id.return_value = [mock_device]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        record_for_get = MagicMock()
+        record_for_get.id = 1
+        record_for_get.extra_config = {
+            "share_policy": {"old": "value"},
+            "callback_timeout_seconds": 1800,
+        }
+
+        with (
+            patch.object(
+                service,
+                "get_bot",
+                new_callable=AsyncMock,
+                return_value=mock_bot_response,
+            ),
+            patch.object(
+                service, "_get_bot_record_by_uuid", return_value=record_for_get
+            ),
+        ):
+            bot_config = BotConfig(
+                share_policy={"new": "policy"},
+                deploy_config=None,
+                entity_id="",
+                entity_type="",
+                sla_grade="standard",
+                callback_timeout_seconds=300,
+                auto_approve_publish=False,
+            )
+
+            result = await service.update_devices(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                device_uuids=["DEV-001"],
+                config=bot_config,
+            )
+
+        assert result is not None
+        assert result.publish_id == 889
 
     @pytest.mark.asyncio
     async def test_update_bot_config_with_name_and_desc(self):
@@ -3838,6 +4314,156 @@ class TestUpdateBotConfigMerges:
             )
 
             assert result.publish_id == 890
+
+    @pytest.mark.asyncio
+    async def test_update_bot_merges_callback_timeout_seconds(self):
+        """Test update_bot merges callback_timeout_seconds into stored config."""
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {"callback_timeout_seconds": 1800}
+        mock_record.name = "Test Bot"
+
+        mock_publish = MagicMock()
+        mock_publish.id = 891
+
+        mock_updated_bot = MagicMock()
+        mock_updated_bot.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": "ACTIVE",
+            "name": "Test Bot",
+            "description": None,
+            "template_uuid": None,
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+
+        mock_bot_repo = MagicMock()
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot = AsyncMock(return_value=mock_updated_bot)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+            bot_service=mock_bot_service,
+        )
+
+        with patch.object(
+            service,
+            "_get_operational_bot_record_by_uuid_for_update",
+            return_value=mock_record,
+        ):
+            bot_config = MagicMock(spec=BotConfig)
+            bot_config.share_policy = None
+            bot_config.deploy_config = None
+            bot_config.entity_id = ""
+            bot_config.entity_type = ""
+            bot_config.sla_grade = ""
+            bot_config.callback_timeout_seconds = 600
+            bot_config.auto_approve_publish = False
+
+            result = await service.update_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                bot_config=bot_config,
+                request_id="test-request-id-12345678901234567890",
+            )
+
+            assert result.publish_id == 891
+
+    @pytest.mark.asyncio
+    async def test_update_bot_preserves_existing_callback_timeout_when_none(self):
+        """Test update_bot preserves existing callback_timeout when incoming is None."""
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {"callback_timeout_seconds": 1200}
+        mock_record.name = "Test Bot"
+
+        mock_publish = MagicMock()
+        mock_publish.id = 892
+
+        mock_updated_bot = MagicMock()
+        mock_updated_bot.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": "ACTIVE",
+            "name": "Test Bot",
+            "description": None,
+            "template_uuid": None,
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+
+        mock_bot_repo = MagicMock()
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot = AsyncMock(return_value=mock_updated_bot)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+            bot_service=mock_bot_service,
+        )
+
+        with patch.object(
+            service,
+            "_get_operational_bot_record_by_uuid_for_update",
+            return_value=mock_record,
+        ):
+            bot_config = MagicMock(spec=BotConfig)
+            bot_config.share_policy = None
+            bot_config.deploy_config = None
+            bot_config.entity_id = ""
+            bot_config.entity_type = ""
+            bot_config.sla_grade = ""
+            bot_config.callback_timeout_seconds = None
+            bot_config.auto_approve_publish = False
+
+            result = await service.update_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                bot_config=bot_config,
+                request_id="test-request-id-12345678901234567890",
+            )
+
+            assert result.publish_id == 892
 
 
 class TestAutoApprovePublish:
@@ -4885,3 +5511,208 @@ class TestStopBot:
         assert result is not None
         call_kwargs = mock_publish_service.create_publish.call_args.kwargs
         assert call_kwargs["config"].auto_approve is True
+
+
+class TestUpdateDevicesConfigMerge:
+    """Tests for BotManagementService.update_devices with config merge."""
+
+    @pytest.mark.asyncio
+    async def test_update_devices_merges_config(self):
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {
+            "share_policy": {"old": "value"},
+            "deploy_config": None,
+        }
+        mock_record.model_dump = MagicMock(
+            return_value={"id": 1, "bot_uuid": "BOT-001"}
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 888
+
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.status = "ACTIVE"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+            }
+        )
+
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.get_by_bot_uuid.return_value = mock_record
+        mock_device_repo = MagicMock()
+        mock_device = MagicMock()
+        mock_device.device_uuid = "DEV-001"
+        mock_device_repo.list_by_bot_id.return_value = [mock_device]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        record_for_get = MagicMock()
+        record_for_get.id = 1
+        record_for_get.extra_config = {
+            "share_policy": {"old": "value"},
+            "deploy_config": None,
+        }
+
+        with (
+            patch.object(
+                service,
+                "get_bot",
+                new_callable=AsyncMock,
+                return_value=mock_bot_response,
+            ),
+            patch.object(
+                service, "_get_bot_record_by_uuid", return_value=record_for_get
+            ),
+        ):
+            bot_config = BotConfig(
+                share_policy={"new": "policy"},
+                deploy_config=None,
+                entity_id="",
+                entity_type="",
+                sla_grade="standard",
+                callback_timeout_seconds=None,
+                auto_approve_publish=False,
+            )
+
+            result = await service.update_devices(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                device_uuids=["DEV-001"],
+                config=bot_config,
+            )
+
+        assert result is not None
+        assert result.publish_id == 888
+
+    @pytest.mark.asyncio
+    async def test_update_devices_merges_deploy_config(self):
+        """update_devices with deploy_config override triggers field-level merge."""
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.extra_config = {
+            "deploy_config": {
+                "envs": {"EXISTING": "val"},
+                "ttl_in_minutes": 60,
+            },
+        }
+        mock_record.model_dump = MagicMock(
+            return_value={"id": 1, "bot_uuid": "BOT-001"}
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 888
+
+        mock_bot_response = MagicMock()
+        mock_bot_response.id = 1
+        mock_bot_response.status = "ACTIVE"
+        mock_bot_response.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-001",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "ACTIVE",
+                "name": "Test Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+            }
+        )
+
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.get_by_bot_uuid.return_value = mock_record
+        mock_device_repo = MagicMock()
+        mock_device = MagicMock()
+        mock_device.device_uuid = "DEV-001"
+        mock_device_repo.list_by_bot_id.return_value = [mock_device]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+        )
+
+        record_for_get = MagicMock()
+        record_for_get.id = 1
+        record_for_get.extra_config = {
+            "deploy_config": {
+                "envs": {"EXISTING": "val"},
+                "ttl_in_minutes": 60,
+            },
+        }
+
+        with (
+            patch.object(
+                service,
+                "get_bot",
+                new_callable=AsyncMock,
+                return_value=mock_bot_response,
+            ),
+            patch.object(
+                service, "_get_bot_record_by_uuid", return_value=record_for_get
+            ),
+        ):
+            bot_config = BotConfig(
+                share_policy=None,
+                deploy_config=DeployConfig(ttl_in_minutes=120, docker_image="img:v2"),
+                entity_id="",
+                entity_type="",
+                sla_grade="standard",
+                callback_timeout_seconds=None,
+                auto_approve_publish=False,
+            )
+
+            result = await service.update_devices(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                device_uuids=["DEV-001"],
+                config=bot_config,
+            )
+
+        assert result is not None
+        assert result.publish_id == 888

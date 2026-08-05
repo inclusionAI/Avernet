@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from singlebox_coverage_report import (  # noqa: E402
     _load_jsonl_keys,
     _matches_core_path,
+    _plugin_evidence_hits,
     acceptance_targets_for,
     build_module_report,
     select_module_names,
@@ -107,13 +108,17 @@ def test_repository_manifest_registers_existing_coverage_modules_and_paths():
     module_names = select_module_names(manifest, [])
 
     assert module_names == [
+        "bot_dormant",
+        "auth",
         "devices",
         "access",
         "bot_chat",
         "bot_collaborator",
         "cron",
         "expert_chat",
+        "files",
         "harness",
+        "resources",
     ]
     for module_name in module_names:
         module = manifest["modules"][module_name]
@@ -271,6 +276,127 @@ def test_validate_thresholds_reports_applicable_plugin_failure():
     ]
 
 
+def test_plugin_evidence_hits_uses_executed_implementation_body(tmp_path: Path):
+    source = tmp_path / "src/agentclaw/community/plugins/local/passport.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class LocalPassportPlugin:\n"
+        "    def freeze_agent_passport(self):\n"
+        "        marker = 'called'\n"
+        "        return marker\n"
+        "\n"
+        "    def unfreeze_agent_passport(self):\n"
+        "        return 'not called'\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "modules": {
+            "bot_dormant": {
+                "plugin_api": {
+                    "items": [
+                        {
+                            "key": "PassportPlugin.freeze_agent_passport",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/passport.py",
+                                "symbol": "LocalPassportPlugin.freeze_agent_passport",
+                            },
+                        },
+                        {
+                            "key": "PassportPlugin.unfreeze_agent_passport",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/passport.py",
+                                "symbol": "LocalPassportPlugin.unfreeze_agent_passport",
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+    }
+    coverage = {
+        "files": {
+            "src/agentclaw/community/plugins/local/passport.py": {
+                "executed_lines": [1, 2, 3, 4, 6]
+            }
+        }
+    }
+
+    assert _plugin_evidence_hits(
+        manifest, ["bot_dormant"], coverage, backend_root=tmp_path
+    ) == ["PassportPlugin.freeze_agent_passport"]
+
+
+def test_plugin_evidence_does_not_count_one_line_definition(tmp_path: Path):
+    source = tmp_path / "src/agentclaw/community/plugins/local/device.py"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "class DeviceAdapter:\n"
+        "    def invoke(self): return None\n",
+        encoding="utf-8",
+    )
+    manifest = {
+        "modules": {
+            "devices": {
+                "plugin_api": {
+                    "items": [
+                        {
+                            "key": "DeviceAdapterTransport.invoke",
+                            "evidence": {
+                                "path": "src/agentclaw/community/plugins/local/device.py",
+                                "symbol": "DeviceAdapter.invoke",
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+    }
+    coverage = {
+        "files": {
+            str(source): {
+                "executed_lines": [2],
+            }
+        }
+    }
+
+    assert (
+        _plugin_evidence_hits(
+            manifest,
+            ["devices"],
+            coverage,
+            backend_root=tmp_path,
+        )
+        == []
+    )
+
+
+def test_build_module_report_uses_mapping_keys_for_plugin_metric():
+    manifest = _manifest()
+    manifest["modules"]["devices"]["plugin_api"] = {
+        "items": [
+            {
+                "key": "DeviceAdapterTransport.invoke",
+                "evidence": {
+                    "path": "src/plugin.py",
+                    "symbol": "LocalTransport.invoke",
+                },
+            }
+        ]
+    }
+
+    report = build_module_report(
+        manifest=manifest,
+        module_name="devices",
+        coverage=_coverage(),
+        router_hits=[],
+        plugin_hits=["DeviceAdapterTransport.invoke"],
+    )
+
+    assert report["plugin_api"]["covered_items"] == [
+        "DeviceAdapterTransport.invoke"
+    ]
+
+
 def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path: Path):
     report_dir = tmp_path / "reports"
     report_dir.mkdir()
@@ -281,6 +407,31 @@ def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path
                 "status": "passed",
                 "acceptance": {"target": "tests/community/acceptance/devices"},
                 "coverage": {"backend": {"router_hits": 4, "plugin_hits": 0}},
+                "systems": {
+                    "bcs": {
+                        "name": "bcs",
+                        "runtime_line": {
+                            "covered": 45,
+                            "total": 100,
+                            "percent": 45.0,
+                        },
+                        "method": {
+                            "covered": 40,
+                            "total": 100,
+                            "percent": 40.0,
+                        },
+                        "router_api": {
+                            "covered": 12,
+                            "total": 12,
+                            "percent": 100.0,
+                        },
+                        "cli_command": {
+                            "covered": 8,
+                            "total": 8,
+                            "percent": 100.0,
+                        },
+                    }
+                },
             }
         ),
         encoding="utf-8",
@@ -306,6 +457,14 @@ def test_update_report_artifacts_keeps_summary_and_dashboard_consistent(tmp_path
     assert "60.00%" in dashboard
     assert "66.67%" in dashboard
     assert "Not applicable" in dashboard
+    assert "BCS System" in markdown
+    assert "Runtime Line: 45.00% (45/100)" in markdown
+    assert "Method: 40.00% (40/100)" in markdown
+    assert "Router API: 100.00% (12/12)" in markdown
+    assert "CLI Commands: 100.00% (8/8)" in markdown
+    assert "BCS System" in dashboard
+    assert "Runtime Line" in dashboard
+    assert "CLI Commands" in dashboard
 
 
 def test_update_report_artifacts_marks_threshold_failure(tmp_path: Path):

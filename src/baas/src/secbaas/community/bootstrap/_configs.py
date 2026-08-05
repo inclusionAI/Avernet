@@ -86,6 +86,9 @@ class ConfigKey(StrEnum):
     BCN_UPLINK_BASE_URL = "bcn.uplink.base_url"
     BCN_UPLINK_PROVIDER_ID = "bcn.uplink.provider_id"
 
+    # Gateway (JWT-authenticated message delivery)
+    GATEWAY_JWT_SECRET_NAME = "gateway.jwt.secret_name"
+
 
 def _read_config(cfg, key: ConfigKey):
     """Traverse ``container.config`` by dotted key, raise if unset.
@@ -196,8 +199,32 @@ class PluginConfig(ConfigSchema):
     bot_service: str = Field(default="stub", pattern=r"^(real|local|stub)$")
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
+    file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
     database: DatabasePluginConfig = Field(default_factory=DatabasePluginConfig)
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
+
+
+class FileTransferPollerConfigSchema(ConfigSchema):
+    """File transfer poller configuration."""
+
+    config_section = "file_transfer_poller"
+    enabled: bool = Field(default=False)
+    lock_expire_seconds: int = Field(default=300, ge=1)
+    cron_interval_seconds: int = Field(default=10, ge=1)
+    upload_timeout_seconds: int = Field(default=3600, ge=1)
+    max_concurrent_tickets: int = Field(default=5, ge=1)
+    dry_run: bool = Field(default=False)
+
+
+class FileTransferOssConfigSchema(ConfigSchema):
+    """OSS storage backend configuration for file transfer."""
+
+    config_section = "file_transfer_oss"
+    endpoint: str = Field(default="")
+    external_endpoint: str = Field(default="")
+    bucket_name: str = Field(default="")
+    staging_root_path: str = Field(default="baas-file-transfer")
+    secret_name: str = Field(default="")
 
 
 class BotServiceConfig(ConfigSchema):
@@ -271,6 +298,12 @@ class BotRunnerConfig(ConfigSchema):
         ge=0,
         description="单个任务最大执行秒数，默认 660（10分钟+1分钟缓冲）；0=不限；超时自动取消并释放槽位",
     )
+    default_timeout: float = Field(
+        default=30.0,
+        gt=0,
+        description="请求默认超时秒数，metadata 未指定 timeout 时使用",
+    )
+    origin: str = Field(default="", description="设置请求的origin header")
 
 
 class BcnUplinkConfigSchema(BaseModel):
@@ -301,6 +334,20 @@ class BcnConfig(ConfigSchema):
     config_section = "bcn"
     api_key: _BcnApiKeyConfig = Field(default_factory=_BcnApiKeyConfig)
     uplink: _BcnUplinkConfig = Field(default_factory=_BcnUplinkConfig)
+
+
+class _GatewayJwtConfig(BaseSettings):
+    """Gateway JWT config."""
+
+    model_config = _CFG
+    secret_name: str = "other_manual_secbaas_gateway_jwt_secret"
+
+
+class GatewayConfig(ConfigSchema):
+    """Gateway config — JWT-authenticated message delivery."""
+
+    config_section = "gateway"
+    jwt: _GatewayJwtConfig = Field(default_factory=_GatewayJwtConfig)
 
 
 class BotChatLogRelationConfig(ConfigSchema):

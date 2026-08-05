@@ -173,6 +173,10 @@ impl BotRegistryCoreService for BotCore {
         self.repo.get(bot_id).await
     }
 
+    async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
+        self.repo.try_get(bot_id).await
+    }
+
     async fn get_including_deleted(&self, bot_id: &str) -> Option<RegisteredBot> {
         self.repo.get_including_deleted(bot_id).await
     }
@@ -346,6 +350,13 @@ impl BotRegistryCoreService for BotCore {
 
     async fn list_bots_by_creator(&self, created_by: &str) -> Vec<RegisteredBot> {
         self.repo.list_bots_by_creator(created_by).await
+    }
+
+    async fn try_list_bots_by_creator(
+        &self,
+        created_by: &str,
+    ) -> ServiceResult<Vec<RegisteredBot>> {
+        self.repo.try_list_bots_by_creator(created_by).await
     }
 
     async fn discover(&self, query: &str) -> Vec<RegisteredBot> {

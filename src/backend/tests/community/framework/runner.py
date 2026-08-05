@@ -127,7 +127,9 @@ def _prepare_request(case: EndpointCase, world: World) -> tuple[str, dict[str, A
     url = _build_url(case.path, case.input.path_params)
 
     body_kwargs: dict[str, Any] = {}
-    if case.input.files is not None or case.input.form_data is not None:
+    if case.input.raw_body is not None:
+        body_kwargs["content"] = case.input.raw_body
+    elif case.input.files is not None or case.input.form_data is not None:
         if case.input.form_data is not None:
             body_kwargs["data"] = dict(case.input.form_data)
         if case.input.files is not None:
