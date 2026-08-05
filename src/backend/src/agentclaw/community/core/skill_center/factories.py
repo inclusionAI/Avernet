@@ -244,6 +244,9 @@ class SkillServiceFactory:
         owner_id: str,
         bot_id: str,
         engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
         locator: str,
     ) -> LocalSkillPackageStorage:
         """Re-open an existing internal Local package locator for cleanup."""
@@ -253,9 +256,28 @@ class SkillServiceFactory:
             bot_id=bot_id,
             engine_type=engine_type,
         )
+        local_dir = service.local_dir
+        if not service.runtime_uses_pool_paths:
+            local_dir = self._path_factory.get_bot_skills_local_dir(
+                entity_id,
+                bot_id,
+                engine_type or "openclaw",
+                entity_type,
+                is_desktop=is_desktop,
+                is_teclaw=is_teclaw,
+            )
+        resolved_locator = Path(locator)
+        if not resolved_locator.is_absolute():
+            if resolved_locator.parts[:1] == (local_dir.name,):
+                resolved_locator = local_dir.parent / resolved_locator
+            else:
+                resolved_locator = local_dir / resolved_locator
+        local_skill_path_adapter = service._local_skill_path_adapter
+        if is_teclaw and not service.runtime_uses_pool_paths:
+            local_skill_path_adapter = to_local_skill_engine_path
         return LocalSkillPackageStorage(
             service._device_fs_factory(bot_id, owner_id),
-            service._local_skill_path_adapter(locator),
+            local_skill_path_adapter(str(resolved_locator)),
         )
 
 
