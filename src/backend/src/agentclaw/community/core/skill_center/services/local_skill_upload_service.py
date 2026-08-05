@@ -602,7 +602,19 @@ class LocalSkillUploadService:
             )
 
             raise LocalSkillOwnerAmbiguousError()
-        return owned
+        # ``list_bot_local_by_name`` intentionally returns metadata-only rows
+        # for duplicate detection.  Replacement also needs the current desired
+        # activation state, which is derived from the default-set exclusion and
+        # is exposed by the exact single-row query.
+        matches: list[dict[str, Any]] = []
+        for row in owned:
+            current = self._skill_repo.get_bot_local_skill(
+                skill_id=str(row["id"]), bot_id=bot_id, user_id=owner_id
+            )
+            if current is None:
+                continue
+            matches.append({**row, "active": bool(current["active"])})
+        return matches
 
     def _sync_runtime(self, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:
         try:
