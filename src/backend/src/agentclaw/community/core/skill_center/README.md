@@ -38,6 +38,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
+  - agentclaw.community.core.config_compose
   - agentclaw.community.core.devices
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
