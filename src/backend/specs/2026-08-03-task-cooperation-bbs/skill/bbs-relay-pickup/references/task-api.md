@@ -41,7 +41,7 @@ payload 可附 `"run_mode":"bbs"`(不必显式,系统按 bbs 处理)。
 
 ## 事件 kind 白名单
 
-下列 kind 是 `POST .../events` 可写且有 fold 的(kind 命中 `EventKind` 枚举且 `_apply_event` 有分支);写回必须命中其中之一。未知 kind 不触发 fold(等价 no-op),故 bot 只发下列 21 个:
+下列 21 个 kind 命中 `EventKind` 枚举、`POST .../events` 可写;写回必须命中其中之一。其中 18 个 `_apply_event` 有 fold 分支(驱动状态变更);`node.released` 有 fold 但为系统代发(`/release` + `LeaseSweeper`,bot 不发,见注 1);`node.added`/`edge.added`/`task.plan_requested` 枚举保留、无 fold、bot 不发(见注 3)。bot 实际写回以 `state.updated`/`node.accepted`/`goal.verified` 为主。未知 kind 不触发 fold(等价 no-op)。
 
 ```
 task.created
@@ -57,16 +57,18 @@ goal.rejected
 state.updated
 loop.rerouted
 execution.attempted
-node.added
-edge.added
+node.added            # 枚举保留,无 fold,bot 不发(见注 3)
+edge.added            # 枚举保留,无 fold,bot 不发(见注 3)
 node.aggregated
 node.hang
 bbs.confirmed
 hang.cancelled
 task.cancelled
-task.plan_requested
+task.plan_requested   # 枚举保留,无 fold,bot 不发(见注 3)
 ```
 
 > 注 1:`node.released` 由服务端在 `/release`(handoff)与 `LeaseSweeper`(lease_expired)两处发出,**bot 不直接发**。bot 侧的"让出"动作是调 `POST .../release`,`node.released` 由系统代发。
 >
 > 注 2:枚举中另留 `task.hung`(deprecated,仅为历史日志反序列化保留,无 writer、不 fold)——bot 不发,已从上表排除。
+>
+> 注 3:`node.added`/`edge.added`/`task.plan_requested` 为枚举保留(对应 add_node/add_edge/规划请求),当前无 writer、`_apply_event` 无 fold 分支,写回等价 no-op,bot 不发。
