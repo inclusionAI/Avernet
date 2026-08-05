@@ -119,17 +119,12 @@ modules:
       - src/agentclaw/community/core/bot_chat/
     router_api:
       status: applicable
-      reason: Product and signed Bot Logs reads are exercised against the live Backend; only the external-service-dependent Langfuse health route is excluded.
+      reason: The Langfuse health route is external-service dependent and is outside the local singlebox denominator.
       items:
         - POST /api/bot-chat/otel/traces
         - POST /api/bot-chat/log-relations
         - GET /api/v1/bot-chats
         - GET /api/v1/bot-chats/{trace_id}
-        - GET /openapi/v1/bots/logs/sessions/{session_key}/traces
-        - GET /openapi/v1/bots/logs/tasks/{biz_scene}/{biz_task_id}/traces
-        - GET /openapi/v1/bots/logs/groups/{group_id}/traces
-        - GET /openapi/v1/bots/logs/traces
-        - GET /openapi/v1/bots/logs/traces/{trace_id}
     plugin_api:
       status: not_applicable
       reason: Bot chat currently has no independently attributable Plugin API boundary.

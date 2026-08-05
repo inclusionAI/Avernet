@@ -1,7 +1,5 @@
-"""Secret concern — test/singlebox binding with explicit local overrides."""
+"""Secret concern — test / singlebox binding (local stub, returns ``None``)."""
 from __future__ import annotations
-
-import os
 
 from injector import Module, provider, singleton
 
@@ -21,8 +19,4 @@ class TestSecretModule(Module):
         from agentclaw.community.plugins.local.secret_resolver import LocalSecretResolver
 
         logger.info("SecretResolver: LocalSecretResolver (test)")
-        return LocalSecretResolver(
-            gateway_principal_signing_key=os.environ.get(
-                "AGENTCLAW_SECRET_GATEWAY_PRINCIPAL_SIGNING_KEY_VALUE", ""
-            )
-        )
+        return LocalSecretResolver()
