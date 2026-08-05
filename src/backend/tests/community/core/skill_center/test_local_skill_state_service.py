@@ -50,6 +50,7 @@ class _Sets:
         self.skills = skills
         self.events: list[str] = []
         self.associated = associated
+        self.remove_all_calls = 0
 
     def get_default(self, **kwargs):
         return {"id": "4"}
@@ -63,6 +64,12 @@ class _Sets:
         return True
 
     def remove_default_skill_exclusion(self, *args):
+        self.events.append("remove")
+        self.skills.active = True
+        return True
+
+    def remove_all_default_skill_exclusions(self, *args):
+        self.remove_all_calls += 1
         self.events.append("remove")
         self.skills.active = True
         return True
@@ -187,6 +194,17 @@ async def test_activate_repairs_missing_default_set_membership_before_runtime_sy
     assert result["active"] is True
     assert sets.associated is True
     assert sets.events == ["associate", "remove"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_activate_clears_stale_exclusions_from_prior_default_sets():
+    service, _skills, sets, _guard, runtime, _factory = _service()
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+
+    assert sets.remove_all_calls == 1
+    assert sets.events == ["remove"]
     assert runtime.calls == 1
 
 
