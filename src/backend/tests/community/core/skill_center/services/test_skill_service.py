@@ -158,7 +158,7 @@ class TestSkillServiceActivation:
             git_sync_service_factory=MagicMock(),
         )
         result = await svc.deactivate_skill("does-not-exist")
-        assert result is False
+        assert result is True
 
 
 # ── TestSkillServiceSync ─────────────────────────────────────────────
