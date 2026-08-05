@@ -332,6 +332,11 @@ class _ReplacementRepo(_Repo):
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
 
+    def get_bot_local_skill(self, *, skill_id, **_kwargs):
+        return next(
+            (row for row in self.rows if str(row["id"]) == str(skill_id)), None
+        )
+
     def update(self, skill_id, values):
         self.updates.append((skill_id, values))
         row = next(row for row in self.rows if row["id"] == skill_id)
@@ -801,6 +806,30 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_reads_desired_state_from_exact_local_skill_query():
+    """The duplicate scan is metadata-only in production and has no ``active``."""
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=True)])
+    repo.list_bot_local_by_name = lambda **_kwargs: [
+        {key: value for key, value in repo.rows[0].items() if key != "active"}
+    ]
+    runtime = _ReplacementRuntime([True])
+
+    result = await _replacement_service(filesystem, repo, runtime).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+
+    assert result["operation"] == "updated"
+    assert runtime.calls == 1
 
 
 @pytest.mark.asyncio
