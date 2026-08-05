@@ -218,6 +218,77 @@ def _load_verified_guide(server_code: str) -> str | None:
         return None
 
 
+# ── prompt budget guard ───────────────────────────────────────
+# #717 handed the diagnostic LLM each tool's *full* ``inputSchema`` (nested JSON
+# Schema: ``$schema``/deep ``properties``/long per-param descriptions) for every
+# configured MCP tool. A bot with many MCPs — e.g. ~88 tools across 10 MCPs —
+# produced a 50–100k-token user message that antchat's gateway couldn't process
+# inside its ~90s window → ``RemoteProtocolError`` on every retry → the
+# ``[llm disabled]`` sentinel → a spurious "LLM执行异常(请重试)". We compress
+# each tool to a flat param table (name/type/required/one-line desc) and cap the
+# number of tools per MCP in the prompt so the message stays small enough to
+# finish inside the window. The full ``inputSchema`` is still read for bucketing
+# (verified/schema/unreachable) and the ``has_recoverable`` advisory check —
+# only the *prompt payload* is slimmed.
+_MAX_TOOLS_PER_MCP_IN_PROMPT = 20
+_PARAM_DESC_MAX_CHARS = 120
+_TOOL_DESC_MAX_CHARS = 200
+
+
+def _compact_tool_for_prompt(tool: dict) -> dict:
+    """Compress one MCP tool to a flat, prompt-sized param table.
+
+    Drops the nested ``inputSchema`` JSON and keeps only what the diagnostic
+    LLM needs to transcribe a non-fabricated call spec: the tool name, a
+    one-line tool description, and a flat param list (name/type/required/
+    one-line desc). Returns ``params: []`` when the tool exposes no schema.
+    """
+    schema = tool.get("inputSchema")
+    params: list[dict] = []
+    if isinstance(schema, dict):
+        props = schema.get("properties")
+        required = schema.get("required") or []
+        required_set = set(required) if isinstance(required, (list, tuple)) else set()
+        if isinstance(props, dict):
+            for pname, pdef in props.items():
+                if not isinstance(pdef, dict):
+                    continue
+                p_desc = (pdef.get("description") or "").strip()
+                p_desc = p_desc.split("\n", 1)[0][:_PARAM_DESC_MAX_CHARS]
+                params.append({
+                    "name": pname,
+                    "type": pdef.get("type", ""),
+                    "required": pname in required_set,
+                    "desc": p_desc,
+                })
+    t_desc = (tool.get("description") or "").strip()
+    t_desc = t_desc.split("\n", 1)[0][:_TOOL_DESC_MAX_CHARS]
+    return {
+        "name": tool.get("name", ""),
+        "desc": t_desc,
+        "params": params,
+    }
+
+
+def _compact_mcp_tools_for_prompt(mcp: dict) -> tuple[list[dict], int]:
+    """Return ``(compacted tools, count of named tools omitted past the cap)``.
+
+    Caps each MCP's tools at ``_MAX_TOOLS_PER_MCP_IN_PROMPT`` so a 27-tool MCP
+    doesn't dominate the message; the omitted count is surfaced separately so
+    the caller can annotate it (``tools_omitted``). Tools without a name are
+    dropped. Reads the *original* tools list — not a pre-slimmed copy — so the
+    bucketing and ``has_recoverable`` checks that run against ``mcp_details``
+    still see the unredacted ``inputSchema``.
+    """
+    tools = mcp.get("tools") or []
+    if not isinstance(tools, list):
+        return [], 0
+    named = [t for t in tools if isinstance(t, dict) and t.get("name")]
+    kept = named[:_MAX_TOOLS_PER_MCP_IN_PROMPT]
+    compacted = [_compact_tool_for_prompt(t) for t in kept]
+    return compacted, len(named) - len(kept)
+
+
 class ToolsMcpFormatDiagnostic(Diagnostic):
     id = "D-TOOLS-002"
     name = "各项 MCP 调用规范诊断"
@@ -253,14 +324,14 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - `server_code`: MCP 服务器全称
 - `name`: MCP 名称
 - `description`: 该 MCP 的功能描述
-- `tools`: 该 MCP 提供的工具列表，每项含 `name`、`description`、`inputSchema`（JSON Schema：参数 properties/required/types 等）
+- `tools`: 该 MCP 提供的工具列表（每个 MCP 最多展示前 20 个工具，超出部分以 `tools_omitted` 标注数量），每项含 `name`（工具名）、`desc`（工具一句话描述）、`params`（参数表：每项含 `name`/`type`/`required`/`desc`，其中 `desc` 为该参数的说明）
 - `verified_guide`（可选）：人工校验过的调用规范全文，可直接用于 TOOLS.md
 - `kb_context`（可选）：从内网知识库检索到的与 MCP 相关的术语与服务说明，可帮助更准确地理解 MCP 的定位和用途。**必须在"场景与工具映射速查"表格的"注意事项"列中充分利用这些信息**，例如将术语解释作为注意事项的一部分，帮助 Bot 更好地理解和使用该 MCP
 
 **关键规则：按"是否有可落地的调用规范来源"决定调用规范章节**
 - `verified_guide` 不为空 → 调用规范已经过人工验证，内容准确可用。修复建议中应直接引用 verified_guide 原文，建议用户粘贴到 TOOLS.md；同时在"场景与工具映射速查"表格中列出该 MCP。
-- `verified_guide` 为空、但该 MCP 的工具提供了 `inputSchema` → **可基于 `inputSchema` 转录**该工具的参数规格（参数名/类型/必填/格式/描述）写入"## MCP 调用规范"子章节。**仅转录 schema 明确给出的内容，禁止编造**调用示例值、`mcporter call` 命令、业务工作流或易错点等 schema 未提供的信息。同时仍在映射表中列出该 MCP。
-- `verified_guide` 为空、且工具也没有 `inputSchema`（取不到该 MCP 的工具 schema） → **只**在"场景与工具映射速查"表格列出该 MCP 的映射行，**不得**为其生成"##  MCP 调用规范"子章节，注意事项写"调用规范由平台补全中"。
+- `verified_guide` 为空、但该 MCP 的工具提供了 `params` 参数表 → **可基于 `params` 转录**该工具的参数规格（参数名/类型/必填/描述）写入"## MCP 调用规范"子章节。**仅转录参数表明确给出的内容，禁止编造**调用示例值、`mcporter call` 命令、业务工作流或易错点等参数表未提供的信息。同时仍在映射表中列出该 MCP。
+- `verified_guide` 为空、且工具也没有 `params` 参数表（取不到该 MCP 的工具 schema） → **只**在"场景与工具映射速查"表格列出该 MCP 的映射行，**不得**为其生成"##  MCP 调用规范"子章节，注意事项写"调用规范由平台补全中"。
 
 请充分利用这些信息，在修复建议中引用对应 MCP 的 description 和 tools，帮助用户快速补齐文档。
 
@@ -286,9 +357,9 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - 注意事项可结合 description、工具名称和常见调用约束来写，要求具体、可执行；如果提供了内网知识库参考，必须将相关术语说明融入注意事项中
 
 ##  MCP 调用规范
-- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `inputSchema` 的 MCP（据 schema 转录参数规格）。
-- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成 `### XXX (server_code)` 子章节或 `mcporter call` 示例——这类 MCP 只能出现在映射表里。
-- ✅ schema 转录要求：基于 `inputSchema` 的 properties/required/types/description 如实转录参数；不要编造 schema 未提供的调用示例值、命令或业务流程。
+- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `params` 参数表的 MCP（据参数表转录参数规格）。
+- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成 `### XXX (server_code)` 子章节或 `mcporter call` 示例——这类 MCP 只能出现在映射表里。
+- ✅ 参数表转录要求：基于 `params` 的 name/type/required/desc 如实转录参数；不要编造参数表未提供的调用示例值、命令或业务流程。
 - 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md
 - 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，因此只补最关键、最缺失的部分即可
 
@@ -322,8 +393,8 @@ XX 为 0-100 的整数
 - 不得评价行为边界
 - 不得脱离已提供的 MCP 列表空泛发挥
 - 不得编造未出现在 tools 列表中的工具名称
-- **禁止为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成"MCP 调用规范"子章节**；这类 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏写"调用规范由平台补全中"
-- **禁止编造 `mcporter call` 示例、调用示例值或业务工作流**——仅有 inputSchema 时只转录 schema 给出的参数规格，不得生成 schema 未提供的命令/示例
+- **禁止为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成"MCP 调用规范"子章节**；这类 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏写"调用规范由平台补全中"
+- **禁止编造 `mcporter call` 示例、调用示例值或业务工作流**——仅有 `params` 参数表时只转录参数表给出的参数规格，不得生成参数表未提供的命令/示例
 
 【额外要求】
 如果发现问题，你的修复建议中应尽量让用户一眼就能复制到 TOOLS.md：
@@ -490,9 +561,35 @@ XX 为 0-100 的整数
                     for t in (tools if isinstance(tools, list) else [])
                 )
                 if mcp.get("verified_guide"):
-                    verified_mcps.append(mcp)
+                    # Keep the verified_guide全文 verbatim (that's the value);
+                    # slim only the tools list to a compact param table so the
+                    # full inputSchema JSON doesn't bloat the prompt.
+                    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
+                    slim_mcp = {
+                        "server_code": mcp["server_code"],
+                        "name": mcp.get("name", ""),
+                        "description": mcp.get("description", ""),
+                        "verified_guide": mcp.get("verified_guide"),
+                        "tools": compacted,
+                    }
+                    if omitted:
+                        slim_mcp["tools_omitted"] = omitted
+                    verified_mcps.append(slim_mcp)
                 elif has_schema:
-                    schema_mcps.append(mcp)
+                    # Transcribe params from the compact param table, not the
+                    # full inputSchema JSON (which is what blew up the prompt
+                    # for bots with many MCP tools).
+                    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
+                    slim_mcp = {
+                        "server_code": mcp["server_code"],
+                        "name": mcp.get("name", ""),
+                        "description": mcp.get("description", ""),
+                        "verified_guide": None,
+                        "tools": compacted,
+                    }
+                    if omitted:
+                        slim_mcp["tools_omitted"] = omitted
+                    schema_mcps.append(slim_mcp)
                 else:
                     unreachable_mcps.append({
                         "server_code": mcp["server_code"],
@@ -505,17 +602,17 @@ XX 为 0-100 的整数
             if verified_mcps:
                 user_msg += (
                     "\n--- ✅ 已验证 MCP（verified_guide 不为空，引用原文生成调用规范） ---\n"
-                    f"{json.dumps(verified_mcps, ensure_ascii=False, indent=2)}\n"
+                    f"{json.dumps(verified_mcps, ensure_ascii=False)}\n"
                 )
             if schema_mcps:
                 user_msg += (
-                    "\n--- 🛠 可据 schema 转录 MCP（无 verified_guide，但工具含 inputSchema：可据参数 schema 转录调用规范，禁止编造示例/命令） ---\n"
-                    f"{json.dumps(schema_mcps, ensure_ascii=False, indent=2)}\n"
+                    "\n--- 🛠 可据参数表转录 MCP（无 verified_guide，但工具含 params 参数表：可据参数表转录调用规范，禁止编造示例/命令） ---\n"
+                    f"{json.dumps(schema_mcps, ensure_ascii=False)}\n"
                 )
             if unreachable_mcps:
                 user_msg += (
                     "\n--- ⛔ 无 schema MCP（既无 verified_guide 又无 inputSchema，仅写入映射表，禁止生成调用规范/示例） ---\n"
-                    f"{json.dumps(unreachable_mcps, ensure_ascii=False, indent=2)}\n"
+                    f"{json.dumps(unreachable_mcps, ensure_ascii=False)}\n"
                 )
 
             # 查询内网知识库补充 MCP 上下文
