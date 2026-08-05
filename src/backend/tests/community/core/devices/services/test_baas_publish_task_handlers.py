@@ -73,12 +73,14 @@ def _make_restart_handler(
     repo: MagicMock,
     bot_repository: MagicMock,
     baas_device_service: MagicMock,
+    publish_repository: MagicMock | None = None,
     template_service: MagicMock | None = None,
     clock=lambda: 200.0,
 ) -> tuple[BaasRestartPublishPollHandler, MagicMock]:
     handler = BaasRestartPublishPollHandler(
         binding_repository=repo,
         bot_repository=bot_repository,
+        publish_repository=publish_repository or MagicMock(),
         baas_device_service=baas_device_service,
         template_service=template_service or MagicMock(),
         poll_delay_seconds=10.0,
@@ -1656,3 +1658,178 @@ def test_restart_replay_after_active_reemits_reconciliation_wakeup():
         ]
     finally:
         reset_event_bus()
+
+
+def test_restart_default_policy_is_persisted_only_after_active():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.PENDING.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        bot_repository = MagicMock()
+        bot_repository.get_by_binding_id.return_value = {
+            "bot_id": "bot-001",
+            "owner_id": "owner-001",
+            "status": DeviceBindingStatus.PENDING.value,
+        }
+        publish_repository = MagicMock()
+        baas_device_service = MagicMock()
+        baas_device_service.poll_publish_once.return_value = (
+            DeviceBindingStatus.ACTIVE.value
+        )
+        baas_device_service.refresh_codefuse_token_on_publish_success.return_value = (
+            None
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=bot_repository,
+            publish_repository=publish_repository,
+            baas_device_service=baas_device_service,
+        )
+
+        with patch(
+            "agentclaw.community.core.devices.services."
+            "baas_publish_task_handlers.persist_default_image_policy"
+        ) as persist:
+            outcome = handler.handle(
+                build_restart_publish_poll_payload(
+                    binding_id=42,
+                    bot_id="bot-001",
+                    owner_id="owner-001",
+                    publish_id=1002,
+                    started_at_epoch_s=190.0,
+                    bot_uuid="baas-bot-1",
+                    image_policy_on_success="default",
+                )
+            )
+
+        assert outcome == Complete()
+        persist.assert_called_once_with(
+            bot_repository=bot_repository,
+            publish_repository=publish_repository,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            env="dev",
+        )
+        assert len(received) == 1
+        assert received[0].publish_kind == "restart"
+    finally:
+        reset_event_bus()
+
+
+def test_restart_failed_publish_does_not_persist_default_policy():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={"restart_publish_id": 1002},
+    )
+    bot_repository = MagicMock()
+    bot_repository.get_by_binding_id.return_value = {
+        "status": DeviceBindingStatus.PENDING.value
+    }
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = (
+        DeviceBindingStatus.FAILED.value
+    )
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        publish_repository=MagicMock(),
+        baas_device_service=baas_device_service,
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services."
+        "baas_publish_task_handlers.persist_default_image_policy"
+    ) as persist:
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+                image_policy_on_success="default",
+            )
+        )
+
+    assert outcome == Complete()
+    persist.assert_not_called()
+
+
+def test_restart_default_policy_persistence_failure_retries_without_completion():
+    reset_event_bus()
+    received: list[BaasPublishCompletedEvent] = []
+    get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    try:
+        repo = MagicMock()
+        repo.get_by_id.return_value = _make_binding(
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"restart_publish_id": 1002},
+        )
+        handler, _ = _make_restart_handler(
+            repo=repo,
+            bot_repository=MagicMock(),
+            publish_repository=MagicMock(),
+            baas_device_service=MagicMock(),
+        )
+
+        with patch(
+            "agentclaw.community.core.devices.services."
+            "baas_publish_task_handlers.persist_default_image_policy",
+            side_effect=RuntimeError("database unavailable"),
+        ):
+            outcome = handler.handle(
+                build_restart_publish_poll_payload(
+                    binding_id=42,
+                    bot_id="bot-001",
+                    owner_id="owner-001",
+                    publish_id=1002,
+                    started_at_epoch_s=190.0,
+                    bot_uuid="baas-bot-1",
+                    image_policy_on_success="default",
+                )
+            )
+
+        assert outcome == Retry("database unavailable")
+        assert received == []
+    finally:
+        reset_event_bus()
+
+
+def test_restart_replay_after_active_finishes_default_policy_persistence():
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.ACTIVE.value,
+        device_props={"restart_publish_id": 1002},
+    )
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        publish_repository=MagicMock(),
+        baas_device_service=MagicMock(),
+    )
+
+    with patch(
+        "agentclaw.community.core.devices.services."
+        "baas_publish_task_handlers.persist_default_image_policy"
+    ) as persist:
+        outcome = handler.handle(
+            build_restart_publish_poll_payload(
+                binding_id=42,
+                bot_id="bot-001",
+                owner_id="owner-001",
+                publish_id=1002,
+                started_at_epoch_s=190.0,
+                bot_uuid="baas-bot-1",
+                image_policy_on_success="default",
+            )
+        )
+
+    assert outcome == Complete()
+    persist.assert_called_once()

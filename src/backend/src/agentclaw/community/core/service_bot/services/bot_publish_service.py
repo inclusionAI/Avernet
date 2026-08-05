@@ -30,6 +30,12 @@ from agentclaw.community.core.service_bot.services.arka_image_pin import (
     copy_image_policy_to_ext,
     has_explicit_image_policy,
     resolve_current_arka_image,
+    apply_runtime_kind_to_ext,
+    runtime_kind_from_provider,
+    RUNTIME_KIND_ARKA,
+    RUNTIME_KIND_TECLAW,
+    PublishImagePolicyResolver,
+    ServiceBotImagePin,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -75,6 +81,11 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._task_queue_service = task_queue_service
         self._bot_process_registry = bot_process_registry
         self._common_config_service = common_config_service
+        self._image_policy_resolver = PublishImagePolicyResolver(
+            publish_repository=bot_publish_repo,
+            binding_repository=device_binding_repo,
+            common_config_service=common_config_service,
+        )
         self._env = get_current_env()
 
     def create_device_binding(
@@ -224,6 +235,21 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
         ext = copy_image_policy_to_ext(source_bot_ext, ext)
+        if isinstance(source_bot, dict) and source_bot.get("bot_type") == "service":
+            runtime_kind = None
+            binding_id = source_bot.get("binding_id")
+            if isinstance(binding_id, int):
+                binding = self._device_binding_repo.get_by_id(binding_id)
+                runtime_kind = runtime_kind_from_provider(
+                    getattr(binding, "device_provider", None)
+                )
+            if runtime_kind is None:
+                runtime_kind = (
+                    RUNTIME_KIND_TECLAW
+                    if self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+                    else RUNTIME_KIND_ARKA
+                )
+            ext = apply_runtime_kind_to_ext(ext, runtime_kind)
 
         # A new/default Bot carries an explicit marker and never consumes the
         # legacy Pin switch. A pre-feature ARKA Bot has no policy marker; when
@@ -380,6 +406,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
 
         logger.info(f"[update_publish_ext] id={publish_id}, ext updated")
         return updated_record
+
+    def resolve_publish_image_pin(
+        self, publish_record: BotPublishRecord
+    ) -> ServiceBotImagePin:
+        """Resolve image policy through the shared persisted-CAS seam."""
+        return self._image_policy_resolver.resolve(publish_record)
 
     def record_draft_artifact(
         self, *, bot_id: str, artifact: Dict[str, Any]

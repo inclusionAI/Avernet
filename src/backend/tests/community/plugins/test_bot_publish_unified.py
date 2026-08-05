@@ -203,6 +203,51 @@ def test_update_status_with_ext(repo):
     ) is None
 
 
+def test_compare_and_set_ext_updates_only_matching_snapshot(repo):
+    rec = repo.insert(_data(ext={"service_bot_config": {"device_count": 2}}))
+
+    updated = repo.compare_and_set_ext(
+        publish_id=rec.id,
+        expected_ext={"service_bot_config": {"device_count": 2}},
+        ext={
+            "service_bot_config": {"device_count": 2},
+            "sbot_use_default_image": True,
+        },
+    )
+
+    assert updated is not None
+    assert updated.ext == {
+        "service_bot_config": {"device_count": 2},
+        "sbot_use_default_image": True,
+    }
+
+
+def test_compare_and_set_ext_rejects_stale_snapshot(repo):
+    rec = repo.insert(_data(ext={"concurrent": "new"}))
+
+    updated = repo.compare_and_set_ext(
+        publish_id=rec.id,
+        expected_ext={"concurrent": "old"},
+        ext={"sbot_pin_image": True, "sbot_docker_image": "arka:v2"},
+    )
+
+    assert updated is None
+    assert repo.get_by_id(rec.id).ext == {"concurrent": "new"}
+
+
+def test_compare_and_set_ext_supports_null_expected_ext(repo):
+    rec = repo.insert(_data(ext=None))
+
+    updated = repo.compare_and_set_ext(
+        publish_id=rec.id,
+        expected_ext=None,
+        ext={"sbot_runtime_kind": "arka"},
+    )
+
+    assert updated is not None
+    assert updated.ext == {"sbot_runtime_kind": "arka"}
+
+
 def test_update_version_and_last_pub_id(repo):
     r = repo.insert(_data(version=1))
     out = repo.update_version(r.id, 5, status="RELEASE")

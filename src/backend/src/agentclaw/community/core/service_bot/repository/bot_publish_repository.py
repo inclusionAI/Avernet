@@ -261,6 +261,20 @@ class BotPublishRepositoryProtocol(Protocol):
         """
         ...
 
+    def compare_and_set_ext(
+        self,
+        *,
+        publish_id: int,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+    ) -> Optional[BotPublishRecord]:
+        """Atomically replace ``ext`` only when its full stored value is unchanged.
+
+        Unlike ``update_status_with_ext``, this CAS protects same-status writers
+        (Restart/Scale/Caller) from overwriting one another.
+        """
+        ...
+
     def rollback_flip(
         self,
         *,

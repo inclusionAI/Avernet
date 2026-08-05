@@ -94,6 +94,9 @@ from agentclaw.community.core.notify.protocol import NotifyBotLister
 from agentclaw.community.core.bot_collaborator.repository.protocol import (
     CollaboratorRepositoryProtocol,
 )
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,
@@ -260,6 +263,7 @@ class DevicesModule(Module):
         task_queue_service: TaskQueueService,
         baas_device_service: BaasDeviceService,
         bot_repository: BotRepository,
+        publish_repository: BotPublishRepositoryProtocol,
         template_service: TemplateService,
     ) -> BaasPublishTaskLifecycle:
         return BaasPublishTaskLifecycle(
@@ -269,6 +273,7 @@ class DevicesModule(Module):
             task_queue_service=task_queue_service,
             baas_device_service=baas_device_service,
             bot_repository=bot_repository,
+            publish_repository=publish_repository,
             template_service=template_service,
         )
 
