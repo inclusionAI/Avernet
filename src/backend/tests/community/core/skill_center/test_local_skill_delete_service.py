@@ -13,6 +13,9 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
+from agentclaw.community.core.skill_center.services.repositories import (
+    ActiveSkillSetReferenceError,
+)
 
 
 class _Files:
@@ -62,9 +65,12 @@ class _Files:
 
 
 class _Skills:
-    def __init__(self, *, active=False, fail_delete=False) -> None:
+    def __init__(
+        self, *, active=False, fail_delete=False, active_during_delete=False
+    ) -> None:
         self.active = active
         self.fail_delete = fail_delete
+        self.active_during_delete = active_during_delete
         self.deleted = False
         self.pending_work = None
 
@@ -86,6 +92,8 @@ class _Skills:
     def delete_bot_local_skill(self, **_kwargs):
         if self.fail_delete:
             raise RuntimeError("database write failed")
+        if self.active_during_delete:
+            raise ActiveSkillSetReferenceError()
         self.pending_work = _kwargs
         self.deleted = True
         return 1
@@ -158,6 +166,11 @@ class _Guard:
 class _Cleanup:
     def __init__(self):
         self.work = []
+        self.preparing = []
+
+    def record_preparing(self, **kwargs):
+        self.preparing.append(kwargs)
+        return 1
 
     def record_pending(self, **kwargs):
         self.work.append(kwargs)
@@ -170,10 +183,19 @@ class _Cleanup:
     def mark_cleaned(self, **_kwargs):
         return True
 
+    def cancel_pending(self, **_kwargs):
+        return True
 
-def _service(*, active=False, fail_delete=False, on_acquire=None, status="ACTIVE"):
+
+def _service(
+    *, active=False, fail_delete=False, active_during_delete=False,
+    on_acquire=None, status="ACTIVE",
+):
     files = _Files()
-    skills = _Skills(active=active, fail_delete=fail_delete)
+    skills = _Skills(
+        active=active, fail_delete=fail_delete,
+        active_during_delete=active_during_delete,
+    )
     guard = _Guard(on_acquire)
     cleanup = _Cleanup()
     service = LocalSkillDeleteService(
@@ -253,6 +275,40 @@ async def test_database_failure_restores_verified_package_before_fixed_storage_e
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+
+@pytest.mark.asyncio
+async def test_transactional_active_recheck_restores_package_and_returns_active_error():
+    service, files, skills, _guard, _cleanup = _service(active_during_delete=True)
+
+    with pytest.raises(LocalSkillActiveError):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is False
+    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+
+
+@pytest.mark.asyncio
+async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(monkeypatch):
+    service, files, _skills, _guard, cleanup = _service()
+    original_quarantine = LocalSkillPackageStorage.quarantine_to
+
+    class _ProcessCrash(BaseException):
+        pass
+
+    async def crash_after_source_removal(package, quarantine):
+        await original_quarantine(package, quarantine)
+        raise _ProcessCrash()
+
+    monkeypatch.setattr(
+        LocalSkillPackageStorage, "quarantine_to", crash_after_source_removal
+    )
+    with pytest.raises(_ProcessCrash):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert cleanup.preparing[0]["skill_id"] == "9"
+    assert "/skills/one/SKILL.md" not in files.files
+    assert any(".one.delete-" in path for path in files.files)
 
 
 @pytest.mark.asyncio
