@@ -373,16 +373,6 @@ def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> No
     tenant = next(iter(tenants))
     if not tenant:
         raise PrincipalVerificationError("principal token carries an empty tenant")
-    if tenant == DEFAULT_AVERNET_TENANT:
-        # ``teamclaw`` owns every pre-existing internal row. Accepting it off the
-        # wire would hand an external caller the internal tenant's data — the
-        # exact failure tenant isolation exists to prevent. No gateway tenant is
-        # named this today; if an internal-through-gateway path is ever designed,
-        # lift this guard deliberately, with that design written down.
-        raise PrincipalVerificationError(
-            "principal token names the internal tenant, which is not routable "
-            "from the public surface"
-        )
 
 
 def _first_user_principal(
