@@ -12,6 +12,7 @@ import re
 import zipfile
 from typing import Any
 
+import yaml
 from injector import inject
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -34,6 +35,7 @@ from agentclaw.community.core.skill_center.services.repositories import (
     SkillRepository,
     SkillSetRepository,
 )
+from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.skills_pool.edit_guard import (
@@ -309,14 +311,19 @@ class LocalSkillUploadService:
             text = markdown.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise LocalSkillInvalidPackageError() from exc
-        name_match = re.search(r"(?m)^name:\s*([^\n]+)\s*$", text)
-        desc_match = re.search(r"(?m)^description:\s*([^\n]+)\s*$", text)
-        if not name_match or not desc_match:
+        metadata = SkillParser.parse_content(text) or {}
+        if not metadata.get("name") or not metadata.get("description"):
+            try:
+                raw_metadata = yaml.safe_load(text)
+            except yaml.YAMLError:
+                raw_metadata = None
+            if isinstance(raw_metadata, dict):
+                metadata = raw_metadata
+        name = metadata.get("name")
+        description = metadata.get("description")
+        if not isinstance(name, str) or not isinstance(description, str):
             raise LocalSkillInvalidPackageError()
-        name, description = (
-            name_match.group(1).strip(" \"'"),
-            desc_match.group(1).strip(" \"'"),
-        )
+        name, description = name.strip(), description.strip()
         if (
             not name
             or not description
