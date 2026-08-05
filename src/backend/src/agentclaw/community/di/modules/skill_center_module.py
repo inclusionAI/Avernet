@@ -310,6 +310,7 @@ class SkillCenterModule(Module):
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
+        injector: Injector,
     ) -> LocalSkillUploadServiceProtocol:
         return LocalSkillUploadService(
             skill_repo,
@@ -321,6 +322,7 @@ class SkillCenterModule(Module):
             audit_log_repo,
             edit_guard,
             cleanup_repo,
+            lambda: injector.get(DeviceContextResolver),
         )
 
     @singleton

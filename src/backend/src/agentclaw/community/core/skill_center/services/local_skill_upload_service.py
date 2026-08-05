@@ -10,7 +10,7 @@ import io
 import json
 import re
 import zipfile
-from typing import Any
+from typing import Any, Callable, TYPE_CHECKING
 from uuid import uuid4
 
 import yaml
@@ -52,6 +52,11 @@ from agentclaw.community.core.skills_pool.edit_guard import (
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
+
 _MAX_COMPRESSED = 10 * 1024 * 1024
 _MAX_EXPANDED = 50 * 1024 * 1024
 _MAX_FILE = 10 * 1024 * 1024
@@ -74,6 +79,7 @@ class LocalSkillUploadService:
         audit_log_repo: BotCollabLogRepositoryProtocol,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
+        device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -84,6 +90,7 @@ class LocalSkillUploadService:
         self._audit_log_repo = audit_log_repo
         self._edit_guard = edit_guard
         self._cleanup_repo = cleanup_repo
+        self._device_context_resolver_provider = device_context_resolver_provider
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -106,7 +113,13 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
-            await self._retry_pending_cleanup(bot=bot, owner_id=owner_id, bot_id=bot_id)
+            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
+            await self._retry_pending_cleanup(
+                bot=bot,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                is_teclaw=is_teclaw,
+            )
             name, description, files = self._unpack(package)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
@@ -130,6 +143,7 @@ class LocalSkillUploadService:
                     name=name,
                     description=description,
                     files=files,
+                    is_teclaw=is_teclaw,
                 )
             return await self._create(
                 bot=bot,
@@ -140,6 +154,7 @@ class LocalSkillUploadService:
                 description=description,
                 files=files,
                 default_set=default_set,
+                is_teclaw=is_teclaw,
             )
         finally:
             self._edit_guard.release(lease)
@@ -155,6 +170,7 @@ class LocalSkillUploadService:
         description: str,
         files: list[tuple[str, bytes]],
         default_set: dict[str, Any],
+        is_teclaw: bool,
     ) -> dict[str, Any]:
         directory, storage = self._skill_service_factory.local_skill_package_storage(
             entity_id=str(bot["entity_id"]),
@@ -163,7 +179,7 @@ class LocalSkillUploadService:
             engine_type=bot.get("active_engine"),
             entity_type=str(bot.get("entity_type") or "staff"),
             is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=bot.get("device_provider") == "teclaw",
+            is_teclaw=is_teclaw,
             name=name,
         )
         skill: dict[str, Any] | None = None
@@ -289,6 +305,7 @@ class LocalSkillUploadService:
         name: str,
         description: str,
         files: list[tuple[str, bytes]],
+        is_teclaw: bool,
     ) -> dict[str, Any]:
         """Stage a complete replacement, then atomically switch its locator authority."""
         old_locator = str(skill["git_path"])[len("local://") :]
@@ -300,7 +317,7 @@ class LocalSkillUploadService:
             engine_type=bot.get("active_engine"),
             entity_type=str(bot.get("entity_type") or "staff"),
             is_desktop=bot.get("bot_type") == "desktop",
-            is_teclaw=bot.get("device_provider") == "teclaw",
+            is_teclaw=is_teclaw,
             name=name,
             directory_name=version_dir,
         )
@@ -310,6 +327,9 @@ class LocalSkillUploadService:
                 owner_id=owner_id,
                 bot_id=bot_id,
                 engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=is_teclaw,
                 locator=old_locator,
             )
         )
@@ -524,7 +544,12 @@ class LocalSkillUploadService:
             raise LocalSkillStorageError()
 
     async def _retry_pending_cleanup(
-        self, *, bot: dict[str, Any], owner_id: str, bot_id: str
+        self,
+        *,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+        is_teclaw: bool,
     ) -> None:
         """Retry durable obsolete-byte work on a later serialized Bot mutation."""
         for work in self._cleanup_repo.list_pending(
@@ -553,6 +578,9 @@ class LocalSkillUploadService:
                     owner_id=owner_id,
                     bot_id=bot_id,
                     engine_type=bot.get("active_engine"),
+                    entity_type=str(bot.get("entity_type") or "staff"),
+                    is_desktop=bot.get("bot_type") == "desktop",
+                    is_teclaw=is_teclaw,
                     locator=str(work["package_locator"]),
                 )
             )
@@ -577,6 +605,15 @@ class LocalSkillUploadService:
                     error="obsolete package cleanup failed",
                 ):
                     raise LocalSkillStorageError()
+
+    def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
+        try:
+            context = self._device_context_resolver_provider().resolve_for_bot(
+                bot_id, owner_id
+            )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
+        return context.provider == "teclaw"
 
     def _cleanup_target_is_authoritative(self, work: dict[str, Any]) -> bool:
         skill_id = work.get("skill_id")
