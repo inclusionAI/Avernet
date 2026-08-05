@@ -366,6 +366,7 @@ class SkillCenterModule(Module):
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
+        injector: Injector,
     ) -> LocalSkillDeleteServiceProtocol:
         return LocalSkillDeleteService(
             skill_repo,
@@ -375,6 +376,7 @@ class SkillCenterModule(Module):
             skill_service_factory,
             edit_guard,
             cleanup_repo,
+            lambda: injector.get(DeviceContextResolver),
         )
 
     @singleton

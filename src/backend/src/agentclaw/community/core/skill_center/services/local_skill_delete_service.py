@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 from uuid import uuid4
 
 from injector import inject
@@ -39,6 +39,11 @@ from agentclaw.community.plugin_api.local_skill_cleanup import (
     LocalSkillCleanupRepository,
 )
 
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.services.device_context_resolver import (
+        DeviceContextResolver,
+    )
+
 
 class LocalSkillDeleteService:
     """Delete an inactive Local Skill after reversible package quarantine."""
@@ -53,6 +58,7 @@ class LocalSkillDeleteService:
         skill_service_factory: SkillServiceFactory,
         edit_guard: SkillsPoolEditGuard,
         cleanup_repo: LocalSkillCleanupRepository,
+        device_context_resolver_provider: Callable[[], "DeviceContextResolver"],
     ) -> None:
         self._skill_repo = skill_repo
         self._skill_set_repo = skill_set_repo
@@ -61,6 +67,7 @@ class LocalSkillDeleteService:
         self._skill_service_factory = skill_service_factory
         self._edit_guard = edit_guard
         self._cleanup_repo = cleanup_repo
+        self._device_context_resolver_provider = device_context_resolver_provider
 
     async def delete_local_skill(self, *, skill_id: str, actor_id: str) -> None:
         scope = self._discover_scope(skill_id)
@@ -106,6 +113,7 @@ class LocalSkillDeleteService:
             if active_custom_set_ids & referenced_set_ids:
                 raise LocalSkillActiveError()
             locator = str(skill["git_path"])[len("local://") :]
+            is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             package = (
                 self._skill_service_factory.local_skill_package_storage_for_locator(
                     entity_id=str(bot["entity_id"]),
@@ -114,7 +122,7 @@ class LocalSkillDeleteService:
                     engine_type=bot.get("active_engine"),
                     entity_type=str(bot.get("entity_type") or "staff"),
                     is_desktop=bot.get("bot_type") == "desktop",
-                    is_teclaw=bot.get("device_provider") == "teclaw",
+                    is_teclaw=is_teclaw,
                     locator=locator,
                 )
             )
@@ -126,7 +134,7 @@ class LocalSkillDeleteService:
                     engine_type=bot.get("active_engine"),
                     entity_type=str(bot.get("entity_type") or "staff"),
                     is_desktop=bot.get("bot_type") == "desktop",
-                    is_teclaw=bot.get("device_provider") == "teclaw",
+                    is_teclaw=is_teclaw,
                     name=Path(locator).name,
                     directory_name=f".{Path(locator).name}.delete-{uuid4().hex}",
                 )
@@ -332,6 +340,15 @@ class LocalSkillDeleteService:
             raise LocalSkillStorageError() from exc
         if not cancelled:
             raise LocalSkillStorageError()
+
+    def _is_teclaw(self, *, bot_id: str, owner_id: str) -> bool:
+        try:
+            context = self._device_context_resolver_provider().resolve_for_bot(
+                bot_id, owner_id
+            )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
+        return context.provider == "teclaw"
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
         if not skill_id.isdecimal():
