@@ -293,6 +293,20 @@ class SkillSetServiceFactory:
             _get_bot_paths,
         )
 
+        is_desktop = False
+        if user_id or entity_id:
+            try:
+                owner_id = user_id or entity_id
+                bot = self._bot_repo.get_by_id_and_owner(bot_id or "default", owner_id)
+                is_desktop = bool(bot and bot.get("bot_type") == "desktop")
+            except Exception as exc:
+                logger.warning(
+                    "[SkillSetServiceFactory] bot_type lookup failed for "
+                    "bot_id=%s owner_id=%s: %s — defaulting is_desktop=False",
+                    bot_id or "default",
+                    owner_id,
+                    exc,
+                )
         if user_id or entity_id:
             resolved_skills, resolved_repo, resolved_local = _get_bot_paths(
                 path_factory=self._path_factory,
@@ -301,6 +315,7 @@ class SkillSetServiceFactory:
                 bot_id=bot_id,
                 engine_type=engine_type,
                 entity_type=entity_type,
+                is_desktop=is_desktop,
             )
         else:
             resolved_skills = skills_dir or SKILLS_DIR
