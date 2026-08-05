@@ -105,7 +105,8 @@ pub enum GroupMessageType {
 /// Determines how the message should be delivered to the bot:
 /// - Send: Bot should respond (mentioned or coordinator for non-@ messages)
 /// - Inject: Bot should observe silently
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeliveryType {
     /// Bot should respond to this message.
     Send,

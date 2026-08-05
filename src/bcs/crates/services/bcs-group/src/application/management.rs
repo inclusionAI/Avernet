@@ -1132,6 +1132,7 @@ impl GroupManagementService for GroupManagement {
                                 reason,
                                 session_input: None,
                                 task_ledger: None,
+                                driver_delivery: None,
                             },
                             &sid,
                             &session_participants,

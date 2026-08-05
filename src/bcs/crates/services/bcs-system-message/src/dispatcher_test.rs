@@ -432,6 +432,7 @@ async fn dispatch_session_context_preserves_manager_worker_group_type() {
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -482,6 +483,7 @@ async fn dispatch_manager_worker_session_context_persists_worker_private_context
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -547,6 +549,7 @@ async fn dispatch_manager_worker_session_context_persists_each_worker_private_co
         reason: "性能审计".to_string(),
         session_input: Some(serde_json::json!("执行数据库慢查询审计")),
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -604,6 +607,7 @@ async fn dispatch_non_manager_worker_session_context_persists_per_recipient_reco
         reason: "普通协作".to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -655,6 +659,7 @@ async fn dispatch_manager_worker_session_context_does_not_make_worker_context_pu
         reason: "性能审计".to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
@@ -1211,6 +1216,7 @@ async fn dispatch_session_context_with_provider_registry(
         reason: reason.to_string(),
         session_input: None,
         task_ledger: None,
+        driver_delivery: None,
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
     let delivery = Arc::new(MockDeliveryPort::default());
