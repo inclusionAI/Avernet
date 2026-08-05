@@ -9,6 +9,7 @@ These resolve the REAL factories from the test injector and invoke
 ``create()`` the way the routers do — covering every skill-center
 factory ``create()`` body (both branches where they differ).
 """
+
 from pathlib import Path
 
 import pytest
@@ -89,12 +90,165 @@ def test_pool_active_factory_scopes_direct_skill_crud_to_canonical_pool(
     assert svc.local_dir == Path(f"{engine_root}/skills-pool/skills-local")
     assert svc.repo_dir == Path(f"{engine_root}/skills-pool/skills-repo")
     assert svc.runtime_uses_pool_paths is True
-    assert svc._local_skill_path_adapter(
-        f"{engine_root}/skills/skills-local/handmade"
-    ) == f"{engine_root}/skills-pool/skills-local/handmade"
-    assert svc._local_skill_locator_adapter(
-        f"{engine_root}/skills/skills-local/handmade"
-    ) == f"{engine_root}/skills-pool/skills-local/handmade"
+    assert (
+        svc._local_skill_path_adapter(f"{engine_root}/skills/skills-local/handmade")
+        == f"{engine_root}/skills-pool/skills-local/handmade"
+    )
+    assert (
+        svc._local_skill_locator_adapter(f"{engine_root}/skills/skills-local/handmade")
+        == f"{engine_root}/skills-pool/skills-local/handmade"
+    )
+
+
+def test_skill_factory_uses_bot_owner_for_pool_and_device_resolution(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/home/admin/.hermes/skills",
+            "/home/admin/.hermes/workspace/skills-pool/skills-local",
+            "/home/admin/.hermes/workspace/skills-pool/skills-repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+    service = factory.create(
+        entity_id="project-42",
+        bot_owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="hermes",
+    )
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")]
+    assert service._device_owner_id == "owner-7"
+
+
+def test_local_skill_package_storage_splits_path_entity_from_device_owner(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+    path_calls = []
+    device_calls = []
+
+    class _Paths:
+        def get_bot_skills_local_dir(
+            self,
+            entity_id,
+            bot_id,
+            engine_type,
+            entity_type,
+            *,
+            is_desktop,
+            is_teclaw,
+        ):
+            path_calls.append(
+                (
+                    entity_id,
+                    bot_id,
+                    engine_type,
+                    entity_type,
+                    is_desktop,
+                    is_teclaw,
+                )
+            )
+            return Path(f"/bots/{entity_id}/{bot_id}/skills-local")
+
+    class _DeviceDispatcher:
+        @staticmethod
+        def for_bot(bot_id, owner_id):
+            device_calls.append((bot_id, owner_id))
+            return object()
+
+    factory._path_factory = _Paths()
+    factory._device_fs_dispatcher = _DeviceDispatcher()
+
+    directory, _storage = factory.local_skill_package_storage(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="project",
+        is_desktop=False,
+        is_teclaw=False,
+        name="reviewer",
+    )
+
+    assert directory == "/bots/project-42/bot-1/skills-local/reviewer"
+    assert path_calls == [("project-42", "bot-1", "hermes", "project", False, False)]
+    assert device_calls == [("bot-1", "owner-7")]
+
+
+def test_teclaw_legacy_local_skill_package_storage_uses_workspace_adapter(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+
+    class _DeviceDispatcher:
+        @staticmethod
+        def for_bot(_bot_id, _owner_id):
+            return object()
+
+    factory._device_fs_dispatcher = _DeviceDispatcher()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda _entity_id, _bot_id, *_args, **_kwargs: Path("skills-local")
+    )
+
+    directory, storage = factory.local_skill_package_storage(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="openclaw",
+        entity_type="proj",
+        is_desktop=False,
+        is_teclaw=True,
+        name="reviewer",
+    )
+
+    assert directory == "skills-local/reviewer"
+    assert storage._device_directory == "workspace/skills-local/reviewer"
+
+
+def test_legacy_local_skill_packages_are_isolated_for_same_name_across_bots(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+
+    class _DeviceDispatcher:
+        @staticmethod
+        def for_bot(_bot_id, _owner_id):
+            return object()
+
+    factory._device_fs_dispatcher = _DeviceDispatcher()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda entity_id, bot_id, *_args, **_kwargs: Path(
+            f"/bots/{entity_id}/{bot_id}/skills-local"
+        )
+    )
+
+    directories = [
+        factory.local_skill_package_storage(
+            entity_id=f"entity-{index}",
+            owner_id="owner",
+            bot_id=f"bot-{index}",
+            engine_type="openclaw",
+            entity_type="staff",
+            is_desktop=False,
+            is_teclaw=False,
+            name="same-name",
+        )[0]
+        for index in (1, 2)
+    ]
+
+    assert directories == [
+        "/bots/entity-1/bot-1/skills-local/same-name",
+        "/bots/entity-2/bot-2/skills-local/same-name",
+    ]
 
 
 def test_real_skill_set_service_factory_create_default_branch(test_injector):
@@ -128,17 +282,44 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
         engine_type="openclaw",
     )
 
-    assert str(svc.skill_service.local_dir).endswith(
-        "/skills-pool/skills-local"
-    )
-    assert str(svc.skill_service.repo_dir).endswith(
-        "/skills-pool/skills-repo"
-    )
+    assert str(svc.skill_service.local_dir).endswith("/skills-pool/skills-local")
+    assert str(svc.skill_service.repo_dir).endswith("/skills-pool/skills-repo")
     assert str(svc.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
     assert svc.skill_service._local_skill_path_adapter(
         "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
     ).endswith("/skills-pool/skills-local/handmade")
+
+
+def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/pool/active",
+            "/pool/local",
+            "/pool/repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+
+    svc = factory.create(
+        user_id="owner-7",
+        entity_id="project-42",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="proj",
+    )
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 2
+    assert svc.user_id == "owner-7"
+    assert svc.entity_id == "project-42"
+    assert str(svc.local_dir) == "/pool/local"
+    assert str(svc.skill_service.local_dir) == "/pool/local"
 
 
 def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
@@ -164,9 +345,7 @@ def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
     assert svc.is_desktop is True
     assert str(svc.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
-    assert str(svc.skill_service.local_dir).endswith(
-        "/skills-pool/skills-local"
-    )
+    assert str(svc.skill_service.local_dir).endswith("/skills-pool/skills-local")
 
 
 def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
@@ -184,12 +363,11 @@ def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
     )
 
     assert svc.is_desktop is True
-    assert str(svc.local_dir) == (
-        "/home/admin/.openclaw/workspace/skills/skills-local"
-    )
-    assert str(svc.repo_dir) == (
-        "/home/admin/.openclaw/workspace/skills/skills-repo"
-    )
+    assert str(svc.local_dir) == ("/home/admin/.openclaw/workspace/skills/skills-local")
+    assert str(svc.repo_dir) == ("/home/admin/.openclaw/workspace/skills/skills-repo")
+    assert svc.skill_service.local_dir == svc.local_dir
+    assert svc.skill_service.repo_dir == svc.repo_dir
+    assert svc.skill_service.active_dir == svc.skills_dir
 
 
 def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
@@ -212,8 +390,7 @@ def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
         {
             "name": "handmade",
             "git_path": (
-                "local:///home/admin/.openclaw/workspace/skills/"
-                "skills-local/handmade"
+                "local:///home/admin/.openclaw/workspace/skills/skills-local/handmade"
             ),
         },
         {
@@ -226,13 +403,11 @@ def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
 
     assert [(item.source, item.target) for item in mappings] == [
         (
-            "/home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/handmade",
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local/handmade",
             "/home/admin/.openclaw/workspace/skills/handmade",
         ),
         (
-            "/home/admin/.openclaw/workspace/skills-pool/"
-            "skills-repo/business/reviewer",
+            "/home/admin/.openclaw/workspace/skills-pool/skills-repo/business/reviewer",
             "/home/admin/.openclaw/workspace/skills/reviewer",
         ),
     ]

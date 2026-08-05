@@ -86,6 +86,14 @@ impl Fixture {
             .await
             .expect("register bot");
     }
+
+    async fn add_public_bot_owned_by(&self, bot_uuid: &str, staff_no: &str) {
+        self.add_public_bot(bot_uuid).await;
+        self.bots
+            .save_created_by(bot_uuid, staff_no, true)
+            .await
+            .expect("assign Bot owner");
+    }
 }
 
 fn human_caller(staff_no: &str) -> AuthenticatedCaller {
@@ -120,6 +128,59 @@ fn normal_group(
 
 /// Build a fixture with a Chat group `GROUP_ID` whose Human originator manages
 /// the Group. A second Human is a plain participant for self-service tests.
+
+async fn seed_owned_driver_without_human_participant() -> Fixture {
+    let fixture = Fixture::new().await;
+    fixture
+        .add_public_bot_owned_by("bot-driver", "staff-driver")
+        .await;
+    for bot in ["bot-a", "bot-b"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-a", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("bot-driver".into());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store group");
+    fixture
+}
+
+async fn seed_owned_participant_without_human_participant() -> Fixture {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-driver").await;
+    fixture
+        .add_public_bot_owned_by("bot-a", "staff-owner")
+        .await;
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-a", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("bot-driver".into());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store group");
+    fixture
+}
+
 async fn seed() -> Fixture {
     let fixture = Fixture::new().await;
     for bot in ["bot-driver", "bot-a", "bot-b"] {
@@ -151,6 +212,168 @@ async fn seed() -> Fixture {
         .await
         .expect("store group");
     fixture
+}
+
+
+#[tokio::test]
+async fn human_originator_can_manage_participants_without_human_membership() {
+    let fixture = Fixture::new().await;
+    for bot in ["bot-driver", "bot-a", "bot-b"] {
+        fixture.add_public_bot(bot).await;
+    }
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-a", ParticipantRole::Consultant),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("human_staff-originator".into());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store group");
+
+    let err = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-unrelated"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+        })
+        .await
+        .expect_err("unrelated Human cannot manage originator-only group");
+    assert!(matches!(err, ApplicationError::Forbidden(_)));
+
+    let added = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-originator"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+        })
+        .await
+        .expect("Human originator can manage participants without membership");
+
+    assert_eq!(added.actor_id, "bot-b");
+}
+
+#[tokio::test]
+async fn human_owner_of_group_driver_can_add_participant_without_human_membership() {
+    let fixture = seed_owned_driver_without_human_participant().await;
+
+    let err = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-unrelated"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+        })
+        .await
+        .expect_err("unrelated Human cannot manage group through Bot ownership");
+    assert!(matches!(err, ApplicationError::Forbidden(_)));
+
+    let added = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-driver"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+        })
+        .await
+        .expect("Human owner of driver Bot can manage group");
+
+    assert_eq!(added.actor_id, "bot-b");
+}
+
+#[tokio::test]
+async fn human_owner_of_group_driver_can_add_human_participant() {
+    let fixture = seed_owned_driver_without_human_participant().await;
+
+    let added = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-driver"),
+            group_id: GROUP_ID.into(),
+            actor_id: "human_bob".into(),
+        })
+        .await
+        .expect("Human owner of driver Bot can add a Human participant");
+
+    assert_eq!(added.actor_id, "human_bob");
+    assert_eq!(added.role, ParticipantRole::Consultant);
+}
+
+#[tokio::test]
+async fn human_owner_of_bot_participant_can_update_that_participant_as_self_service() {
+    let fixture = seed_owned_participant_without_human_participant().await;
+
+    let err = fixture
+        .service
+        .update_participant(UpdateGroupParticipant {
+            caller: human_caller("staff-unrelated"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-a".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect_err("unrelated Human cannot self-service an unowned Bot participant");
+    assert!(matches!(err, ApplicationError::Forbidden(_)));
+
+    let updated = fixture
+        .service
+        .update_participant(UpdateGroupParticipant {
+            caller: human_caller("staff-owner"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-a".into(),
+            mode: ParticipantMode::Muted,
+        })
+        .await
+        .expect("Human owner can self-service the owned Bot participant");
+
+    assert_eq!(updated.actor_id, "bot-a");
+    assert_eq!(updated.mode, ParticipantMode::Muted);
+}
+
+#[tokio::test]
+async fn chat_manager_role_does_not_grant_group_management_to_human_owner() {
+    let fixture = Fixture::new().await;
+    fixture.add_public_bot("bot-driver").await;
+    fixture
+        .add_public_bot_owned_by("bot-manager", "staff-manager-owner")
+        .await;
+    fixture.add_public_bot("bot-b").await;
+    let mut group = normal_group(
+        GROUP_ID,
+        "bot-driver",
+        vec![
+            Participant::bot("bot-driver", ParticipantRole::Driver),
+            Participant::bot("bot-manager", ParticipantRole::Manager),
+        ],
+        GroupStrategy::Chat,
+        1,
+    );
+    group.originator = Some("bot-driver".into());
+    fixture
+        .groups
+        .upsert(group)
+        .await
+        .expect("store group");
+
+    let err = fixture
+        .service
+        .add_participant(AddGroupParticipant {
+            caller: human_caller("staff-manager-owner"),
+            group_id: GROUP_ID.into(),
+            actor_id: "bot-b".into(),
+        })
+        .await
+        .expect_err("Chat manager role must not grant management authority");
+    assert!(matches!(err, ApplicationError::Forbidden(_)));
 }
 
 #[tokio::test]

@@ -141,11 +141,13 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
         bot_id="bot-1",
         user_id="owner-1",
         mappings=mappings,
+        retired_mappings=mappings,
     )
     verified = await runtime.verify_mappings(
         bot_id="bot-1",
         user_id="owner-1",
         mappings=mappings,
+        retired_mappings=mappings,
     )
 
     assert cutover.committed
@@ -177,6 +179,8 @@ async def test_pool_runtime_resolves_current_binding_for_each_mutation() -> None
             == "skills-pool-mapping-v2"
         )
         assert transport.calls[index]["body"]["mappings"] == [logical_mapping]
+    for index in (2, 3):
+        assert transport.calls[index]["body"]["retired_mappings"] == [logical_mapping]
 
 
 @pytest.mark.asyncio

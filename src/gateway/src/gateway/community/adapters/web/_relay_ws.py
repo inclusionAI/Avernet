@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from starlette.websockets import WebSocket
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
@@ -50,28 +50,45 @@ from ._forward import _INBOUND_STRIP, _PRINCIPAL_HEADER, _bundle
 logger = get_logger("relay_ws")
 
 
-def relay_routes(base_path: str, domain: str) -> tuple[str, ...]:
+def relay_routes(prefix: str) -> tuple[str, ...]:
     """Every path a socket domain's entrypoint must be mounted on.
 
-    Built from configuration rather than written down, so adding a socket domain
-    is a config edit and this module never names one.
+    Takes the domain's declared prefix rather than deriving one from its name, so
+    a domain may sit anywhere its pattern claims — including beneath another
+    domain — and this module still never names one.
 
     **Two paths, not one.** Starlette compiles ``{full_path:path}`` with a
     mandatory separator in front of it, so mounting only the tail form leaves
-    the bare prefix unserved — a handshake to exactly ``/openapi/v1/engine``
-    is refused before it reaches the entrypoint. That is not hypothetical: a
-    domain whose upstream publishes its socket at the rewrite target's own root
-    is reached at precisely that prefix, and :meth:`PathRewrite.apply` has an
-    exact-prefix branch for it. Returned together so a caller cannot mount one
-    and forget the other.
+    the bare prefix unserved — a handshake to exactly
+    ``/openapi/v1/bots/messages`` is refused before it reaches the entrypoint.
+    That is not hypothetical: a domain whose upstream publishes its socket at the
+    rewrite target's own root is reached at precisely that prefix, and
+    :meth:`PathRewrite.apply` has an exact-prefix branch for it. Returned
+    together so a caller cannot mount one and forget the other.
     """
-    prefix = f"{base_path.rstrip('/')}/{domain}"
     return (prefix, f"{prefix}/{{full_path:path}}")
 
 
-#: A WebSocket handshake is an HTTP ``GET``; route security is resolved for it
-#: the same way it is for any other request.
-_HANDSHAKE_METHOD = "GET"
+#: The method a handshake is authenticated under.
+#:
+#: A WebSocket handshake *is* an HTTP ``GET`` on the wire, and this used to say
+#: so. It cannot any longer: the route-security table is plane-blind, so a rule
+#: written for the socket also governs an ordinary request to the same path, and
+#: a socket prefix now sits **inside** an authenticated HTTP prefix rather than
+#: beside it as its own top-level domain.
+#:
+#: Authenticating under ``GET`` there would mean the socket's deliberate "no
+#: identity required" exemption — the credential rides in the handshake query,
+#: because a browser's WebSocket API can attach no headers — silently applied to
+#: HTTP requests on that prefix too. Those no longer 404: they fall through to
+#: the broader domain and reach its upstream, so the exemption would let an
+#: unauthenticated caller forward a request there.
+#:
+#: A distinct method keeps the exemption to the plane it was written for. The
+#: table's keys already carry an optional method qualifier, so this is expressed
+#: as ``WEBSOCKET /path`` and an HTTP ``GET`` to the same path simply does not
+#: match it — falling to whatever rule governs the prefix above.
+_HANDSHAKE_METHOD = "WEBSOCKET"
 
 # Refusals, all of them *before* the client is accepted. A close code is not
 # transmitted on a handshake that never completed — a real client sees an HTTP
@@ -113,8 +130,8 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # plane does, so one request cannot be routed or authorised differently
     # depending on which entrypoint serves it.
     path = websocket.url.path
-    domain = state.domain_map.domain_for(path)
-    if domain is None or not domain.serves_websocket:
+    domain = state.domain_map.websocket_domain_for(path)
+    if domain is None:
         await _refuse(websocket, _CLOSE_NO_ROUTE, "no route for path")
         return
 
@@ -127,7 +144,7 @@ async def forward_websocket(websocket: WebSocket) -> None:
     # something, or the request is authorised as one resource and dialled as
     # another — see _required_raw_prefix.
     raw_path = _raw_path(websocket)
-    if not _starts_at(raw_path, _required_raw_prefix(state.domain_map, domain)):
+    if not _starts_at(raw_path, _required_raw_prefix(domain)):
         await _refuse(websocket, _CLOSE_BAD_PATH, "routing prefix is encoded")
         return
 
@@ -166,18 +183,48 @@ async def forward_websocket(websocket: WebSocket) -> None:
         headers=headers,
         subprotocols=tuple(websocket.scope.get("subprotocols") or ()),
     )
+    logger.info(
+        "ws forwarding request url=%s headers=%s subprotocols=%s",
+        request.url,
+        request.headers,
+        request.subprotocols,
+    )
     try:
         cm = state.ws_forwarder.connect(request)
         upstream = await cm.__aenter__()
+    # Deliberately ``Exception`` and not ``BaseException``: a cancellation here
+    # has nothing to unwind. The context manager never entered, so there is no
+    # ``__aexit__`` owed, and the socket library releases its own transport when
+    # its dial is cancelled. Catching it would only turn a cancelled worker into
+    # a refusal the caller is no longer there to read.
     except Exception:
         logger.warning("relay upstream unavailable", exc_info=True)
         await _refuse(websocket, _CLOSE_UPSTREAM_UNAVAILABLE, "upstream unavailable")
         return
 
+    logger.info("ws upstream connected subprotocol=%s", upstream.subprotocol)
+
+    # Past this point the upstream is open and the exit is owed unconditionally
+    # — whatever the client does next, and whether the relay ends cleanly, by
+    # exception, or by cancellation.
     try:
-        # Echoed, not guessed: the upstream has already negotiated, so the
-        # client is told exactly what the socket behind it agreed to.
-        await websocket.accept(subprotocol=upstream.subprotocol or None)
+        try:
+            # Echoed, not guessed: the upstream has already negotiated, so the
+            # client is told exactly what the socket behind it agreed to.
+            await websocket.accept(subprotocol=upstream.subprotocol or None)
+        except (RuntimeError, WebSocketDisconnect):
+            # The client gave up while the dial was in flight. Its
+            # ``websocket.disconnect`` is then what ``accept`` reads in place of
+            # the ``websocket.connect`` it expects, and Starlette reports that
+            # mismatch as a ``RuntimeError``. Under load that is an ordinary
+            # race rather than a fault: nobody is left to accept, and nothing
+            # to refuse. Swallowed here rather than left to escape the
+            # endpoint, because one unhandled traceback per abandoned handshake
+            # buries the single warning above that explains a *real* upstream
+            # failure — which is exactly how a capacity investigation loses the
+            # only log line that mattered.
+            logger.debug("client left before the relay accepted", exc_info=True)
+            return
         await _relay(websocket, upstream)
     finally:
         await cm.__aexit__(None, None, None)
@@ -203,7 +250,7 @@ def _has_dot_segment(path: str) -> bool:
     return any(segment in _DOT_SEGMENTS for segment in path.split("/"))
 
 
-def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
+def _required_raw_prefix(domain: Any) -> str:
     """The prefix the **raw** path must carry literally, for this domain.
 
     Routing and authentication run on the decoded path; the dial is built from
@@ -213,13 +260,17 @@ def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
 
     Two prefixes decide something, and the deeper one governs:
 
-    - the domain prefix, which chose the route and the authentication rule.
-      ``/openapi/v1/%65ngine/...`` decodes to the domain, so it resolves and
-      authenticates as it, while the raw path keeps ``%65ngine``.
+    - the domain's own prefix, which chose the route and the authentication rule.
+      ``/openapi/v1/bots/%6dessages/...`` decodes to the socket domain, so it
+      resolves and authenticates as it, while the raw path keeps ``%6dessages``
+      — and would dial the upstream outside the substituted prefix. Note this
+      prefix is now several segments deep and may nest inside another domain's,
+      so every segment of it has to be literal, not merely the first.
     - the rewrite's own ``from``, when one is declared — which may be *deeper*
       than the domain prefix, since a nested ``from`` is accepted. With
-      ``from: /openapi/v1/engine/v2``, a raw ``/openapi/v1/engine/%76%32/...``
-      clears the domain prefix but defeats the substitution.
+      ``from: /openapi/v1/bots/messages/v2``, a raw
+      ``/openapi/v1/bots/messages/%76%32/...`` clears the domain prefix but
+      defeats the substitution.
 
     In both cases the rewrite silently fails to fire and the upstream is dialled
     outside the prefix its credential check is scoped to. Requiring the rewrite's
@@ -232,7 +283,7 @@ def _required_raw_prefix(domain_map: Any, domain: Any) -> str:
     """
     if domain.rewrite is not None:
         return str(domain.rewrite.from_prefix)
-    return f"{domain_map.base_path.rstrip('/')}/{domain.name}"
+    return str(domain.mount_prefix)
 
 
 def _starts_at(path: str, prefix: str) -> bool:
@@ -289,9 +340,14 @@ async def _upstream_headers(
 
 
 async def _refuse(websocket: WebSocket, code: int, reason: str) -> None:
-    """Reject the handshake, never having accepted it."""
+    """Reject the handshake, never having accepted it.
+
+    Closed quietly: every refusal races a caller that may already have hung up,
+    and the reason it is being refused is worth more than the failure to say so.
+    Letting that raise would replace the logged cause with a close-time error.
+    """
     logger.info("engine socket refused (%s): %s", code, reason)
-    await websocket.close(code=code, reason=_truncate_reason(reason))
+    await _quietly(websocket.close(code=code, reason=_truncate_reason(reason)))
 
 
 async def _relay(websocket: WebSocket, upstream: WebSocketUpstream) -> None:

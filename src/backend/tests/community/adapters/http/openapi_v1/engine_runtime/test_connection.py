@@ -25,7 +25,7 @@ from agentclaw.community.core.engine_runtime.models import (
 
 from .conftest import BOT, OWNER, fails, ok
 
-URL = f"/openapi/v1/bots/{BOT}/connection"
+URL = f"/openapi/v1/bots/connection/{BOT}"
 
 
 class FakeConnections:
@@ -47,7 +47,7 @@ class FakeConnections:
             SocketInfo(
                 kind="chat",
                 url=(
-                    "wss://gw.example/openapi/v1/engine/tgt/api/openclaw/ws"
+                    "wss://gw.example/openapi/v1/bots/messages/ws/tgt/api/openclaw/ws"
                     "?x-proxypass-token=tok"
                 ),
             )
@@ -125,7 +125,7 @@ def test_connection_build_failure_is_enveloped(client, relay, connections):
 def test_foreign_bot_is_masked_404_without_building_a_connection(
     client, relay, connections
 ):
-    assert fails(client.get("/openapi/v1/bots/other/connection"), 404)
+    assert fails(client.get("/openapi/v1/bots/connection/other"), 404)
     assert relay.calls == []
     assert connections.calls == []
 

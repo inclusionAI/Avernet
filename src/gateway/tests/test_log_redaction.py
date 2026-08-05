@@ -23,8 +23,8 @@ from gateway.community.adapters.web._log_redaction import (
     [
         # The one this change actually introduces.
         (
-            "/openapi/v1/engine/T/api/ws?x-proxypass-token=eyJhbGciOi.J9.sig",
-            "/openapi/v1/engine/T/api/ws?x-proxypass-token=<redacted>",
+            "/openapi/v1/bots/messages/T/api/ws?x-proxypass-token=eyJhbGciOi.J9.sig",
+            "/openapi/v1/bots/messages/T/api/ws?x-proxypass-token=<redacted>",
         ),
         (
             "/openapi/v1/collaboration/messages/ws?token=bcn.session.jwt",
@@ -43,7 +43,7 @@ def test_a_credential_query_value_is_replaced(target: str, expected: str) -> Non
 @pytest.mark.parametrize(
     "target",
     [
-        "/openapi/v1/engine/T/api/ws",  # no query at all
+        "/openapi/v1/bots/messages/T/api/ws",  # no query at all
         "/x?ordinary=value",
         "/x?monkey=fine",  # contains 'key', and is not a credential
         "/x?page=2&limit=10",
@@ -60,9 +60,11 @@ def test_the_parameter_name_and_path_survive() -> None:
     A log that says *which* credential was presented and to what path is still
     useful for tracing a request; one that drops the query entirely is not.
     """
-    redacted = redact_credentials("/openapi/v1/engine/T/ws?x-proxypass-token=live")
+    redacted = redact_credentials(
+        "/openapi/v1/bots/messages/T/ws?x-proxypass-token=live"
+    )
     assert "x-proxypass-token" in redacted
-    assert "/openapi/v1/engine/T/ws" in redacted
+    assert "/openapi/v1/bots/messages/T/ws" in redacted
     assert "live" not in redacted
 
 
@@ -74,7 +76,7 @@ def test_the_filter_rewrites_the_record_uvicorn_actually_emits() -> None:
         pathname=__file__,
         lineno=1,
         msg='%s - "WebSocket %s" [accepted]',
-        args=("127.0.0.1:1", "/openapi/v1/engine/T/ws?x-proxypass-token=live"),
+        args=("127.0.0.1:1", "/openapi/v1/bots/messages/T/ws?x-proxypass-token=live"),
         exc_info=None,
     )
     assert CredentialRedactingFilter().filter(record) is True

@@ -2154,6 +2154,276 @@ class TestSendMessageWaitResult:
             assert call_kwargs["wait_result"] is False
 
 
+# ==================== TestSendMessageStreamErrorChunk ====================
+
+
+class TestSendMessageStreamErrorChunk:
+    """Test send_message_stream tracks error chunks and marks session failed."""
+
+    @pytest.mark.asyncio
+    async def test_stream_error_chunk_marks_session_failed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """When stream yields an error chunk, session is marked FAILED."""
+        from secbaas.community.api.sse import StreamChunk
+
+        binding = _make_binding_info(
+            baas_session_id="SESSION-xyz", engine_type="openclaw"
+        )
+
+        async def _stream_error(*a, **kw):
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="error", content="CONNECTION_ERROR")
+
+        mock_client = AsyncMock()
+        mock_client.send_message_stream = _stream_error
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_failed") as mock_failed,
+            patch.object(service, "_mark_session_completed") as mock_completed,
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+            ):
+                chunks.append(chunk)
+
+            # Session should be marked FAILED, not COMPLETED
+            mock_failed.assert_called_once_with("SESSION-xyz")
+            mock_completed.assert_not_called()
+            assert any(c.type == "error" for c in chunks)
+
+    @pytest.mark.asyncio
+    async def test_stream_no_error_marks_session_completed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """When stream completes without error chunk, session is marked COMPLETED."""
+        from secbaas.community.api.sse import StreamChunk
+
+        binding = _make_binding_info(
+            baas_session_id="SESSION-xyz", engine_type="openclaw"
+        )
+
+        async def _stream_ok(*a, **kw):
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="final", content="done")
+
+        mock_client = AsyncMock()
+        mock_client.send_message_stream = _stream_ok
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed") as mock_completed,
+            patch.object(service, "_mark_session_failed") as mock_failed,
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+            ):
+                chunks.append(chunk)
+
+            # Session should be marked COMPLETED, not FAILED
+            mock_completed.assert_called_once_with("SESSION-xyz")
+            mock_failed.assert_not_called()
+
+
+# ==================== TestBotSessionErrorPropagation ====================
+
+
+class TestBotSessionErrorPropagation:
+    """Test that BotSessionError from AsyncChatClient propagates correctly."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_bot_session_error_marks_failed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """BotSessionError from client.send_message marks session as FAILED."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            BotSessionError,
+        )
+
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(
+            side_effect=BotSessionError("session ended with error state")
+        )
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_failed") as mock_failed,
+        ):
+            with pytest.raises(BotServiceError, match="Failed to send message"):
+                await service.send_message(
+                    session_id=SESSION_ID,
+                    message="hello",
+                    binding_info=binding,
+                    timeout=30.0,
+                )
+            mock_failed.assert_called_once()
+
+
+# ==================== TestListSessions ====================
+
+
+class TestListSessions:
+    """BaasBotService.list_sessions() coverage."""
+
+    @pytest.mark.asyncio
+    async def test_success_path(self, service):
+        """Successful list_sessions resolves WS conn, queries client, maps results."""
+        from secbaas.community.core.service.bot_run._async_session_client import (
+            SessionInfo as AdapterSessionInfo,
+        )
+
+        adapter_session = AdapterSessionInfo(
+            id="sess-001",
+            title="test",
+            user_id="user-1",
+            agent_id=BOT_UUID,
+            created_at="2025-01-01T00:00:00Z",
+            updated_at="2025-01-01T01:00:00Z",
+        )
+
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(return_value=[adapter_session])
+
+        binding = _make_binding_info(engine_type="openclaw")
+        context = MagicMock()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            result = await service.list_sessions(
+                binding_info=binding,
+                context=context,
+                limit=5,
+                offset=2,
+            )
+
+        session_client.list_sessions.assert_awaited_once_with(
+            agent_id=BOT_UUID,
+            limit=5,
+            offset=2,
+            engine="openclaw",
+        )
+        assert len(result) == 1
+        assert result[0].session_id == "sess-001"
+        assert result[0].bot_id == BOT_UUID
+
+    @pytest.mark.asyncio
+    async def test_connection_resolution_failure(self, service):
+        """WS connection resolution failure wraps as BotServiceError."""
+        binding = _make_binding_info()
+        context = MagicMock()
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("conn failed"),
+        ):
+            with pytest.raises(
+                BotServiceError, match="Failed to resolve WS connection"
+            ):
+                await service.list_sessions(
+                    binding_info=binding,
+                    context=context,
+                    limit=20,
+                    offset=0,
+                )
+
+    @pytest.mark.asyncio
+    async def test_downstream_client_failure(self, service):
+        """Downstream session client failure wraps as BotServiceError."""
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(side_effect=RuntimeError("timeout"))
+
+        binding = _make_binding_info()
+        context = MagicMock()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            with pytest.raises(BotServiceError, match="Failed to list sessions"):
+                await service.list_sessions(
+                    binding_info=binding,
+                    context=context,
+                )
+
+    @pytest.mark.asyncio
+    async def test_bot_service_error_not_double_wrapped(self, service):
+        """Existing BotServiceError from client passes through without re-wrapping."""
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(
+            side_effect=BotServiceError("already wrapped"),
+        )
+
+        binding = _make_binding_info()
+        context = MagicMock()
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                new_callable=AsyncMock,
+                return_value=_make_conn_info(),
+            ),
+            patch.object(
+                service, "_create_session_client", return_value=session_client
+            ),
+        ):
+            with pytest.raises(BotServiceError, match="already wrapped"):
+                await service.list_sessions(
+                    binding_info=binding,
+                    context=context,
+                )
+
+
 # ==================== ANY matcher for mock assertions ====================
 
 

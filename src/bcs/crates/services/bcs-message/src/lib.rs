@@ -159,11 +159,14 @@ impl MessageService {
     /// Returns:
     /// - `ManagerWorker` strategy + worker viewer → `(Eq(worker_id), None)`
     ///   (owner isolation: a worker only reads its own messages).
-    /// - `ManagerWorker` strategy + non-worker/manager viewer →
-    ///   `(IsNull, None)` (public-only: hide worker-owned messages, VUlai).
-    /// - Chat / other strategies → `(Any, visible_from_seq)` where
-    ///   `visible_from_seq` is the spec §5.2 new-participant cutoff for the
-    ///   viewer's `bot_uuid`, or `None` when no viewer / no recorded messages.
+    /// - `ManagerWorker` strategy + non-worker bot manager viewer →
+    ///   `(PublicOrOwner(view), None)`; none / human viewer →
+    ///   `(IsNull, None)` (public-only, VUlai).
+    /// - Chat / other strategies + bot viewer →
+    ///   `(PublicOrOwner(view), visible_from_seq)`; none / human viewer →
+    ///   `(IsNull, visible_from_seq)` where `visible_from_seq` is the spec
+    ///   §5.2 new-participant cutoff for the viewer's `bot_uuid`, or `None`
+    ///   when no viewer / no recorded messages.
     pub fn compute_session_history_query(
         group: &Group,
         session: &Session,
@@ -174,8 +177,14 @@ impl MessageService {
         if is_manager_worker {
             let view = Self::manager_worker_history_view(group, session, view_bot_id)?;
             let owner_filter = match view {
-                ManagerWorkerHistoryView::Public => MessageOwnerFilter::IsNull,
                 ManagerWorkerHistoryView::Worker(worker_id) => MessageOwnerFilter::Eq(worker_id),
+                ManagerWorkerHistoryView::Public => match view_bot_id {
+                    // Non-worker bot viewer (the manager) reads public + own copies.
+                    Some(v) if !v.is_empty() && !v.starts_with("human_") => {
+                        MessageOwnerFilter::PublicOrOwner(v.to_string())
+                    }
+                    _ => MessageOwnerFilter::IsNull,
+                },
             };
             Ok((owner_filter, None))
         } else {
@@ -188,7 +197,20 @@ impl MessageService {
                 ),
                 None => None,
             };
-            Ok((MessageOwnerFilter::Any, visible_from_seq))
+            Ok((Self::chat_owner_filter_for_view(view_bot_id), visible_from_seq))
+        }
+    }
+
+    /// Chat/non-MW viewer → owner filter: a bot viewer reads public messages
+    /// plus its own system-message copies (`PublicOrOwner`); no view_bot_id or
+    /// a `human_*` viewer reads public-only (`IsNull`). Membership is NOT
+    /// verified here (mirrors the existing chat-branch behavior).
+    pub fn chat_owner_filter_for_view(view_bot_id: Option<&str>) -> MessageOwnerFilter {
+        match view_bot_id {
+            Some(v) if !v.is_empty() && !v.starts_with("human_") => {
+                MessageOwnerFilter::PublicOrOwner(v.to_string())
+            }
+            _ => MessageOwnerFilter::IsNull,
         }
     }
 }
@@ -329,6 +351,7 @@ impl GroupMessageHistoryService for MessageService {
                 limit,
                 "get_history: new Chat group, querying MessageRepoPort"
             );
+            let owner_filter = Self::chat_owner_filter_for_view(cmd.view_bot_id.as_deref());
             let query = MessageQuery {
                 group_id: cmd.group_id.clone(),
                 session_id: String::new(),
@@ -337,7 +360,7 @@ impl GroupMessageHistoryService for MessageService {
                 keyword: None,
                 sender_id: None,
                 message_type: None,
-                owner_filter: MessageOwnerFilter::Any,
+                owner_filter,
                 time_range: None,
                 visible_from_seq: None,
             };
@@ -562,7 +585,7 @@ mod tests {
     use super::*;
 
     use bcs_bot::BotCore;
-    use bcs_domain::{MessagePage, NewMessage, PersistedMessage, SenderType};
+    use bcs_domain::{MessagePage, NewMessage, PersistedMessage, SenderType, SystemMessageEvent};
     use bcs_group::GroupCore;
     use bcs_message_store::MemoryMessageRepo;
     use bcs_service_api::{
@@ -1116,5 +1139,191 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 0);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "public-human");
+    }
+
+    #[tokio::test]
+    async fn chat_bot_viewer_sees_public_and_own_system_copies_not_others() {
+        let (service, repo, _sessions, fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
+        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-a", Some("worker-a")).await;
+        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-b", Some("worker-b")).await;
+
+        // worker-a view: public + own system copy; NOT worker-b's copy.
+        let res_a = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("worker-a")))
+            .await
+            .expect("worker-a chat history");
+        let contents_a: Vec<&str> = res_a.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(contents_a.contains(&"public-human"));
+        assert!(contents_a.contains(&"sys-to-worker-a"));
+        assert!(!contents_a.contains(&"sys-to-worker-b"),
+            "other bot's system copy must be hidden under PublicOrOwner");
+
+        // no view_bot_id: only public (IsNull).
+        let res_none = service
+            .get_session_history(session_cmd("group-1", &session_id, None))
+            .await
+            .expect("public chat history");
+        let contents_none: Vec<&str> = res_none.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(contents_none.contains(&"public-human"));
+        assert!(!contents_none.contains(&"sys-to-worker-a"));
+        assert!(!contents_none.contains(&"sys-to-worker-b"));
+        let _ = fallback;
+    }
+
+    #[tokio::test]
+    async fn mw_manager_viewer_sees_public_and_own_system_copies() {
+        let (service, repo, _sessions, _fallback, session_id) =
+            service_fixture(GroupStrategy::ManagerWorker, 0, 0, Vec::new()).await;
+        append_history(&repo, "group-1", &session_id, "human_1", "public-human", None).await;
+        append_history(&repo, "group-1", &session_id, "system", "sys-to-manager", Some("mgr")).await;
+        append_history(&repo, "group-1", &session_id, "system", "sys-to-worker-a", Some("worker-a")).await;
+
+        let res = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("mgr")))
+            .await
+            .expect("manager history");
+        let contents: Vec<&str> = res.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(contents.contains(&"public-human"));
+        assert!(contents.contains(&"sys-to-manager"),
+            "manager now sees own system copy under PublicOrOwner(mgr)");
+        assert!(!contents.contains(&"sys-to-worker-a"));
+    }
+
+    #[tokio::test]
+    async fn get_history_chat_view_bot_id_now_filters_by_public_or_owner() {
+        let (service, repo, _sessions, _fallback, _session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        // get_history new-path hardcodes session_id "" (String::new()),
+        // so seed with session_id "" to match the query.
+        let gid = "group-1";
+        append_history(&repo, gid, "", "human_1", "public-human", None).await;
+        append_history(&repo, gid, "", "system", "sys-to-a", Some("worker-a")).await;
+        append_history(&repo, gid, "", "system", "sys-to-b", Some("worker-b")).await;
+
+        // Regression: view_bot_id was previously ignored (hardcoded Any).
+        let res_a = service
+            .get_history(group_cmd(gid, Some("worker-a")))
+            .await
+            .expect("worker-a group history");
+        let contents_a: Vec<&str> = res_a.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(contents_a.contains(&"public-human"));
+        assert!(contents_a.contains(&"sys-to-a"));
+        assert!(!contents_a.contains(&"sys-to-b"),
+            "get_history must now honor view_bot_id (was hardcoded Any)");
+
+        let res_none = service
+            .get_history(group_cmd(gid, None))
+            .await
+            .expect("public group history");
+        let contents_none: Vec<&str> = res_none.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(contents_none.contains(&"public-human"));
+        assert!(!contents_none.contains(&"sys-to-a"));
+        assert!(!contents_none.contains(&"sys-to-b"));
+    }
+
+    /// End-to-end round-trip: `SystemMessageDispatcherImpl` persists system
+    /// messages with `owner_bot_id = Some(recipient)` into a REAL
+    /// `MemoryMessageRepo`, and `MessageService::get_session_history` with
+    /// `view_bot_id=recipient` returns that recipient's own copy, hides the
+    /// other recipients' copies, and still returns public (owner=None) records.
+    /// This locks the §数据流 bridge between the write side (per-recipient
+    /// ownership persistence) and the query side (`PublicOrOwner` scoping).
+    #[tokio::test]
+    async fn system_message_dispatch_round_trips_through_message_service_view_scoping() {
+        use bcs_system_message::SystemMessageDispatcherImpl;
+        use bcs_system_message::producers::bot_joined::BotJoinedMessageProducer;
+        use bcs_test_support::{
+            NoopBotDeliveryPort, NoopBotRegistryCoreService, NoopFrontendDeliveryPort,
+            NoopGroupMessageHistoryService,
+        };
+        use bcs_service_api::SystemMessageDispatcherService;
+
+        let (service, repo, _sessions, _fallback, session_id) =
+            service_fixture(GroupStrategy::Chat, 0, u64::MAX, Vec::new()).await;
+        let group_id = "group-1";
+
+        // A public (owner=None) anchor that must remain visible to every viewer.
+        append_history(&repo, group_id, &session_id, "bot-anchor", "public-anchor", None).await;
+
+        // Build a REAL dispatcher wired to the SAME MemoryMessageRepo. Delivery
+        // ports are noops — persistence happens before delivery, so the
+        // per-recipient records land in the repo regardless of delivery outcome.
+        let dispatcher = SystemMessageDispatcherImpl::builder()
+            .with_registry(Arc::new(NoopBotRegistryCoreService))
+            .with_delivery(Arc::new(NoopBotDeliveryPort))
+            .with_frontend_delivery(Arc::new(NoopFrontendDeliveryPort))
+            .with_message_repo(repo.clone())
+            .register(BotJoinedMessageProducer::new(Arc::new(
+                NoopGroupMessageHistoryService,
+            )))
+            .build()
+            .expect("build dispatcher");
+
+        // BotJoined: new-bot joins a group that already has `mgr` (driver) and
+        // two workers. The producer emits one context-injection message for
+        // new-bot and one notification for each existing participant.
+        let new_bot_id = "bot-new".to_string();
+        let existing_id = "mgr".to_string();
+        let participants = vec![
+            Participant::bot(&existing_id, ParticipantRole::Manager),
+            Participant::bot("worker-a", ParticipantRole::Worker),
+            Participant::bot("worker-b", ParticipantRole::Worker),
+            Participant::bot(&new_bot_id, ParticipantRole::Consultant),
+        ];
+        let event = SystemMessageEvent::BotJoined {
+            group_id: group_id.to_string(),
+            actor: Participant::bot(&new_bot_id, ParticipantRole::Consultant),
+        };
+        dispatcher
+            .dispatch(event, &group_fixture(group_id, &existing_id), &session_id, &participants)
+            .await
+            .expect("dispatch succeeded");
+
+        // Viewer = existing mgr: sees its own notification (owner=mgr) + the
+        // public anchor; must NOT see new-bot's context injection (owner=new-bot)
+        // nor the other workers' notification copies.
+        let res_existing = service
+            .get_session_history(session_cmd(group_id, &session_id, Some(&existing_id)))
+            .await
+            .expect("existing view session history");
+        let existing_contents: Vec<&str> =
+            res_existing.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(existing_contents.contains(&"public-anchor"),
+            "public owner=None records still visible to mgr");
+        assert!(existing_contents.iter().any(|c| c.contains("已加入协作群")),
+            "mgr's own notification (owner=mgr) is returned");
+        assert!(existing_contents.iter().all(|c| !c.contains("你加入了 BCS 协作群.")),
+            "new-bot's context injection (owner=new-bot) is hidden from mgr");
+
+        // Viewer = new-bot: sees its own context injection (owner=new-bot) + the
+        // public anchor; must NOT see the notification copies (owner=existing).
+        let res_new = service
+            .get_session_history(session_cmd(group_id, &session_id, Some(&new_bot_id)))
+            .await
+            .expect("new-bot view session history");
+        let new_contents: Vec<&str> =
+            res_new.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(new_contents.contains(&"public-anchor"),
+            "public owner=None records still visible to new-bot");
+        assert!(new_contents.iter().any(|c| c.contains("你加入了 BCS 协作群.")),
+            "new-bot's own context injection (owner=new-bot) is returned");
+        assert!(new_contents.iter().all(|c| !c.contains("已加入协作群")),
+            "existing participants' notification copies are hidden from new-bot");
+    }
+
+    fn group_fixture(group_id: &str, driver_bot_id: &str) -> Group {
+        let mut group = Group::new(
+            group_id.to_string(),
+            driver_bot_id,
+            vec![
+                Participant::bot(driver_bot_id, ParticipantRole::Manager),
+                Participant::bot("worker-a", ParticipantRole::Worker),
+                Participant::bot("worker-b", ParticipantRole::Worker),
+            ],
+        );
+        group.group_strategy = GroupStrategy::Chat;
+        group
     }
 }

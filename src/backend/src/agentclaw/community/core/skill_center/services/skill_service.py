@@ -26,6 +26,10 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
 
 from agentclaw.community.core.access.admin_scopes import skill_admin
+from agentclaw.community.core.skill_center.errors import (
+    SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
+)
 from agentclaw.community.core.skill_center.services.repositories import (
     SkillCategoryRepository,
     SkillRepository,
@@ -78,6 +82,7 @@ class SkillService:
         local_skill_path_adapter: "Callable[[str], str] | None" = None,
         local_skill_locator_adapter: "Callable[[str], str] | None" = None,
         runtime_uses_pool_paths: bool = False,
+        device_owner_id: str | None = None,
     ):
         """
         Args:
@@ -109,6 +114,7 @@ class SkillService:
         # Device filesystem factory — supplied per-request by
         # SkillServiceFactory.create() (uses DeviceFilesystemDispatcher.for_bot).
         self._device_fs_factory = device_fs_factory
+        self._device_owner_id = device_owner_id
 
         # Adapter applied to a local-skill path right before it is handed to the
         # device filesystem. Identity for arca/baas/local (they pass a host path
@@ -1336,12 +1342,13 @@ class SkillService:
                 git_path = skill.get('git_path', '')
                 db_bolt_id = skill.get('bolt_id')
                 bolt_id = db_bolt_id or bolt_id
-                skill_author_id = skill.get('user_id') or user_id
-                device_user_id = device_owner_id or skill_author_id
+                skill_metadata_owner_id = skill.get('user_id') or user_id
+                device_user_id = device_owner_id or skill_metadata_owner_id
                 logger.info(
                     f"[get_skill_readme] DB found, git_path={git_path}, "
                     f"db_bolt_id={db_bolt_id}, effective_bolt_id={bolt_id}, "
-                    f"skill_author_id={skill_author_id}, device_user_id={device_user_id}"
+                    f"skill_metadata_owner_id={skill_metadata_owner_id}, "
+                    f"device_user_id={device_user_id}"
                 )
 
                 if git_path.startswith('local://'):
@@ -1797,7 +1804,6 @@ class SkillService:
         self,
         uploaded_files: list[dict[str, Any]],
         user_id: str | None = None,
-        author_id: str | None = None,
         bolt_id: str | None = None
     ):
         """
@@ -1808,8 +1814,7 @@ class SkillService:
                 - filename: 文件名
                 - content: 文件内容（bytes）
                 - relative_path: 相对路径（文件夹上传时使用）
-            user_id: Bot owner ID，用于设备文件系统路由
-            author_id: 实际上传者 ID，用于 Skill 元数据；未提供时兼容为 user_id
+            user_id: Bot owner ID，用于设备文件系统路由和 Skill 元数据
             bolt_id: Bot ID，为空时默认使用 'default'
 
         Returns:
@@ -1818,10 +1823,9 @@ class SkillService:
         Raises:
             ValueError: 如果验证失败
         """
-        author_id = author_id or user_id
         logger.info(
             f"[SkillService.upload_skill] Start: file_count={len(uploaded_files)}, "
-            f"user_id={user_id}, author_id={author_id}, bolt_id={bolt_id}"
+            f"user_id={user_id}, bolt_id={bolt_id}"
         )
 
         if not uploaded_files:
@@ -1849,11 +1853,13 @@ class SkillService:
         device_fs = self._device_fs_factory(bolt_id, user_id)
         # POOL_ACTIVE 后 DB locator 已经是 Pool canonical 绝对路径。重传同名
         # 本地技能时必须继续使用该 locator；否则会写到 Legacy bridge 后又以
-        # Legacy locator 新建一条重复记录。
+        # Legacy locator 新建一条重复记录。查询必须始终带 Bot owner：历史
+        # collaborator metadata 由离线 DB 订正处理，在线请求不从不完整 locator
+        # 猜测记录归属，避免 ``default`` / desktop / teclaw 场景跨 owner 命中。
         existing_skill = self._skill_repo.get_bot_local_by_name(
             bot_id=bolt_id or "default",
             name=skill_name,
-            user_id=author_id,
+            user_id=user_id,
         )
         existing_locator = (
             str(existing_skill["git_path"])[len("local://") :]
@@ -1904,8 +1910,8 @@ class SkillService:
                     'git_path': skill_path,
                     'gmt_modified': datetime.utcnow()
                 }
-                if author_id:
-                    update_data['user_id'] = author_id
+                if user_id:
+                    update_data['user_id'] = user_id
                 updated = self._skill_repo.update(existing_skill['id'], update_data)
                 logger.info(
                     f"[SkillService.upload_skill] Updated existing skill: {skill_name} "
@@ -1921,7 +1927,7 @@ class SkillService:
                     category=skill_info.get("category", "general"),
                     tags=skill_info.get("tags", []),
                     is_public=False,  # 本地技能默认不公开
-                    user_id=author_id,
+                    user_id=user_id,
                     bolt_id=bolt_id
                 )
                 logger.info(f"[SkillService.upload_skill] Created new skill: {skill_name} (id: {skill.get('id')})")
@@ -2210,12 +2216,20 @@ class SkillService:
         update_data['gmt_modified'] = datetime.utcnow()
         return self._skill_repo.update(skill_id, update_data)
 
-    def _can_delete_skill(self, skill: dict, user_id: str | None = None) -> bool:
+    def _can_delete_skill(
+        self,
+        skill: dict,
+        user_id: str | None = None,
+        authorized_bot_owner_id: str | None = None,
+        collaborator_authorization_verified: bool = False,
+    ) -> bool:
         """检查用户是否有权限删除技能
 
         只有以下用户可以删除技能：
         1. 技能的创建者（user_id 匹配）
         2. 指定的管理员用户
+        3. 已在 HTTP adapter 经协作者拦截器授权、且当前 Service 也绑定到
+           该 Skill 所属 Bot owner 的协作者
         """
         if not user_id:
             return False
@@ -2227,6 +2241,19 @@ class SkillService:
         # 技能的创建者可以删除自己的技能
         skill_user_id = skill.get('user_id')
         if skill_user_id and str(skill_user_id) == str(user_id):
+            return True
+
+        # ``authorized_bot_owner_id`` 不是客户端参数，只能由已经完成
+        # CollaboratorPermissionInterceptor 校验的 adapter 注入。二次校验
+        # 它与 Skill metadata 和本 Service 的设备 owner 一致，避免调用方仅凭
+        # 伪造 owner 值跨 Bot 删除。
+        if (
+            skill_user_id
+            and authorized_bot_owner_id
+            and collaborator_authorization_verified
+            and str(skill_user_id) == str(authorized_bot_owner_id)
+            and str(self._device_owner_id or "") == str(authorized_bot_owner_id)
+        ):
             return True
 
         return False
@@ -2260,12 +2287,22 @@ class SkillService:
             return False
 
     # ----- Delete -----
-    async def delete_skill(self, skill_id: str, user_id: str | None = None) -> bool:
+    async def delete_skill(
+        self,
+        skill_id: str,
+        user_id: str | None = None,
+        authorized_bot_owner_id: str | None = None,
+        collaborator_authorization_verified: bool = False,
+    ) -> bool:
         """删除技能 - 同时删除数据库记录和物理文件
 
         Args:
             skill_id: 技能ID
             user_id: 当前操作用户ID（用于权限验证）
+            authorized_bot_owner_id: 已完成协作者授权时，由 adapter 注入的
+                Bot owner；不接受任何外部请求透传
+            collaborator_authorization_verified: adapter 从 fail-closed
+                协作者拦截器取得的可信授权结论
 
         Returns:
             bool: 删除是否成功
@@ -2279,48 +2316,135 @@ class SkillService:
             return False
 
         # 权限检查：只有技能所有者或管理员可以删除
-        if not self._can_delete_skill(skill, user_id):
+        if not self._can_delete_skill(
+            skill,
+            user_id,
+            authorized_bot_owner_id=authorized_bot_owner_id,
+            collaborator_authorization_verified=collaborator_authorization_verified,
+        ):
             skill_owner = skill.get('user_id')
             logger.warning(f"[SkillService] Permission denied: user={user_id} attempted to delete skill={skill_id} owned by={skill_owner}")
             raise ValueError("无权删除此技能：您不是该技能的创建者，且没有管理员权限")
 
+        git_path = skill.get('git_path') or ''
+        published_center_uuid = (
+            skill.get("skill_uuid")
+            if git_path.startswith("center://")
+            and str(skill.get("status") or "").upper() == "PUBLISHED"
+            else None
+        )
+        references = self._skill_repo.list_skill_set_references(
+            skill_id,
+            skill_uuid=published_center_uuid,
+        )
+        if references:
+            raise SkillReferencedBySkillSetError(
+                [str(ref["skill_set_id"]) for ref in references]
+            )
+
         # 获取技能名称和路径
         skill_name = skill.get('name')
-        git_path = skill.get('git_path', '')
         bolt_id = skill.get('bolt_id')
         skill_user_id = skill.get('user_id') or user_id
+        device_owner_id = self._device_owner_id or skill_user_id
+        is_shared_source = (
+            not skill.get('user_id')
+            and git_path.startswith(("git://", "center://"))
+        )
 
         logger.info(f"[SkillService] Deleting skill: id={skill_id}, name={skill_name}, git_path={git_path}")
         logger.info(f"[SkillService] local_dir: {self.local_dir}, active_dir: {self.active_dir}")
 
-        # 1. 删除激活的软链接（如果存在）—— Phase 4 引入 helper
-        try:
-            link_name = self.get_link_name(skill_name) if skill_name else None
-            logger.info(f"[SkillService] link_name: {link_name}")
-            if link_name:
-                active_link = self.active_dir / link_name
-                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
-                await self._delete_active_entry(device_fs, active_link)
-        except Exception as e:
-            logger.warning(f"[SkillService] Failed to delete active link: {e}", exc_info=True)
+        device_fs = None
+        if not is_shared_source:
+            try:
+                device_fs = self._device_fs_factory(bolt_id, device_owner_id)
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        "failed to resolve device filesystem before delete"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime has no available device "
+                    "filesystem; keeping historical metadata-only delete",
+                    exc_info=True,
+                )
+
+        # 1. 先收敛 active entry。已激活 Skill 的 entry 删除失败时必须 fail closed，
+        # 否则继续删除 source/DB 会把它变成 dangling link。未激活时 entry
+        # 本来就不存在，仍保持幂等成功。
+        link_name = self.get_link_name(skill_name) if skill_name else None
+        logger.info(f"[SkillService] link_name: {link_name}")
+        if link_name and device_fs is not None:
+            active_link = self.active_dir / link_name
+            try:
+                active_entry_exists = await device_fs.exists(str(active_link))
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to inspect active skill entry before delete: {active_link}"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime could not inspect active entry: %s",
+                    active_link,
+                    exc_info=True,
+                )
+                active_entry_exists = True
+            if active_entry_exists:
+                active_deleted = await self._delete_active_entry(
+                    device_fs, active_link
+                )
+                if not active_deleted and self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to delete active skill entry: {active_link}"
+                    )
 
         # 2. 删除物理文件（仅 local:// 技能）— 通过 DeviceFileSystem
-        try:
-            logger.info(f"[SkillService] Checking git_path: {git_path}, starts_with_local={git_path.startswith('local://')}")
-            if git_path.startswith('local://'):
-                # teclaw: skills-local/<name> → workspace/skills-local/<name>;
-                # 非 teclaw: identity（主机路径原样）。
-                local_path_str = self._local_skill_path_adapter(git_path[8:])  # 去掉 local:// 前缀
-                device_fs = self._device_fs_factory(bolt_id, skill_user_id)
-                success = await device_fs.delete_tree(local_path_str)
-                if success:
-                    logger.info(f"[SkillService] Deleted skill files: {local_path_str}")
+        logger.info(f"[SkillService] Checking git_path: {git_path}, starts_with_local={git_path.startswith('local://')}")
+        if git_path.startswith('local://') and device_fs is not None:
+            # teclaw: skills-local/<name> → workspace/skills-local/<name>;
+            # 非 teclaw: identity（主机路径原样）。
+            local_path_str = self._local_skill_path_adapter(git_path[8:])  # 去掉 local:// 前缀
+            try:
+                local_source_exists = await device_fs.exists(local_path_str)
+            except Exception as e:
+                if self.runtime_uses_pool_paths:
+                    raise SkillDeleteConsistencyError(
+                        f"failed to inspect local skill source before delete: {local_path_str}"
+                    ) from e
+                logger.warning(
+                    "[SkillService] Legacy runtime could not inspect local source: %s",
+                    local_path_str,
+                    exc_info=True,
+                )
+                local_source_exists = True
+            if local_source_exists:
+                try:
+                    success = await device_fs.delete_tree(local_path_str)
+                except Exception as e:
+                    if self.runtime_uses_pool_paths:
+                        raise SkillDeleteConsistencyError(
+                            f"failed to delete local skill source: {local_path_str}"
+                        ) from e
+                    logger.warning(
+                        "[SkillService] Legacy runtime failed to delete local source: %s",
+                        local_path_str,
+                        exc_info=True,
+                    )
+                    success = False
+                if not success:
+                    if self.runtime_uses_pool_paths:
+                        raise SkillDeleteConsistencyError(
+                            f"failed to delete local skill source: {local_path_str}"
+                        )
+                    logger.warning(
+                        "[SkillService] Legacy runtime did not delete local source: %s",
+                        local_path_str,
+                    )
                 else:
-                    logger.warning(f"[SkillService] Failed to delete skill files: {local_path_str}")
-            else:
-                logger.info("[SkillService] Not a local skill, skipping physical delete")
-        except Exception as e:
-            logger.warning(f"[SkillService] Failed to delete local skill: {e}", exc_info=True)
+                    logger.info(f"[SkillService] Deleted skill files: {local_path_str}")
+        elif not git_path.startswith('local://'):
+            logger.info("[SkillService] Not a local skill, skipping physical delete")
 
         # 3. 删除数据库记录
         return self._skill_repo.delete(skill_id)

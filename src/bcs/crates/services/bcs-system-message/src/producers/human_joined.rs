@@ -31,9 +31,9 @@ impl SystemMessageProducerService for HumanJoinedMessageProducer {
         _group: &Group,
         _registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::HumanJoined { actor, .. } = event else {
-            return vec![];
+            return (vec![], None);
         };
 
         let display_name = actor
@@ -42,6 +42,7 @@ impl SystemMessageProducerService for HumanJoinedMessageProducer {
             .unwrap_or(&actor.bot_uuid);
 
         let message = format!("{}({}) 已加入协作群", display_name, actor.bot_uuid);
+        let user_message = Some(message.clone());
 
         let recipients: Vec<String> = participants
             .iter()
@@ -49,14 +50,65 @@ impl SystemMessageProducerService for HumanJoinedMessageProducer {
             .map(|p| p.bot_uuid.clone())
             .collect();
 
-        if recipients.is_empty() {
-            return vec![];
-        }
+        let bot_messages = if recipients.is_empty() {
+            vec![]
+        } else {
+            vec![SystemGroupMessage {
+                recipients,
+                message,
+                delivery_type: DeliveryType::Inject,
+            }]
+        };
+        (bot_messages, user_message)
+    }
+}
 
-        vec![SystemGroupMessage {
-            recipients,
-            message,
-            delivery_type: DeliveryType::Inject,
-        }]
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bcs_domain::{ActorKind, ParticipantRole};
+    use bcs_test_support::NoopBotRegistryCoreService;
+
+    #[tokio::test]
+    async fn human_joined_emits_user_message() {
+        let group = Group::new("g1", "bot-1", vec![Participant::bot("bot-1", ParticipantRole::Driver)]);
+        let actor = Participant {
+            bot_uuid: "human_42".into(),
+            bot_name: Some("Alice".into()),
+            kind: None,
+            role: ParticipantRole::Observer,
+            actor_kind: ActorKind::Human,
+            mode: None,
+        };
+        let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
+
+        let (messages, user_message) = HumanJoinedMessageProducer::new()
+            .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants)
+            .await;
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].recipients, vec!["bot-1".to_string()]);
+        assert_eq!(user_message.as_deref(), Some("Alice(human_42) 已加入协作群"));
+    }
+
+    #[tokio::test]
+    async fn human_joined_emits_user_message_even_with_no_bot_recipients() {
+        let group = Group::new("g1", "bot-1", vec![]);
+        let actor = Participant {
+            bot_uuid: "human_42".into(),
+            bot_name: Some("Alice".into()),
+            kind: None,
+            role: ParticipantRole::Observer,
+            actor_kind: ActorKind::Human,
+            mode: None,
+        };
+        let event = SystemMessageEvent::HumanJoined { group_id: "g1".into(), actor };
+
+        let (messages, user_message) = HumanJoinedMessageProducer::new()
+            .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants)
+            .await;
+
+        assert!(messages.is_empty());
+        assert_eq!(user_message.as_deref(), Some("Alice(human_42) 已加入协作群"));
     }
 }

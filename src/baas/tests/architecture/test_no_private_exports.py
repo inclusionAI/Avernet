@@ -29,29 +29,7 @@ from pathlib import Path
 
 SECBAAS = Path(__file__).resolve().parents[2] / "src" / "secbaas" / "community"
 
-_KNOWN_PRIVATE_EXPORTS: dict[str, set[str]] = {
-    "bootstrap/__init__.py": {"_inject_enterprise_plugins"},
-    "core/repository/__init__.py": {"_is_expected_distributed_lock_conflict"},
-    "core/service/config_manage/__init__.py": {"_record_to_response"},
-    "core/service/device_manage/__init__.py": {
-        "_decrypt_header_rule_values",
-        "_encrypt_header_rule_values",
-        "_safe_format_hook",
-    },
-    "core/service/template_manage/__init__.py": {
-        "_ensure_api_key_encrypted",
-        "_record_to_response",
-    },
-    "core/service/tenant_manage/__init__.py": {"_record_to_response"},
-    "plugins/logger/bare/__init__.py": {"_TraceIdFilter", "_resolve_log_level"},
-    "spi/bot/teclaw/__init__.py": {
-        "_BotCreateResult",
-        "_BotDestroyResult",
-        "_BotInfo",
-        "_BotRestartResult",
-        "_BotUpdateResult",
-    },
-}
+_KNOWN_PRIVATE_EXPORTS: dict[str, set[str]] = {}
 
 
 def _is_dunder(name: str) -> bool:

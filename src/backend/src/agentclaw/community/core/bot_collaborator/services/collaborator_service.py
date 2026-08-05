@@ -538,6 +538,68 @@ class CollaboratorService:
 
         return success
 
+    def leave_collaboration(
+        self,
+        bot_id: str,
+        owner_id: str,
+        user_id: str,
+        env: Optional[str] = None,
+    ) -> bool:
+        """当前成员主动退出 Bot 协作。
+
+        与 ``remove_collaborator`` 不同，退出协作只允许删除当前登录用户
+        自己的协作者记录，不需要 ADMIN 权限，也不允许用它删除其他成员。
+
+        Args:
+            bot_id: Bot ID
+            owner_id: Bot 拥有者工号
+            user_id: 当前登录用户工号
+            env: 环境标识
+
+        Returns:
+            是否成功退出
+
+        Raises:
+            BotNotFoundError: Bot 不存在
+            CollaboratorNotFoundError: 当前用户不是该 Bot 协作者
+        """
+        if env is None:
+            env = get_current_env()
+
+        # 1. 查询 Bot 信息，避免仅凭 owner_id/bot_id 删除跨 Bot 记录。
+        bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot 不存在: bot_id={bot_id}, owner_id={owner_id}")
+
+        bot_pk = bot["id"]
+        owner_id_from_bot = bot["owner_id"]
+
+        # Owner 不是协作者记录，不能通过“退出协作”退出自己的 Bot。
+        if user_id == owner_id_from_bot:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 2. 只查当前用户自己的协作者记录。
+        collaborator = self._collaborator_repo.get_by_bot_and_user(bot_pk, user_id, env)
+        if not collaborator:
+            raise CollaboratorNotFoundError(
+                f"当前用户不是该 Bot 协作者: bot_id={bot_id}, user_id={user_id}"
+            )
+
+        # 3. 删除自己的协作者记录。
+        success = self._collaborator_repo.delete(collaborator.id)
+
+        logger.info(
+            "[leave_collaboration] Left: bot_id=%s, user_id=%s",
+            bot_id, user_id
+        )
+
+        # 4. 触发协作关系变更回调。
+        self.on_collaboration_changed(bot_id, owner_id_from_bot, env)
+
+        return success
+
     # ========================================================================
     # 用户参与的 Bot 列表
     # ========================================================================

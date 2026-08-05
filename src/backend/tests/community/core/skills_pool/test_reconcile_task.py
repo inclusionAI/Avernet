@@ -370,6 +370,7 @@ class FakeLayouts:
         self.acquire_result = False
         self.runtime_reconciliation_calls: list[dict[str, object]] = []
         self.runtime_reconciliation_failure_calls: list[dict[str, object]] = []
+        self.runtime_reconciliation_result = True
 
     def renew_lease(self, **kwargs: object) -> bool:
         self.renew_calls.append(kwargs)
@@ -386,7 +387,7 @@ class FakeLayouts:
 
     def record_runtime_reconciliation(self, **kwargs: object) -> bool:
         self.runtime_reconciliation_calls.append(kwargs)
-        return True
+        return self.runtime_reconciliation_result
 
     def record_runtime_reconciliation_failure(self, **kwargs: object) -> bool:
         self.runtime_reconciliation_failure_calls.append(kwargs)
@@ -467,9 +468,7 @@ def _payload(
 def test_ineligible_unclaimed_bot_never_probes_or_reconciles_runtime() -> None:
     legacy = BotSkillLayoutState.legacy_default(SCOPE)
     handler, claims, _, reconcile = _handler(
-        claim_results=[
-            MigrationClaimResult(MigrationClaimOutcome.INELIGIBLE, legacy)
-        ],
+        claim_results=[MigrationClaimResult(MigrationClaimOutcome.INELIGIBLE, legacy)],
         reconcile_results=[],
         state=legacy,
     )
@@ -600,7 +599,7 @@ def test_pool_active_wakeup_records_runtime_reconciliation_after_ready_probe() -
     assert layouts.runtime_reconciliation_calls[0]["evidence"]["probe"] is None
 
 
-def test_pool_active_wakeup_skips_probe_after_quarantine_is_cleaned() -> None:
+def test_pool_active_wakeup_verifies_runtime_after_quarantine_is_cleaned() -> None:
     state = _claimed_state(active_layout=SkillLayout.POOL)
     claims = FakeClaimService(
         [MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)]
@@ -618,9 +617,33 @@ def test_pool_active_wakeup_skips_probe_after_quarantine_is_cleaned() -> None:
 
     assert handler.handle(_payload()) == Complete()
 
-    assert reconcile.calls == []
-    assert layouts.runtime_reconciliation_calls == []
+    assert reconcile.calls == [{"scope": SCOPE, "lease_owner": "skills-pool:wakeup-1"}]
+    assert len(layouts.runtime_reconciliation_calls) == 1
     assert layouts.runtime_reconciliation_failure_calls == []
+
+
+def test_pool_active_wakeup_after_cleanup_completes_when_evidence_is_immutable() -> (
+    None
+):
+    state = _claimed_state(active_layout=SkillLayout.POOL)
+    claims = FakeClaimService(
+        [MigrationClaimResult(MigrationClaimOutcome.ALREADY_CLAIMED, state)]
+    )
+    layouts = FakeLayouts(state)
+    layouts.runtime_reconciliation_result = False
+    reconcile = FakeReconcileService(
+        [SkillsPoolReconcileResult(SkillsPoolReconcileOutcome.ALREADY_ACTIVE)]
+    )
+    handler = SkillsPoolReconcileTaskHandler(
+        claim_service=claims,
+        layout_repository=layouts,
+        reconcile_service=reconcile,
+        quarantine_repository=FakeQuarantines(QuarantineStatus.CLEANED),
+    )
+
+    assert handler.handle(_payload()) == Complete()
+    assert reconcile.calls == [{"scope": SCOPE, "lease_owner": "skills-pool:wakeup-1"}]
+    assert len(layouts.runtime_reconciliation_calls) == 1
 
 
 def test_pool_active_wakeup_does_not_enqueue_duplicate_cleanup_task() -> None:

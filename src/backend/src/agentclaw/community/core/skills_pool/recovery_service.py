@@ -96,9 +96,7 @@ class SkillsPoolRecoveryService:
         resolution: ManualRepairResolution,
     ) -> SkillsPoolRecoveryResult:
         if not operator.strip() or not note.strip():
-            return SkillsPoolRecoveryResult(
-                SkillsPoolRecoveryOutcome.INVALID_REQUEST
-            )
+            return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.INVALID_REQUEST)
         state = self._layouts.get(scope)
         if not state.persisted:
             return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.NOT_FOUND)
@@ -119,9 +117,7 @@ class SkillsPoolRecoveryService:
                 SkillsPoolRecoveryOutcome.NOT_REPAIR_REQUIRED
             )
         if state.migration_generation != migration_generation:
-            return SkillsPoolRecoveryResult(
-                SkillsPoolRecoveryOutcome.STALE_GENERATION
-            )
+            return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.STALE_GENERATION)
 
         if not retrying_resolved_enqueue:
             committed = resolution is ManualRepairResolution.POOL_COMMITTED
@@ -159,9 +155,7 @@ class SkillsPoolRecoveryService:
                 scope.bot_id,
                 migration_generation,
             )
-            return SkillsPoolRecoveryResult(
-                SkillsPoolRecoveryOutcome.RETRIGGER_FAILED
-            )
+            return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.RETRIGGER_FAILED)
         return SkillsPoolRecoveryResult(SkillsPoolRecoveryOutcome.RETRIGGERED)
 
 
@@ -248,9 +242,7 @@ class SkillsPoolRollbackService:
             value.strip()
             for value in (rollback_generation, lease_owner, operator, note)
         ):
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.INVALID_REQUEST
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.INVALID_REQUEST)
 
         state = self._layouts.get(scope)
         began_rollback = False
@@ -274,23 +266,17 @@ class SkillsPoolRollbackService:
             SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
             SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED,
         }:
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.NOT_POOL_ACTIVE
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.NOT_POOL_ACTIVE)
 
         if state.migration_generation != rollback_generation:
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.STALE_GENERATION
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.STALE_GENERATION)
         if not began_rollback and not self._layouts.try_acquire_rollback_lease(
             scope=scope,
             rollback_generation=rollback_generation,
             lease_owner=lease_owner,
             lease_seconds=self._LEASE_SECONDS,
         ):
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.STATE_RACE_LOST
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.STATE_RACE_LOST)
 
         bot = self._bots.get_by_id_and_entity(scope.bot_id, scope.entity_id)
         if bot is None or bot.get("env") != scope.env:
@@ -330,9 +316,7 @@ class SkillsPoolRollbackService:
                 code="ROLLBACK_ENGINE_UNSUPPORTED",
                 stage="rollback_bot_validation",
                 retryable=False,
-                evidence={
-                    "reason": f"engine Pool layout not implemented: {engine}"
-                },
+                evidence={"reason": f"engine Pool layout not implemented: {engine}"},
             )
         user_id = str(owner_id)
 
@@ -390,9 +374,7 @@ class SkillsPoolRollbackService:
                 evidence={"reason": str(error)},
             )
 
-        locator_evidence = self._persisted_rollback_evidence(
-            state.last_probe_evidence
-        )
+        locator_evidence = self._persisted_rollback_evidence(state.last_probe_evidence)
         if state.phase is SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING:
             # Pool cutover retires Legacy local storage, so Legacy mappings
             # cannot be published until the runtime has rebuilt that corpus.
@@ -477,9 +459,7 @@ class SkillsPoolRollbackService:
                 retryable=True,
                 evidence={"local_locator_count": len(local_locators)},
             )
-        return SkillsPoolRollbackResult(
-            SkillsPoolRollbackOutcome.LEGACY_ACTIVE
-        )
+        return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.LEGACY_ACTIVE)
 
     async def _publish_and_verify_mappings(
         self,
@@ -494,6 +474,7 @@ class SkillsPoolRollbackService:
             bot_id=scope.bot_id,
             user_id=user_id,
             mappings=mappings,
+            retired_mappings=[],
             source_layout=SkillMappingSourceLayout.LEGACY,
         ):
             return self._failure(
@@ -510,6 +491,7 @@ class SkillsPoolRollbackService:
             bot_id=scope.bot_id,
             user_id=user_id,
             mappings=mappings,
+            retired_mappings=[],
             source_layout=SkillMappingSourceLayout.LEGACY,
         ):
             return self._failure(
@@ -545,9 +527,7 @@ class SkillsPoolRollbackService:
             retryable=retryable,
             evidence=evidence,
         ):
-            return SkillsPoolRollbackResult(
-                SkillsPoolRollbackOutcome.STATE_RACE_LOST
-            )
+            return SkillsPoolRollbackResult(SkillsPoolRollbackOutcome.STATE_RACE_LOST)
         return SkillsPoolRollbackResult(
             outcome,
             evidence=evidence,

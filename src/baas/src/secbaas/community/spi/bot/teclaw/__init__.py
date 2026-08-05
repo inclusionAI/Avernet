@@ -2,18 +2,18 @@
 
 from ._protocols import TeClawBotPlugin
 from ._types import (
-    _BotCreateResult,
-    _BotDestroyResult,
-    _BotInfo,
-    _BotRestartResult,
-    _BotUpdateResult,
+    BotCreateResult,
+    BotDestroyResult,
+    BotInfo,
+    BotRestartResult,
+    BotUpdateResult,
 )
 
 __all__ = [
     "TeClawBotPlugin",
-    "_BotCreateResult",
-    "_BotDestroyResult",
-    "_BotInfo",
-    "_BotRestartResult",
-    "_BotUpdateResult",
+    "BotCreateResult",
+    "BotDestroyResult",
+    "BotInfo",
+    "BotRestartResult",
+    "BotUpdateResult",
 ]

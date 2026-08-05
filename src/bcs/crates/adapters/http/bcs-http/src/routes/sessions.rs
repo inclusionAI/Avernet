@@ -13,7 +13,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use bcs_domain::{ActorKind, SystemMessageEvent};
+use bcs_domain::{ActorKind, DeliveryType, SystemMessageEvent};
 use bcs_service_api::{
     AuthenticatedHumanCaller, GroupChatCommand, StartStateMachineRunCommand,
     StartStateMachineRunOutcome,
@@ -180,6 +180,12 @@ pub struct CreateSessionRequest {
     pub created_by: Option<String>,
     #[serde(default)]
     pub caller_role: Option<String>,
+    /// Optional delivery override for the driver bot's `[GROUP CONTEXT]`
+    /// message: `"send"` (default, driver is asked to respond) or
+    /// `"inject"` (driver observes silently). Other participants always
+    /// receive the context via `chat.inject`.
+    #[serde(default)]
+    pub group_context_delivery: Option<DeliveryType>,
 }
 
 pub async fn create_session_for_group(
@@ -590,6 +596,7 @@ pub async fn create_session_for_group(
                 let sid = sess.id.clone();
                 let session_input = sess.input.clone();
                 let session_participants = sess.participants.clone();
+                let driver_delivery = body.group_context_delivery;
                 let reason = group
                     .label
                     .clone()
@@ -604,6 +611,7 @@ pub async fn create_session_for_group(
                                 reason,
                                 session_input,
                                 task_ledger: None,
+                                driver_delivery,
                             },
                             &sid,
                             &session_participants,

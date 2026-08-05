@@ -2,8 +2,8 @@
 
 One route handles every request that is not a gateway-local endpoint:
 
-1. resolve the domain from the leading path segment (unknown → 404; the gateway
-   forwards only into known domains, never as an open proxy);
+1. resolve the domain claiming this path *on the HTTP plane* (none → 404; the
+   gateway forwards only into known domains, never as an open proxy);
 2. authenticate (fail-closed) — a known domain still requires a principal;
 3. forward the path **verbatim** to the resolved server and stream the response
    back unchanged.
@@ -110,12 +110,14 @@ async def _attach_identities(
 async def forward_request(request: Request) -> Response:
     """Resolve domain → authenticate → forward verbatim, streaming the response."""
     path = request.url.path
-    domain = request.app.state.domain_map.domain_for(path)
-    # A domain that does not answer HTTP is as unknown here as one that is not
-    # configured at all. Socket domains are served by the WebSocket entrypoint
-    # and must not become an HTTP proxy into their upstream as a side effect of
-    # sharing the domain map.
-    if domain is None or not domain.serves_http:
+    # Asked for the *HTTP* domain, not for whichever domain claims the path.
+    # A socket domain is not a candidate here at all, so it can neither become an
+    # HTTP proxy into its upstream nor shadow a broader HTTP domain that also
+    # claims the path — an HTTP request beneath a socket-only prefix still
+    # resolves to the domain that serves the prefix above it.
+    domain = request.app.state.domain_map.http_domain_for(path)
+    if domain is None:
+        logger.info("no route for %s %s", request.method, path)
         return _error(404, 1, "no route for path")
     server = domain.server
     upstream_path = domain.upstream_path(path)
@@ -125,6 +127,7 @@ async def forward_request(request: Request) -> Response:
             request.method, path, _bundle(request)
         )
     except AuthError as exc:
+        logger.warning("auth failed for %s %s: %s", request.method, path, exc)
         return _error(401, 1, str(exc))
 
     body = await request.body()
@@ -154,6 +157,9 @@ async def forward_request(request: Request) -> Response:
     try:
         upstream = await cm.__aenter__()
     except Exception:
+        logger.warning(
+            "upstream unavailable for %s %s", request.method, path, exc_info=True
+        )
         return _error(502, 1, "upstream unavailable")
 
     async def stream() -> AsyncIterator[bytes]:
@@ -164,6 +170,13 @@ async def forward_request(request: Request) -> Response:
             await cm.__aexit__(None, None, None)
 
     response = StreamingResponse(stream(), status_code=upstream.status_code)
+    logger.info(
+        "forward %s %s -> %s status=%d",
+        request.method,
+        path,
+        forward.url,
+        upstream.status_code,
+    )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
     response.raw_headers = [
         (k.encode("latin-1"), v.encode("latin-1")) for k, v in upstream.headers

@@ -3,7 +3,10 @@
 //! When a session is created this producer generates the initial
 //! `[GROUP CONTEXT]` or `[SERVICE GROUP CONTEXT]` message delivered
 //! to all bot participants, with `chat.send` for the driver/manager
-//! and `chat.inject` for other participants.
+//! and `chat.inject` for other participants. The driver's delivery
+//! can be overridden to `chat.inject` via the event's
+//! `driver_delivery` field (except in ManagerWorker groups, which
+//! always deliver to the manager via `chat.send`).
 
 use std::collections::HashMap;
 
@@ -30,16 +33,17 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
         group: &Group,
         registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::SessionContext {
             session_id,
             reason,
             session_input,
             task_ledger,
+            driver_delivery,
             ..
         } = event
         else {
-            return vec![];
+            return (vec![], None);
         };
 
         let mut render_group = group.clone();
@@ -64,13 +68,22 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
         let mut messages = Vec::new();
         for participant in bot_participants {
             let is_driver = is_lead_participant(&render_group, participant);
+            let is_manager_worker = render_group.group_strategy == GroupStrategy::ManagerWorker;
             let delivery_type = if is_driver {
-                DeliveryType::Send
+                // ManagerWorker groups intentionally ignore the
+                // `driver_delivery` (group_context_delivery) override: the
+                // manager is expected to actively pick up and dispatch the
+                // task, so its context is always delivered via `chat.send`.
+                if is_manager_worker {
+                    DeliveryType::Send
+                } else {
+                    driver_delivery.unwrap_or(DeliveryType::Send)
+                }
             } else {
                 DeliveryType::Inject
             };
 
-            let context_message = if render_group.group_strategy == GroupStrategy::ManagerWorker {
+            let context_message = if is_manager_worker {
                 let coordination_surface = registry
                     .resolve_coordination_surface(&participant.bot_uuid)
                     .await
@@ -105,7 +118,11 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                 delivery_type,
             });
         }
-        messages
+        // SessionContext does not emit a user-facing WS message: the bot
+        // context messages are delivered per-recipient and persisted with
+        // owner=recipient, but no session-level frontend broadcast is produced.
+        let user_message: Option<String> = None;
+        (messages, user_message)
     }
 }
 
@@ -157,16 +174,8 @@ fn initial_group_context_message(
     use_at_mention_routing: bool,
     task_input: Option<&str>,
 ) -> String {
-    let base_context = user_context
-        .filter(|ctx| !ctx.trim().is_empty())
-        .map(|ctx| format!("背景: {}\n", ctx.trim()))
-        .unwrap_or_default();
-
-    let task_line = task_input
-        .filter(|task| !task.trim().is_empty())
-        .map(|task| format!("\n[任务]\n{}\n[/任务]\n", task.trim()))
-        .unwrap_or_default();
-
+    let base_context = base_context_block(user_context);
+    let task_line = task_block(task_input);
     let role_instruction = match delivery_type {
         DeliveryType::Send => {
             "你是本次协作的 Driver。请介绍协作目标，判断下一步需要谁参与，并开始协调。"
@@ -178,19 +187,7 @@ fn initial_group_context_message(
             "你当前通过 chat.inject 收到初始化上下文，应静默观察，不要主动回复；等待 @mention、bcs_route 或任务点名后再响应。"
         }
     };
-    let routing_instruction = if use_at_mention_routing {
-        "路由工具 (@mention):\n\
-           消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。\n\
-           只有希望某个 Bot 响应时才使用 @，不要用 @ 表示引用、收到或转述某个 Bot 的消息。\n\
-           优先使用名称；名称为空、重复或不确定时，使用 Bot ID。"
-    } else {
-        "路由工具 (bcs_route):\n\
-           使用 bcs_route 工具指定下一个响应者（替代 @mention）。\n\
-           - to: 目标 Bot 列表，支持按名称或 bot_id 选择\n\
-             - 按名称: {\"type\": \"name\", \"value\": \"DBA\"}\n\
-             - 按ID: {\"type\": \"bot\", \"value\": \"bot_54123f4f\"}\n\
-           - reason: 路由原因"
-    };
+    let routing_instruction = routing_instruction_block(use_at_mention_routing);
     let roster = if use_at_mention_routing {
         format_roster_with_mentions(group)
     } else {
@@ -224,6 +221,42 @@ fn initial_group_context_message(
         role_slug(recipient.role),
         role_instruction,
     )
+}
+
+/// Renders the `背景: ...` line for `[GROUP CONTEXT]` blocks, or an empty
+/// string when `user_context` is missing/blank.
+fn base_context_block(user_context: Option<&str>) -> String {
+    user_context
+        .filter(|ctx| !ctx.trim().is_empty())
+        .map(|ctx| format!("背景: {}\n", ctx.trim()))
+        .unwrap_or_default()
+}
+
+/// Renders the `[任务]...[/任务]` block, or an empty string when `task_input`
+/// is missing/blank.
+fn task_block(task_input: Option<&str>) -> String {
+    task_input
+        .filter(|task| !task.trim().is_empty())
+        .map(|task| format!("\n[任务]\n{}\n[/任务]\n", task.trim()))
+        .unwrap_or_default()
+}
+
+/// Renders the routing instruction text (either `@mention` or `bcs_route`
+/// variant) used inside `[GROUP CONTEXT]` blocks.
+fn routing_instruction_block(use_at_mention_routing: bool) -> &'static str {
+    if use_at_mention_routing {
+        "路由工具 (@mention):\n\
+           消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。\n\
+           只有希望某个 Bot 响应时才使用 @，不要用 @ 表示引用、收到或转述某个 Bot 的消息。\n\
+           优先使用名称；名称为空、重复或不确定时，使用 Bot ID。"
+    } else {
+        "路由工具 (bcs_route):\n\
+           使用 bcs_route 工具指定下一个响应者（替代 @mention）。\n\
+           - to: 目标 Bot 列表，支持按名称或 bot_id 选择\n\
+             - 按名称: {\"type\": \"name\", \"value\": \"DBA\"}\n\
+             - 按ID: {\"type\": \"bot\", \"value\": \"bot_54123f4f\"}\n\
+           - reason: 路由原因"
+    }
 }
 
 fn format_roster_with_mentions(group: &Group) -> String {
@@ -290,32 +323,10 @@ fn manager_worker_initial_message(
     coordination_surface: &CoordinationSurface,
 ) -> String {
     let is_manager = recipient.role == ParticipantRole::Manager;
-    let context_line = if is_manager {
-        context
-            .filter(|ctx| !ctx.trim().is_empty())
-            .map(|ctx| format!("\n{}\n", ctx.trim()))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let task_line = if is_manager {
-        task_input
-            .filter(|task| !task.trim().is_empty())
-            .map(|task| format!("\n[任务]\n{}\n[/任务]\n", task.trim()))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let context_line = if is_manager { mw_context_block(context) } else { String::new() };
+    let task_line = if is_manager { mw_task_block(task_input) } else { String::new() };
     let role_label = if is_manager { "manager" } else { "worker" };
-    let status_line = if is_manager {
-        task_ledger
-            .map(format_ledger_status_line)
-            .filter(|line| !line.is_empty())
-            .map(|line| format!("\n{}", line))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+    let status_line = if is_manager { mw_status_block(task_ledger) } else { String::new() };
     let instruction = manager_worker_coordination_instruction(
         is_manager,
         delivery_type,
@@ -347,6 +358,34 @@ fn manager_worker_initial_message(
         display_participant(recipient),
         role_label,
     )
+}
+
+/// Renders the background block for `[SERVICE GROUP CONTEXT]` blocks:
+/// `\n{ctx}\n` when `context` is non-blank, else `""`.
+fn mw_context_block(context: Option<&str>) -> String {
+    context
+        .filter(|ctx| !ctx.trim().is_empty())
+        .map(|ctx| format!("\n{}\n", ctx.trim()))
+        .unwrap_or_default()
+}
+
+/// Renders the `[任务]...[/任务]` block for `[SERVICE GROUP CONTEXT]`
+/// blocks, or `""` when `task_input` is missing/blank.
+fn mw_task_block(task_input: Option<&str>) -> String {
+    task_input
+        .filter(|task| !task.trim().is_empty())
+        .map(|task| format!("\n[任务]\n{}\n[/任务]\n", task.trim()))
+        .unwrap_or_default()
+}
+
+/// Renders the `[任务状态]` line for `[SERVICE GROUP CONTEXT]` blocks via
+/// `format_ledger_status_line`: non-empty → `\n{line}`, else `""`.
+fn mw_status_block(task_ledger: Option<&LedgerSummary>) -> String {
+    task_ledger
+        .map(format_ledger_status_line)
+        .filter(|line| !line.is_empty())
+        .map(|line| format!("\n{}", line))
+        .unwrap_or_default()
 }
 
 fn manager_worker_coordination_instruction(

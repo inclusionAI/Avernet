@@ -19,7 +19,10 @@ Capability matrix:
   ``update_skill``, ``enable_skill``, ``disable_skill``, ``execute_skill``,
   ``validate_skill``, ``discover_skills`` (10 ops).
 """
+
 from __future__ import annotations
+
+from collections.abc import Sequence
 
 from engine.community.core.engine.capability import Capability
 from engine.community.core.engine.context import AuthContext
@@ -180,14 +183,10 @@ class OpenClawSkillsAdapter(SkillsService):
         evidence = dict(raw.get("evidence") or {})
         if status is PoolLayoutActivationStatus.UNKNOWN:
             evidence["raw_status"] = raw_status
-        committed = (
-            raw.get("committed") is True
-            and status
-            in {
-                PoolLayoutActivationStatus.COMMITTED,
-                PoolLayoutActivationStatus.ALREADY_COMMITTED,
-            }
-        )
+        committed = raw.get("committed") is True and status in {
+            PoolLayoutActivationStatus.COMMITTED,
+            PoolLayoutActivationStatus.ALREADY_COMMITTED,
+        }
         return PoolLayoutActivationResult(
             committed=committed,
             status=status,
@@ -266,6 +265,7 @@ class OpenClawSkillsAdapter(SkillsService):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
@@ -274,6 +274,10 @@ class OpenClawSkillsAdapter(SkillsService):
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
         }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
         raw = await self._port.publish_pool_mappings(payload)
@@ -286,6 +290,7 @@ class OpenClawSkillsAdapter(SkillsService):
         self,
         mappings: list[PoolSkillMappingIntent | SymlinkItem],
         *,
+        retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
         auth: AuthContext | None = None,
@@ -294,6 +299,10 @@ class OpenClawSkillsAdapter(SkillsService):
             "mappings": [_serialize_pool_mapping(item) for item in mappings],
             "source_layout": source_layout.value,
         }
+        if retired_mappings:
+            payload["retired_mappings"] = [
+                _serialize_pool_mapping(item) for item in retired_mappings
+            ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
         raw = await self._port.verify_pool_mappings(payload)
@@ -305,22 +314,29 @@ class OpenClawSkillsAdapter(SkillsService):
     # ── Per-skill ops (not exposed by OpenClaw) ───────────────────────────────
 
     async def list_skills(
-        self, auth: AuthContext | None = None,
+        self,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_LIST)
 
     async def get_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> Skill | None:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_LIST)
 
     async def install_skill(
-        self, config: SkillConfig, auth: AuthContext | None = None,
+        self,
+        config: SkillConfig,
+        auth: AuthContext | None = None,
     ) -> Skill:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_INSTALL)
 
     async def uninstall_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_UNINSTALL)
 
@@ -333,12 +349,16 @@ class OpenClawSkillsAdapter(SkillsService):
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_UPDATE)
 
     async def enable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_INSTALL)
 
     async def disable_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> bool:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_UNINSTALL)
 
@@ -350,12 +370,16 @@ class OpenClawSkillsAdapter(SkillsService):
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_EXECUTE)
 
     async def validate_skill(
-        self, skill_id: str, auth: AuthContext | None = None,
+        self,
+        skill_id: str,
+        auth: AuthContext | None = None,
     ) -> list[str]:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_LIST)
 
     async def discover_skills(
-        self, source: str, auth: AuthContext | None = None,
+        self,
+        source: str,
+        auth: AuthContext | None = None,
     ) -> list[Skill]:
         raise CapabilityNotSupportedError("openclaw", Capability.SKILLS_DISCOVER)
 

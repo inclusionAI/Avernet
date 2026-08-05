@@ -578,3 +578,87 @@ class TestCreateSessionFullFlow:
         )
         assert session.session_id == SESSION_ID
         assert session.status == "active"
+
+
+# ==================== TestListSessions ====================
+
+
+class TestListSessions:
+    """ClawBotService.list_sessions() coverage."""
+
+    @pytest.mark.asyncio
+    async def test_missing_sandbox_id(self, service, baas_binding):
+        """ClawBotService requires sandbox_id in binding_info."""
+        with pytest.raises(BotServiceError, match="ClawBotService requires sandbox_id"):
+            await service.list_sessions(binding_info=baas_binding)
+
+    @pytest.mark.asyncio
+    async def test_success_path_with_pagination(
+        self, service, arca_binding, monkeypatch
+    ):
+        """Successful list_sessions delegates to session client with correct args."""
+        from secbaas.community.core.service.bot_run._async_session_client import (
+            SessionInfo as AdapterSessionInfo,
+        )
+
+        adapter_session = AdapterSessionInfo(
+            id="sess-001",
+            title="test",
+            user_id="user-1",
+            agent_id=BOT_ID,
+            created_at="2025-01-01T00:00:00Z",
+            updated_at="2025-01-01T01:00:00Z",
+        )
+
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(return_value=[adapter_session])
+
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+
+        result = await service.list_sessions(
+            binding_info=arca_binding,
+            limit=5,
+            offset=2,
+        )
+
+        session_client.list_sessions.assert_awaited_once_with(
+            agent_id=BOT_ID,
+            limit=5,
+            offset=2,
+            engine=arca_binding.engine_type,
+        )
+        assert len(result) == 1
+        assert result[0].session_id == "sess-001"
+        assert result[0].bot_id == BOT_ID
+
+    @pytest.mark.asyncio
+    async def test_downstream_client_failure(self, service, arca_binding, monkeypatch):
+        """Downstream client RuntimeError wraps as BotServiceError."""
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(side_effect=RuntimeError("timeout"))
+
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+
+        with pytest.raises(BotServiceError, match="Failed to list sessions"):
+            await service.list_sessions(binding_info=arca_binding)
+
+    @pytest.mark.asyncio
+    async def test_bot_service_error_passthrough(
+        self, service, arca_binding, monkeypatch
+    ):
+        """Existing BotServiceError passes through without re-wrapping."""
+        session_client = AsyncMock()
+        session_client.__aenter__ = AsyncMock(return_value=session_client)
+        session_client.__aexit__ = AsyncMock(return_value=False)
+        session_client.list_sessions = AsyncMock(
+            side_effect=BotServiceError("already wrapped"),
+        )
+
+        monkeypatch.setattr(service, "_create_session_client", lambda x: session_client)
+
+        with pytest.raises(BotServiceError, match="already wrapped"):
+            await service.list_sessions(binding_info=arca_binding)

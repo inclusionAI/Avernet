@@ -105,7 +105,8 @@ pub enum GroupMessageType {
 /// Determines how the message should be delivered to the bot:
 /// - Send: Bot should respond (mentioned or coordinator for non-@ messages)
 /// - Inject: Bot should observe silently
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeliveryType {
     /// Bot should respond to this message.
     Send,
@@ -179,6 +180,10 @@ pub enum MessageOwnerFilter {
     Any,
     IsNull,
     Eq(String),
+    /// `owner_bot_id IS NULL OR owner_bot_id = <viewer>` — 公共消息 + 发给该
+    /// viewer 的系统消息副本。历史查询按 `view_bot_id` 回放"公共 + 自己的
+    /// 系统副本"，收窄的仅是他人新增的私有副本，是旧 `Any`/`IsNull` 的超集。
+    PublicOrOwner(String),
 }
 
 impl Default for MessageOwnerFilter {

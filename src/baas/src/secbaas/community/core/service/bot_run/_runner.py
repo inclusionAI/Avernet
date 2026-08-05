@@ -440,6 +440,24 @@ class BotRunner:
             context=context,
         )
 
+    async def list_sessions(
+        self,
+        *,
+        bot_id: str,
+        context: BotChatContext,
+        metadata: dict[str, Any],
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[SessionInfo]:
+        """List sessions for a given bot (read-only)."""
+        route = await self._resolve_bot_route(bot_id, metadata)
+        return await route.bot_service.list_sessions(
+            binding_info=route.binding_info,
+            context=context,
+            limit=limit,
+            offset=offset,
+        )
+
     def get_result(self, run_id: str) -> Any:
         """获取执行结果
 
@@ -664,7 +682,14 @@ class BotRunner:
         context: BotChatContext,
         metadata: dict[str, Any],
     ) -> None:
-        """入库 PENDING 记录（DB-first）"""
+        """入库 PENDING 记录（DB-first）
+
+        将 context 的 app_id / app_type / tenant 写入 metadata，
+        供 Worker 端 ``_rebuild_context`` 重建 BotChatContext。
+        """
+        metadata["app_id"] = context.app_id
+        metadata["app_type"] = context.app_type
+        metadata["tenant"] = context.tenant
         try:
             self._run_repository.insert_run(
                 run_id=run_id,

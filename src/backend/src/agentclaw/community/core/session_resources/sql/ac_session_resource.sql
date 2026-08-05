@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS ac_session_resource (
   resource_id VARCHAR(128) NOT NULL,
   owner_id VARCHAR(128) NOT NULL,
   bot_id VARCHAR(128) NOT NULL,
+  binding_id BIGINT NULL,
   scope_type VARCHAR(64) NOT NULL,
   scope_key_hash VARCHAR(128) NOT NULL,
   session_key_hash VARCHAR(128) NOT NULL,

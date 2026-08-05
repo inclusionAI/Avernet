@@ -62,6 +62,12 @@ from agentclaw.community.api.skill_set_service_factory import (
 from agentclaw.community.api.skill_set_switcher_factory import (
     SkillSetSwitcherFactoryProtocol,
 )
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
 from agentclaw.community.di import config as cfg
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -120,6 +126,7 @@ from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
 from agentclaw.community.core.skills_pool.models import pool_paths_for_engine
+from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,
@@ -127,6 +134,24 @@ from agentclaw.community.core.skills_pool.types import (
 )
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
+)
+from agentclaw.community.core.skill_center.services.local_skill_query_service import (
+    LocalSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
+from agentclaw.community.core.bot_collaborator.repository.protocol import (
+    BotCollabLogRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
@@ -242,6 +267,66 @@ class SkillCenterModule(Module):
         )
 
         return UnifiedSkillSetRepository(db)
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_query_service(
+        self,
+        skill_repo: SkillRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+    ) -> LocalSkillQueryServiceProtocol:
+        """Bind the public Local-Skill desired-state query service."""
+        return LocalSkillQueryService(
+            skill_repo=skill_repo,
+            bot_repo=bot_repo,
+            collaborator_service=collaborator_service,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_upload_service(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_service_factory: SkillServiceFactory,
+        audit_log_repo: BotCollabLogRepositoryProtocol,
+        edit_guard: SkillsPoolEditGuard,
+    ) -> LocalSkillUploadServiceProtocol:
+        return LocalSkillUploadService(
+            skill_repo,
+            skill_set_repo,
+            bot_repo,
+            collaborator_service,
+            skill_service_factory,
+            audit_log_repo,
+            edit_guard,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def local_skill_state_service(
+        self,
+        skill_repo: SkillRepository,
+        skill_set_repo: SkillSetRepository,
+        bot_repo: BotRepository,
+        collaborator_service: CollaboratorServiceProtocol,
+        skill_set_service_factory: SkillSetServiceFactory,
+        edit_guard: SkillsPoolEditGuard,
+    ) -> LocalSkillStateServiceProtocol:
+        return LocalSkillStateService(
+            skill_repo,
+            skill_set_repo,
+            bot_repo,
+            collaborator_service,
+            skill_set_service_factory,
+            edit_guard,
+        )
 
     @singleton
     @provider
@@ -404,6 +489,7 @@ class SkillCenterModule(Module):
         git_sync_service_factory: Callable[[], GitSyncService],
         bot_repo: BotRepository,
         layout_repository: SkillsPoolLayoutRepositoryProtocol,
+        path_factory: WorkspacePathFactory,
     ) -> SkillServiceFactory:
         def resolve_pool_paths(
             owner_id: str,
@@ -435,6 +521,7 @@ class SkillCenterModule(Module):
             device_fs_dispatcher=device_fs_dispatcher,
             market_cache=market_cache,
             git_sync_service_factory=git_sync_service_factory,
+            path_factory=path_factory,
             pool_layout_paths=resolve_pool_paths,
         )
 
@@ -638,8 +725,7 @@ class SkillCenterModule(Module):
             entity_id = bot.get("entity_id")
             bot_id = bot.get("bot_id")
             if not all(
-                isinstance(value, str) and value
-                for value in (env, entity_id, bot_id)
+                isinstance(value, str) and value for value in (env, entity_id, bot_id)
             ):
                 return None
             state = layout_repository.get(

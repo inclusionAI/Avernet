@@ -14,8 +14,13 @@ provides:
   - "GitSyncService"
   - "SkillAuthService"
   - "CurrentRuntimeLayoutProbeService"
+  - "LocalSkillQueryService"
+  - "LocalSkillUploadService"
+  - "LocalSkillStateService"
 consumes:
   - "BotRepository"
+  - "BotCollabLogRepositoryProtocol"
+  - "CollaboratorServiceProtocol"
   - "Events"
   - "core/mcp services"
   - "CachePlugin"
@@ -27,14 +32,18 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillRepoSyncPlugin"
+  - "WorkspacePathFactory"
 internal_dependencies:
   - agentclaw.community.core.access
+  - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.config
+  - agentclaw.community.core.config_compose
   - agentclaw.community.core.devices
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
+  - agentclaw.community.core.skills_pool
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.di.runtime_mode

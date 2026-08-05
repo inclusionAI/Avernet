@@ -310,6 +310,10 @@ impl MessageRepoPort for MySqlMessageStore {
                 conditions.push("owner_bot_id = ?".to_string());
                 params.push(DbValue::from(owner_bot_id.clone()));
             }
+            MessageOwnerFilter::PublicOrOwner(owner_bot_id) => {
+                conditions.push("(owner_bot_id IS NULL OR owner_bot_id = ?)".to_string());
+                params.push(DbValue::from(owner_bot_id.clone()));
+            }
         }
 
         if let Some(ref keyword) = query.keyword {
@@ -450,6 +454,10 @@ impl MessageRepoPort for MySqlMessageStore {
             }
             MessageOwnerFilter::Eq(owner) => {
                 conditions.push("owner_bot_id = ?".to_string());
+                params.push(DbValue::from(owner.clone()));
+            }
+            MessageOwnerFilter::PublicOrOwner(owner) => {
+                conditions.push("(owner_bot_id IS NULL OR owner_bot_id = ?)".to_string());
                 params.push(DbValue::from(owner.clone()));
             }
         }

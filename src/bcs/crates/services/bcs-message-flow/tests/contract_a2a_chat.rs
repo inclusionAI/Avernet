@@ -1111,6 +1111,19 @@ async fn protected_target_requires_friendship_in_a2a_service() {
 }
 
 #[tokio::test]
+async fn protected_target_allows_self_chat_without_friendship() {
+    let (service, delivery, _) = build_service(
+        vec![("bot-source", "protected", Some("owner-1"))],
+        vec![],
+    )
+    .await;
+
+    service.chat(chat_command("bot-source")).await.unwrap();
+
+    assert_eq!(delivery.frames().await.len(), 1);
+}
+
+#[tokio::test]
 async fn protected_friend_and_public_target_are_delivered_by_a2a_service() {
     let (service, delivery, _) = build_service(
         vec![

@@ -7,11 +7,10 @@ topology and a raw device credential, both of which become things we cannot
 change without breaking integrators.
 
 This service returns **finished** socket URLs instead, addressed to the public
-gateway under ``/openapi/v1/engine``. The target and the credential do travel
-*inside* that
-URL — a browser's WebSocket handshake can carry a credential nowhere else — but
-no field beside it hands a caller the pieces to assemble a different one, and
-nothing names the hop behind the gateway.
+gateway under ``/openapi/v1/bots/messages/ws``. The target and the credential do
+travel *inside* that URL — a browser's WebSocket handshake can carry a credential
+nowhere else — but no field beside it hands a caller the pieces to assemble a
+different one, and nothing names the hop behind the gateway.
 """
 
 from __future__ import annotations
@@ -56,10 +55,29 @@ CONNECTION_TTL_SECONDS = 120 * 60
 _PROXY_TOKEN_PARAM = "x-proxypass-token"
 
 #: Path prefix the gateway routes on. It sits *inside* the published API
-#: namespace rather than at the host root: ``engine`` is an ordinary gateway
-#: domain, resolved by the same leading-segment lookup as ``bots``, and the
-#: socket is part of the same public surface as the endpoint that hands it out.
-_ENGINE_PREFIX = "/openapi/v1/engine"
+#: namespace rather than at the host root, and inside the ``bots`` scope rather
+#: than beside it: the whole bots surface — management here, runtime on the hop
+#: behind the gateway — is one team's, and the leading segment names the owner
+#: rather than the process. The gateway resolves it by path pattern, so a
+#: socket prefix nested under another domain's is an ordinary configuration.
+#:
+#: ``messages`` names the channel the messages travel over. Other domains are
+#: expected to grow their own, so the word is shared vocabulary rather than
+#: this surface's alone.
+#:
+#: ``ws`` names the transport, and it is a segment rather than an implication.
+#: The channel is expected to grow HTTP endpoints, and the gateway's socket
+#: domain claims this prefix outright — along with the one route-security rule
+#: that waives authentication, since a browser handshake carries its credential
+#: in the query and can present nothing else. Keeping that claim one segment
+#: deeper than ``messages`` is what stops a later endpoint from being born
+#: inside it.
+#:
+#: This value and the gateway's ``bots-messages-ws`` domain are one contract:
+#: the gateway matches ``/openapi/v1/bots/messages/ws/**`` and rewrites that
+#: prefix onto ``/proxypass``. A change to either without the other publishes
+#: URLs the gateway resolves to no domain, and every handshake fails.
+_ENGINE_PREFIX = "/openapi/v1/bots/messages/ws"
 
 #: The routing prefix the hop behind the gateway serves. Recognised, then swapped
 #: for :data:`_ENGINE_PREFIX` — see :meth:`_readdress_onto_gateway`.
@@ -343,7 +361,8 @@ class EngineConnectionService:
         """The provider's relay URL, re-pointed at the gateway.
 
         Exactly two things change: the origin becomes the gateway's, and the
-        hop's ``/proxypass/`` routing prefix becomes ``/openapi/v1/engine/``.
+        hop's ``/proxypass/`` routing prefix becomes
+        ``/openapi/v1/bots/messages/ws/``.
         Everything past that prefix — the target, the engine path, any query the
         provider set — is carried through as the provider wrote it, so this
         endpoint holds no opinion about a URL grammar it does not own.
@@ -434,7 +453,7 @@ class EngineConnectionService:
         # A bare origin is all this may be. The prefix appended below already
         # carries the API namespace, so a base url with a path of its own would
         # double it — ``https://gw.example/api`` would publish
-        # ``/api/openapi/v1/engine/…``, which no gateway domain resolves. A
+        # ``/api/openapi/v1/bots/messages/ws/…``, which no gateway domain resolves. A
         # ``#`` or ``?`` is worse still: it ends the path before the prefix is
         # even appended, putting the credential somewhere a browser never sends.
         if any(delimiter in rest for delimiter in "/#?") or not rest:

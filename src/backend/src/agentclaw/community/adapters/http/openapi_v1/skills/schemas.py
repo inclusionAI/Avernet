@@ -2,35 +2,34 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Skill(BaseModel):
-    """A skill in the catalog."""
+    """Public metadata for one Bot-owned Skill."""
 
     skill_id: str
     name: str
     description: str | None = None
     category: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    active: bool
+    created_at: datetime | str | None = None
+    updated_at: datetime | str | None = None
 
 
-class SkillDetail(Skill):
-    """A skill's full detail."""
+class SkillUpload(BaseModel):
+    """Response for a first-time Skill upload."""
 
-    manifest: dict[str, Any] | None = None
-
-
-class BotSkill(BaseModel):
-    """A skill installed on a bot."""
-
-    skill_id: str
-    name: str
-    enabled: bool
+    operation: Literal["created"]
+    skill: Skill
 
 
-class SkillInstall(BaseModel):
-    """Install-a-skill request body."""
+class SkillState(BaseModel):
+    """Result of an idempotent Skill desired-state command."""
 
-    skill_id: str
+    skill: Skill
+    changed: bool

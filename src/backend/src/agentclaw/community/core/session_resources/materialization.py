@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from injector import Injector, inject
 
@@ -73,10 +74,17 @@ class SessionResourceMaterializeHandler:
                     task_version,
                 )
                 return Complete()
-            context = self._resolver.resolve_for_bot(
-                record.bot_id,
-                record.owner_id,
-            )
+            if record.binding_id is None:
+                context = self._resolver.resolve_for_bot(
+                    record.bot_id,
+                    record.owner_id,
+                )
+            else:
+                context = self._resolver.resolve_for_binding(
+                    record.binding_id,
+                    record.owner_id,
+                    bot_id=record.bot_id,
+                )
             session_id = None
             if record.transfer_api_version is TransferApiVersion.SESSION_V2:
                 if not record.session_key_ciphertext:
@@ -97,6 +105,7 @@ class SessionResourceMaterializeHandler:
                 "filename": record.filename,
                 "size_bytes": record.size_bytes,
                 "content_hash": record.client_content_hash,
+                "uploaded_at": self._format_uploaded_at(record.gmt_create),
                 "transfer_api_version": record.transfer_api_version.value,
                 "tenant": record.tenant,
                 "session_id": session_id,
@@ -118,10 +127,11 @@ class SessionResourceMaterializeHandler:
             if not isinstance(response, dict) or not response.get("accepted"):
                 raise RuntimeError("Engine did not accept materialization")
             log.info(
-                "session_resource.materialize.dispatch.accepted resource_id=%s task_version=%s provider=%s",
+                "session_resource.materialize.dispatch.accepted resource_id=%s task_version=%s provider=%s upload_time_present=%s",
                 record.resource_id,
                 record.task_version,
                 context.provider,
+                body["uploaded_at"] is not None,
             )
             return Complete()
         except Exception as exc:
@@ -132,6 +142,14 @@ class SessionResourceMaterializeHandler:
                 type(exc).__name__,
             )
             return Retry(error=type(exc).__name__)
+
+    @staticmethod
+    def _format_uploaded_at(uploaded_at: datetime | None) -> str | None:
+        if uploaded_at is None:
+            return None
+        if uploaded_at.tzinfo is None:
+            uploaded_at = uploaded_at.replace(tzinfo=UTC)
+        return uploaded_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 class SessionResourceTaskLifecycle(LifecycleBase):

@@ -32,6 +32,9 @@ from agentclaw.community.core.skill_center.services.skill_cache import MarketCac
 from agentclaw.community.core.skill_center.path_resolution import (
     build_pool_local_path_adapter,
 )
+from agentclaw.community.core.config_compose.teclaw_paths import (
+    to_local_skill_engine_path,
+)
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
@@ -66,6 +69,30 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
+class LocalSkillPackageStorage:
+    """Explicit package-I/O port owned by the SkillService factory."""
+
+    def __init__(self, filesystem, device_directory: str) -> None:
+        self._filesystem = filesystem
+        self._device_directory = device_directory
+
+    async def write(self, files: list[tuple[str, bytes]]) -> None:
+        for relative_path, content in files:
+            await self._filesystem.write_file(
+                f"{self._device_directory}/{relative_path}", content
+            )
+
+    async def prepare(self) -> None:
+        """Remove an orphaned failed upload before writing a first package."""
+        if not await self._filesystem.exists(self._device_directory):
+            return
+        if not await self._filesystem.delete_tree(self._device_directory):
+            raise OSError("unable to clear prior Local Skill upload")
+
+    async def cleanup(self) -> bool:
+        return await self._filesystem.delete_tree(self._device_directory)
+
+
 class SkillServiceFactory:
     """Mints :class:`SkillService` instances scoped to per-request paths.
 
@@ -84,6 +111,7 @@ class SkillServiceFactory:
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
+        path_factory: "WorkspacePathFactory",
         pool_layout_paths: Callable[
             [str, str, str],
             tuple[str, str, str] | None,
@@ -95,6 +123,7 @@ class SkillServiceFactory:
         self._device_fs_dispatcher = device_fs_dispatcher
         self._market_cache = market_cache
         self._git_sync_service_factory = git_sync_service_factory
+        self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
 
     def resolve_pool_paths(
@@ -115,17 +144,20 @@ class SkillServiceFactory:
         global_repo_dir: Optional[Path] = None,
         device_fs_factory=None,
         local_skill_path_adapter: Optional[Callable[[str], str]] = None,
-        local_skill_locator_adapter: Optional[
-            Callable[[str], str]
-        ] = None,
+        local_skill_locator_adapter: Optional[Callable[[str], str]] = None,
         entity_id: str | None = None,
+        bot_owner_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
     ) -> SkillService:
         uses_pool_paths = False
         if entity_id is not None and bot_id is not None:
+            # Paths are scoped by the Bot entity, while Bot lookup and device
+            # binding are owned by ac_bots.owner_id.  They differ for project
+            # and team Bots and therefore must not be conflated.
+            lookup_owner_id = bot_owner_id or entity_id
             pool_paths = self.resolve_pool_paths(
-                str(entity_id),
+                str(lookup_owner_id),
                 str(bot_id),
                 engine_type or "",
             )
@@ -153,6 +185,45 @@ class SkillServiceFactory:
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
+            device_owner_id=bot_owner_id or entity_id,
+        )
+
+    def local_skill_package_storage(
+        self,
+        *,
+        entity_id: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
+        name: str,
+    ) -> tuple[str, LocalSkillPackageStorage]:
+        """Return the canonical Local Skill locator and its device-I/O port."""
+        service = self.create(
+            entity_id=entity_id,
+            bot_owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+        )
+        local_dir = service.local_dir
+        if not service.runtime_uses_pool_paths:
+            local_dir = self._path_factory.get_bot_skills_local_dir(
+                entity_id,
+                bot_id,
+                engine_type or "openclaw",
+                entity_type,
+                is_desktop=is_desktop,
+                is_teclaw=is_teclaw,
+            )
+        directory = str(local_dir / name)
+        local_skill_path_adapter = service._local_skill_path_adapter
+        if is_teclaw and not service.runtime_uses_pool_paths:
+            local_skill_path_adapter = to_local_skill_engine_path
+        return directory, LocalSkillPackageStorage(
+            service._device_fs_factory(bot_id, owner_id),
+            local_skill_path_adapter(directory),
         )
 
 
@@ -222,6 +293,20 @@ class SkillSetServiceFactory:
             _get_bot_paths,
         )
 
+        is_desktop = False
+        if user_id or entity_id:
+            try:
+                owner_id = user_id or entity_id
+                bot = self._bot_repo.get_by_id_and_owner(bot_id or "default", owner_id)
+                is_desktop = bool(bot and bot.get("bot_type") == "desktop")
+            except Exception as exc:
+                logger.warning(
+                    "[SkillSetServiceFactory] bot_type lookup failed for "
+                    "bot_id=%s owner_id=%s: %s — defaulting is_desktop=False",
+                    bot_id or "default",
+                    owner_id,
+                    exc,
+                )
         if user_id or entity_id:
             resolved_skills, resolved_repo, resolved_local = _get_bot_paths(
                 path_factory=self._path_factory,
@@ -230,12 +315,13 @@ class SkillSetServiceFactory:
                 bot_id=bot_id,
                 engine_type=engine_type,
                 entity_type=entity_type,
+                is_desktop=is_desktop,
             )
         else:
             resolved_skills = skills_dir or SKILLS_DIR
             resolved_repo = repo_dir or SKILLS_REPO_DIR
             resolved_local = local_dir or SKILLS_LOCAL_DIR
-        effective_owner = entity_id or user_id
+        effective_owner = user_id or entity_id
         local_skill_path_adapter = None
         if effective_owner is not None and bot_id is not None:
             pool_paths = self._pool_layout_paths(
@@ -248,9 +334,7 @@ class SkillSetServiceFactory:
                 resolved_skills = Path(active_path)
                 resolved_local = Path(local_path)
                 resolved_repo = Path(repo_path)
-                local_skill_path_adapter = build_pool_local_path_adapter(
-                    resolved_local
-                )
+                local_skill_path_adapter = build_pool_local_path_adapter(resolved_local)
 
         skill_service = self._skill_service_factory.create(
             active_dir=resolved_skills,

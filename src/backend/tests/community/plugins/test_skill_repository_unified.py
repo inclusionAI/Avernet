@@ -211,6 +211,59 @@ def test_delete_by_bot_id(skills):
     assert skills.list_skills(bolt_id="bot-x") == []
 
 
+def test_list_skill_set_references_includes_active_and_inactive_sets(
+    skills, sets
+):
+    skill = skills.create({"name": "referenced", "bolt_id": "bot-x"})
+    active_set = sets.create(
+        {"name": "active", "bolt_id": "bot-x", "is_active": True}
+    )
+    inactive_set = sets.create(
+        {"name": "inactive", "bolt_id": "bot-x", "is_active": False}
+    )
+    sets.add_skill_to_set(active_set["id"], skill["id"])
+    sets.add_skill_to_set(inactive_set["id"], skill["id"])
+
+    assert skills.list_skill_set_references(skill["id"]) == [
+        {"skill_set_id": active_set["id"]},
+        {"skill_set_id": inactive_set["id"]},
+    ]
+
+
+def test_list_skill_set_references_ignores_orphans_and_matches_center_uuid(
+    skills, sets, db
+):
+    center = skills.create(
+        {
+            "name": "center",
+            "git_path": "center://center",
+            "skill_uuid": "center-uuid",
+        }
+    )
+    live_set = sets.create({"name": "live", "is_active": False})
+    deleted_set = sets.create({"name": "deleted", "is_active": False})
+    with db.orm_session() as session:
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(live_set["id"]),
+                skill_id=0,
+                skill_uuid="center-uuid",
+            )
+        )
+        session.add(
+            SkillSetSkill(
+                skill_set_id=int(deleted_set["id"]),
+                skill_id=int(center["id"]),
+            )
+        )
+    assert sets.delete(deleted_set["id"]) is True
+
+    assert skills.list_skill_set_references(
+        center["id"],
+        skill_uuid="center-uuid",
+    ) == [{"skill_set_id": live_set["id"]}]
+
+
 def test_skills_pool_asset_views_are_exactly_bot_scoped(skills, sets):
     local = skills.create(
         {
@@ -351,6 +404,36 @@ def test_get_skills_in_set_center_max_version(skills, sets):
     assert res[0]["version"] == 2  # MAX(version) PUBLISHED
 
 
+def test_get_all_active_skill_sets_preserves_global_and_bot_scoped_defaults(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    active = sets.get_all_active_skill_sets(
+        user_id="owner-x", bolt_id="bot-x", engine_type="openclaw"
+    )
+
+    assert [row["id"] for row in active] == [
+        bot_default["id"],
+        global_default["id"],
+    ]
+
+
 def test_set_active_skill_set_clears_then_activates(sets):
     a = sets.create({"name": "A", "bolt_id": "b", "is_active": 1})
     bset = sets.create({"name": "B", "bolt_id": "b"})
@@ -424,6 +507,40 @@ def test_explicit_env_active_skill_sets_and_mcps_are_isolated(sets, db):
         }
     ]
     assert sets.get_mcp_servers_in_set_for_env(pre["id"], env="prod") == []
+
+
+def test_env_scoped_active_skill_sets_preserve_bot_and_global_defaults(sets, db):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    with db.orm_session() as session:
+        session.query(SkillSet).filter(SkillSet.id.in_([
+            int(bot_default["id"]), int(global_default["id"])
+        ])).update({SkillSet.env: "prod"}, synchronize_session=False)
+
+    active = sets.get_all_active_skill_sets_for_env(
+        user_id="owner-x", bolt_id="bot-x", engine_type="openclaw", env="prod"
+    )
+
+    assert [row["id"] for row in active] == [
+        bot_default["id"],
+        global_default["id"],
+    ]
 
 
 def test_add_default_mcp_exclusion_upsert_idempotent(sets, db):

@@ -6,6 +6,7 @@ Tests the following endpoints from ``adapters/http/bot_collaborator/router.py``:
 - GET /api/bot/collaborator/list
 - POST /api/bot/collaborator/update
 - POST /api/bot/collaborator/remove
+- POST /api/bot/collaborator/leave
 - POST /api/bot/collaborator/check_permission
 - POST /api/bot/collaborator/lock/acquire
 - POST /api/bot/collaborator/lock/release
@@ -667,6 +668,81 @@ def remove_collaborator_not_found():
     """Remove non-existent collaborator returns 404."""
 
 
+def _assert_current_user_left(response, world):
+    """Assert current collaborator was removed after leaving collaboration."""
+    from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.utils.env_utils import get_current_env
+
+    bot_repo = world.get(BotRepository)
+    bot = bot_repo.get_by_id_and_owner("bot_test", "u_owner")
+    assert bot is not None
+
+    collab_repo = world.get(CollaboratorRepositoryProtocol)
+    record = collab_repo.get_by_bot_and_user(bot["id"], "u_collab", get_current_env())
+    assert record is None, "Expected u_collab collaborator record to be deleted"
+
+
+# ============================================================================
+# POST /api/bot/collaborator/leave
+# ============================================================================
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="ok",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_collaborator,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True, "data": {"deleted": True}},
+    ),
+    extra_assertions=(_assert_current_user_left,),
+)
+def leave_collaboration_ok():
+    """Collaborator can leave collaboration by removing their own record."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="not_collaborator",
+    input=CaseInput(
+        headers={"x-user-id": "u_other"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_collaborator,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404},
+    ),
+)
+def leave_collaboration_not_collaborator():
+    """Non-collaborator cannot leave a collaboration they are not in."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="owner",
+    input=CaseInput(
+        headers={"x-user-id": "u_owner"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_collaborator,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404},
+    ),
+)
+def leave_collaboration_owner():
+    """Owner is not a collaborator record and cannot use leave endpoint."""
+
+
 # ============================================================================
 # POST /api/bot/collaborator/check_permission
 # ============================================================================
@@ -1223,3 +1299,109 @@ def steal_lock_admin_success():
 )
 def steal_lock_member_denied():
     """Member collaborator cannot steal lock (needs ADMIN permission)."""
+
+# Extra leave endpoint error branches for changed-line coverage.
+
+
+def _seed_leave_service_bot_not_found(world):
+    from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import BotNotFoundError
+
+    class _StubCollaboratorService:
+        def leave_collaboration(self, *args, **kwargs):
+            raise BotNotFoundError("Bot 不存在: bot_id=missing, owner_id=u_owner")
+
+    world.injector.binder.bind(CollaboratorServiceProtocol, to=_StubCollaboratorService, scope=None)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="anonymous",
+    input=CaseInput(
+        headers={"x-user-id": "anonymous"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_collaborator,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 400},
+    ),
+)
+def leave_collaboration_anonymous():
+    """Anonymous user cannot leave collaboration."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="bot_not_found",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        json_body={"bot_id": "missing", "owner_id": "u_owner"},
+    ),
+    seed=_seed_leave_service_bot_not_found,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 404},
+    ),
+)
+def leave_collaboration_bot_not_found():
+    """BotNotFoundError is mapped to 404 envelope."""
+
+
+def _seed_leave_service_error(world):
+    from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorServiceError
+
+    class _StubCollaboratorService:
+        def leave_collaboration(self, *args, **kwargs):
+            raise CollaboratorServiceError("repository unavailable")
+
+    world.injector.binder.bind(CollaboratorServiceProtocol, to=_StubCollaboratorService, scope=None)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="service_error",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_leave_service_error,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 500},
+    ),
+)
+def leave_collaboration_service_error():
+    """CollaboratorServiceError is mapped to 500 envelope."""
+
+
+def _seed_leave_unexpected_error(world):
+    from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
+
+    class _StubCollaboratorService:
+        def leave_collaboration(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    world.injector.binder.bind(CollaboratorServiceProtocol, to=_StubCollaboratorService, scope=None)
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/bot/collaborator/leave",
+    scenario="unexpected_error",
+    input=CaseInput(
+        headers={"x-user-id": "u_collab"},
+        json_body={"bot_id": "bot_test", "owner_id": "u_owner"},
+    ),
+    seed=_seed_leave_unexpected_error,
+    expect=ExpectError(
+        status=200,
+        json_contains={"success": False, "error_code": 500},
+    ),
+)
+def leave_collaboration_unexpected_error():
+    """Unexpected exceptions are mapped to 500 envelope."""

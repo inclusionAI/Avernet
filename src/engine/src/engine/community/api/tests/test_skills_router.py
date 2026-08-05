@@ -5,6 +5,7 @@ behavior of the OpenClawSkillsService via the router. This file covers the
 dispatch contract: calls land on `manager.skills.*`, the capability guard
 501s when the engine doesn't declare the skill bulk capabilities.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -118,7 +119,9 @@ class TestSyncSymlinks:
         plugin = MagicMock()
         plugin.sync_symlinks = AsyncMock(
             return_value=SyncSymlinksResult(
-                total=1, created=["a"], base_dir="/tmp/x",
+                total=1,
+                created=["a"],
+                base_dir="/tmp/x",
             )
         )
         rich_manager._active_engine._skills = plugin
@@ -142,9 +145,7 @@ class TestSyncSymlinks:
 class TestSyncBindpaths:
     def test_dispatches(self, rich_manager, client):
         plugin = MagicMock()
-        plugin.sync_bindpaths = AsyncMock(
-            return_value=SyncSymlinksResult(total=0)
-        )
+        plugin.sync_bindpaths = AsyncMock(return_value=SyncSymlinksResult(total=0))
         rich_manager._active_engine._skills = plugin
 
         resp = client.post(
@@ -169,7 +170,8 @@ class TestCleanSymlinksDispatch:
         plugin = MagicMock()
         plugin.clean_symlinks = AsyncMock(
             return_value=CleanSymlinksResult(
-                directories_scanned=2, removed=["/a/b"],
+                directories_scanned=2,
+                removed=["/a/b"],
             )
         )
         rich_manager._active_engine._skills = plugin
@@ -185,7 +187,8 @@ class TestCleanSymlinksDispatch:
 
     def test_501(self, lean_manager, client):
         resp = client.post(
-            "/api/skills/symlink/clean", json={"directories": ["/x"]},
+            "/api/skills/symlink/clean",
+            json={"directories": ["/x"]},
         )
         assert resp.status_code == 501
 
@@ -213,17 +216,23 @@ def test_ensure_center_skills_route_success(rich_manager, client):
             captured["items"] = list(req.items)
             return CenterEnsureResult(
                 ok=[CenterEnsureItem(skill_uuid="u1", version="1.0.0")],
-                failed=[CenterEnsureFailure(skill_uuid="u2", version="2.0.0", reason="missing")],
+                failed=[
+                    CenterEnsureFailure(
+                        skill_uuid="u2", version="2.0.0", reason="missing"
+                    )
+                ],
             )
 
     rich_manager._active_engine._skills = _FakePlugin()
 
     resp = client.post(
         "/api/skills/center/ensure",
-        json={"items": [
-            {"skill_uuid": "u1", "version": "1.0.0"},
-            {"skill_uuid": "u2", "version": "2.0.0"},
-        ]},
+        json={
+            "items": [
+                {"skill_uuid": "u1", "version": "1.0.0"},
+                {"skill_uuid": "u2", "version": "2.0.0"},
+            ]
+        },
     )
 
     assert resp.status_code == 200
@@ -236,9 +245,7 @@ def test_ensure_center_skills_route_success(rich_manager, client):
     assert len(captured["items"]) == 2
 
 
-def test_runtime_layout_probe_has_no_engine_capability_dependency(
-    client, rich_manager
-):
+def test_runtime_layout_probe_has_no_engine_capability_dependency(client, rich_manager):
     plugin = MagicMock()
     plugin.probe_pool_layout = AsyncMock(
         return_value=PoolLayoutProbeResult(
@@ -322,9 +329,7 @@ def test_runtime_layout_probe_rejects_unknown_contract_before_dispatch(
     plugin.probe_pool_layout.assert_not_awaited()
 
 
-def test_runtime_layout_probe_rejects_plugin_engine_mismatch(
-    client, rich_manager
-):
+def test_runtime_layout_probe_rejects_plugin_engine_mismatch(client, rich_manager):
     plugin = MagicMock()
     plugin.probe_pool_layout = AsyncMock(
         return_value=PoolLayoutProbeResult(
@@ -363,9 +368,7 @@ def test_runtime_layout_probe_rejects_real_openclaw_plugin_engine_mismatch(
     client,
     rich_manager,
 ) -> None:
-    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
-        OpenClawPluginImpl()
-    )
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl())
 
     response = client.post(
         "/api/skills/layout/probe",
@@ -478,9 +481,7 @@ def test_pool_activation_and_mapping_routes_are_capability_independent(
     )
 
 
-def test_pool_mapping_routes_propagate_logical_v2_contract(
-    client, rich_manager
-):
+def test_pool_mapping_routes_propagate_logical_v2_contract(client, rich_manager):
     plugin = MagicMock()
     plugin.activate_pool_layout = AsyncMock(
         return_value=PoolLayoutActivationResult(
@@ -501,6 +502,11 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
         "relative_path": "business/reviewer",
         "link_name": "reviewer",
     }
+    retired_mapping = {
+        "corpus": "repo",
+        "relative_path": "legacy/writer",
+        "link_name": "writer",
+    }
     version = "skills-pool-mapping-v2"
 
     activation = client.post(
@@ -518,6 +524,7 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
         json={
             "mapping_contract_version": version,
             "mappings": [mapping],
+            "retired_mappings": [retired_mapping],
         },
     )
     verified = client.post(
@@ -525,14 +532,22 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
         json={
             "mapping_contract_version": version,
             "mappings": [mapping],
+            "retired_mappings": [retired_mapping],
         },
     )
 
-    assert activation.status_code == published.status_code == verified.status_code == 200
+    assert (
+        activation.status_code == published.status_code == verified.status_code == 200
+    )
     intent = PoolSkillMappingIntent(
         corpus="repo",
         relative_path="business/reviewer",
         link_name="reviewer",
+    )
+    retired_intent = PoolSkillMappingIntent(
+        corpus="repo",
+        relative_path="legacy/writer",
+        link_name="writer",
     )
     request = plugin.activate_pool_layout.await_args.args[0]
     assert request.mapping_contract_version == version
@@ -540,10 +555,12 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(
     plugin.publish_pool_mappings.assert_awaited_once_with(
         [intent],
         mapping_contract_version=version,
+        retired_mappings=[retired_intent],
     )
     plugin.verify_pool_mappings.assert_awaited_once_with(
         [intent],
         mapping_contract_version=version,
+        retired_mappings=[retired_intent],
     )
 
 
@@ -594,9 +611,7 @@ def test_pool_mapping_routes_map_invalid_request_errors_to_400(
     response = client.post(path, json=payload)
 
     assert response.status_code == 400
-    assert response.json()["detail"] == (
-        "mapping_contract_version is unsupported"
-    )
+    assert response.json()["detail"] == ("mapping_contract_version is unsupported")
 
 
 @pytest.mark.parametrize(
@@ -609,27 +624,21 @@ def test_pool_mapping_routes_map_invalid_request_errors_to_400(
                 "preparation_id": "preparation-1",
                 "registered_local_names": [],
                 "mapping_contract_version": "skills-pool-mapping-v2",
-                "mappings": [
-                    {"source": "/pool/a", "target": "/active/a"}
-                ],
+                "mappings": [{"source": "/pool/a", "target": "/active/a"}],
             },
         ),
         (
             "/api/skills/layout/mappings/publish",
             {
                 "mapping_contract_version": "skills-pool-mapping-v2",
-                "mappings": [
-                    {"source": "/pool/a", "target": "/active/a"}
-                ],
+                "mappings": [{"source": "/pool/a", "target": "/active/a"}],
             },
         ),
         (
             "/api/skills/layout/mappings/verify",
             {
                 "mapping_contract_version": "skills-pool-mapping-v2",
-                "mappings": [
-                    {"source": "/pool/a", "target": "/active/a"}
-                ],
+                "mappings": [{"source": "/pool/a", "target": "/active/a"}],
             },
         ),
     ],
@@ -640,9 +649,7 @@ def test_pool_mapping_routes_reject_v2_physical_shape_via_real_adapter(
     path: str,
     payload: dict[str, object],
 ) -> None:
-    rich_manager._active_engine._skills = OpenClawSkillsAdapter(
-        OpenClawPluginImpl()
-    )
+    rich_manager._active_engine._skills = OpenClawSkillsAdapter(OpenClawPluginImpl())
 
     response = client.post(path, json=payload)
 

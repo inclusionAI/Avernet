@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from engine.community.plugins.skills_pool.layout_activation import (
@@ -49,11 +49,13 @@ def inspect_hermes_runtime_layout(
 def publish_hermes_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    retired_mappings: Sequence[SkillMapping] = (),
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingPublishResult:
     return _publish_pool_mappings(
         mappings=mappings,
+        retired_mappings=retired_mappings,
         home=home,
         engine="hermes",
         source_layout=source_layout,
@@ -63,11 +65,13 @@ def publish_hermes_pool_mappings(
 def verify_hermes_pool_mappings(
     *,
     mappings: list[SkillMapping],
+    retired_mappings: Sequence[SkillMapping] = (),
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     home: str | Path = "/home/admin",
 ) -> MappingVerificationResult:
     return _verify_skill_mappings(
         mappings=mappings,
+        retired_mappings=retired_mappings,
         home=home,
         engine="hermes",
         source_layout=source_layout,

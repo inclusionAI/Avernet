@@ -20,7 +20,11 @@ def test_shipped_config_loads_and_requires_user() -> None:
     assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
-def test_shipped_config_exempts_the_engine_socket_prefix() -> None:
+_SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
+_COLLABORATION_SOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
+
+
+def test_shipped_config_exempts_the_bot_socket_handshake() -> None:
     """The socket's credential is checked by the hop behind the gateway.
 
     An *empty* requirement, not a missing rule: an omitted rule falls through to
@@ -29,25 +33,67 @@ def test_shipped_config_exempts_the_engine_socket_prefix() -> None:
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    req = rs.resolve("GET", "/openapi/v1/engine/ARCA_x@0:20003/api/openclaw/ws")
-    assert req == {}
+    assert rs.resolve("WEBSOCKET", _SOCKET_PATH) == {}
 
 
-def test_shipped_config_exempts_only_the_bcn_session_websocket_get() -> None:
+def test_the_socket_exemption_beats_the_bots_user_requirement() -> None:
+    """It is nested inside an authenticated prefix and must win there.
+
+    Ranked by literal segment count: five to three. Were it the other way, the
+    handshake would be challenged for an identity a browser cannot present.
+    """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    assert rs.resolve("WEBSOCKET", _SOCKET_PATH) == {}
+    bots = rs.resolve("WEBSOCKET", "/openapi/v1/bots/abc")
+    assert bots is not None
+    assert bots[PrincipalType.USER] is Presence.REQUIRED
 
-    assert rs.resolve("GET", "/openapi/v1/collaboration/messages/ws") == {}
 
-    token_post = rs.resolve(
-        "POST", "/openapi/v1/collaboration/sessions/session-1/token"
-    )
-    assert token_post is not None
-    assert token_post[PrincipalType.USER] is Presence.REQUIRED
+def test_the_socket_exemption_stops_at_the_ws_segment() -> None:
+    """It exempts the socket's own subtree, not the whole ``messages`` channel.
 
-    ordinary_get = rs.resolve("GET", "/openapi/v1/collaboration/groups/group-1")
-    assert ordinary_get is not None
-    assert ordinary_get[PrincipalType.USER] is Presence.REQUIRED
+    ``messages`` names a channel that HTTP endpoints are expected to grow under.
+    Anchoring the exemption one segment deeper keeps those endpoints behind the
+    user requirement on *every* plane, so a handshake is not a way to reach a
+    sibling path unauthenticated.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    sibling = rs.resolve("WEBSOCKET", "/openapi/v1/bots/messages/history")
+    assert sibling is not None
+    assert sibling[PrincipalType.USER] is Presence.REQUIRED
+
+
+def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
+    """The table is plane-blind, so the exemption is qualified by plane.
+
+    An ordinary request to this prefix is *not* refused as an unknown route —
+    the socket domain is not a candidate on the HTTP plane, so it falls through
+    to the ``bots`` domain and is forwarded to the backend. An unqualified
+    exemption would therefore let an unauthenticated caller through, and a ``..``
+    in the path normalises away en route, landing anywhere under the namespace.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    for path in (_SOCKET_PATH, "/openapi/v1/bots/messages/../../admin/keys"):
+        req = rs.resolve("GET", path)
+        assert req is not None, path
+        assert req[PrincipalType.USER] is Presence.REQUIRED, path
+
+
+def test_shipped_config_exempts_the_collaboration_socket_handshake() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    assert rs.resolve("WEBSOCKET", _COLLABORATION_SOCKET_PATH) == {}
+
+
+def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", _COLLABORATION_SOCKET_PATH)
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.REQUIRED
 
 
 def test_more_specific_rule_wins() -> None:

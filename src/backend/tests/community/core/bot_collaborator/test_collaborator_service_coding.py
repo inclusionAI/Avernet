@@ -229,3 +229,76 @@ def test_on_collaboration_changed_passport_failure_is_swallowed():
     svc.on_collaboration_changed("bot1", "owner1", env="dev")
 
     passport.update_passport.assert_called_once()
+
+
+def _collaborator_record(user_id: str = MEMBER) -> CollaboratorRecord:
+    return CollaboratorRecord(
+        id=42,
+        bot_pk=1,
+        bot_id="bot-123",
+        owner_id=OWNER,
+        user_id=user_id,
+        role=CollaboratorRole.MEMBER,
+        operator_id=OWNER,
+        env="dev",
+    )
+
+
+def test_leave_collaboration_allows_member_self_exit(service, bot_repo, collaborator_repo):
+    """成员主动退出协作：只删除当前用户自己的协作者记录，不要求 admin 权限。"""
+    bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="service")
+    collaborator_repo.get_by_bot_and_user.return_value = _collaborator_record()
+    collaborator_repo.delete.return_value = True
+
+    result = service.leave_collaboration(
+        bot_id="bot-123",
+        owner_id=OWNER,
+        user_id=MEMBER,
+        env="dev",
+    )
+
+    assert result is True
+    collaborator_repo.get_by_bot_and_user.assert_called_once_with(1, MEMBER, "dev")
+    collaborator_repo.delete.assert_called_once_with(42)
+    service.on_collaboration_changed.assert_called_once_with("bot-123", OWNER, "dev")
+
+
+def test_leave_collaboration_rejects_non_collaborator(service, bot_repo, collaborator_repo):
+    """非协作者没有自己的记录，退出返回 CollaboratorNotFoundError。"""
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+        CollaboratorNotFoundError,
+    )
+
+    bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="service")
+    collaborator_repo.get_by_bot_and_user.return_value = None
+
+    with pytest.raises(CollaboratorNotFoundError):
+        service.leave_collaboration(
+            bot_id="bot-123",
+            owner_id=OWNER,
+            user_id="stranger",
+            env="dev",
+        )
+
+    collaborator_repo.delete.assert_not_called()
+    service.on_collaboration_changed.assert_not_called()
+
+
+def test_leave_collaboration_owner_is_not_collaborator_record(service, bot_repo, collaborator_repo):
+    """Owner 不是协作者记录，不能使用成员退出接口。"""
+    from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
+        CollaboratorNotFoundError,
+    )
+
+    bot_repo.get_by_id_and_owner.return_value = _bot(bot_type="service")
+
+    with pytest.raises(CollaboratorNotFoundError):
+        service.leave_collaboration(
+            bot_id="bot-123",
+            owner_id=OWNER,
+            user_id=OWNER,
+            env="dev",
+        )
+
+    collaborator_repo.get_by_bot_and_user.assert_not_called()
+    collaborator_repo.delete.assert_not_called()

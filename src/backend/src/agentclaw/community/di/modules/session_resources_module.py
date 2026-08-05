@@ -8,10 +8,14 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
+    BotFriendRepositoryProtocol,
+)
 from agentclaw.community.di.config import BaasConfig
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
@@ -76,6 +80,8 @@ class SessionResourcesModule(Module):
         token_vault: TokenVault,
         adapter_transport: DeviceAdapterTransport,
         baas_config: BaasConfig,
+        bot_repository: BotRepository,
+        bot_friend_repository: BotFriendRepositoryProtocol,
     ) -> SessionResourceService:
         return SessionResourceService(
             repository=repository,
@@ -85,6 +91,8 @@ class SessionResourcesModule(Module):
             token_vault=token_vault,
             adapter_transport=adapter_transport,
             default_tenant=baas_config.tenant,
+            bot_repository=bot_repository,
+            bot_friend_repository=bot_friend_repository,
         )
 
     @singleton

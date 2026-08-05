@@ -28,6 +28,7 @@ from secbaas.community.core.repository.local_user_machine import (
 from secbaas.community.core.repository.publish import OrmPublishRepository
 from secbaas.community.core.repository.publish_batch import OrmPublishBatchRepository
 from secbaas.community.core.repository.publish_record import OrmPublishRecordRepository
+from secbaas.community.core.repository.resource_key import OrmResourceKeyRepository
 from secbaas.community.core.repository.session_file_ticket import (
     OrmSessionTicketRepository,
 )
@@ -142,6 +143,11 @@ class CoreRepositoryContainer(containers.DeclarativeContainer):
         config.plugins.database.plugin_database,
         ZDAS_ORM=_orm_repo(OrmPublishRecordRepository),
         SQLITE_ORM=_orm_repo(OrmPublishRecordRepository),
+    )
+    resource_key_repository = providers.Selector(
+        config.plugins.database.plugin_database,
+        ZDAS_ORM=_orm_repo(OrmResourceKeyRepository),
+        SQLITE_ORM=_orm_repo(OrmResourceKeyRepository),
     )
     system_config_repository = providers.Selector(
         config.plugins.database.plugin_database,

@@ -112,18 +112,11 @@ def create_app() -> FastAPI:
     _default_openapi = app.openapi
 
     def _served_openapi() -> dict[str, Any]:
-        served = bs.served_openapi(
+        return bs.served_openapi(
             title=config.app_name,
             version=__version__,
             description=_API_DESCRIPTION,
         )
-        local = _default_openapi()
-        local_paths = local.get("paths", {})
-        served_paths = served.setdefault("paths", {})
-        for path, item in local_paths.items():
-            if path not in served_paths:
-                served_paths[path] = item
-        return served
 
     app.openapi = _served_openapi  # type: ignore[method-assign]
 
@@ -136,8 +129,8 @@ def create_app() -> FastAPI:
     # only http gets no socket route, and a socket domain is refused by the HTTP
     # catch-all below.
     domain_map = bs.forwarding.domain_map
-    for name in domain_map.websocket_domains():
-        for route in relay_routes(domain_map.base_path, name):
+    for domain in domain_map.websocket_domains():
+        for route in relay_routes(domain.mount_prefix):
             app.add_api_websocket_route(route, forward_websocket)
 
     app.add_api_route(
