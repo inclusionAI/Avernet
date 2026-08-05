@@ -203,6 +203,28 @@ def test_query_is_logged_with_credentials_redacted(client, caplog):
     assert "access_token=<redacted>" in query
 
 
+def test_caller_controlled_fields_are_capped(client, caplog):
+    """Every field a caller controls is bounded, including on an unauthenticated
+    request — this line is written for a 401 too, so the cap cannot depend on
+    having verified anyone first.
+    """
+    from agentclaw.community.adapters.http.openapi_v1.access_log import (
+        _MAX_REQUEST_ID,
+        _MAX_UA,
+    )
+
+    with caplog.at_level(logging.INFO):
+        response = client.get(
+            "/openapi/v1/bots/bot-7",
+            headers={"x-request-id": "R" * 8000, "user-agent": "U" * 8000},
+        )
+
+    assert response.status_code == 401  # no principal: the line still gets written
+    line = access_lines(caplog)[0]
+    assert len(field(line, "request_id")) == _MAX_REQUEST_ID
+    assert len(field(line, "ua")) == _MAX_UA
+
+
 def test_a_broken_log_line_does_not_break_the_request(client, caplog, monkeypatch):
     """The access log runs after the response is sent; it must never fail it.
 

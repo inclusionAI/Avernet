@@ -110,6 +110,12 @@ _MAX_UA = 120
 #: makes a query safe to print, not short.
 _MAX_QUERY = 512
 
+#: Cap on the echoed ``X-Request-ID``. Same reasoning again, and this one is the
+#: cheapest to reach: the header is caller-supplied, the line is written even for
+#: a request answered ``401``, and a correlation handle that does not fit a uuid
+#: several times over is not a correlation handle.
+_MAX_REQUEST_ID = 128
+
 
 def redact_query(raw: str) -> str:
     """Replace the value of every credential-looking parameter in *raw*.
@@ -170,6 +176,11 @@ def _header(scope: Scope, name: str) -> str:
         if key.lower() == target:
             return value.decode("latin-1", "replace")
     return ""
+
+
+def _request_id(scope: Scope) -> str:
+    """The caller's ``X-Request-ID``, capped."""
+    return _header(scope, "x-request-id")[:_MAX_REQUEST_ID]
 
 
 def _client(scope: Scope) -> str:
@@ -274,7 +285,7 @@ class PublicApiAccessLogMiddleware:
             _kv("query", _query(scope)),
             _kv("client", _client(scope)),
             _kv("ua", _header(scope, "user-agent")[:_MAX_UA]),
-            _kv("request_id", _header(scope, "x-request-id")),
+            _kv("request_id", _request_id(scope)),
         ]
 
     def _log_completion(
@@ -304,7 +315,7 @@ class PublicApiAccessLogMiddleware:
                 *_identity_fields(scope),
                 _kv("query", _query(scope)),
                 _kv("trace_id", state.get("trace_id") or ""),
-                _kv("request_id", _header(scope, "x-request-id")),
+                _kv("request_id", _request_id(scope)),
                 _kv("client", _client(scope)),
                 _kv("ua", _header(scope, "user-agent")[:_MAX_UA]),
             ]
