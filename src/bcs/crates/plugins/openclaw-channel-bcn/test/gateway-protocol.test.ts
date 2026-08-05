@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -40,7 +40,10 @@ function createResponseClient() {
   };
 }
 
-async function startGatewayStub() {
+async function startGatewayStub(options?: {
+  onChatInject?: (frame: any) => void;
+  chatInjectPayload?: Record<string, unknown>;
+}) {
   const frames: any[] = [];
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
   await once(server, 'listening');
@@ -104,11 +107,12 @@ async function startGatewayStub() {
       }
 
       if (frame.method === 'chat.inject') {
+        options?.onChatInject?.(frame);
         socket.send(JSON.stringify({
           type: 'res',
           id: frame.id,
           ok: true,
-          payload: {},
+          payload: options?.chatInjectPayload ?? {},
         }));
         return;
       }
@@ -243,9 +247,35 @@ describe('OpenClaw gateway protocol compatibility', () => {
   });
 
   it('uses a protocol range that can call chat.inject on OpenClaw 2026.5.12', async () => {
-    const gateway = await startGatewayStub();
     const dataDir = await mkdtemp(join(tmpdir(), 'bcn-inject-'));
     const storePath = join(dataDir, 'sessions', 'sessions.json');
+    const transcriptPath = join(dataDir, 'sessions', 'transcript-1.jsonl');
+    const gateway = await startGatewayStub({
+      chatInjectPayload: { ok: true, messageId: 'msg-injected' },
+      onChatInject() {
+        writeFileSync(
+          transcriptPath,
+          [
+            JSON.stringify({ type: 'session', version: 3, id: 'transcript-1' }),
+            JSON.stringify({
+              type: 'message',
+              id: 'msg-injected',
+              parentId: null,
+              timestamp: '2026-08-05T00:00:00.000Z',
+              message: {
+                role: 'assistant',
+                content: [{ type: 'text', text: 'injected observation' }],
+                api: 'openai-responses',
+                provider: 'openclaw',
+                model: 'gateway-injected',
+                stopReason: 'stop',
+                usage: { totalTokens: 0 },
+              },
+            }),
+          ].join('\n') + '\n',
+        );
+      },
+    });
     const capturedInbound: { value?: Record<string, unknown> } = {};
     installRuntime(gateway.port, storePath, capturedInbound);
     const { client, responses } = createResponseClient();
@@ -294,6 +324,15 @@ describe('OpenClaw gateway protocol compatibility', () => {
       assert.deepEqual(connectFrame?.params?.scopes, [ 'operator.admin' ]);
       const injectFrame = gateway.frames.find(frame => frame.method === 'chat.inject');
       assert.equal(injectFrame?.params?.message, observationText);
+      const transcriptLines = readFileSync(transcriptPath, 'utf8').trim().split('\n');
+      const injectedEntry = JSON.parse(transcriptLines[1]);
+      assert.equal(injectedEntry.message.role, 'user');
+      assert.deepEqual(injectedEntry.message.content, [{ type: 'text', text: 'injected observation' }]);
+      assert.equal(injectedEntry.message.provider, undefined);
+      assert.equal(injectedEntry.message.model, undefined);
+      assert.equal(injectedEntry.message.api, undefined);
+      assert.equal(injectedEntry.message.stopReason, undefined);
+      assert.equal(injectedEntry.message.usage, undefined);
     } finally {
       await gateway.close();
       await rm(dataDir, { recursive: true, force: true });
