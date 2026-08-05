@@ -206,8 +206,10 @@ class LocalSkillStateService:
                 engine_type=bot.get("active_engine"),
                 entity_type=bot.get("entity_type"),
             )
-            await service.skill_service.deactivate_skill(
+            cleaned = await service.skill_service.deactivate_skill(
                 skill_name, bolt_id=bot_id, user_id=owner_id
             )
+            if not cleaned:
+                raise LocalSkillStorageError()
         except Exception as exc:
             raise LocalSkillStorageError() from exc

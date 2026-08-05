@@ -182,6 +182,37 @@ def test_local_skill_package_storage_splits_path_entity_from_device_owner(
     assert device_calls == [("bot-1", "owner-7")]
 
 
+def test_teclaw_legacy_local_skill_package_storage_uses_workspace_adapter(
+    test_injector,
+):
+    factory = test_injector.get(SkillServiceFactory)
+    factory._pool_layout_paths = lambda *_: None
+
+    class _DeviceDispatcher:
+        @staticmethod
+        def for_bot(_bot_id, _owner_id):
+            return object()
+
+    factory._device_fs_dispatcher = _DeviceDispatcher()
+    factory._path_factory.get_bot_skills_local_dir = (
+        lambda _entity_id, _bot_id, *_args, **_kwargs: Path("skills-local")
+    )
+
+    directory, storage = factory.local_skill_package_storage(
+        entity_id="project-42",
+        owner_id="owner-7",
+        bot_id="bot-1",
+        engine_type="openclaw",
+        entity_type="proj",
+        is_desktop=False,
+        is_teclaw=True,
+        name="reviewer",
+    )
+
+    assert directory == "skills-local/reviewer"
+    assert storage._device_directory == "workspace/skills-local/reviewer"
+
+
 def test_legacy_local_skill_packages_are_isolated_for_same_name_across_bots(
     test_injector,
 ):
@@ -258,6 +289,37 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
     assert svc.skill_service._local_skill_path_adapter(
         "/home/admin/.openclaw/workspace/skills/skills-local/handmade"
     ).endswith("/skills-pool/skills-local/handmade")
+
+
+def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
+    test_injector,
+):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return (
+            "/pool/active",
+            "/pool/local",
+            "/pool/repo",
+        )
+
+    factory._pool_layout_paths = resolve_pool_paths
+
+    svc = factory.create(
+        user_id="owner-7",
+        entity_id="project-42",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="proj",
+    )
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 2
+    assert svc.user_id == "owner-7"
+    assert svc.entity_id == "project-42"
+    assert str(svc.local_dir) == "/pool/local"
+    assert str(svc.skill_service.local_dir) == "/pool/local"
 
 
 def test_desktop_pool_active_factory_uses_the_same_canonical_paths(

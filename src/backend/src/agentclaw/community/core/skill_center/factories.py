@@ -32,6 +32,9 @@ from agentclaw.community.core.skill_center.services.skill_cache import MarketCac
 from agentclaw.community.core.skill_center.path_resolution import (
     build_pool_local_path_adapter,
 )
+from agentclaw.community.core.config_compose.teclaw_paths import (
+    to_local_skill_engine_path,
+)
 from agentclaw.community.core.skill_center.services.skill_parameter_service import (
     SkillParameterService,
 )
@@ -215,9 +218,12 @@ class SkillServiceFactory:
                 is_teclaw=is_teclaw,
             )
         directory = str(local_dir / name)
+        local_skill_path_adapter = service._local_skill_path_adapter
+        if is_teclaw and not service.runtime_uses_pool_paths:
+            local_skill_path_adapter = to_local_skill_engine_path
         return directory, LocalSkillPackageStorage(
             service._device_fs_factory(bot_id, owner_id),
-            service._local_skill_path_adapter(directory),
+            local_skill_path_adapter(directory),
         )
 
 
@@ -300,7 +306,7 @@ class SkillSetServiceFactory:
             resolved_skills = skills_dir or SKILLS_DIR
             resolved_repo = repo_dir or SKILLS_REPO_DIR
             resolved_local = local_dir or SKILLS_LOCAL_DIR
-        effective_owner = entity_id or user_id
+        effective_owner = user_id or entity_id
         local_skill_path_adapter = None
         if effective_owner is not None and bot_id is not None:
             pool_paths = self._pool_layout_paths(
