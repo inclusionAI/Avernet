@@ -22,9 +22,12 @@ OpenAPI 3.1 YAML, pytest/PyYAML Contract tests, Cargo tests.
 - All 32 operations declare `x-avernet-security: {user: required}`.
 - A valid caller without User is rejected by Application with Forbidden.
 - User plus Bot/App/AccessKey behaves exactly like the same User alone.
-- The three optional `view_bot_id` reads are Group list, Session list, and
-  Session history. Omission means `human_<user.id>`; an explicit Human must be
-  that same Actor; an explicit Bot must have exact `created_by` ownership.
+- Group list is path-Bot scoped at
+  `GET /openapi/v1/collaboration/bots/{bot_id}/groups` and does not accept
+  `view_bot_id`; the Human caller must own that Bot by exact `created_by`.
+- The remaining optional `view_bot_id` reads are Session list and Session
+  history. Omission means `human_<user.id>`; an explicit Human must be that
+  same Actor; an explicit Bot must have exact `created_by` ownership.
 - Group/Session detail has no `view_bot_id`. Read succeeds when the resource
   participants contain either the current Human Actor or a Bot created by the
   current User. This does not grant mutation or message-view authority.
@@ -48,7 +51,7 @@ OpenAPI 3.1 YAML, pytest/PyYAML Contract tests, Cargo tests.
 
 - [x] Add failing tests for the Gateway security marker and detail-read rules.
 - [x] Use `user: required` on all 32 operations.
-- [x] Expose the shared `view_bot_id` only on the three actor-relative reads.
+- [x] Expose `view_bot_id` only on Session list and Session history; keep Group list path-Bot scoped.
 - [x] Document Human/owned-Bot participant access for Group and Session detail.
 - [x] Run all OpenAPI tests, validation, and deterministic bundling.
 
@@ -64,9 +67,9 @@ OpenAPI 3.1 YAML, pytest/PyYAML Contract tests, Cargo tests.
 - [ ] Add the transport-neutral Human projection and raw User-ID helpers.
 - [ ] Replace every command/query `principal: Principal` with
   `caller: AuthenticatedCaller`.
-- [ ] Rename `ListBotGroups`/`list_bot_groups` to `ListGroups`/`list_groups`,
-  remove the required path Bot, and add optional `view_bot_id` to both list
-  contracts.
+- [ ] Keep `ListBotGroups`/`list_bot_groups` path-Bot scoped for Group list,
+  remove `view_bot_id` from that operation, and keep optional `view_bot_id`
+  only on Session list/history contracts.
 - [ ] Update message-history documentation to the Human-default participant
   semantics.
 - [ ] Run the Service API crate tests and formatting check.
@@ -87,8 +90,10 @@ OpenAPI 3.1 YAML, pytest/PyYAML Contract tests, Cargo tests.
 - [ ] Add the production header adapter that extracts exactly one compact JWT
   and delegates cryptographic verification.
 - [ ] Change all route extractors and DTO command builders to pass full caller.
-- [ ] Move Group list routing to `GET /openapi/v1/groups` and add the two list
-  `view_bot_id` query fields without adding them to detail routes.
+- [ ] Keep Group list routing at
+  `GET /openapi/v1/collaboration/bots/{bot_id}/groups`, ensure it exposes no
+  `view_bot_id`, and keep `view_bot_id` only on Session list/history without
+  adding it to detail routes.
 - [ ] Run the HTTP adapter route and Gateway-principal tests.
 
 ### Task 4: Enforce Human admission and exact Bot ownership
@@ -112,9 +117,9 @@ OpenAPI 3.1 YAML, pytest/PyYAML Contract tests, Cargo tests.
 - Modify `src/bcs/crates/application/v1/bcs-app-group/src/lib.rs`
 - Modify `src/bcs/crates/application/v1/bcs-app-group/tests/v1_group_service.rs`
 
-- [ ] Write failing tests for omitted/explicit-Human/owned-Bot list views,
-  invalid/unowned views, pre-pagination filtering, and empty pages.
-- [ ] Resolve an effective list Actor with exact Bot ownership and no fallback.
+- [ ] Write failing tests for path Bot ownership, invalid/unowned path Bots,
+  pre-pagination filtering, no `view_bot_id`, and empty pages.
+- [ ] Resolve the list Actor from the path `bot_id` with exact Bot ownership and no fallback.
 - [ ] Write failing detail tests for direct Human participant, owned-Bot
   participant, unrelated participants, and creator-relation-only non-ownership.
 - [ ] Implement implicit detail access from Human plus exact-created Bots.
