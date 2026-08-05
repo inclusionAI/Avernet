@@ -238,11 +238,7 @@ class CreateBotForOthersService:
                 error_code=500,
             )
         engine_type = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
-        if self._bot_service.is_teclaw_bot(engine_type):
-            raise CreateBotForOthersError(
-                "teclaw 类型的 Bot 不支持重启",
-                error_code=400,
-            )
+        is_teclaw_bot = self._bot_service.is_teclaw_bot(engine_type)
         existing_ext = self._mapping_copy(bot.get("ext"))
         readiness = self._ensure_passport(
             bot_id=bot_id,
@@ -286,11 +282,18 @@ class CreateBotForOthersService:
             return {
                 **base_result,
                 "action": "repaired" if identity_repaired else "skipped",
-                "runtime": {"restart_required": identity_repaired},
+                "runtime": {
+                    "restart_required": identity_repaired and not is_teclaw_bot
+                },
             }
 
         wait = self._restart_wait(bot.get("gmt_modified"))
         if wait is not None:
+            if is_teclaw_bot:
+                raise CreateBotForOthersError(
+                    "teclaw 类型的 Bot 不支持重启",
+                    error_code=400,
+                )
             minutes_since_modified, minutes_remaining = wait
             return {
                 **base_result,

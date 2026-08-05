@@ -413,22 +413,23 @@ def test_active_bot_with_complete_identity_is_verified_without_restart():
     bot_service.restart_bot.assert_not_called()
 
 
-def test_teclaw_bot_rejects_create_for_others_before_repair_or_restart():
-    from agentclaw.community.core.bot_management.errors import (
-        CreateBotForOthersError,
+def test_active_teclaw_bot_is_verified_without_requesting_restart():
+    stored = _bot(
+        active_engine="teclaw",
+        ext={"passport": {"agent_code": AGENT_CODE}},
     )
-
-    stored = _bot(active_engine="teclaw")
     service, _, bot_service, passport, relationship, _ = _service(
         existing_bot=stored
     )
     bot_service.is_teclaw_bot.return_value = True
+    relationship.query_relationships.return_value = [
+        {"auth_id": 42, "work_no": TARGET_USER, "agent_code": AGENT_CODE},
+    ]
 
-    with pytest.raises(CreateBotForOthersError) as exc_info:
-        _execute(service)
+    result = _execute(service)
 
-    assert exc_info.value.error_code == 400
-    assert str(exc_info.value) == "teclaw 类型的 Bot 不支持重启"
+    assert result["action"] == "skipped"
+    assert result["runtime"]["restart_required"] is False
     bot_service.is_teclaw_bot.assert_called_once_with("teclaw")
     passport.apply_first_agent_passport.assert_not_called()
     relationship.create_relationship.assert_not_called()
