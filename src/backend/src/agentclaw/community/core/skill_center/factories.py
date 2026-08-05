@@ -130,7 +130,14 @@ class LocalSkillPackageStorage:
             )
             if copied != content:
                 raise OSError("Local Skill quarantine verification failed")
-        if not await self.cleanup():
+        try:
+            source_cleaned = await self.cleanup()
+        except Exception:
+            # A device backend can raise after partially deleting source
+            # bytes. Treat that exactly like a failed cleanup so the verified
+            # quarantine copy is used to restore the authoritative package.
+            source_cleaned = False
+        if not source_cleaned:
             try:
                 restored = await self._restore_contents(files)
             except Exception as exc:
