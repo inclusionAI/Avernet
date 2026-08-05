@@ -28,6 +28,20 @@ def test_cleanup_repository_persists_and_progresses_one_bot_scoped_work_item(wor
     assert repo.list_pending(env="dev", owner_id="cleanup-owner", bot_id="cleanup-bot") == []
 
 
+def test_cleanup_preparation_is_durable_but_not_purgeable_until_committed(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    work_id = repo.record_preparing(
+        **scope, skill_id="9", package_locator="pool/local/delete-quarantine"
+    )
+    assert work_id is not None
+    assert repo.list_pending(**scope) == []
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.status == "preparing"
+    assert repo.cancel_pending(work_id=work_id, **scope)
+
+
 def test_cleanup_repository_isolated_by_the_full_deployment_wide_bot_scope(world) -> None:
     repo = world.get(LocalSkillCleanupRepository)
     values = {

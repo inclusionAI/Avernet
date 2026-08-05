@@ -26,6 +26,7 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.services.repositories import (
+    ActiveSkillSetReferenceError,
     SkillRepository,
     SkillSetRepository,
 )
@@ -128,6 +129,18 @@ class LocalSkillDeleteService:
                 )
             )
             try:
+                cleanup_work_id = self._cleanup_repo.record_preparing(
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_id=skill_id,
+                    package_locator=quarantine_locator,
+                )
+            except Exception as exc:
+                raise LocalSkillStorageError() from exc
+            if cleanup_work_id is None:
+                raise LocalSkillStorageError()
+            try:
                 await package.quarantine_to(quarantine)
             except LocalSkillQuarantineRepairError as exc:
                 # Quarantine is the sole complete copy until an operator can
@@ -149,6 +162,7 @@ class LocalSkillDeleteService:
                     skill_id=skill_id,
                     quarantine=quarantine,
                     quarantine_locator=quarantine_locator,
+                    cleanup_work_id=cleanup_work_id,
                 )
                 raise LocalSkillStorageError() from exc
             try:
@@ -157,6 +171,7 @@ class LocalSkillDeleteService:
                     owner_id=owner_id,
                     bot_id=bot_id,
                     quarantine_locator=quarantine_locator,
+                    cleanup_work_id=cleanup_work_id,
                 )
                 if work_id is None:
                     raise RuntimeError("Local Skill record disappeared during deletion")
@@ -195,6 +210,15 @@ class LocalSkillDeleteService:
                         raise LocalSkillStorageError() from record_exc
                     if work_id is None:
                         raise LocalSkillStorageError()
+                else:
+                    self._cancel_cleanup(
+                        work_id=cleanup_work_id,
+                        bot=bot,
+                        owner_id=owner_id,
+                        bot_id=bot_id,
+                    )
+                if isinstance(exc, ActiveSkillSetReferenceError):
+                    raise LocalSkillActiveError() from exc
                 raise LocalSkillStorageError() from exc
             try:
                 purged = await quarantine.cleanup()
@@ -247,10 +271,17 @@ class LocalSkillDeleteService:
         skill_id: str,
         quarantine,
         quarantine_locator: str,
+        cleanup_work_id: int,
     ) -> None:
         """Remove a failed pre-commit copy, or leave it durably retryable."""
         try:
             if await quarantine.cleanup():
+                self._cancel_cleanup(
+                    work_id=cleanup_work_id,
+                    bot=bot,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                )
                 return
         except Exception:
             pass
@@ -266,6 +297,26 @@ class LocalSkillDeleteService:
         except Exception as exc:
             raise LocalSkillStorageError() from exc
         if work_id is None:
+            raise LocalSkillStorageError()
+
+    def _cancel_cleanup(
+        self,
+        *,
+        work_id: int,
+        bot: dict[str, Any],
+        owner_id: str,
+        bot_id: str,
+    ) -> None:
+        try:
+            cancelled = self._cleanup_repo.cancel_pending(
+                work_id=work_id,
+                env=str(bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+            )
+        except Exception as exc:
+            raise LocalSkillStorageError() from exc
+        if not cancelled:
             raise LocalSkillStorageError()
 
     def _discover_scope(self, skill_id: str) -> BotSkillLayoutScope:
