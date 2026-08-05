@@ -401,6 +401,32 @@ def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
     assert str(svc.skill_service.local_dir) == "/pool/local"
 
 
+def test_skill_set_mapping_uses_owner_for_pool_lookup(test_injector):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return ("/pool/active", "/pool/local", "/pool/repo")
+
+    factory._pool_layout_paths = resolve_pool_paths
+    svc = factory.create(
+        user_id="owner-7",
+        entity_id="project-42",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="proj",
+    )
+    svc.get_active_skills = lambda **_: []
+
+    mappings = svc.get_symlink_mappings(additional_skill_paths=["local://handmade"])
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 3
+    assert [(mapping.source, mapping.target) for mapping in mappings] == [
+        ("/pool/local/handmade", "/pool/active/handmade")
+    ]
+
+
 def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
     test_injector,
 ):
@@ -719,6 +745,49 @@ async def test_bot_skill_set_deactivation_holds_the_layout_edit_lease(test_injec
     assert guard.events[0][1].env == "dev"
     assert guard.events[0][1].entity_id == "owner"
     assert guard.events[0][1].bot_id == "bot"
+    assert guard.events[1] == ("release", "lease")
+    unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
+
+
+@pytest.mark.asyncio
+async def test_bot_skill_set_lease_uses_owner_lookup_and_entity_scope(test_injector):
+    from unittest.mock import AsyncMock
+
+    activator = test_injector.get(SkillSetActivatorFactory).create()
+    activator.skill_set_service.user_id = "owner"
+    activator.skill_set_service.entity_id = "project-42"
+    activator.skill_set_service.bot_id = "bot"
+
+    class _Guard:
+        def __init__(self):
+            self.events = []
+
+        async def acquire_for_edit_wait(self, *, scope):
+            self.events.append(("acquire", scope))
+            return "lease"
+
+        def release(self, lease):
+            self.events.append(("release", lease))
+
+    guard = _Guard()
+    activator._edit_guard = guard
+    owner_lookups = []
+
+    def get_by_id_and_owner(bot_id, owner_id):
+        owner_lookups.append((bot_id, owner_id))
+        if owner_id != "owner":
+            return None
+        return {"env": "dev", "entity_id": "project-42"}
+
+    activator.skill_set_service._bot_repo.get_by_id_and_owner = get_by_id_and_owner
+    unlocked = AsyncMock(return_value=ActivateResult(success=True, message="ok"))
+    activator._activate_skill_set_unlocked = unlocked
+
+    result = await activator.activate_skill_set("7", user_id="owner")
+
+    assert result.success is True
+    assert owner_lookups == [("bot", "owner")]
+    assert guard.events[0][1].entity_id == "project-42"
     assert guard.events[1] == ("release", "lease")
     unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
 
