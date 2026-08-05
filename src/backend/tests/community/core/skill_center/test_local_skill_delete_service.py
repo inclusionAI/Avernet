@@ -114,6 +114,9 @@ class _Sets:
     def get_excluded_skills(self, *_args):
         return [] if self.skills.active else [9]
 
+    def get_all_excluded_skills(self, *_args):
+        return [] if self.skills.active else [9]
+
     def get_all_active_skill_sets_for_env(self, **_kwargs):
         # The repository includes the Bot-scoped default set for runtime sync;
         # its association must not override the explicit default exclusion.
@@ -320,7 +323,7 @@ async def test_current_default_set_exclusion_is_the_active_authority_under_lock(
         def get_default(self, **_kwargs):
             return {"id": "4"}
 
-        def get_excluded_skills(self, *_args):
+        def get_all_excluded_skills(self, *_args):
             return []
 
     service._skill_set_repo = _CurrentDefaultIsActive()
@@ -329,6 +332,25 @@ async def test_current_default_set_exclusion_is_the_active_authority_under_lock(
 
     assert skills.deleted is False
     assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
+    assert cleanup.work == []
+
+
+@pytest.mark.asyncio
+async def test_exclusion_from_a_previous_default_set_allows_delete():
+    service, files, skills, _guard, cleanup = _service(active=False)
+
+    class _PreviousDefaultExcluded(_Sets):
+        def get_excluded_skills(self, *_args):
+            return []
+
+        def get_all_excluded_skills(self, *_args):
+            return [9]
+
+    service._skill_set_repo = _PreviousDefaultExcluded(skills)
+    await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is True
+    assert files.files == {}
     assert cleanup.work == []
 
 

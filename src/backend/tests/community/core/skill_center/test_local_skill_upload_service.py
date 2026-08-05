@@ -287,6 +287,9 @@ class _Cleanup:
     def list_pending(self, **_kwargs):
         return []
 
+    def list_repair_required(self, **_kwargs):
+        return []
+
     def mark_cleaned(self, **_kwargs):
         return True
 
@@ -889,6 +892,41 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_is_blocked_while_the_same_skill_has_delete_repair_work():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+
+    class _RepairRequiredCleanup(_Cleanup):
+        def list_repair_required(self, **kwargs):
+            assert kwargs == {
+                "env": "test",
+                "owner_id": "owner",
+                "bot_id": "bot",
+                "skill_id": "9",
+            }
+            return [{"id": 12, "status": "repair_required"}]
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem,
+            repo,
+            _ReplacementRuntime([True]),
+            _RepairRequiredCleanup(),
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+
+    assert repo.atomic_replacements == []
+    assert filesystem.files == {"/private/skills-local/upload-skill/SKILL.md": b"old"}
 
 
 @pytest.mark.asyncio
