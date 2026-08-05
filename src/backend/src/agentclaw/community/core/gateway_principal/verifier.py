@@ -344,8 +344,8 @@ def _asserted_tenants(principals: tuple[GatewayPrincipal, ...]) -> set[str]:
     Empty is therefore a real result, not a failure — it is the user-only
     request, and :attr:`VerifiedCaller.tenant` answers it with the internal
     default. Keeping "what was claimed" separate from "what we scope by" is the
-    point of this function: the guards below judge only claims, so a caller
-    cannot reach the internal tenant by naming it.
+    point of this function: the guard below judges only claims, so the fallback
+    stays a decision made here rather than a value a token can supply.
     """
     return {
         principal.tenant
@@ -355,11 +355,17 @@ def _asserted_tenants(principals: tuple[GatewayPrincipal, ...]) -> set[str]:
 
 
 def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> None:
-    """Require at most one non-internal tenant across the whole identity set.
+    """Require at most one tenant, named and non-empty, across the identity set.
 
     "At most" because a user-only set claims no tenant at all; there is then
     nothing to contradict and nothing to vet, and
     :attr:`VerifiedCaller.tenant` supplies the internal default locally.
+
+    Tenants are judged by count and emptiness, never by name.
+    :data:`DEFAULT_AVERNET_TENANT` used to be refused here — see the module
+    README's change-impact note — because no gateway tenant was registered under
+    it. One is now, so it passes like any other; a set that pairs it with a
+    second tenant still fails the contradiction check above.
     """
     tenants = _asserted_tenants(principals)
     if not tenants:
@@ -373,16 +379,6 @@ def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> No
     tenant = next(iter(tenants))
     if not tenant:
         raise PrincipalVerificationError("principal token carries an empty tenant")
-    if tenant == DEFAULT_AVERNET_TENANT:
-        # ``teamclaw`` owns every pre-existing internal row. Accepting it off the
-        # wire would hand an external caller the internal tenant's data — the
-        # exact failure tenant isolation exists to prevent. No gateway tenant is
-        # named this today; if an internal-through-gateway path is ever designed,
-        # lift this guard deliberately, with that design written down.
-        raise PrincipalVerificationError(
-            "principal token names the internal tenant, which is not routable "
-            "from the public surface"
-        )
 
 
 def _first_user_principal(
