@@ -119,6 +119,9 @@ class PublishConfig(BaseModel):
     # Deploy config (passed through for device provisioning)
     deploy_config: DeployConfig | None = None
 
+    # UPDATE-specific: optional device template for the target Bot record
+    template_uuid: str | None = None
+
     # UPDATE-specific: ID of the new PENDING bot record created during create_publish
     target_bot_id: int | None = None
 

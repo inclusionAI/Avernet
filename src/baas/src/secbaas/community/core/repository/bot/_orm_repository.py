@@ -353,6 +353,7 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         status: str,
         extra_config: dict[str, Any] | None = None,
         name: str | None = None,
+        template_uuid: str | None = None,
         modifier: str = "system",
     ) -> int:
         log.info(
@@ -398,7 +399,9 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
             status=status,
             name=name if name is not None else source.name,
             description=source.description,
-            template_uuid=source.template_uuid,
+            template_uuid=(
+                template_uuid if template_uuid is not None else source.template_uuid
+            ),
             replica_desired=source.replica_desired,
             replica_minimum=source.replica_minimum,
             replica_maximum=source.replica_maximum,
