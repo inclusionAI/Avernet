@@ -87,6 +87,21 @@ class LocalSkillDeleteService:
                 int(excluded_id) for excluded_id in excluded_skill_ids
             }:
                 raise LocalSkillActiveError()
+            active_custom_set_ids = {
+                str(skill_set["id"])
+                for skill_set in self._skill_set_repo.get_all_active_skill_sets_for_env(
+                    user_id=owner_id,
+                    bolt_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                    env=str(bot["env"]),
+                )
+            }
+            referenced_set_ids = {
+                reference["skill_set_id"]
+                for reference in self._skill_repo.list_skill_set_references(skill_id)
+            }
+            if active_custom_set_ids & referenced_set_ids:
+                raise LocalSkillActiveError()
             locator = str(skill["git_path"])[len("local://") :]
             package = (
                 self._skill_service_factory.local_skill_package_storage_for_locator(
