@@ -13,6 +13,7 @@ from ._models import MountPermission, MountPoint, ResourceSpecification, Storage
 from ._outbound_rule import OutBoundOperationRule
 
 __all__ = [
+    "AgentCodingBotParams",
     "ArcaDeployConfig",
     "DeployConfig",
     "DeviceCredentials",
@@ -270,6 +271,12 @@ class SigmaDeployConfig(BaseModel):
     )
 
 
+class AgentCodingBotParams(BaseModel):
+    """Opaque AgentCoding parameters consumed only at the Arca boundary."""
+
+    theta_key: str | None = Field(default=None, description="Encrypted theta key")
+
+
 class DeployConfig(BaseModel):
     """Unified deploy configuration for all platforms.
 
@@ -296,6 +303,11 @@ class DeployConfig(BaseModel):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    agent_coding_bot_params: AgentCodingBotParams | None = Field(
+        default=None,
+        description="AgentCoding Bot sandbox extension parameters",
+    )
 
     # === Arca-specific fields ===
     mount_points: list[MountPoint] | None = Field(

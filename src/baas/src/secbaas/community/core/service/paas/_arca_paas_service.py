@@ -25,6 +25,7 @@ from secbaas.community.api.device_manage import (
     PaasError,
 )
 from secbaas.community.api.tenant_manage import TenantType
+from secbaas.community.core.utils.secret_utils import symmetric_decrypt
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
     ArcaSandboxError,
@@ -32,6 +33,7 @@ from secbaas.community.spi.sandbox.arca import (
     ArcaSandboxPlugin,
     ArcaSandboxTimeoutError,
 )
+from secbaas.community.spi.secret import SecretStorePlugin
 
 from ._paas_service import PaasService
 
@@ -66,7 +68,10 @@ class ArcaPaasService(PaasService):
     """
 
     def __init__(
-        self, credentials: ArcaCredentials, arca_sandbox_plugin: ArcaSandboxPlugin
+        self,
+        credentials: ArcaCredentials,
+        arca_sandbox_plugin: ArcaSandboxPlugin,
+        secret_plugin: SecretStorePlugin | None = None,
     ):
         """Initialize ArcaPaasService with pre-resolved credentials and plugin.
 
@@ -87,6 +92,7 @@ class ArcaPaasService(PaasService):
 
         self._credentials = credentials
         self._arca_sandbox_plugin = arca_sandbox_plugin
+        self._secret_plugin = secret_plugin
         self._logger = get_logger("core-service")
 
     async def get_credentials(self) -> ArcaCredentials:
@@ -259,6 +265,43 @@ class ArcaPaasService(PaasService):
             )
         return mount_points
 
+    def _resolve_agent_coding_api_key(
+        self, config: ArcaCreateConfig
+    ) -> str | None:
+        """Resolve a request-scoped Arca API key; None keeps fixed credentials."""
+        params = config.agent_coding_bot_params
+        theta_key = params.theta_key if params is not None else None
+        if not isinstance(theta_key, str) or not theta_key.strip():
+            return None
+        if self._secret_plugin is None:
+            self._logger.warning(
+                "[arca_credential] fallback=fixed reason=secret_plugin_unavailable"
+            )
+            return None
+        try:
+            _, decrypt_key = self._secret_plugin.get_kv_secret(
+                "other_manual_aixharness_theta_key"
+            )
+            if not decrypt_key:
+                self._logger.warning(
+                    "[arca_credential] fallback=fixed reason=mist_secret_empty"
+                )
+                return None
+            api_key = symmetric_decrypt(theta_key.strip(), decrypt_key)
+            if not api_key or not api_key.strip():
+                self._logger.warning(
+                    "[arca_credential] fallback=fixed reason=decrypted_key_empty"
+                )
+                return None
+            self._logger.info("[arca_credential] source=agent_coding")
+            return api_key.strip()
+        except Exception as exc:
+            self._logger.warning(
+                "[arca_credential] fallback=fixed reason=resolve_failed error_type=%s",
+                type(exc).__name__,
+            )
+            return None
+
     async def create_device(  # type: ignore[override]
         self,
         config: ArcaCreateConfig,
@@ -296,8 +339,12 @@ class ArcaPaasService(PaasService):
         template_id = None
         try:
             # Log detailed config parameters at info level
+            log_config = config.model_dump(exclude_none=True)
+            if "agent_coding_bot_params" in log_config:
+                log_config["agent_coding_bot_params"] = "<redacted>"
             self._logger.info(
-                f"[create_device] ArcaCreateConfig: {config.model_dump_json()}"
+                "[create_device] ArcaCreateConfig: %s",
+                json.dumps(log_config, default=str),
             )
 
             # Use config template_id or fall back to credentials arca_template_id
@@ -326,10 +373,14 @@ class ArcaPaasService(PaasService):
                 "timeout_in_millis": timeout * 1000,
                 "ready_timeout_in_seconds": timeout,
             }
+            request_api_key = self._resolve_agent_coding_api_key(config)
+            if request_api_key is not None:
+                create_params["api_key"] = request_api_key
             # Build log-safe params dict with storage and image converted to dict if present
             log_params = {
                 k: (v.model_dump() if k == "storage" and v is not None else v)
                 for k, v in create_params.items()
+                if k != "api_key"
             }
             self._logger.info(
                 f"Creating sandbox with params: {json.dumps(log_params, default=str)}"

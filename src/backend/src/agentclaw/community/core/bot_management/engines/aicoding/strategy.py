@@ -13,7 +13,11 @@ from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
 
-from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
+from ..provisioning import (
+    AgentCodingBotParams,
+    BotProvisioningContext,
+    EngineProvisioningStrategy,
+)
 
 
 # Legacy coding template types.  This is only used for old call sites that
@@ -130,6 +134,29 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             envs["RELAY_DEFAULT_RUNTIME"] = runtime.strip()
 
         return envs or None
+
+    def build_agent_coding_bot_params(
+        self, ctx: BotProvisioningContext
+    ) -> AgentCodingBotParams | None:
+        """Extract the opaque theta key from the governed template snapshot."""
+        template_config = ctx.template_config
+        if not self.consumes_template_config(
+            ctx.template_type,
+            active_engine=ctx.active_engine,
+            template_config=template_config,
+        ) or not isinstance(template_config, dict):
+            return None
+
+        bot_template_config = template_config.get("bot_template_config")
+        if not isinstance(bot_template_config, dict):
+            return None
+        ext_config = bot_template_config.get("ext_config")
+        if not isinstance(ext_config, dict):
+            return None
+        theta_key = ext_config.get("thetaKey")
+        if not isinstance(theta_key, str) or not theta_key.strip():
+            return None
+        return AgentCodingBotParams(theta_key=theta_key.strip())
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         return self.consumes_template_config(

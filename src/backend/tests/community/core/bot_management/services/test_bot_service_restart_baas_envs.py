@@ -652,3 +652,23 @@ class TestRestartBaasCodefuseTokenPassthrough:
 
         payload = svc._task_queue_service.enqueue.call_args.args[1]
         assert "codefuse_token" not in payload
+
+
+def test_restart_baas_forwards_agent_coding_bot_params():
+    template_config = {
+        "bot_template_config": {
+            "ext_config": {"thetaKey": "encrypted-theta"},
+        },
+    }
+    svc, baas, _ = _make_service(template_config=template_config)
+
+    svc._restart_bot_baas(
+        bot_id="bot001",
+        user_id="user001",
+        binding_id=42,
+        bot=_make_bot(),
+    )
+
+    assert baas.upgrade_bot.call_args.kwargs["agent_coding_bot_params"] == {
+        "theta_key": "encrypted-theta"
+    }

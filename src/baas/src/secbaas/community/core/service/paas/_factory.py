@@ -204,7 +204,9 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
                 f"plugin={type(arca_sandbox_plugin).__name__}"
             )
             return ArcaPaasService(
-                credentials=arca_creds, arca_sandbox_plugin=arca_sandbox_plugin
+                credentials=arca_creds,
+                arca_sandbox_plugin=arca_sandbox_plugin,
+                secret_plugin=self._secret_plugin,
             )
 
         elif platform_upper == TenantType.SIGMA.value.upper():

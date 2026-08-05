@@ -12,6 +12,16 @@ from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
+class AgentCodingBotParams:
+    """Opaque AgentCoding Bot parameters forwarded to the sandbox boundary."""
+
+    theta_key: str | None = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"theta_key": self.theta_key}
+
+
+@dataclass(frozen=True)
 class BotProvisioningContext:
     """Common inputs used by engine provisioning strategies.
 
@@ -59,6 +69,16 @@ class EngineProvisioningStrategy(ABC):
     @abstractmethod
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
+
+    def build_agent_coding_bot_params(
+        self, ctx: BotProvisioningContext
+    ) -> AgentCodingBotParams | None:
+        """Return optional AgentCoding-specific sandbox parameters.
+
+        The default is a no-op so non-coding engines and future strategies do
+        not need to know about AgentCoding template fields.
+        """
+        return None
 
     @abstractmethod
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:

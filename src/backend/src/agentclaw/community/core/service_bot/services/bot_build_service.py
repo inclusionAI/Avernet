@@ -390,6 +390,27 @@ class BotBuildService:
             )
             return False
 
+    @staticmethod
+    def _build_agent_coding_bot_params(
+        *, bot: Dict[str, Any], user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Resolve AgentCoding sandbox parameters through provisioning strategy."""
+        from agentclaw.community.core.bot_management.engines import resolve_provisioning
+
+        template_config = bot.get("template_config")
+        if not isinstance(template_config, dict):
+            template_config = None
+        ctx, strategy = resolve_provisioning(
+            bot_id=str(bot.get("bot_id") or ""),
+            owner_id=user_id,
+            bot_type=str(bot.get("bot_type") or "service"),
+            active_engine=bot.get("active_engine"),
+            template_type=bot.get("template_type"),
+            template_config=template_config,
+        )
+        params = strategy.build_agent_coding_bot_params(ctx)
+        return params.to_dict() if params is not None else None
+
     def _resolve_baas_template_uuid(
         self,
         *,
@@ -563,6 +584,9 @@ class BotBuildService:
                     "version": version,
                     "ext_info": ext_info,
                     "extra_envs": extra_envs,
+                    "agent_coding_bot_params": self._build_agent_coding_bot_params(
+                        bot=bot, user_id=user_id
+                    ),
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,
@@ -1192,6 +1216,9 @@ class BotBuildService:
                     "stage": publish_stage.value,
                     "version": version,
                     "extra_envs": extra_envs,
+                    "agent_coding_bot_params": self._build_agent_coding_bot_params(
+                        bot=bot, user_id=user_id
+                    ),
                 }
                 template_uuid = self._resolve_baas_template_uuid(
                     bot=bot,

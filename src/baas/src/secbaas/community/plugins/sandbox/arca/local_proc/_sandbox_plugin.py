@@ -97,6 +97,7 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        api_key: str | None = None,
     ) -> ArcaSandbox:
         """创建新的沙箱并等待其就绪。
 

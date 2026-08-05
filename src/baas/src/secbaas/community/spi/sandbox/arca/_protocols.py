@@ -119,6 +119,7 @@ class ArcaSandboxPlugin(Protocol):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        api_key: str | None = None,
     ) -> ArcaSandbox:
         """Create a new sandbox and wait for it to be ready.
 

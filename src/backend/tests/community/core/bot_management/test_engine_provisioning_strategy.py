@@ -377,3 +377,62 @@ def test_template_only_user_template_factory_config_without_active_engine_is_noo
     assert strategy.engine_type == "default"
     assert strategy.should_encrypt_template_token(ctx) is False
     assert strategy.extract_runtime_token(ctx) is None
+
+
+def test_aicoding_strategy_builds_agent_coding_bot_params_from_theta_key():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type="personalCoding",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "bot_template_config": {
+                "ext_config": {"thetaKey": "  encrypted-theta  "},
+            },
+        },
+    )
+
+    params = strategy.build_agent_coding_bot_params(ctx)
+
+    assert params is not None
+    assert params.to_dict() == {"theta_key": "encrypted-theta"}
+
+
+def test_aicoding_strategy_invalid_theta_key_keeps_legacy_behavior():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    for template_config in (
+        {},
+        {"bot_template_config": None},
+        {"bot_template_config": {"ext_config": None}},
+        {"bot_template_config": {"ext_config": {"thetaKey": ""}}},
+        {"bot_template_config": {"ext_config": {"thetaKey": 123}}},
+    ):
+        ctx = BotProvisioningContext(
+            active_engine="aicoding",
+            template_type="personalCoding",
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            template_config=template_config,
+        )
+        assert strategy.build_agent_coding_bot_params(ctx) is None
+
+
+def test_default_strategy_does_not_build_agent_coding_bot_params():
+    ctx = BotProvisioningContext(
+        active_engine="openclaw",
+        template_type="personalCoding",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "bot_template_config": {
+                "ext_config": {"thetaKey": "encrypted-theta"},
+            },
+        },
+    )
+    strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
+
+    assert strategy.build_agent_coding_bot_params(ctx) is None

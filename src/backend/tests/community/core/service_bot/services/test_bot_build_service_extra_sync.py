@@ -202,3 +202,21 @@ def test_mcp_config_skipped_when_device_returns_non_json_stdout():
     ok = service._generate_mcp_config(device_id="dev-1", target_dir="/tmp/x")
     assert ok is False
     service._device_service.exec_shell_new.assert_called()
+
+
+def test_service_publish_builds_agent_coding_bot_params_from_template_snapshot():
+    bot = {
+        "bot_id": "service-bot-1",
+        "bot_type": "service",
+        "active_engine": "aicoding",
+        "template_type": "applicationCoding",
+        "template_config": {
+            "bot_template_config": {
+                "ext_config": {"thetaKey": "encrypted-service-theta"},
+            },
+        },
+    }
+
+    assert BotBuildService._build_agent_coding_bot_params(
+        bot=bot, user_id="owner-1"
+    ) == {"theta_key": "encrypted-service-theta"}

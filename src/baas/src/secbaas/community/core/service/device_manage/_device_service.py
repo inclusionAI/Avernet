@@ -199,6 +199,10 @@ def _build_arca_detail_config(
             detail_config.resource_spec = deploy_config.resource_spec
         if deploy_config.docker_image is not None:
             detail_config.docker_image = deploy_config.docker_image
+        if deploy_config.agent_coding_bot_params is not None:
+            detail_config.agent_coding_bot_params = (
+                deploy_config.agent_coding_bot_params
+            )
 
     # Log which fields are being passed
     fields_info = []

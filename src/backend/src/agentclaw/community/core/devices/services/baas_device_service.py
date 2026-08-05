@@ -328,6 +328,19 @@ class BaasDeviceService(DeviceService):
                 "active_engine": engine,
                 "bot_type": effective_bot_type,
             }
+            provisioning_ctx, provisioning_strategy = resolve_provisioning(
+                bot_id=bolt_id,
+                owner_id=effective_owner_id,
+                active_engine=engine,
+                bot_type=effective_bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            agent_coding_params = (
+                provisioning_strategy.build_agent_coding_bot_params(
+                    provisioning_ctx
+                )
+            )
             # 个人 Bot 不向启动脚本传 stage；服务 Bot 草稿才显式传 draft。
             payload_kwargs = {
                 "bot": bot,
@@ -339,6 +352,11 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
+                "agent_coding_bot_params": (
+                    agent_coding_params.to_dict()
+                    if agent_coding_params is not None
+                    else None
+                ),
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
                 "mount_home_dir_storage": True,
             }

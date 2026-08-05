@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ._deploy_config import DeviceCredentials
+from ._deploy_config import AgentCodingBotParams, DeviceCredentials
 from ._device_config import (
     ArcaCreateConfig,
     LocalCreateConfig,
@@ -137,6 +137,10 @@ class ArcaDeviceConfig(BaseDeviceConfig):
         default=None,
         description="Docker 镜像名称，覆盖 template 中的默认镜像",
     )
+    agent_coding_bot_params: AgentCodingBotParams | None = Field(
+        default=None,
+        description="AgentCoding Bot sandbox extension parameters",
+    )
 
     def to_create_config(self) -> ArcaCreateConfig:
         """Extract create config fields into ArcaCreateConfig.
@@ -156,6 +160,7 @@ class ArcaDeviceConfig(BaseDeviceConfig):
             metadata=self.metadata,
             storage=self.storage,
             docker_image=self.docker_image,
+            agent_coding_bot_params=self.agent_coding_bot_params,
         )
 
 

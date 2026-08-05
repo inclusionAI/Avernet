@@ -456,6 +456,42 @@ class BotService:
             )
             return None
 
+    def _build_agent_coding_bot_params(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_engine: "str | None",
+        bot_type: str,
+        template_type: "str | None",
+        template_config: "Optional[Dict[str, Any]]",
+        log_context: str,
+    ) -> "Optional[Dict[str, Any]]":
+        """Build optional AgentCoding sandbox parameters via the engine strategy."""
+        try:
+            from agentclaw.community.core.bot_management.engines import (
+                resolve_provisioning,
+            )
+
+            ctx, strategy = resolve_provisioning(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                active_engine=active_engine,
+                bot_type=bot_type,
+                template_type=template_type,
+                template_config=template_config,
+            )
+            params = strategy.build_agent_coding_bot_params(ctx)
+            return params.to_dict() if params is not None else None
+        except Exception as e:
+            logger.warning(
+                "[%s] Failed to build AgentCoding bot params for bot %s: %s",
+                log_context,
+                bot_id,
+                e,
+            )
+            return None
+
     def _extract_engine_runtime_token(
         self,
         *,
@@ -4206,6 +4242,15 @@ class BotService:
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
+        agent_coding_bot_params = self._build_agent_coding_bot_params(
+            bot_id=str(bot_id),
+            owner_id=user_id,
+            active_engine=active_engine,
+            bot_type=bot.get("bot_type", ""),
+            template_type=bot_template_type,
+            template_config=resolved_template_config,
+            log_context="bot_service._restart_bot_baas",
+        )
         # 与 _allocate_device_async 对齐：BaaS 原地重启也必须透传模板快照。
         # template_config.envs / image / resource_spec 是独立的沙箱覆写能力，
         # 不能被 extra_envs（引擎策略环境变量）是否命中门控影响。否则非
@@ -4251,6 +4296,7 @@ class BotService:
             # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
             "extra_envs": extra_envs,
             "template_config": device_template_config,
+            "agent_coding_bot_params": agent_coding_bot_params,
         }
         if restart_stage is not None:
             upgrade_kwargs["stage"] = restart_stage

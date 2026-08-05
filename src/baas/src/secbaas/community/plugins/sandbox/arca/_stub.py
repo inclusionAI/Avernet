@@ -127,6 +127,7 @@ class StubArcaSandboxPlugin(ArcaSandboxPlugin):
         image: str | None = None,
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
+        api_key: str | None = None,
     ) -> ArcaSandbox:
         sandbox_id = f"stub-arca-{uuid.uuid4().hex[:12]}"
         device = StubArcaSandbox(sandbox_id, template_id)

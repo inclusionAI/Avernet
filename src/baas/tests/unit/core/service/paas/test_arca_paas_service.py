@@ -415,3 +415,86 @@ def test__safe_repr__repr_fails():
     result = _safe_repr(BadRepr())
     assert "<repr failed:" in result
     assert "boom" in result
+
+
+class TestAgentCodingArcaCredential:
+    def test_resolves_theta_key_for_single_create_request(
+        self, arca_credentials, mock_plugin
+    ):
+        from secbaas.community.api.device_manage import (
+            AgentCodingBotParams,
+            ArcaCreateConfig,
+        )
+        from secbaas.community.core.utils.secret_utils import symmetric_encrypt
+
+        decrypt_key = "mist-decrypt-key"
+        encrypted = symmetric_encrypt("dynamic-arca-api-key", decrypt_key)
+        secret_plugin = MagicMock()
+        secret_plugin.get_kv_secret.return_value = ("unused", decrypt_key)
+        service = ArcaPaasService(
+            credentials=arca_credentials,
+            arca_sandbox_plugin=mock_plugin,
+            secret_plugin=secret_plugin,
+        )
+        config = ArcaCreateConfig(
+            agent_coding_bot_params=AgentCodingBotParams(theta_key=encrypted)
+        )
+
+        assert service._resolve_agent_coding_api_key(config) == "dynamic-arca-api-key"
+        secret_plugin.get_kv_secret.assert_called_once_with(
+            "other_manual_aixharness_theta_key"
+        )
+
+    @pytest.mark.parametrize("theta_key", [None, "", "   "])
+    def test_missing_theta_key_keeps_fixed_credential(
+        self, arca_credentials, mock_plugin, theta_key
+    ):
+        from secbaas.community.api.device_manage import (
+            AgentCodingBotParams,
+            ArcaCreateConfig,
+        )
+
+        service = ArcaPaasService(
+            credentials=arca_credentials,
+            arca_sandbox_plugin=mock_plugin,
+            secret_plugin=MagicMock(),
+        )
+        params = (
+            AgentCodingBotParams(theta_key=theta_key)
+            if theta_key is not None
+            else None
+        )
+
+        assert (
+            service._resolve_agent_coding_api_key(
+                ArcaCreateConfig(agent_coding_bot_params=params)
+            )
+            is None
+        )
+
+    def test_mist_or_decrypt_failure_keeps_fixed_credential(
+        self, arca_credentials, mock_plugin
+    ):
+        from secbaas.community.api.device_manage import (
+            AgentCodingBotParams,
+            ArcaCreateConfig,
+        )
+
+        secret_plugin = MagicMock()
+        secret_plugin.get_kv_secret.side_effect = RuntimeError("mist unavailable")
+        service = ArcaPaasService(
+            credentials=arca_credentials,
+            arca_sandbox_plugin=mock_plugin,
+            secret_plugin=secret_plugin,
+        )
+
+        assert (
+            service._resolve_agent_coding_api_key(
+                ArcaCreateConfig(
+                    agent_coding_bot_params=AgentCodingBotParams(
+                        theta_key="invalid-ciphertext"
+                    )
+                )
+            )
+            is None
+        )
