@@ -1,4 +1,5 @@
 """Transport-neutral value types for resource materialization."""
+
 from __future__ import annotations
 
 import hashlib
@@ -38,8 +39,14 @@ class MaterializationRequest(BaseModel):
 
     def model_post_init(self, __context, /) -> None:
         if self.transfer_api_version == "session_v2":
-            if not self.tenant or not self.session_id or not self.workspace_relative_path:
-                raise ValueError("session_v2 requires tenant, session_id, and workspace_relative_path")
+            if (
+                not self.tenant
+                or not self.session_id
+                or not self.workspace_relative_path
+            ):
+                raise ValueError(
+                    "session_v2 requires tenant, session_id, and workspace_relative_path"
+                )
         elif not self.device_path:
             raise ValueError("bot_device_v1 requires device_path")
 
@@ -74,6 +81,7 @@ class ManifestEntry(BaseModel):
     observed_mtime_ns: int | None = None
     observed_inode: int | None = None
     uploaded_at: datetime | None = None
+    baas_tenant: str | None = None
 
 
 @dataclass(frozen=True)

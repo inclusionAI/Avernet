@@ -1,18 +1,25 @@
 """Direct, session-scoped file access through a trusted Bot proxypass."""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from collections.abc import AsyncIterator
 
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+
+from engine.community.core.session_files.export_service import (
+    EXPORT_POLL_SECONDS,
+    SessionFileExportService,
+)
 from engine.community.core.session_files.models import SessionFileError
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.di import Injected
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import StreamingResponse
 
 log = logging.getLogger("engine.session_files.api")
 router = APIRouter(prefix="/api/session-files", tags=["session-files"])
+_MAX_DIRECT_CONTENT_BYTES = 30 * 1024 * 1024
 
 
 def _error(exc: SessionFileError) -> HTTPException:
@@ -39,17 +46,66 @@ async def list_session_files(
     return {"files": [item.as_dict() for item in files]}
 
 
-@router.get("/{resource_id}/content")
+@router.get("/{resource_id}/content", response_model=None)
 async def stream_session_file_content(
     resource_id: str,
     session_key: str = Query(alias="sessionKey", min_length=1, max_length=2048),
     disposition: str = Query("inline", pattern="^(inline|attachment)$"),
     service: SessionFileService = Injected(SessionFileService),  # noqa: B008
-) -> StreamingResponse:
+    export_service: SessionFileExportService = Injected(SessionFileExportService),  # noqa: B008
+) -> Response:
     log.info(
         "engine.session_files.proxypass_access operation=content resource_id=%s",
         resource_id,
     )
+    if disposition == "attachment":
+        try:
+            source = await asyncio.to_thread(
+                service.prepare_export_source,
+                session_key=session_key,
+                resource_id=resource_id,
+            )
+        except SessionFileError as exc:
+            raise _error(exc) from exc
+        if source.size_bytes > _MAX_DIRECT_CONTENT_BYTES:
+            result = await export_service.request_download(
+                source=source,
+                session_key=session_key,
+            )
+            if result.state == "preparing":
+                return JSONResponse(
+                    status_code=202,
+                    content={
+                        "status": "preparing_download",
+                        "retry_after_seconds": EXPORT_POLL_SECONDS,
+                    },
+                    headers={
+                        "Retry-After": str(EXPORT_POLL_SECONDS),
+                        "Cache-Control": "no-store",
+                    },
+                )
+            if result.state == "failed":
+                if result.error_code in {"resource_missing", "resource_changed"}:
+                    raise _error(SessionFileError(result.error_code))
+                status_code = {
+                    "file_export_unavailable": 503,
+                    "file_export_timeout": 504,
+                }.get(result.error_code, 502)
+                raise HTTPException(status_code=status_code, detail=result.error_code)
+            if result.download is None:
+                raise HTTPException(status_code=502, detail="file_export_failed")
+            return JSONResponse(
+                content={
+                    "status": "ready",
+                    "delivery": "external_url",
+                    "download_url": result.download.download_url,
+                    "expires_at": result.download.expires_at,
+                    "filename": result.download.filename,
+                    "size_bytes": result.download.size_bytes,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
+
     try:
         content = await asyncio.to_thread(
             service.open_content,
@@ -59,6 +115,8 @@ async def stream_session_file_content(
         )
     except SessionFileError as exc:
         raise _error(exc) from exc
+    if content.size_bytes > _MAX_DIRECT_CONTENT_BYTES:
+        raise HTTPException(status_code=413, detail="resource_preview_too_large")
 
     async def body() -> AsyncIterator[bytes]:
         stream = await asyncio.to_thread(content.path.open, "rb")

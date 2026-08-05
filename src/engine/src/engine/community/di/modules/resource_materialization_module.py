@@ -1,19 +1,26 @@
 """DI bindings for shared resource materialization."""
+
 from __future__ import annotations
+
+from injector import Binder, Module, inject, provider, singleton
 
 from engine.community.core.resource_materialization.service import (
     ResourceMaterializationService,
 )
+from engine.community.core.session_files.export_service import SessionFileExportService
 from engine.community.core.session_files.service import SessionFileService
 from engine.community.plugin_api.resource_materialization import (
     BaasMaterializationClient,
     BackendMaterializationCallbackClient,
 )
+from engine.community.plugin_api.session_file_export import BaasSessionFileClient
 from engine.community.plugins.resource_materialization import (
     NotConfiguredBaasMaterializationClient,
     NotConfiguredBackendMaterializationCallbackClient,
 )
-from injector import Binder, Module, inject, provider, singleton
+from engine.community.plugins.session_file_export import (
+    NotConfiguredBaasSessionFileClient,
+)
 
 
 class ResourceMaterializationModule(Module):
@@ -26,10 +33,16 @@ class ResourceMaterializationModule(Module):
             scope=singleton,
         )
         binder.bind(
+            BaasSessionFileClient,
+            to=NotConfiguredBaasSessionFileClient,
+            scope=singleton,
+        )
+        binder.bind(
             BackendMaterializationCallbackClient,
             to=NotConfiguredBackendMaterializationCallbackClient,
             scope=singleton,
         )
+
     @singleton
     @provider
     @inject
@@ -47,3 +60,16 @@ class ResourceMaterializationModule(Module):
     @provider
     def session_file_service(self) -> SessionFileService:
         return SessionFileService()
+
+    @singleton
+    @provider
+    @inject
+    def session_file_export_service(
+        self,
+        session_file_service: SessionFileService,
+        export_client: BaasSessionFileClient,
+    ) -> SessionFileExportService:
+        return SessionFileExportService(
+            session_file_service=session_file_service,
+            export_client=export_client,
+        )
