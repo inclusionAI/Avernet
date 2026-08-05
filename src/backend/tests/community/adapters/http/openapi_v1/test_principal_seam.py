@@ -193,6 +193,28 @@ def test_a_first_party_user_scopes_to_the_internal_tenant(client):
     }
 
 
+def test_a_token_naming_the_internal_tenant_is_scoped_to_it(client):
+    """A claimed ``teamclaw`` binds ``teamclaw``. *Changed 2026-08-05.*
+
+    The seam used to answer ``401`` here: no gateway tenant was spelled
+    ``teamclaw``, so a token naming it could only be an attempt to reach internal
+    rows. Now that a tenant registered under that name is a supported
+    first-party path, the claim is honoured and the middleware binds it like any
+    other — which is what makes this worth asserting through the probe rather
+    than at the verifier: the tenant a handler *observes* is the internal one.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
+
+
 def test_each_caller_gets_their_own_tenant(client):
     """The tenant is per-request state, never sticky across requests."""
     first = client.get(
@@ -277,16 +299,6 @@ def test_rejected_caller_never_binds_the_internal_tenant_to_a_handler(client):
     assert response.status_code == 401
     assert "data" in response.json()
     assert response.json()["data"] is None
-
-
-def test_internal_tenant_cannot_be_claimed_over_the_wire(client):
-    """A token naming ``teamclaw`` would otherwise read every internal row."""
-    response = client.get(
-        "/openapi/v1/bots/_probe",
-        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
-    )
-
-    assert response.status_code == 401
 
 
 # ── the property that makes the tenant fallback safe ─────────────────────────

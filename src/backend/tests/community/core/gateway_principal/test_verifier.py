@@ -446,21 +446,48 @@ def test_empty_tenant_is_rejected():
         verify_principal_token(token, CONFIG)
 
 
-def test_internal_tenant_off_the_wire_is_rejected():
-    """``teamclaw`` owns every internal row and must not be *claimable* publicly.
+def test_internal_tenant_named_on_the_wire_is_honoured():
+    """``teamclaw`` is a routable tenant claim. *Changed 2026-08-05.*
 
-    The guard is about what a token asserts, not about what the request ends up
-    scoped to: a user-only caller resolves to ``teamclaw`` by our own decision
-    (see :func:`test_user_only_token_yields_the_internal_tenant_and_the_owner`),
-    while a token that names it is refused. Only the machine principals can
-    assert a tenant, so only they can trip this.
+    Verification used to refuse a token whose machine principal named the
+    internal tenant, on the reasoning that no gateway tenant was spelled that way
+    and honouring one would scope an external caller to every pre-existing
+    internal row. An app registered to ``teamclaw`` is now a deliberate
+    first-party path through the gateway, so the claim is treated like any other
+    tenant's: the gateway vouched for the registration, and this component
+    believes what it vouches for.
+
+    The tenant a request scopes to is still decided by one rule, not two — a
+    named ``teamclaw`` and the user-only fallback
+    (:func:`test_user_only_token_yields_the_internal_tenant_and_the_owner`) land
+    on the same value by different routes.
     """
     token = mint([user_principal(), app_principal(tenant=DEFAULT_AVERNET_TENANT)])
 
-    with pytest.raises(PrincipalVerificationError) as exc:
-        verify_principal_token(token, CONFIG)
+    caller = verify_principal_token(token, CONFIG)
 
-    assert "internal tenant" in str(exc.value)
+    assert caller.tenant == DEFAULT_AVERNET_TENANT
+    assert caller.user_id == "u-1"
+
+
+def test_internal_tenant_still_cannot_be_mixed_with_another():
+    """Honouring ``teamclaw`` did not exempt it from the one-tenant rule.
+
+    The contradiction guard judges tenants by count, not by name, so a set that
+    pairs the internal tenant with an external one is refused for the same reason
+    any other mixed set is: picking one would invent an answer the gateway never
+    gave.
+    """
+    token = mint(
+        [
+            user_principal(),
+            app_principal(tenant=DEFAULT_AVERNET_TENANT),
+            bot_principal(tenant="acme-partner"),
+        ]
+    )
+
+    with pytest.raises(PrincipalVerificationError):
+        verify_principal_token(token, CONFIG)
 
 
 def test_a_tenant_claimed_on_a_user_principal_is_ignored():
