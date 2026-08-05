@@ -104,12 +104,31 @@ class GatewayAccessKey(BaseModel):
 
 
 class UserPrincipal(BaseModel):
-    """A first-party authenticated user."""
+    """A first-party authenticated user.
+
+    Alone among the four, this principal carries **no tenant** — the gateway
+    does not send one, because nothing in a user credential proves which tenant
+    a person acts for (gateway ``spi/authn/_models.py``). A tenant is asserted
+    by the *machine* identities: an app, a bot and an access key are each
+    registered to one.
+
+    So an identity set naming only a user asserts no tenant, and
+    ``VerifiedCaller.tenant`` resolves it to :data:`DEFAULT_AVERNET_TENANT` —
+    the internal tenant, which is the right scope for a first-party caller on
+    our own frontend. That fallback is **ours**, decided here from the absence
+    of a claim; it is not a value the token supplied. The distinction is what
+    keeps the guard in ``verifier.py`` meaningful: ``teamclaw`` is still refused
+    when a token *claims* it, and no caller can talk their way into the internal
+    tenant by asserting it.
+
+    ``subject.tenant_id`` still carries whatever the identity provider said
+    about the person. It is attribution, not an isolation key — nothing scopes
+    by it.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     type: Literal[PrincipalType.USER] = PrincipalType.USER
-    tenant: str
     subject: GatewayUser
 
 

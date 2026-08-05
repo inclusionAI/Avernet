@@ -92,7 +92,6 @@ class TestGoogleUserStrategy(AuthStrategyContract):
     def setup_method(self) -> None:
         self.strategy = GoogleUserStrategy(
             token_header="x-avernet-google-token",
-            default_tenant="t-default",
             transport=_userinfo_handler(_GOOGLE_BODY),
         )
         self.applicable_creds = CredentialBundle(

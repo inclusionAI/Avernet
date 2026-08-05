@@ -10,8 +10,9 @@ about earning the right to believe it:
    not replayable here,
 3. ``iss`` must be the gateway and ``exp`` must not have passed,
 4. the ``principals`` payload must parse onto :mod:`.models`,
-5. every principal in the set must agree on one tenant, and that tenant must not
-   be the internal one,
+5. every principal that *asserts* a tenant must agree on one, and that tenant
+   must not be the internal one (a ``user`` principal asserts none — see
+   :func:`_asserted_tenants`),
 6. the set must name an end user — see :func:`_require_user_principal`.
 
 Any failure raises :class:`PrincipalVerificationError`. There is no partial
@@ -158,12 +159,25 @@ class VerifiedCaller:
 
     @property
     def tenant(self) -> str:
-        """The tenant every principal in the set agrees on.
+        """The tenant to scope this request by.
 
-        Verification rejects a set that disagrees, so reading the first is
-        reading all of them.
+        Every principal that asserts a tenant agrees on it — verification
+        rejects a set that disagrees — so reading any one of them reads all of
+        them.
+
+        A set that asserts **none** is the user-only case, and it resolves to
+        :data:`DEFAULT_AVERNET_TENANT`. That is not a guess standing in for a
+        missing claim: a caller who presents nothing but a first-party user
+        identity *is* an internal caller, which is exactly the scope
+        ``teamclaw`` names. Every other path through this component already
+        resolves to it (background work, the internal ``/api`` surface), so the
+        public surface agreeing is one rule rather than two.
+
+        Reached only through :func:`verify_principal_token`, which admits no set
+        without a user principal — so "asserts no tenant" always means "a user
+        and nothing else", never "an empty set".
         """
-        return self.principals[0].tenant
+        return next(iter(_asserted_tenants(self.principals)), DEFAULT_AVERNET_TENANT)
 
     @property
     def user_id(self) -> str:
@@ -318,9 +332,38 @@ def _parse_principals(raw: object) -> tuple[GatewayPrincipal, ...]:
         ) from exc
 
 
+def _asserted_tenants(principals: tuple[GatewayPrincipal, ...]) -> set[str]:
+    """The distinct tenants the identity set actually claims.
+
+    A ``user`` principal carries no tenant and so contributes nothing here: the
+    gateway authenticates a person, and nothing about a person proves which
+    tenant they act for (see :class:`~.models.UserPrincipal`). The other three
+    are each registered to a tenant, and that registration is what their
+    principal asserts.
+
+    Empty is therefore a real result, not a failure — it is the user-only
+    request, and :attr:`VerifiedCaller.tenant` answers it with the internal
+    default. Keeping "what was claimed" separate from "what we scope by" is the
+    point of this function: the guards below judge only claims, so a caller
+    cannot reach the internal tenant by naming it.
+    """
+    return {
+        principal.tenant
+        for principal in principals
+        if not isinstance(principal, UserPrincipal)
+    }
+
+
 def _reject_contradictory_tenant(principals: tuple[GatewayPrincipal, ...]) -> None:
-    """Require exactly one non-internal tenant across the whole identity set."""
-    tenants = {principal.tenant for principal in principals}
+    """Require at most one non-internal tenant across the whole identity set.
+
+    "At most" because a user-only set claims no tenant at all; there is then
+    nothing to contradict and nothing to vet, and
+    :attr:`VerifiedCaller.tenant` supplies the internal default locally.
+    """
+    tenants = _asserted_tenants(principals)
+    if not tenants:
+        return
     if len(tenants) > 1:
         # One request cannot belong to two tenants. Picking one would be
         # inventing an answer the gateway did not give us.

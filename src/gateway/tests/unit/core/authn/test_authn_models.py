@@ -30,36 +30,51 @@ def _subject() -> AuthenticatedUser:
 
 
 def test_user_principal_defaults() -> None:
-    p = UserPrincipal(tenant="t-1", subject=_subject())
+    p = UserPrincipal(subject=_subject())
     assert p.type is PrincipalType.USER
     assert p.type == "user"
-    assert p.tenant == "t-1"
     assert p.subject.id == "u1"
 
 
-def test_user_principal_tenant_defaults_to_none() -> None:
-    """Tenant is optional — a user with no tenant is None, not a fabricated default."""
-    p = UserPrincipal(subject=_subject())
-    assert p.tenant is None
+def test_user_principal_has_no_tenant_field() -> None:
+    """A person is not registered to a tenant; only machine callers assert one.
+
+    Asserted against the model's fields rather than an instance attribute so the
+    check fails if the field is reintroduced with a default — the shape sent over
+    the wire is the contract, and a defaulted field is still sent.
+    """
+    assert "tenant" not in UserPrincipal.model_fields
+    assert "tenant" not in UserPrincipal(subject=_subject()).model_dump()
+
+
+def test_user_principal_does_not_carry_a_tenant_it_is_handed() -> None:
+    """A caller still on the old contract cannot smuggle a tenant onto the wire.
+
+    The model ignores unknown fields (pydantic's default), so this does not
+    raise — it drops. What matters is that the dropped value never reaches
+    ``model_dump``, which is what the signer serializes into the token.
+    """
+    p = UserPrincipal(subject=_subject(), tenant="t-1")  # type: ignore[call-arg]
+    assert not hasattr(p, "tenant")
+    assert "tenant" not in p.model_dump()
 
 
 def test_user_principal_requires_subject() -> None:
     with pytest.raises(ValidationError):
-        UserPrincipal(tenant="t-1")  # type: ignore[call-arg]
+        UserPrincipal()  # type: ignore[call-arg]
 
 
 def test_user_principal_serialization_tags_type() -> None:
-    p = UserPrincipal(tenant="t-1", subject=_subject())
+    p = UserPrincipal(subject=_subject())
     dumped = p.model_dump()
     assert dumped["type"] == "user"
-    assert dumped["tenant"] == "t-1"
     assert dumped["subject"]["id"] == "u1"
 
 
 def test_user_principal_is_immutable() -> None:
-    p = UserPrincipal(tenant="t-1", subject=_subject())
+    p = UserPrincipal(subject=_subject())
     with pytest.raises(ValidationError):
-        p.tenant = "t-2"  # type: ignore[misc]
+        p.subject = _subject()  # type: ignore[misc]
 
 
 def test_principal_union_includes_all_members() -> None:
