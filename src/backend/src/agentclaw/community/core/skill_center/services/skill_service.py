@@ -478,7 +478,11 @@ class SkillService:
         return skills
 
     async def get_active_skills_from_device(
-        self, *, bot_id: str, owner_id: str
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_dir: Path | None = None,
     ) -> list[SkillInfo]:
         """Read active Skill entries from a Bot's live device filesystem.
 
@@ -492,8 +496,9 @@ class SkillService:
         an unavailable runtime would make a transport failure indistinguishable
         from a Bot with no active Skills.
         """
+        active_root = active_dir or self.active_dir
         device_fs = self._device_fs_factory(bot_id, owner_id)
-        entries = await device_fs.list_dir(str(self.active_dir), recursive=False)
+        entries = await device_fs.list_dir(str(active_root), recursive=False)
         if entries is None:
             return []
 
@@ -509,7 +514,7 @@ class SkillService:
             ):
                 continue
 
-            active_path = self.active_dir / name
+            active_path = active_root / name
             content = None
             skill_file = active_path / "SKILL.md"
             if await device_fs.exists(str(skill_file)):

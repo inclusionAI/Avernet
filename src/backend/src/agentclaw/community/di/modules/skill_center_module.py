@@ -51,6 +51,9 @@ from agentclaw.community.api.skill_propagation_service import (
     SkillPropagationServiceProtocol,
 )
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
+from agentclaw.community.api.runtime_layout_probe_service import (
+    RuntimeLayoutProbeServiceProtocol,
+)
 from agentclaw.community.api.skill_scan_service import SkillScanServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_activator_factory import (
@@ -97,6 +100,9 @@ from agentclaw.community.core.skill_center.services.skill_center_sync_service im
 )
 from agentclaw.community.core.skill_center.services.skill_member_service import (
     SkillMemberService,
+)
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    CurrentRuntimeLayoutProbeService,
 )
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
@@ -786,6 +792,14 @@ class SkillCenterModule(Module):
     def _skill_publish_service_protocol(
         self, svc: SkillPublishService
     ) -> SkillPublishServiceProtocol:
+        return svc
+
+    @singleton
+    @provider
+    @inject
+    def _runtime_layout_probe_service_protocol(
+        self, svc: CurrentRuntimeLayoutProbeService
+    ) -> RuntimeLayoutProbeServiceProtocol:
         return svc
 
     @singleton
