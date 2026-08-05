@@ -23,6 +23,11 @@ logger = get_logger()
 # HTTP 超时（秒）— 真实 BCSFuse 处理较慢，需要足够的超时时间
 HTTP_TIMEOUT_SECONDS = 15
 MAX_RETRIES = 3
+# Base of the exponential backoff between retries: attempt N waits
+# ``RETRY_BACKOFF_BASE_SECONDS * 2 ** (N - 1)``. Named rather than inlined so a
+# test asserting retry *counts* can collapse the waits without patching
+# ``time.sleep`` process-wide.
+RETRY_BACKOFF_BASE_SECONDS = 1.0
 
 # link_type → MCP server code 映射
 _LINK_TYPE_TO_MCP_CODE = {
@@ -176,7 +181,7 @@ def sync_to_ecb(
                 logger.warning(f"[sync_to_ecb] Attempt {attempt}/{MAX_RETRIES} failed: {exc}")
                 if attempt == MAX_RETRIES:
                     return {"success": False, "error": str(exc)}
-                delay = 2 ** (attempt - 1)
+                delay = RETRY_BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
                 logger.info(f"[sync_to_ecb] Retrying in {delay}s...")
                 time.sleep(delay)
     except Exception as exc:
@@ -239,7 +244,7 @@ def sync_to_bcsfuse(
                 logger.warning(f"[sync_to_bcsfuse] Attempt {attempt}/{MAX_RETRIES} failed: {exc}")
                 if attempt == MAX_RETRIES:
                     return {"success": False, "error": str(exc)}
-                delay = 2 ** (attempt - 1)
+                delay = RETRY_BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
                 logger.info(f"[sync_to_bcsfuse] Retrying in {delay}s...")
                 time.sleep(delay)
     except Exception as exc:

@@ -868,6 +868,19 @@ class TestVerifyOwnership:
 class TestPublishPolling:
     """Tests for publish progress polling logic."""
 
+    @pytest.fixture(autouse=True)
+    def _instant_poll_interval(self, monkeypatch):
+        """Drop ``_POLL_INTERVAL_SECONDS`` to zero for this class.
+
+        ``_poll_publish_progress`` sleeps the interval *before* its first status
+        query, so each of these tests paid the full 5s even though the very first
+        mocked response is terminal — 20s of pure wall-clock across the class. The
+        loop structure and exit conditions are unchanged by a zero interval; the
+        four tests that assert on timeout behaviour drive ``time.monotonic``
+        themselves and already patch ``time.sleep``, so they are unaffected.
+        """
+        monkeypatch.setattr(DesktopBotService, "_POLL_INTERVAL_SECONDS", 0)
+
     def test_poll_success_triggers_device_alive_instead_of_update_local_status(self):
         """SUCCESS 时应调 _trigger_device_alive(device_id)，不单独调 _update_local_status。"""
         service, mocks = _make_service_with_mocks()
