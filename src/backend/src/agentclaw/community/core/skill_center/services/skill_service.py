@@ -747,14 +747,23 @@ class SkillService:
             target_path = self.active_dir / link_name
             logger.info(f"[SkillService.deactivate_skill] Trying link name: {link_name}, new target: {target_path}")
 
+        # ``active_dir`` is an engine-view path. For desktop and BaaS Bots it
+        # normally does not exist on the backend host, so host-side absence
+        # cannot prove that the remote runtime link is already gone.
+        device_fs = self._device_fs_factory(bolt_id, user_id)
+
         # 检查是否存在（文件、目录、或断开的软链接）
         if not target_path.exists() and not target_path.is_symlink():
-            # 幂等成功：技能已不存在，无需停用
-            logger.debug(f"[SkillService.deactivate_skill] Skill not found (already deactivated): {skill_id}")
-            return True
+            success = await self._delete_active_entry(device_fs, target_path)
+            if success:
+                logger.debug(
+                    "[SkillService.deactivate_skill] Skill not found on host; "
+                    "remote runtime cleanup completed: %s",
+                    skill_id,
+                )
+            return success
 
         # Phase 4: engine-view path — 让 engine 在 VM 内删
-        device_fs = self._device_fs_factory(bolt_id, user_id)
         success = await self._delete_active_entry(device_fs, target_path)
         if success:
             logger.info(f"[SkillService.deactivate_skill] Success: removed {skill_id}")
