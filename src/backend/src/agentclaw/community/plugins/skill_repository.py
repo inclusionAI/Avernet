@@ -1969,7 +1969,9 @@ class SkillSetRepository:
                 active_sets.append(_skill_set_to_dict(ss))
 
         default_set = self.get_default(
-            user_id=None, bolt_id=None, engine_type=engine_type
+            user_id=parsed if user_id is not None and bolt_id is not None else None,
+            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+            engine_type=engine_type,
         )
         if default_set:
             enabled = self._get_user_default_enabled(
