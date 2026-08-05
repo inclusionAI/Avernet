@@ -294,7 +294,7 @@ impl FriendshipService for NoopFriendshipService {
 
 fn caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "staff-1".into(),
             username: "alice".into(),

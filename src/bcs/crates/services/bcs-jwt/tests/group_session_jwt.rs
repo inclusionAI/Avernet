@@ -18,7 +18,7 @@ fn service() -> GroupSessionJwtService {
 
 fn scope() -> GroupSessionTokenScope {
     GroupSessionTokenScope {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user_id: "user-a".into(),
         group_id: "group-a".into(),
         session_id: "session-a".into(),
@@ -54,9 +54,32 @@ fn issues_exact_five_minute_session_scoped_claims() {
     assert_eq!(wire["aud"], "bcn-group-session-ws");
     assert_eq!(wire["purpose"], "group_session_ws");
     assert_eq!(wire["sub"], "user-a");
+    assert_eq!(wire["tenant"], "tenant-a");
     assert_eq!(wire["uid"], "user-a");
     assert_eq!(wire["gid"], "group-a");
     assert_eq!(wire["sid"], "session-a");
+}
+
+#[test]
+fn issues_and_verifies_a_tenantless_session_scope() {
+    let mut tenantless = scope();
+    tenantless.tenant = None;
+
+    let issued = service()
+        .issue_at(tenantless.clone(), TTL_SECONDS, NOW)
+        .expect("tenant is optional binding metadata");
+    let claims = service()
+        .verify_at(&issued.token, NOW + 1)
+        .expect("tenantless token must verify");
+    assert_eq!(claims.scope, tenantless);
+
+    let payload = issued.token.split('.').nth(1).unwrap_or_default();
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .expect("issued payload must be base64url");
+    let wire: serde_json::Value =
+        serde_json::from_slice(&decoded).expect("issued payload must be JSON");
+    assert!(wire.get("tenant").is_none());
 }
 
 #[test]
