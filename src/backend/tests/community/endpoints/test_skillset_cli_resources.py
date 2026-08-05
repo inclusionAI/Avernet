@@ -1,7 +1,13 @@
-"""Endpoint coverage for SkillSet resource and CLI scope APIs."""
-from __future__ import annotations
+"""Endpoint coverage for SkillSet resource and CLI scope APIs.
 
-from unittest.mock import MagicMock
+AgentPass is the one system boundary here, and the injected
+``LocalPassportPlugin`` already is the test double for it: as a ``MockSeam``
+it answers ``set_response``/``set_override`` and records every call. Driving
+it through that seam keeps the plugin the injector hands the router the same
+object the assertions read back, so the CLI scope the endpoint pushed is
+observed rather than asserted against a stand-in of our own.
+"""
+from __future__ import annotations
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
@@ -20,7 +26,7 @@ _QUERY = {
 _HEADERS = {"x-user-id": "u_skillset_cli"}
 
 
-def _bind_deps(world, *, default_set: bool = True) -> MagicMock:
+def _bind_deps(world, *, default_set: bool = True) -> PassportPlugin:
     make_staff_user(world, user_id="u_skillset_cli")
     world.get(BotRepository).insert({
         "bot_id": "bot_skillset_cli",
@@ -56,13 +62,17 @@ def _bind_deps(world, *, default_set: bool = True) -> MagicMock:
         env=get_current_env(),
     )
 
-    passport = MagicMock(spec=PassportPlugin)
-    passport.query_passport_clis.return_value = [
+    passport = world.get(PassportPlugin)
+    passport.set_response("query_passport_clis", [
         {"cli_code": "cli.keep", "cli_name": "Keep CLI", "cli_desc": "kept"},
         {"cli_code": "cli.delete", "cli_name": "Delete CLI", "cli_desc": "removed"},
-    ]
-    world.injector.binder.bind(PassportPlugin, to=passport, scope=None)
+    ])
     return passport
+
+
+def _tcauth_down(*_args, **_kwargs):
+    """AgentPass is unreachable — the boundary failure the endpoints must survive."""
+    raise RuntimeError("tcauth down")
 
 
 def _seed_resources_happy(world) -> None:
@@ -71,7 +81,7 @@ def _seed_resources_happy(world) -> None:
 
 def _seed_resources_cli_query_failure(world) -> None:
     passport = _bind_deps(world)
-    passport.query_passport_clis.side_effect = RuntimeError("tcauth down")
+    passport.set_override("query_passport_clis", _tcauth_down)
 
 
 def _seed_delete_cli_happy(world) -> None:
@@ -88,13 +98,14 @@ def _seed_delete_cli_not_found(world) -> None:
 
 def _seed_delete_cli_query_failure(world) -> None:
     passport = _bind_deps(world)
-    passport.query_passport_clis.side_effect = RuntimeError("tcauth down")
+    passport.set_override("query_passport_clis", _tcauth_down)
 
 
 def _assert_delete_updates_remaining_cli(response, world) -> None:
     passport = world.get(PassportPlugin)
-    passport.update_passport.assert_called_once()
-    kwargs = passport.update_passport.call_args.kwargs
+    updates = [c for c in passport.calls if c.method == "update_passport"]
+    assert len(updates) == 1, f"expected one update_passport call, got {updates}"
+    kwargs = updates[0].kwargs
     assert kwargs["bot_id"] == "bot_skillset_cli"
     assert kwargs["user_id"] == "u_skillset_cli"
     assert kwargs["resource_scope"]["cli_items"] == [

@@ -1,7 +1,13 @@
-"""Tests for skill_set auto-activate with correct device routing.
+"""Unit tests for skill_set auto-activate with correct device routing.
 
 针对 add_skills_to_set / switch_to_skill_set / sync_skill_set_to_active 中
 activate_skill 调用传递 user_id 和 bolt_id 参数的测试。
+
+These construct ``SkillSetService`` directly and never issue an HTTP request,
+so they belong here alongside the other ``SkillSetService`` unit tests rather
+than under ``tests/community/endpoints/``, where every file is expected to
+exercise a real route end to end (see
+``tests/community/framework/test_no_mock_in_endpoint_tests.py``).
 """
 import pytest
 from pathlib import Path
