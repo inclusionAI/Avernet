@@ -88,8 +88,8 @@ class LocalSkillDeleteService:
             )
             if default_set is None:
                 raise LocalSkillNotFoundError()
-            excluded_skill_ids = self._skill_set_repo.get_excluded_skills(
-                owner_id, bot_id, int(default_set["id"])
+            excluded_skill_ids = self._skill_set_repo.get_all_excluded_skills(
+                owner_id, bot_id
             )
             if int(skill_id) not in {
                 int(excluded_id) for excluded_id in excluded_skill_ids

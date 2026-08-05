@@ -134,6 +134,17 @@ class LocalSkillUploadService:
             if len(matches) > 1:
                 raise LocalSkillDuplicateError()
             if matches:
+                if self._cleanup_repo.list_repair_required(
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_id=str(matches[0]["id"]),
+                ):
+                    # A failed delete may still restore the authoritative old
+                    # package into its recorded locator.  Do not let a
+                    # replacement reuse that skill identity until recovery has
+                    # converged, or the recovery could overwrite new content.
+                    raise LocalSkillStorageError()
                 return await self._replace(
                     skill=matches[0],
                     bot=bot,
