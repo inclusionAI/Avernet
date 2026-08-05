@@ -380,6 +380,18 @@ class SkillRepository:
             )
             return [_skill_to_dict(row) for row in rows]
 
+    def get_bot_local_by_locator(
+        self, *, bot_id: str, user_id: str, locator: str
+    ) -> dict | None:
+        with self._db.orm_session() as db:
+            row = db.query(self.Skill).filter(
+                self.Skill.env == get_current_env(),
+                self.Skill.bolt_id == bot_id,
+                self.Skill.user_id == _normalize_user_id(user_id),
+                self.Skill.git_path == f"local://{locator}",
+            ).one_or_none()
+            return _skill_to_dict(row) if row is not None else None
+
     @staticmethod
     def _public_local_skill(row, active: bool) -> dict:
         data = _skill_to_dict(row)

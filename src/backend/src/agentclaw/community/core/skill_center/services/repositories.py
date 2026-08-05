@@ -57,6 +57,12 @@ class SkillRepository(Protocol):
         """
         ...
 
+    def get_bot_local_by_locator(
+        self, *, bot_id: str, user_id: str, locator: str
+    ) -> dict | None:
+        """Return the current exact Bot-owned Local Skill for one locator."""
+        ...
+
     def list_bot_local_skills(
         self,
         *,

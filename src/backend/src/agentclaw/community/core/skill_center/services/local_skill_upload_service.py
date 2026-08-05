@@ -562,7 +562,9 @@ class LocalSkillUploadService:
         for work in self._cleanup_repo.list_pending(
             env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id
         ):
-            if self._cleanup_target_is_authoritative(work):
+            if self._cleanup_target_is_authoritative(
+                work, owner_id=owner_id, bot_id=bot_id
+            ):
                 self._cancel_cleanup_if_registered(
                     int(work["id"]), bot, owner_id, bot_id
                 )
@@ -622,14 +624,18 @@ class LocalSkillUploadService:
             raise LocalSkillStorageError() from exc
         return context.provider == "teclaw"
 
-    def _cleanup_target_is_authoritative(self, work: dict[str, Any]) -> bool:
+    def _cleanup_target_is_authoritative(
+        self, work: dict[str, Any], *, owner_id: str, bot_id: str
+    ) -> bool:
+        locator = str(work["package_locator"])
         skill_id = work.get("skill_id")
-        if skill_id is None:
-            return False
-        skill = self._skill_repo.get_by_id(str(skill_id))
-        return bool(
-            skill and skill.get("git_path") == f"local://{work['package_locator']}"
-        )
+        if skill_id is not None:
+            skill = self._skill_repo.get_by_id(str(skill_id))
+            if skill and skill.get("git_path") == f"local://{locator}":
+                return True
+        return self._skill_repo.get_bot_local_by_locator(
+            bot_id=bot_id, user_id=owner_id, locator=locator
+        ) is not None
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str
