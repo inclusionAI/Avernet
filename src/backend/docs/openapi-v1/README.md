@@ -453,10 +453,10 @@ wrong half of the system.
     frontend *is* an internal caller, which is the scope `teamclaw` names, and
     it is the same tenant every other path in this component resolves to.
   - That fallback is **ours**, decided from the absence of a claim; it is not a
-    value the token supplied. So the `teamclaw` guard above keeps its teeth: a
-    token that *names* the internal tenant is still refused, and a `tenant`
-    smuggled onto a `user` entry is ignored (unknown fields are dropped, not
-    honoured) rather than becoming a scope.
+    value the token supplied. A token may *also* name `teamclaw` on a machine
+    principal — _changed 2026-08-05_, see below — and both routes reach the same
+    scope. A `tenant` smuggled onto a `user` entry is still neither: unknown
+    fields are dropped, not honoured, so it never becomes a scope.
   - ⚠️ **Consequence for the public surface.** `route_security` declares
     `user: required` and nothing else for every `/openapi/v1` path, so the
     gateway resolves a user-only set and **every public request now scopes to
@@ -1220,6 +1220,13 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
      supplied. A token that names `teamclaw` is still refused, and a `tenant`
      smuggled onto a `user` entry is dropped by the DTO rather than honoured —
      both pinned by tests. Nobody can talk their way into the internal tenant.
+
+     _Superseded 2026-08-05:_ the first of those two — refusing a token that
+     names `teamclaw` — was removed once a `teamclaw` tenant was registered on
+     the gateway as a first-party path onto this surface. See
+     `core/gateway_principal/README.md` § Change impact for what still holds the
+     boundary. The second half stands: a `tenant` on a `user` entry is still
+     dropped, so a caller cannot assert a scope the gateway did not sign.
   4. ⚠️ **What this leaves open.** `route_security` declares `user: required`
      and nothing else for the whole public surface, so *every* public request is
      now a user-only set and scopes to `teamclaw`. Nothing gates which Google

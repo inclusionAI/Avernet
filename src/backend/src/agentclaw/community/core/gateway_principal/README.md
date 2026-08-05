@@ -7,8 +7,8 @@ The gateway resolves every identity a request carries into its own `Principal`
 discriminated union and forwards the set as a short-lived HS256 JWT. This module
 earns the right to believe that header: signature, `aud` (this component), `iss`,
 `exp`, then a parse onto local models, then a check that the whole identity set
-agrees on one tenant which is not the internal one. Any failure is total — there
-is no partial trust and no fallback.
+agrees on one non-empty tenant. Any failure is total — there is no partial trust
+and no fallback.
 
 Nothing here reads a framework, a header, the environment, or a secret store
 (Rule 7). The HTTP seam lives in `adapters/http/openapi_v1/dependencies.py`; the
@@ -48,8 +48,22 @@ internal_dependencies:
 This module defines what the backend believes about who is calling the public
 `/openapi/v1` surface, so a change here changes the trust boundary itself.
 Loosening a verification step (accepting another algorithm, skipping the audience
-check, allowing the internal tenant off the wire) is a security change, not a
-refactor, and needs to be argued in the PR rather than noted.
+check) is a security change, not a refactor, and needs to be argued in the PR
+rather than noted.
+
+**Changed 2026-08-05 — the internal tenant is routable.** Verification used to
+refuse any token whose machine principal named `DEFAULT_AVERNET_TENANT`
+(`teamclaw`), because no gateway tenant was registered under that name and
+honouring the claim would have scoped an arbitrary external caller to every
+pre-existing internal row. A `teamclaw` tenant now exists on the gateway as a
+deliberate first-party path onto `/openapi/v1`, so the claim is honoured like any
+other tenant's and the guard is gone. What still holds the boundary: the token is
+HS256-signed with the gateway's shared key, so the tenant is the gateway's
+assertion and not the caller's; a `tenant` on a `user` entry is still dropped as
+an unknown field; and a set naming two tenants is still refused. The load-bearing
+assumption is therefore narrower than before — that the gateway registers
+`teamclaw` only to first-party apps. If that stops being true, this guard is what
+has to come back.
 
 The DTOs mirror the gateway's `spi/authn/_models.py` wire shape. Unknown fields
 are ignored, so the gateway can add one freely; a **rename or removal** on its
