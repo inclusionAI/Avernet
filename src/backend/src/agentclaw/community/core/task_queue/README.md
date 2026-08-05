@@ -71,6 +71,18 @@ skills_pool:prod:e-9:bot-7
 session_resource:r-42:v3
 ```
 
+A key must be **non-empty and at most 190 characters** — the stored column
+width — and both are enforced in Python, raising `ValueError`. That check is
+not belt-and-braces: the engines disagree about overflow and the disagreement
+is invisible to the SQLite suite. SQLite ignores `VARCHAR` length, strict
+MySQL/OceanBase raises `DataError`, and non-strict **silently truncates** —
+which would collapse two distinct keys onto one stored value and hand the
+caller somebody else's task with `created=False`. Note that some id columns
+are much wider than 190 (`ac_bot_publish.publish_bot_id` is `varchar(1024)`),
+so hash the variable part rather than embedding a long id directly. Empty
+string is rejected for the mirror-image reason: `None` is the opt-out, so `""`
+would otherwise be one global dedup slot per `(env, task_type)`.
+
 **Mechanism.** A second column, `active_idempotency_key`, mirrors the key while
 the task is live and is nulled by every terminal transition; the unique index is
 over `(env, task_type, active_idempotency_key)`. MySQL/OceanBase have no partial

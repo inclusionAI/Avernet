@@ -80,6 +80,47 @@ _ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idem"
 #: two is enough to cover the race without risking an unbounded loop.
 _KEYED_INSERT_ATTEMPTS = 2
 
+#: Read off the column itself so the limit and the schema cannot drift apart.
+_MAX_IDEMPOTENCY_KEY_LEN = TaskQueueModel.__table__.c.idempotency_key.type.length
+
+
+def _validate_idempotency_key(key: str) -> None:
+    """Reject keys the storage layer cannot represent faithfully.
+
+    Enforced in Python because the engines disagree, and the disagreement is
+    invisible to the SQLite suite:
+
+    - SQLite (all tests, local dev) ignores ``VARCHAR`` length entirely.
+    - MySQL/OceanBase under ``STRICT_*_TABLES`` raise ``DataError`` — which is
+      *not* an ``IntegrityError``, so it would escape the conflict handling.
+    - MySQL/OceanBase non-strict **silently truncate**, which is the dangerous
+      one: two distinct keys sharing a 190-char prefix collapse to the same
+      stored value, so the second enqueue takes the conflict path,
+      :meth:`_find_active_by_key` matches the *other* task, and the caller is
+      handed somebody else's record with ``created=False`` while its own work
+      is silently dropped. ``idempotency_key`` truncates too, so the audit
+      column could not tell them apart afterwards either.
+
+    An empty or whitespace-only key is rejected for the mirror-image reason:
+    ``None`` is the opt-out, so ``""`` would otherwise be a *valid* key and
+    become a single global dedup slot per ``(env, task_type)``, collapsing
+    unrelated work onto one row.
+
+    Raising beats truncating or hashing: a hash would keep the key opaque in
+    the audit column, whereas a ``ValueError`` surfaces the first time someone
+    writes the key rather than in production months later.
+    """
+    if not key.strip():
+        raise ValueError(
+            "idempotency_key must be a non-empty string; omit it entirely to opt out of dedup"
+        )
+    if len(key) > _MAX_IDEMPOTENCY_KEY_LEN:
+        raise ValueError(
+            f"idempotency_key exceeds {_MAX_IDEMPOTENCY_KEY_LEN} chars ({len(key)}); "
+            "shorten it or hash the variable part — it is stored in a "
+            f"VARCHAR({_MAX_IDEMPOTENCY_KEY_LEN}) and would be truncated"
+        )
+
 
 def _is_active_idem_conflict(exc: IntegrityError) -> bool:
     """Is this ``IntegrityError`` a violation of the active-idempotency index?
@@ -228,6 +269,11 @@ class TaskQueueRepository:
         env: str,
         idempotency_key: Optional[str] = None,
     ) -> EnqueueResult:
+        # Validate before any work: a key the column cannot hold faithfully
+        # must never reach the INSERT (see _validate_idempotency_key).
+        if idempotency_key is not None:
+            _validate_idempotency_key(idempotency_key)
+
         payload_json = json.dumps(payload, ensure_ascii=False)
         insert_kwargs = dict(
             task_type=task_type,

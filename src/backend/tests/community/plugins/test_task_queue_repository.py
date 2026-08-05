@@ -18,7 +18,9 @@ from sqlalchemy.pool import StaticPool
 # create_all() builds the ac_task_queue table.
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
 from agentclaw.community.core.task_queue.types import TaskStatus
+from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugins.task_queue_repository import (
+    _MAX_IDEMPOTENCY_KEY_LEN,
     TaskQueueRepository,
     _is_active_idem_conflict,
 )
@@ -513,3 +515,81 @@ def test_enqueue_raises_when_it_can_neither_insert_nor_resolve_a_holder(repo):
 
     with pytest.raises(RuntimeError, match="could not insert or resolve a holder"):
         _enqueue_result(repo, idempotency_key="k1")
+
+
+# ── enqueue idempotency: key validation ─────────────────────────────────────
+#
+# The bound is enforced in Python because the engines disagree and SQLite —
+# which every test here runs on — cannot observe the disagreement.
+
+
+def test_max_key_length_tracks_the_column_width():
+    """The constant is read off the column, so schema and check cannot drift."""
+    assert _MAX_IDEMPOTENCY_KEY_LEN == TaskQueueModel.__table__.c.idempotency_key.type.length
+    assert (
+        TaskQueueModel.__table__.c.active_idempotency_key.type.length
+        == _MAX_IDEMPOTENCY_KEY_LEN
+    )
+
+
+def test_key_at_the_length_limit_is_accepted(repo):
+    res = _enqueue_result(repo, idempotency_key="k" * _MAX_IDEMPOTENCY_KEY_LEN)
+    assert res.created is True
+    assert len(res.record.idempotency_key) == _MAX_IDEMPOTENCY_KEY_LEN
+
+
+def test_over_length_key_is_rejected_before_any_row_is_inserted(repo):
+    """SQLite would happily store the overflow and dedup exactly; a non-strict
+    MySQL would truncate and collide two distinct keys, handing the caller
+    somebody else's task. Reject in Python so both engines agree."""
+    too_long = "k" * (_MAX_IDEMPOTENCY_KEY_LEN + 1)
+
+    with pytest.raises(ValueError, match="exceeds"):
+        _enqueue_result(repo, idempotency_key=too_long)
+
+    assert _all_rows(repo) == []  # nothing inserted
+
+
+def test_keys_differing_only_past_the_limit_cannot_both_be_enqueued(repo):
+    """The concrete collision the bound prevents: two keys with a shared
+    190-char prefix would truncate to the same stored value under non-strict
+    MySQL, so the second caller would silently join the first one's task."""
+    prefix = "publish:" + "a" * (_MAX_IDEMPOTENCY_KEY_LEN - 8)
+    assert len(prefix) == _MAX_IDEMPOTENCY_KEY_LEN
+
+    for suffix in (":online", ":offline"):
+        with pytest.raises(ValueError, match="exceeds"):
+            _enqueue_result(repo, idempotency_key=prefix + suffix)
+
+
+@pytest.mark.parametrize("blank", ["", " ", "\t", "\n  "])
+def test_blank_key_is_rejected_rather_than_becoming_a_global_dedup_slot(repo, blank):
+    """``None`` is the opt-out. If "" were a valid key it would be one shared
+    dedup slot per (env, task_type), collapsing unrelated work onto one row."""
+    with pytest.raises(ValueError, match="non-empty"):
+        _enqueue_result(repo, idempotency_key=blank)
+
+    assert _all_rows(repo) == []
+
+
+def test_key_is_stored_verbatim_without_stripping(repo):
+    """Validation rejects blank keys but never rewrites a valid one — silently
+    mutating the key would be the same class of bug as truncating it."""
+    res = _enqueue_result(repo, idempotency_key=" k1 ")
+    assert res.record.idempotency_key == " k1 "
+    assert _key_columns(repo, res.record.id) == (" k1 ", " k1 ")
+    # …and it is therefore a different key from the stripped form.
+    assert _enqueue_result(repo, idempotency_key="k1").created is True
+
+
+def test_validation_also_applies_through_the_service_facade(repo):
+    """Adopters call TaskQueueService, so the guard must hold on that path too;
+    it delegates to the repository, which is where the check lives."""
+    service = TaskQueueService(repo)
+    with pytest.raises(ValueError, match="exceeds"):
+        service.enqueue(
+            "demo", {}, 3600, idempotency_key="k" * (_MAX_IDEMPOTENCY_KEY_LEN + 1)
+        )
+    with pytest.raises(ValueError, match="non-empty"):
+        service.enqueue("demo", {}, 3600, idempotency_key="")
+    assert _all_rows(repo) == []

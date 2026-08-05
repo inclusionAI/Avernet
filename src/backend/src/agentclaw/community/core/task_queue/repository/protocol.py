@@ -78,6 +78,14 @@ class TaskQueueRepositoryProtocol(Protocol):
             publish:1234:online_release
             skills_pool:prod:e-9:bot-7
 
+        A key must be non-empty and at most **190 characters** — the stored
+        column width. Both are enforced in Python and raise ``ValueError``,
+        because the engines disagree about overflow (SQLite ignores the bound,
+        strict MySQL errors, non-strict MySQL *silently truncates* and would
+        collide two distinct keys). Embed ids with care: some id columns are
+        far wider than 190, so hash the variable part rather than letting a
+        long id blow the bound.
+
         One edge worth knowing: a task whose deadline has passed but which no
         worker has scanned yet is still non-terminal, so it still holds its key
         and a duplicate enqueue joins it. The next claim scan retires it
