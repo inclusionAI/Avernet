@@ -481,7 +481,7 @@ _story_connect_with_group_session_jwt() {
         return
     fi
 
-    _api_request GET "${public_prefix}/groups?kind=all"
+    _api_request GET "${public_prefix}/bots/${BOT_PM_UUID}/groups?kind=all"
     require_status "public collaboration API rejects a missing Gateway Principal" "401" || true
     assert_json_eq "missing Principal uses the stable error envelope" \
         "$RESPONSE" "data.error_code" "unauthenticated"
@@ -509,7 +509,7 @@ _story_connect_with_group_session_jwt() {
         "$RESPONSE" "data.bot_id" "$BOT_PM_UUID"
 
     local group_body group_id
-    group_body="{\"group_kind\":\"normal\",\"name\":\"JWT connection E2E\",\"context\":\"Validate the public collaboration connection\",\"visibility\":\"private\",\"driver_bot_uuid\":\"${BOT_PM_UUID}\",\"participants\":[{\"actor_id\":\"${BOT_PM_UUID}\",\"role\":\"driver\"},{\"actor_id\":\"${BOT_ENG_UUID}\",\"role\":\"consultant\"}],\"collaboration\":{\"strategy\":\"chat\",\"delivery_policy\":{\"bot_final_delivery\":\"send_to_driver\"}}}"
+    group_body="{\"group_kind\":\"normal\",\"name\":\"JWT connection E2E\",\"context\":\"Validate the public collaboration connection\",\"driver_bot_uuid\":\"${BOT_PM_UUID}\",\"participants\":[{\"actor_id\":\"${BOT_PM_UUID}\"},{\"actor_id\":\"${BOT_ENG_UUID}\"}],\"collaboration\":{\"strategy\":\"chat\",\"delivery_policy\":{\"bot_final_delivery\":\"send_to_driver\"}}}"
     api_request_headers POST "${public_prefix}/groups" "$group_body" \
         "X-Avernet-Principal: ${principal}"
     require_status "human creates a collaboration group through the public API" "201" || return
@@ -517,7 +517,7 @@ _story_connect_with_group_session_jwt() {
     assert_not_empty "public collaboration group has an id" "$group_id"
     [[ -n "$group_id" ]] || return
 
-    api_request_headers GET "${public_prefix}/groups?kind=all&membership=all&limit=20" "" \
+    api_request_headers GET "${public_prefix}/bots/${BOT_PM_UUID}/groups?kind=all&membership=all&limit=20" "" \
         "X-Avernet-Principal: ${principal}"
     require_status "human lists collaboration groups through the public API" "200" || true
 
@@ -535,7 +535,7 @@ _story_connect_with_group_session_jwt() {
         "$RESPONSE" "data.name" "JWT connection E2E updated"
 
     local session_body session_id
-    session_body="{\"driver_bot_uuid\":\"${BOT_PM_UUID}\",\"participants\":[{\"bot_uuid\":\"${BOT_PM_UUID}\"},{\"bot_uuid\":\"${BOT_ENG_UUID}\",\"mode\":\"muted\"}],\"title\":\"JWT connection E2E\",\"input\":{\"query\":\"Validate the public WebSocket connection\"}}"
+    session_body="{\"title\":\"JWT connection E2E\",\"input\":{\"query\":\"Validate the public WebSocket connection\"}}"
     api_request_headers POST "${public_prefix}/groups/${group_id}/sessions" "$session_body" \
         "X-Avernet-Principal: ${principal}"
     if ! require_status "human creates a session through the public API" "201"; then

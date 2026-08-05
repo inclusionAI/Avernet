@@ -6,7 +6,7 @@ use bcs_service_api::application::v1::{
     AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
     GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
-    MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
+    MembershipFilter, Page, Participant, ParticipantMode, Principal, UpdateGroup,
     UpdateGroupParticipant,
 };
 
@@ -109,7 +109,7 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
 fn list_command_carries_caller_view_actor_and_all_approved_filters() {
     let command = ListGroups {
         caller: human_caller(),
-        view_bot_id: Some("bot-1".into()),
+        bot_id: "bot-1".into(),
         offset: 10,
         limit: 25,
         q: Some("planning".into()),
@@ -119,7 +119,7 @@ fn list_command_carries_caller_view_actor_and_all_approved_filters() {
     };
 
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
-    assert_eq!(command.view_bot_id.as_deref(), Some("bot-1"));
+    assert_eq!(command.bot_id, "bot-1");
     assert_eq!(command.membership, MembershipFilter::SessionOnly);
     assert_eq!(command.kind, GroupKindFilter::All);
 }
@@ -172,7 +172,6 @@ fn participant_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
-        role: ParticipantRole::Consultant,
     };
     let update = UpdateGroupParticipant {
         caller: caller.clone(),

@@ -73,12 +73,12 @@ def test_main_publishes_on_pass(tmp_path: Path) -> None:
     )
 
 
-def test_checked_in_bcn_artifact_is_a_34_operation_openapi_document() -> None:
+def test_checked_in_bcn_artifact_is_a_32_operation_openapi_document() -> None:
     document = json.loads(_BCN_ARTIFACT.read_text(encoding="utf-8"))
     operations = sum(len(item) for item in document["paths"].values())
 
     assert document["openapi"] == "3.1.0"
-    assert operations == 34
+    assert operations == 32
     assert all(
         path.startswith("/openapi/v1/collaboration/") for path in document["paths"]
     )
