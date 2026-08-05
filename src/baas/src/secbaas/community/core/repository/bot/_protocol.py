@@ -126,12 +126,13 @@ class BotRepository(Protocol):
         status: str,
         extra_config: dict[str, Any] | None = None,
         name: str | None = None,
+        template_uuid: str | None = None,
         modifier: str = "system",
     ) -> int:
         """Clone an existing bot record with a new status.
 
         Copies all fields from the source bot record, overriding status
-        and optionally extra_config/name. Returns the new record ID.
+        and optionally extra_config/name/template_uuid. Returns the new record ID.
         Used by UPDATE publish to create a PENDING bot record.
         """
         ...

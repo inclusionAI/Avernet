@@ -409,6 +409,7 @@ class TestCreateBotRecord:
             status="PENDING",
             extra_config=None,
             name=None,
+            template_uuid=None,
             modifier="operator",
         )
         mock_bot_repo.get_by_id.assert_called_once_with(99, "test-tenant", "test")
@@ -448,6 +449,7 @@ class TestCreateBotRecord:
             source_bot_id=1,
             new_config=new_config,
             new_name="new-name",
+            new_template_uuid="TEMPLATE-new",
             operator="op",
         )
 
@@ -455,6 +457,7 @@ class TestCreateBotRecord:
         call_kwargs = mock_bot_repo.insert_bot_record.call_args.kwargs
         assert call_kwargs["extra_config"] is not None
         assert call_kwargs["name"] == "new-name"
+        assert call_kwargs["template_uuid"] == "TEMPLATE-new"
 
     @pytest.mark.asyncio
     async def test_create_bot_record_new_record_not_found_raises(
