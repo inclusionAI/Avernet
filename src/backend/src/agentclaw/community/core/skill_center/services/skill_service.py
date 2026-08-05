@@ -756,7 +756,7 @@ class SkillService:
         if not target_path.exists() and not target_path.is_symlink():
             # 幂等成功：技能已不存在，无需停用
             logger.debug(f"[SkillService.deactivate_skill] Skill not found (already deactivated): {skill_id}")
-            return False
+            return True
 
         # Phase 4: engine-view path — 让 engine 在 VM 内删
         device_fs = self._device_fs_factory(bolt_id, user_id)
