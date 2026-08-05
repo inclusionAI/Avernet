@@ -18,7 +18,7 @@ from __future__ import annotations
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     RUNTIME_KIND_TECLAW,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (

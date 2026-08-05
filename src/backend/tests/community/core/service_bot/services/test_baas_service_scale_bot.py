@@ -76,13 +76,13 @@ class TestBaasServiceScaleBot:
             request_id="req-1",
             target_count=3,
             config={
-                "deploy_config": {"docker_image": "registry/arka:v2"},
+                "deploy_config": {"docker_image": "registry/arca:v2"},
             },
         )
 
         assert http.calls_to("post")[0].kwargs["json"]["config"] == {
             "deploy_config": {
-                "docker_image": "registry/arka:v2",
+                "docker_image": "registry/arca:v2",
             },
         }
 

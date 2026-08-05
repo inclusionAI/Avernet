@@ -945,7 +945,7 @@ class TestRestartGuardOrchestration:
         """草稿重启提交时只透传 DEFAULT intent，成功前不持久化标记。"""
         repo = FakeRestartLockRepo()
         common_config = MagicMock()
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         bot = {
             **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
             "ext": {"service_bot_config": {"device_count": 3}},
@@ -958,7 +958,7 @@ class TestRestartGuardOrchestration:
             task_queue_service=MagicMock(),
         )
         svc._template_service.get_template_config.return_value = {
-            "image": "registry/arka:v1",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
         device_service = MagicMock()
@@ -980,7 +980,7 @@ class TestRestartGuardOrchestration:
         assert payload["image_policy_on_success"] == "default"
         upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
         assert upgrade_kwargs["template_config"] == {
-            "image": "registry/arka:v1",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
 

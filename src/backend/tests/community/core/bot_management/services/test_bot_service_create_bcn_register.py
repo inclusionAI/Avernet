@@ -158,10 +158,10 @@ class TestCreateBotBcnRegister:
         svc = _make_service()
         device_service = _attach_device_service(svc)
         common_config = MagicMock()
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         svc._common_config_service = common_config
         template_config = {
-            "image": "registry/arka:v1",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
 
@@ -184,10 +184,10 @@ class TestCreateBotBcnRegister:
         }
         apply_kwargs = device_service.apply_device.call_args.kwargs
         assert apply_kwargs["template_config"] == {
-            "image": "registry/arka:v1",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
-        assert template_config["image"] == "registry/arka:v1"
+        assert template_config["image"] == "registry/arca:v1"
         common_config.get_value.assert_not_called()
 
     def test_claude_code_application_coding_does_not_trigger_bcn_register(self):

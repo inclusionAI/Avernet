@@ -71,7 +71,7 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_default_image_to_ext,
     overlay_image_pin_on_template_config,
     persist_default_image_policy,
@@ -376,7 +376,7 @@ class BotService:
         self,
         bot: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Mark a draft ARKA bot to follow the provider default image."""
+        """Mark a draft ARCA bot to follow the provider default image."""
         if bot.get("bot_type") != "service" or self.is_teclaw_bot(
             bot.get("active_engine")
         ):
@@ -1304,7 +1304,7 @@ class BotService:
         if resolved_bot_type == "service" and not self.is_teclaw_bot(
             resolved_active_engine
         ):
-            # New ARKA service bots intentionally follow the provider default.
+            # New ARCA service bots intentionally follow the provider default.
             # Persist an explicit marker so their future publish records are not
             # mistaken for legacy records that require Pin compatibility.
             ext = apply_default_image_to_ext(ext)

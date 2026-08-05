@@ -9,7 +9,7 @@ from agentclaw.community.core.bot_management.utils import clear_baas_publish_fai
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.events.bus import get_event_bus
 from agentclaw.community.core.events.types import BaasPublishCompletedEvent
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     persist_default_image_policy,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry

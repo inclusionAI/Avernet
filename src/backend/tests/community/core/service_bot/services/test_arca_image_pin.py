@@ -5,12 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePinPersistenceError,
     ImagePinConfigError,
     ImagePolicyState,
     PublishImagePolicyResolver,
-    RUNTIME_KIND_ARKA,
+    RUNTIME_KIND_ARCA,
     RUNTIME_KIND_TECLAW,
     apply_default_image_to_ext,
     apply_image_pin_to_ext,
@@ -18,9 +18,10 @@ from agentclaw.community.core.service_bot.services.arka_image_pin import (
     copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
     persist_default_image_policy,
-    resolve_current_arka_image,
+    resolve_current_arca_image,
     resolve_publish_image_pin,
     resolve_publish_runtime_kind,
+    runtime_kind_from_provider,
 )
 
 
@@ -44,9 +45,9 @@ def _record(ext=None) -> BotPublishRecord:
 
 def test_resolve_current_image_uses_enabled_common_config():
     service = MagicMock()
-    service.get_value.return_value = {"image": " registry.example/arka:v2 "}
+    service.get_value.return_value = {"image": " registry.example/arca:v2 "}
 
-    assert resolve_current_arka_image(service, env="pre") == "registry.example/arka:v2"
+    assert resolve_current_arca_image(service, env="pre") == "registry.example/arca:v2"
     service.get_value.assert_called_once_with(
         business_code="service_bot",
         param_code="sbot_pin_image",
@@ -60,16 +61,16 @@ def test_resolve_current_image_returns_none_for_disabled_or_missing_config():
     service = MagicMock()
     service.get_value.return_value = None
 
-    assert resolve_current_arka_image(service, env="pre") is None
+    assert resolve_current_arca_image(service, env="pre") is None
 
 
-@pytest.mark.parametrize("value", [{}, {"image": ""}, "registry/arka:v2"])
+@pytest.mark.parametrize("value", [{}, {"image": ""}, "registry/arca:v2"])
 def test_resolve_current_image_rejects_enabled_malformed_config(value):
     service = MagicMock()
     service.get_value.return_value = value
 
     with pytest.raises(ImagePinConfigError, match="has no valid image"):
-        resolve_current_arka_image(service, env="pre")
+        resolve_current_arca_image(service, env="pre")
 
 
 def test_apply_pin_preserves_service_bot_config_and_clears_stale_pin():
@@ -106,7 +107,7 @@ def test_publish_copy_is_whitelisted_and_template_overlay_is_non_mutating():
     source = {
         "service_bot_config": {"device_count": 3},
         "sbot_pin_image": True,
-        "sbot_docker_image": "arka:v2",
+        "sbot_docker_image": "arca:v2",
     }
     target = {"config_artifact": {"schema_version": 4}}
     template = {"image": "template:v1", "envs": {"A": "1"}}
@@ -114,10 +115,10 @@ def test_publish_copy_is_whitelisted_and_template_overlay_is_non_mutating():
     assert copy_image_policy_to_ext(source, target) == {
         "config_artifact": {"schema_version": 4},
         "sbot_pin_image": True,
-        "sbot_docker_image": "arka:v2",
+        "sbot_docker_image": "arca:v2",
     }
     assert overlay_image_pin_on_template_config(template, source) == {
-        "image": "arka:v2",
+        "image": "arca:v2",
         "envs": {"A": "1"},
     }
     assert template["image"] == "template:v1"
@@ -138,7 +139,7 @@ def test_publish_copy_supports_default_and_clears_stale_target_policy():
 
 
 def test_resolve_publish_image_pin_reads_only_publish_ext():
-    record = _record({"sbot_pin_image": True, "sbot_docker_image": "arka:v2"})
+    record = _record({"sbot_pin_image": True, "sbot_docker_image": "arca:v2"})
     common_config = MagicMock()
 
     resolved = resolve_publish_image_pin(
@@ -147,7 +148,7 @@ def test_resolve_publish_image_pin_reads_only_publish_ext():
 
     assert resolved.enabled is True
     assert resolved.state == ImagePolicyState.PINNED
-    assert resolved.docker_image == "arka:v2"
+    assert resolved.docker_image == "arca:v2"
     common_config.get_value.assert_not_called()
 
 
@@ -182,7 +183,7 @@ def test_resolve_legacy_publish_with_disabled_config_keeps_platform_default():
 
 def test_resolve_legacy_publish_snapshots_pin_before_use():
     common_config = MagicMock()
-    common_config.get_value.return_value = {"image": "registry/arka:v2"}
+    common_config.get_value.return_value = {"image": "registry/arca:v2"}
     persist = MagicMock()
     record = _record({"migration_path": "/build/v1"})
 
@@ -195,10 +196,10 @@ def test_resolve_legacy_publish_snapshots_pin_before_use():
     expected_ext = {
         "migration_path": "/build/v1",
         "sbot_pin_image": True,
-        "sbot_docker_image": "registry/arka:v2",
+        "sbot_docker_image": "registry/arca:v2",
     }
     assert resolved.state == ImagePolicyState.PINNED
-    assert resolved.docker_image == "registry/arka:v2"
+    assert resolved.docker_image == "registry/arca:v2"
     persist.assert_called_once_with(expected_ext)
     assert record.ext == expected_ext
 
@@ -210,7 +211,7 @@ def test_resolve_rejects_pin_without_image():
 
 def test_resolve_rejects_dangling_image_policy_field():
     with pytest.raises(ImagePinConfigError, match="inconsistent image policy"):
-        resolve_publish_image_pin(_record({"sbot_docker_image": "arka:v2"}))
+        resolve_publish_image_pin(_record({"sbot_docker_image": "arca:v2"}))
 
 
 def test_runtime_kind_prefers_publish_snapshot():
@@ -237,15 +238,26 @@ def test_runtime_kind_reads_string_stage_binding_provider():
 
     assert (
         resolve_publish_runtime_kind(record, binding_repository=binding_repo)
-        == RUNTIME_KIND_ARKA
+        == RUNTIME_KIND_ARCA
     )
     binding_repo.get_by_id.assert_called_once_with(42)
 
 
+@pytest.mark.parametrize("provider", ["arca", "baas"])
+def test_runtime_kind_from_arca_provider_uses_canonical_spelling(provider):
+    assert runtime_kind_from_provider(provider) == "arca"
+
+
+def test_runtime_kind_normalizes_legacy_arka_publish_snapshot():
+    record = _record({"sbot_runtime_kind": "arka"})
+
+    assert resolve_publish_runtime_kind(record) == "arca"
+
+
 def test_apply_runtime_kind_preserves_unrelated_ext():
-    assert apply_runtime_kind_to_ext({"migration_path": "/build/v1"}, "arka") == {
+    assert apply_runtime_kind_to_ext({"migration_path": "/build/v1"}, "arca") == {
         "migration_path": "/build/v1",
-        "sbot_runtime_kind": "arka",
+        "sbot_runtime_kind": "arca",
     }
 
 
@@ -256,14 +268,14 @@ def test_persisted_resolver_returns_successful_cas_snapshot():
             "migration_path": "/build/v1",
             "unrelated": "keep",
             "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_docker_image": "registry/arca:v2",
         }
     )
     publish_repo = MagicMock()
     publish_repo.get_by_id.return_value = legacy
     publish_repo.compare_and_set_ext.return_value = persisted
     common_config = MagicMock()
-    common_config.get_value.return_value = {"image": "registry/arka:v2"}
+    common_config.get_value.return_value = {"image": "registry/arca:v2"}
     resolver = PublishImagePolicyResolver(
         publish_repository=publish_repo,
         binding_repository=MagicMock(),
@@ -274,7 +286,7 @@ def test_persisted_resolver_returns_successful_cas_snapshot():
     resolved = resolver.resolve(original)
 
     assert resolved.state == ImagePolicyState.PINNED
-    assert resolved.docker_image == "registry/arka:v2"
+    assert resolved.docker_image == "registry/arca:v2"
     assert original.ext == persisted.ext
     publish_repo.compare_and_set_ext.assert_called_once_with(
         publish_id=legacy.id,
@@ -313,7 +325,7 @@ def test_persisted_resolver_reloads_concurrent_default_after_cas_conflict():
     publish_repo.get_by_id.side_effect = [legacy, concurrent_default]
     publish_repo.compare_and_set_ext.return_value = None
     common_config = MagicMock()
-    common_config.get_value.return_value = {"image": "registry/arka:v2"}
+    common_config.get_value.return_value = {"image": "registry/arca:v2"}
     resolver = PublishImagePolicyResolver(
         publish_repository=publish_repo,
         binding_repository=MagicMock(),
@@ -334,7 +346,7 @@ def test_persisted_resolver_fails_closed_after_repeated_cas_conflicts():
     publish_repo.get_by_id.return_value = legacy
     publish_repo.compare_and_set_ext.return_value = None
     common_config = MagicMock()
-    common_config.get_value.return_value = {"image": "registry/arka:v2"}
+    common_config.get_value.return_value = {"image": "registry/arca:v2"}
     resolver = PublishImagePolicyResolver(
         publish_repository=publish_repo,
         binding_repository=MagicMock(),

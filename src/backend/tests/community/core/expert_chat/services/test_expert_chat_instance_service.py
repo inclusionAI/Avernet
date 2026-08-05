@@ -22,7 +22,7 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -55,7 +55,7 @@ class MockPublishRecord:
             self.ext = {
                 "migration_path": "/nas/migration/path",
                 "sbot_use_default_image": True,
-                "sbot_runtime_kind": "arka",
+                "sbot_runtime_kind": "arca",
             }
 
 
@@ -150,7 +150,7 @@ def _wire_bot_build_service_async(bot_build_service, create_result=None, upgrade
 
 
 class TestResolvePublishImagePin:
-    def test_teclaw_skips_arka_policy_resolution(self):
+    def test_teclaw_skips_arca_policy_resolution(self):
         svc, _, baas, _, bot_repo, *_ = _make_service()
         record = MockPublishRecord(
             ext={"migration_path": "/nas/path", "sbot_runtime_kind": "teclaw"}
@@ -173,7 +173,7 @@ class TestResolvePublishImagePin:
         svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
             common_config_service=common_config
         )
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         record = MockPublishRecord(ext={"migration_path": "/nas/path"})
         latest = MockPublishRecord(
             ext={"migration_path": "/nas/path", "unrelated": "preserved"}
@@ -193,10 +193,10 @@ class TestResolvePublishImagePin:
         )
 
         assert resolved.state == ImagePolicyState.PINNED
-        assert resolved.docker_image == "registry/arka:v2"
+        assert resolved.docker_image == "registry/arca:v2"
         assert latest.ext["unrelated"] == "preserved"
         assert latest.ext["sbot_pin_image"] is True
-        assert latest.ext["sbot_docker_image"] == "registry/arka:v2"
+        assert latest.ext["sbot_docker_image"] == "registry/arca:v2"
         assert record.ext == latest.ext
 
     def test_concurrent_explicit_policy_is_not_overwritten(self):
@@ -204,7 +204,7 @@ class TestResolvePublishImagePin:
         svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
             common_config_service=common_config
         )
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         record = MockPublishRecord(ext={"migration_path": "/nas/path"})
         latest = MockPublishRecord(
             ext={"migration_path": "/nas/path", "sbot_use_default_image": True}
@@ -226,7 +226,7 @@ class TestResolvePublishImagePin:
         svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
             common_config_service=common_config
         )
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         record = MockPublishRecord(ext={"migration_path": "/nas/path"})
         latest = MockPublishRecord(ext={"migration_path": "/nas/path"})
         publish_repo.get_by_id.return_value = latest
@@ -382,7 +382,7 @@ class TestCreateContainer:
             USER_ID,
             migration_path="/nas/path",
             version=2,
-            docker_image="registry/arka:v2",
+            docker_image="registry/arca:v2",
         )
 
         bot_build_service.release_async.assert_called_once()
@@ -393,7 +393,7 @@ class TestCreateContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "2"
-        assert call_kwargs["docker_image"] == "registry/arka:v2"
+        assert call_kwargs["docker_image"] == "registry/arca:v2"
 
 
 class TestUpgradeContainer:
@@ -455,7 +455,7 @@ class TestUpgradeContainer:
             OWNER_ID,
             migration_path="/nas/path",
             version=3,
-            docker_image="registry/arka:v2",
+            docker_image="registry/arca:v2",
         )
 
         bot_build_service.upgrade_async.assert_called_once()
@@ -467,7 +467,7 @@ class TestUpgradeContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "3"
-        assert call_kwargs["docker_image"] == "registry/arka:v2"
+        assert call_kwargs["docker_image"] == "registry/arca:v2"
 
 
 class TestBuildConnection:
@@ -1213,7 +1213,7 @@ class TestGetCallerConnectionEdgeCases:
             ext={
                 "migration_path": "/path",
                 "sbot_use_default_image": True,
-                "sbot_runtime_kind": "arka",
+                "sbot_runtime_kind": "arca",
             },
         )
         record.version = None

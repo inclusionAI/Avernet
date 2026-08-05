@@ -2,7 +2,7 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
     ImagePolicyState,
     ServiceBotImagePin,
 )
@@ -36,7 +36,7 @@ class _ImagePolicyHarness(PublishImagePolicyMixin):
 
 def test_resolve_publish_image_pin_delegates_to_shared_publish_service_resolver():
     record = _record({"migration_path": "/build/v1"})
-    expected = ServiceBotImagePin(ImagePolicyState.PINNED, "registry/arka:v2")
+    expected = ServiceBotImagePin(ImagePolicyState.PINNED, "registry/arca:v2")
     svc = _ImagePolicyHarness()
     svc._publish_service.resolve_publish_image_pin.return_value = expected
 

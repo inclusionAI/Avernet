@@ -13,7 +13,7 @@ consumes:
   - "BotRepository"
   - "DeviceService + DeviceContextResolver"
   - "ServiceBot repo + BaasService"
-  - "CommonConfigService (legacy ARKA image policy resolution)"
+  - "CommonConfigService (legacy ARCA image policy resolution)"
   - "SkillSync guard"
   - "CollaboratorService (chat 权限校验)"
 internal_dependencies:
