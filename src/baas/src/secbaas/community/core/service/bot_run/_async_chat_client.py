@@ -97,6 +97,15 @@ class ConcurrentSessionError(Exception):
     """
 
 
+class BotSessionError(Exception):
+    """WebSocket 会话以 error 状态终止时抛出。
+
+    当 agent/chat 事件回调收到 state=error 时，send_message 在
+    chat_complete 后检查 state.state 并抛出此异常，使上游调用方
+    （BaasBotService / executor）能将 bot_run 标记为 FAILED 而非 COMPLETED。
+    """
+
+
 class NotConnectedError(Exception):
     """连接未建立或已断开时抛出。"""
 
@@ -396,17 +405,23 @@ class AsyncChatClient:
                     # 无超时等待
                     await state.chat_complete.wait()
 
+                # 6. 检查是否以 error 状态终止
+                if state.state == "error":
+                    raise BotSessionError(
+                        f"session ended with error state: session_key={session_key}"
+                    )
+
                 return state.content, state.agent_payloads
 
             finally:
-                # 6. 清除 sessionKey 标记并唤醒等待者
+                # 7. 清除 sessionKey 标记并唤醒等待者
                 async with self._condition:
                     self._active_sessions.discard(session_key)
                     self._sessions.pop(session_key, None)
                     self._condition.notify_all()
 
         finally:
-            # 7. 释放并发信号量
+            # 8. 释放并发信号量
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 

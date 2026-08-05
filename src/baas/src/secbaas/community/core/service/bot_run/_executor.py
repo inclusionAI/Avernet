@@ -475,6 +475,7 @@ class BotRunRequestExecutor:
             )
 
         final_content = ""
+        stream_error: str | None = None
         last_flush_ts = time.monotonic()
         try:
             async for chunk in bot_service.send_message_stream(
@@ -503,6 +504,7 @@ class BotRunRequestExecutor:
                     _write_chunk(chunk)
                     last_flush_ts = time.monotonic()
                 elif chunk.type == "error":
+                    stream_error = chunk.content or "stream error"
                     _write_chunk(chunk)
                     last_flush_ts = time.monotonic()
                 else:
@@ -528,11 +530,14 @@ class BotRunRequestExecutor:
         # flush 残留 buffer
         _flush_buffers()
 
-        self._repo.update_result(
-            run_id=run.run_id,
-            content_long=final_content,
-            extra={"session_id": session_id, "stream": "true"},
-        )
+        if stream_error:
+            self._repo.update_error(run.run_id, stream_error)
+        else:
+            self._repo.update_result(
+                run_id=run.run_id,
+                content_long=final_content,
+                extra={"session_id": session_id, "stream": "true"},
+            )
 
     async def _do_inject(
         self,
