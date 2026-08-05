@@ -1517,10 +1517,14 @@ class TestApplyDevice:
                 entity_type="staff",
                 operator=_make_operator(),
                 bot_id="bot1",
+                device_props_extra={"image_policy_on_active": "default"},
             )
 
         assert result is record
         repo.insert_binding.assert_called_once()
+        assert repo.insert_binding.call_args.kwargs["device_props"][
+            "image_policy_on_active"
+        ] == "default"
 
     def test_apply_reuses_released_binding(self):
         released = _make_record(id=5, status=DeviceBindingStatus.RELEASED.value)
