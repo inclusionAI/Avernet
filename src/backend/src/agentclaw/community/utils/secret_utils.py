@@ -73,7 +73,7 @@ def verify_jwt_token(token: str, secret_key: str) -> tuple[bool, Optional[str], 
         payload = json.loads(_b64url_decode(payload_b64).decode())
 
         # 检查过期时间
-        if 'exp' in payload and payload['exp'] > int(time.time()):
+        if 'exp' in payload and payload['exp'] < int(time.time()):
             return False, "Token expired", payload
 
         return True, None, payload
