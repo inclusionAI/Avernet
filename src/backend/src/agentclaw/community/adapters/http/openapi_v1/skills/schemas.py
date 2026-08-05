@@ -24,7 +24,7 @@ class Skill(BaseModel):
 class SkillUpload(BaseModel):
     """Response for a first-time Skill upload."""
 
-    operation: Literal["created"]
+    operation: Literal["created", "updated"]
     skill: Skill
 
 
