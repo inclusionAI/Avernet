@@ -63,15 +63,16 @@ class _Sets:
 
 
 class _Bots:
-    def __init__(self, status: str) -> None:
+    def __init__(self, status: str, entity_id: str = "owner") -> None:
         self.status = status
+        self.entity_id = entity_id
 
     def get_by_id_and_owner(self, *_args):
         return {
             "status": self.status,
             "active_engine": "openclaw",
             "env": "pre",
-            "entity_id": "owner",
+            "entity_id": self.entity_id,
             "entity_type": "staff",
         }
 
@@ -124,6 +125,7 @@ def _service(
     sync_success: bool = True,
     git_path: str = "local://one",
     status: str = "ACTIVE",
+    entity_id: str = "owner",
     collaborators=None,
     on_acquire=None,
 ):
@@ -133,7 +135,7 @@ def _service(
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
     service = LocalSkillStateService(
-        skills, sets, _Bots(status), collaborators or _Collaborators(), factory, guard
+        skills, sets, _Bots(status, entity_id), collaborators or _Collaborators(), factory, guard
     )
     return service, skills, sets, guard, runtime, factory
 
@@ -158,6 +160,17 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
         "engine_type": "openclaw",
         "entity_type": "staff",
     }
+
+
+@pytest.mark.asyncio
+async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
+    service, _skills, _sets, _guard, _runtime, factory = _service(
+        entity_id="project-entity"
+    )
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+
+    assert factory.kwargs["entity_id"] == "project-entity"
 
 
 @pytest.mark.asyncio

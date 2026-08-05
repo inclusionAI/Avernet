@@ -2017,14 +2017,25 @@ class SkillSetRepository:
                 query = query.filter(self.SkillSet.user_id.is_(None))
             active_sets.extend(_skill_set_to_dict(ss) for ss in query.all())
 
-        default_set = self.get_default(
+        bot_default = self.get_default(
+            user_id=parsed if user_id is not None and bolt_id is not None else None,
+            bolt_id=effective_bolt_id if user_id is not None and bolt_id is not None else None,
+            engine_type=engine_type,
+            env=env,
+        )
+        if bot_default:
+            active_sets.append(bot_default)
+        global_default = self.get_default(
             user_id=None,
             bolt_id=None,
             engine_type=engine_type,
             env=env,
         )
-        if default_set:
-            active_sets.append(default_set)
+        if global_default and all(
+            skill_set["id"] != global_default["id"]
+            for skill_set in active_sets
+        ):
+            active_sets.append(global_default)
         return active_sets
 
     def _get_user_default_enabled(

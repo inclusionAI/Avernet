@@ -179,7 +179,7 @@ class LocalSkillStateService:
         try:
             service = self._skill_set_service_factory.create(
                 user_id=owner_id,
-                entity_id=owner_id,
+                entity_id=str(bot["entity_id"]),
                 bot_id=bot_id,
                 engine_type=bot.get("active_engine"),
                 entity_type=bot.get("entity_type"),
