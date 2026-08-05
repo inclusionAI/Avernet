@@ -105,7 +105,9 @@ class _Sets:
         return [] if self.skills.active else [9]
 
     def get_all_active_skill_sets_for_env(self, **_kwargs):
-        return []
+        # The repository includes the Bot-scoped default set for runtime sync;
+        # its association must not override the explicit default exclusion.
+        return [{"id": "4", "is_default": True}]
 
 
 class _Bots:

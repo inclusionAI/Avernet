@@ -95,6 +95,8 @@ class LocalSkillDeleteService:
                     engine_type=bot.get("active_engine"),
                     env=str(bot["env"]),
                 )
+                if not skill_set.get("is_default")
+                and str(skill_set["id"]) != str(default_set["id"])
             }
             referenced_set_ids = {
                 reference["skill_set_id"]
