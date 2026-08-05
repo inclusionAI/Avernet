@@ -108,6 +108,7 @@ class SkillServiceFactory:
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
+        path_factory: "WorkspacePathFactory",
         pool_layout_paths: Callable[
             [str, str, str],
             tuple[str, str, str] | None,
@@ -119,6 +120,7 @@ class SkillServiceFactory:
         self._device_fs_dispatcher = device_fs_dispatcher
         self._market_cache = market_cache
         self._git_sync_service_factory = git_sync_service_factory
+        self._path_factory = path_factory
         self._pool_layout_paths = pool_layout_paths
 
     def resolve_pool_paths(
@@ -139,9 +141,7 @@ class SkillServiceFactory:
         global_repo_dir: Optional[Path] = None,
         device_fs_factory=None,
         local_skill_path_adapter: Optional[Callable[[str], str]] = None,
-        local_skill_locator_adapter: Optional[
-            Callable[[str], str]
-        ] = None,
+        local_skill_locator_adapter: Optional[Callable[[str], str]] = None,
         entity_id: str | None = None,
         bot_owner_id: str | None = None,
         bot_id: str | None = None,
@@ -186,13 +186,35 @@ class SkillServiceFactory:
         )
 
     def local_skill_package_storage(
-        self, *, owner_id: str, bot_id: str, engine_type: str | None, name: str
+        self,
+        *,
+        entity_id: str,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        entity_type: str,
+        is_desktop: bool,
+        is_teclaw: bool,
+        name: str,
     ) -> tuple[str, LocalSkillPackageStorage]:
         """Return the canonical Local Skill locator and its device-I/O port."""
         service = self.create(
-            entity_id=owner_id, bot_id=bot_id, engine_type=engine_type
+            entity_id=entity_id,
+            bot_owner_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
         )
-        directory = str(service.local_dir / name)
+        local_dir = service.local_dir
+        if not service.runtime_uses_pool_paths:
+            local_dir = self._path_factory.get_bot_skills_local_dir(
+                entity_id,
+                bot_id,
+                engine_type or "openclaw",
+                entity_type,
+                is_desktop=is_desktop,
+                is_teclaw=is_teclaw,
+            )
+        directory = str(local_dir / name)
         return directory, LocalSkillPackageStorage(
             service._device_fs_factory(bot_id, owner_id),
             service._local_skill_path_adapter(directory),
@@ -291,9 +313,7 @@ class SkillSetServiceFactory:
                 resolved_skills = Path(active_path)
                 resolved_local = Path(local_path)
                 resolved_repo = Path(repo_path)
-                local_skill_path_adapter = build_pool_local_path_adapter(
-                    resolved_local
-                )
+                local_skill_path_adapter = build_pool_local_path_adapter(resolved_local)
 
         skill_service = self._skill_service_factory.create(
             active_dir=resolved_skills,

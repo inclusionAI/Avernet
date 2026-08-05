@@ -32,6 +32,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillRepoSyncPlugin"
+  - "WorkspacePathFactory"
 internal_dependencies:
   - agentclaw.community.core.access
   - agentclaw.community.core.bot_collaborator
@@ -40,7 +41,6 @@ internal_dependencies:
   - agentclaw.community.core.devices
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
-  - agentclaw.community.core.skills_pool
   - agentclaw.community.core.models
   - agentclaw.community.core.skills_pool
   - agentclaw.community.core.workspace
