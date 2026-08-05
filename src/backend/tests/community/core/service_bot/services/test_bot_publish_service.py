@@ -39,6 +39,7 @@ def _make_service(
     publish_operation_repo=None,
     task_queue_service=None,
     bot_process_registry=None,
+    common_config_service=None,
 ) -> BotPublishService:
     """Build a ``BotPublishService`` with MagicMock fallbacks for unused deps.
 
@@ -55,6 +56,10 @@ def _make_service(
     if bot_process_registry is None:
         process_registry.get.return_value.get_active_runtime_engine_type.return_value = ""
 
+    common_config = common_config_service or MagicMock()
+    if common_config_service is None:
+        common_config.get_value.return_value = None
+
     return BotPublishService(
         bot_publish_repo=bot_publish_repo,
         bot_repo=bot_repo or MagicMock(),
@@ -66,6 +71,7 @@ def _make_service(
         publish_operation_repo=operation_repo,
         task_queue_service=task_queue_service or MagicMock(),
         bot_process_registry=process_registry,
+        common_config_service=common_config,
     )
 
 
@@ -92,6 +98,99 @@ def _create_mock_record(
         permission_owner="owner",
         ext=ext,
     )
+
+
+class TestCreatePublishImagePolicy:
+    def _create(self, *, source_bot, common_config_value=None, is_teclaw=False):
+        publish_repo = Mock()
+        publish_repo.get_by_publish_bot_id_and_version.return_value = None
+        publish_repo.insert.return_value = _create_mock_record(
+            record_id=10,
+            status=PublishStatus.DRAFT,
+        )
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = source_bot
+        bot_service = Mock()
+        bot_service.is_teclaw_bot.return_value = is_teclaw
+        common_config = Mock()
+        common_config.get_value.return_value = common_config_value
+        service = _make_service(
+            publish_repo,
+            bot_repo=bot_repo,
+            bot_service=bot_service,
+            common_config_service=common_config,
+        )
+
+        service.create_publish(
+            source_bot_pk=1,
+            source_bot_id="bot_001",
+            publish_bot_id="bot_001_pub",
+            name="bot",
+            owner_id="user_001",
+            permission_owner="owner",
+            ext={"migration_path": "/build/v1"},
+        )
+        return publish_repo.insert.call_args.args[0]["ext"], common_config
+
+    def test_default_bot_copies_marker_without_reading_common_config(self):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "openclaw",
+                "ext": {"sbot_use_default_image": True},
+            },
+            common_config_value={"image": "registry/arka:v2"},
+        )
+
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_use_default_image": True,
+        }
+        common_config.get_value.assert_not_called()
+
+    def test_legacy_arka_bot_snapshots_enabled_common_config_image(self):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "openclaw",
+                "ext": {"service_bot_config": {"device_count": 2}},
+            },
+            common_config_value={"image": "registry/arka:v2"},
+        )
+
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        }
+        common_config.get_value.assert_called_once()
+
+    def test_legacy_arka_bot_stays_policyless_when_switch_disabled(self):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "openclaw",
+                "ext": {"service_bot_config": {"device_count": 2}},
+            },
+            common_config_value=None,
+        )
+
+        assert ext == {"migration_path": "/build/v1"}
+        common_config.get_value.assert_called_once()
+
+    def test_teclaw_publish_does_not_consume_arka_common_config(self):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "teclaw",
+                "ext": None,
+            },
+            common_config_value={"image": "registry/arka:v2"},
+            is_teclaw=True,
+        )
+
+        assert ext == {"migration_path": "/build/v1"}
+        common_config.get_value.assert_not_called()
 
 
 class TestUpgradePublish:

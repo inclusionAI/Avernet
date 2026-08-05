@@ -42,6 +42,9 @@ from agentclaw.community.core.service_bot.services.publish_flow.errors import (
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
     PublishExtState,
 )
+from agentclaw.community.core.service_bot.services.publish_flow.image_policy_mixin import (
+    PublishImagePolicyMixin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.provider_behavior import (
     DefaultProviderBehavior,
     ProviderBehaviorRouter,
@@ -162,6 +165,7 @@ class PublishFlowService(
     UpgradeResolutionMixin,
     RetryOpsMixin,
     DraftRestoreOpsMixin,
+    PublishImagePolicyMixin,
 ):
     """Bot publish flow processing service.
 
@@ -985,4 +989,3 @@ class PublishFlowService(
             ):
                 return True
         return False
-

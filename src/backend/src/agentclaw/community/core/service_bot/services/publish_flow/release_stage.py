@@ -27,7 +27,7 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    resolve_publish_image_pin,
+    ServiceBotImagePin,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.publish_flow.ext_state import (
@@ -82,6 +82,13 @@ class ReleaseRecordOps(Protocol):
     def release_binding(
         self, binding_id: int, *, destroy_publish_id: int | None
     ) -> None: ...
+
+    def resolve_publish_image_pin(
+        self,
+        publish_record: BotPublishRecord,
+        bot: dict,
+    ) -> ServiceBotImagePin: ...
+
 
 
 @dataclass(frozen=True)
@@ -167,7 +174,7 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self._ops.resolve_publish_image_pin(publish_record, bot)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -267,7 +274,7 @@ class ReleaseStageRunner:
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self._ops.resolve_publish_image_pin(publish_record, bot)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied

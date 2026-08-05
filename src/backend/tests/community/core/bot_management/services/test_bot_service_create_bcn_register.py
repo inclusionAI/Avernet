@@ -154,7 +154,7 @@ class TestCreateBotBcnRegister:
             summary="service desc",
         )
 
-    def test_service_bot_create_persists_and_uses_current_pinned_image(self):
+    def test_service_bot_create_uses_default_image_and_persists_marker(self):
         svc = _make_service()
         device_service = _attach_device_service(svc)
         common_config = MagicMock()
@@ -180,15 +180,15 @@ class TestCreateBotBcnRegister:
         inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
         assert inserted_ext == {
             "service_bot_config": {"device_count": 3},
-            "sbot_pin_image": True,
-            "sbot_docker_image": "registry/arka:v2",
+            "sbot_use_default_image": True,
         }
         apply_kwargs = device_service.apply_device.call_args.kwargs
         assert apply_kwargs["template_config"] == {
-            "image": "registry/arka:v2",
+            "image": "registry/arka:v1",
             "envs": {"A": "1"},
         }
         assert template_config["image"] == "registry/arka:v1"
+        common_config.get_value.assert_not_called()
 
     def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
         """claude_code + applicationCoding 创建时不应触发 BCN 注册。"""

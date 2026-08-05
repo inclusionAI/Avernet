@@ -293,6 +293,7 @@ class ServiceBotModule(Module):
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -312,6 +313,7 @@ class ServiceBotModule(Module):
             publish_operation_repo=publish_operation_repo,
             task_queue_service=task_queue_service,
             bot_process_registry=bot_process_registry,
+            common_config_service=common_config_service,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 

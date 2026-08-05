@@ -12,9 +12,6 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    resolve_publish_image_pin,
-)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -93,7 +90,7 @@ class ScaleMixin:
 
         bot_uuid = binding.device_id
         target_count = self._resolve_scale_target_count(publish_record)
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self.resolve_publish_image_pin(publish_record, bot)
         pinned_image = image_pin.docker_image
         scale_config = (
             {"deploy_config": {"docker_image": pinned_image}}
