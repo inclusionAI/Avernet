@@ -69,10 +69,9 @@ from agentclaw.community.core.workspace.path_factory import (
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    apply_image_pin_to_ext,
-    copy_image_pin_to_ext,
+    apply_default_image_to_ext,
+    copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
-    resolve_current_arka_image,
 )
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -370,40 +369,33 @@ class BotService:
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
 
-    def _resolve_service_bot_arka_image_pin(
+    def _mark_service_bot_default_image(
         self,
         bot: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Resolve draft ARKA Pin in memory without changing persistent state."""
+        """Mark a draft ARKA bot to follow the provider default image."""
         if bot.get("bot_type") != "service" or self.is_teclaw_bot(
             bot.get("active_engine")
         ):
             return bot
-        image = resolve_current_arka_image(
-            getattr(self, "_common_config_service", None),
-            env=get_current_env(),
-        )
-        updated_ext = apply_image_pin_to_ext(bot.get("ext"), image)
-        if updated_ext == (bot.get("ext") or {}):
-            return bot
         updated_bot = dict(bot)
-        updated_bot["ext"] = updated_ext
+        updated_bot["ext"] = apply_default_image_to_ext(bot.get("ext"))
         return updated_bot
 
-    def _persist_service_bot_arka_image_pin(
+    def _persist_service_bot_default_image(
         self,
         bot: Dict[str, Any],
         *,
         user_id: str,
     ) -> None:
-        """Persist an accepted draft restart's Pin snapshot to Bot and Draft."""
+        """Persist an accepted draft restart's default policy to Bot and Draft."""
         if bot.get("bot_type") != "service" or self.is_teclaw_bot(
             bot.get("active_engine")
         ):
             return
 
         bot_id = str(bot["bot_id"])
-        updated_ext = dict(bot.get("ext") or {})
+        updated_ext = apply_default_image_to_ext(bot.get("ext"))
         self._repository.update_by_owner(bot_id, user_id, {"ext": updated_ext})
 
         draft = self._bot_publish_repo.get_draft_by_publish_bot_id(
@@ -412,7 +404,7 @@ class BotService:
         )
         if draft is None:
             return
-        draft_ext = copy_image_pin_to_ext(updated_ext, draft.ext) or {}
+        draft_ext = copy_image_policy_to_ext(updated_ext, draft.ext) or {}
         updated_draft = self._bot_publish_repo.update_status_with_ext(
             publish_id=draft.id,
             target_status=draft.status,
@@ -421,7 +413,7 @@ class BotService:
         )
         if updated_draft is None:
             raise BotServiceError(
-                f"Draft publish {draft.id} image Pin persistence conflicted"
+                f"Draft publish {draft.id} default-image persistence conflicted"
             )
 
     def _build_engine_extra_envs(
@@ -1317,13 +1309,10 @@ class BotService:
         if resolved_bot_type == "service" and not self.is_teclaw_bot(
             resolved_active_engine
         ):
-            ext = apply_image_pin_to_ext(
-                ext,
-                resolve_current_arka_image(
-                    getattr(self, "_common_config_service", None),
-                    env=get_current_env(),
-                ),
-            ) or None
+            # New ARKA service bots intentionally follow the provider default.
+            # Persist an explicit marker so their future publish records are not
+            # mistaken for legacy records that require Pin compatibility.
+            ext = apply_default_image_to_ext(ext)
 
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
@@ -1872,7 +1861,7 @@ class BotService:
                     logger.error(f"[bot_service._allocate_device_async] Failed to update bot {bot_id} for user {user_id}: bot not found or not owner")
                     return
                 if bot_ext_override is not None:
-                    self._persist_service_bot_arka_image_pin(
+                    self._persist_service_bot_default_image(
                         {**(bot_record or {}), "bot_id": bot_id, "ext": bot_ext_override},
                         user_id=user_id,
                     )
@@ -4043,7 +4032,7 @@ class BotService:
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):
-                bot = self._resolve_service_bot_arka_image_pin(bot)
+                bot = self._mark_service_bot_default_image(bot)
             if (
                 binding_id
                 and current_device_provider == BAAS_DEVICE_PROVIDER
@@ -4243,7 +4232,7 @@ class BotService:
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
         result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
-        self._persist_service_bot_arka_image_pin(bot, user_id=user_id)
+        self._persist_service_bot_default_image(bot, user_id=user_id)
 
         # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
         # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然

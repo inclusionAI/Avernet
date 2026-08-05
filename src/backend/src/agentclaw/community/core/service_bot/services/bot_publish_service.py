@@ -8,6 +8,7 @@ from agentclaw.community.core.service_bot.repository.publish_operation_repositor
     PublishOperationRepository,
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
@@ -25,7 +26,10 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    copy_image_pin_to_ext,
+    apply_image_pin_to_ext,
+    copy_image_policy_to_ext,
+    has_explicit_image_policy,
+    resolve_current_arka_image,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -57,6 +61,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -69,6 +74,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._publish_operation_repo = publish_operation_repo
         self._task_queue_service = task_queue_service
         self._bot_process_registry = bot_process_registry
+        self._common_config_service = common_config_service
         self._env = get_current_env()
 
     def create_device_binding(
@@ -217,7 +223,24 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         source_bot_ext = (
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
-        ext = copy_image_pin_to_ext(source_bot_ext, ext)
+        ext = copy_image_policy_to_ext(source_bot_ext, ext)
+
+        # A new/default Bot carries an explicit marker and never consumes the
+        # legacy Pin switch. A pre-feature ARKA Bot has no policy marker; when
+        # protection is enabled, freeze the configured image on the new publish
+        # record so all published operations remain reproducible.
+        is_legacy_arka_service = (
+            isinstance(source_bot, dict)
+            and source_bot.get("bot_type") == "service"
+            and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+            and not has_explicit_image_policy(source_bot_ext)
+        )
+        if is_legacy_arka_service:
+            legacy_image = resolve_current_arka_image(
+                self._common_config_service, env=self._env
+            )
+            if legacy_image:
+                ext = apply_image_pin_to_ext(ext, legacy_image)
 
         record = self._repo.insert({
             "source_bot_pk": source_bot_pk,

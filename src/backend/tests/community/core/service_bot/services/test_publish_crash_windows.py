@@ -141,13 +141,15 @@ def _arca_router(build_service):
 def _flow(*, ledger, baas, build_service, publish_service=None):
     reader = Mock()
     reader.overrides_for_stage.return_value = {}
+    common_config_service = Mock()
+    common_config_service.get_value.return_value = None
     svc = PublishFlowService(
         publish_service or Mock(),
         build_service,
         baas,
         Mock(),  # bot_service
         _arca_router(build_service),
-        Mock(),  # common_config_service
+        common_config_service,
         resolver=Mock(),
         device_fs_dispatcher=Mock(),
         teclaw_file_promotion=Mock(),

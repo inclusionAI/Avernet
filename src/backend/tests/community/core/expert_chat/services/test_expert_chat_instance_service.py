@@ -76,6 +76,7 @@ def _make_service(
     caller_identity=None,
     token_provider=None,
     runtime_updater=None,
+    common_config_service=None,
 ):
     """Construct ExpertChatInstanceService with mocks."""
     instance_repo = instance_repo or MagicMock()
@@ -87,6 +88,8 @@ def _make_service(
     caller_identity = caller_identity or MagicMock()
     token_provider = token_provider or MagicMock()
     runtime_updater = runtime_updater or MagicMock()
+    common_config_service = common_config_service or MagicMock()
+    common_config_service.get_value.return_value = None
 
     svc = ExpertChatInstanceService(
         instance_repo=instance_repo,
@@ -98,6 +101,7 @@ def _make_service(
         caller_identity=caller_identity,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
+        common_config_service=common_config_service,
     )
     return svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater
 

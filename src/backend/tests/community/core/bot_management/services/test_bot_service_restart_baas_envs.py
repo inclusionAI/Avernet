@@ -125,8 +125,8 @@ def _make_bot(
 # ===========================================================================
 
 
-class TestRestartBaasImagePin:
-    def test_restart_uses_pinned_image_without_mutating_template_snapshot(self):
+class TestRestartBaasImagePolicy:
+    def test_low_level_restart_uses_explicit_pin_without_mutating_template_snapshot(self):
         template_config = {"image": "registry/arka:v1", "envs": {"A": "1"}}
         svc, baas, _ = _make_service(
             template_config=template_config,
@@ -151,7 +151,7 @@ class TestRestartBaasImagePin:
         }
         assert template_config["image"] == "registry/arka:v1"
 
-    def test_restart_failure_does_not_persist_resolved_pin(self):
+    def test_restart_failure_does_not_persist_default_marker(self):
         svc, baas, _ = _make_service(
             template_config={},
             bot_type="service",
@@ -178,7 +178,7 @@ class TestRestartBaasImagePin:
         ("bot_type", "active_engine"),
         [("personal", "openclaw"), ("service", "teclaw")],
     )
-    def test_pin_persistence_skips_non_arka_service_bot(
+    def test_default_persistence_skips_non_arka_service_bot(
         self,
         bot_type: str,
         active_engine: str,
@@ -196,13 +196,13 @@ class TestRestartBaasImagePin:
             },
         }
 
-        svc._persist_service_bot_arka_image_pin(bot, user_id="user001")
+        svc._persist_service_bot_default_image(bot, user_id="user001")
 
         svc._repository.update_by_owner.assert_not_called()
         svc._bot_publish_repo.get_draft_by_publish_bot_id.assert_not_called()
         svc._bot_publish_repo.update_status_with_ext.assert_not_called()
 
-    def test_restart_success_persists_bot_and_current_draft_pin(self):
+    def test_restart_success_persists_bot_and_current_draft_default_marker(self):
         svc, _, _ = _make_service(
             template_config={},
             bot_type="service",
@@ -227,15 +227,21 @@ class TestRestartBaasImagePin:
         )
 
         svc._repository.update_by_owner.assert_any_call(
-            "bot001", "user001", {"ext": bot["ext"]}
+            "bot001",
+            "user001",
+            {
+                "ext": {
+                    "service_bot_config": {"device_count": 1},
+                    "sbot_use_default_image": True,
+                }
+            },
         )
         svc._bot_publish_repo.update_status_with_ext.assert_called_once_with(
             publish_id=6643,
             target_status="draft",
             ext={
                 "migration_path": "/old",
-                "sbot_pin_image": True,
-                "sbot_docker_image": "registry/arka:v2",
+                "sbot_use_default_image": True,
             },
             source_status="draft",
         )

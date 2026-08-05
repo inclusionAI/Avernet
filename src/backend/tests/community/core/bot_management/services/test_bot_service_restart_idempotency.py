@@ -921,8 +921,8 @@ class TestRestartGuardOrchestration:
         start.assert_not_called()
         assert result == bot
 
-    def test_restart_baas_service_refreshes_pin_before_upgrade(self):
-        """草稿态重启读取当前开关，并仅刷新 Pin 字段后透传镜像。"""
+    def test_restart_baas_service_uses_default_image_and_persists_marker(self):
+        """草稿态重启不读开关、不覆盖模板镜像，并持久化默认镜像标记。"""
         repo = FakeRestartLockRepo()
         common_config = MagicMock()
         common_config.get_value.return_value = {"image": "registry/arka:v2"}
@@ -952,13 +952,14 @@ class TestRestartGuardOrchestration:
         with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
             svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        common_config.get_value.assert_called_once()
+        common_config.get_value.assert_not_called()
         assert state["ext"]["service_bot_config"] == {"device_count": 3}
-        assert state["ext"]["sbot_pin_image"] is True
-        assert state["ext"]["sbot_docker_image"] == "registry/arka:v2"
+        assert state["ext"]["sbot_use_default_image"] is True
+        assert "sbot_pin_image" not in state["ext"]
+        assert "sbot_docker_image" not in state["ext"]
         upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
         assert upgrade_kwargs["template_config"] == {
-            "image": "registry/arka:v2",
+            "image": "registry/arka:v1",
             "envs": {"A": "1"},
         }
 
