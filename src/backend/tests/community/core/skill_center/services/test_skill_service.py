@@ -689,7 +689,7 @@ class TestSkillServiceGetActiveSkills:
             skill_repo=mock_skill_repo,
             skill_repo_sync=_lenient_skill_repo_sync(),
             category_repo=MagicMock(),
-            active_dir=Path(active_root),
+            active_dir=skill_dirs["active_dir"],
             repo_dir=skill_dirs["repo_dir"],
             local_dir=skill_dirs["local_dir"],
             market_cache=MagicMock(),
@@ -698,7 +698,9 @@ class TestSkillServiceGetActiveSkills:
         )
 
         skills = await svc.get_active_skills_from_device(
-            bot_id="desktop_bot_1", owner_id="405935"
+            bot_id="desktop_bot_1",
+            owner_id="405935",
+            active_dir=Path(active_root),
         )
 
         assert [skill.id for skill in skills] == ["sp455-r2-oc-probe"]

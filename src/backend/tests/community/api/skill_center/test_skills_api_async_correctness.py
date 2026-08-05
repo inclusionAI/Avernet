@@ -16,6 +16,7 @@ it in run_in_threadpool.
 """
 import json
 from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -27,6 +28,14 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
 from agentclaw.community.adapters.http.skill_center.skills import router as skills_router
+from agentclaw.community.api.runtime_layout_probe_service import (
+    RuntimeLayoutProbeServiceProtocol,
+)
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    LAYOUT_CONTRACT_VERSION,
+    RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo
 
 
@@ -44,6 +53,9 @@ def _skill_service_di_app(
     device_sync_result=None,
     runtime_uses_pool_paths=False,
     bot_type="personal",
+    engine_type="openclaw",
+    runtime_probe_result=None,
+    management_active_root=Path("/backend/legacy/skills"),
 ):
     """Build a TestClient whose SkillService has AsyncMock methods.
 
@@ -66,14 +78,19 @@ def _skill_service_di_app(
     mock_skill_service.get_link_name = MagicMock(return_value="link_name")
     mock_skill_service.get_active_skills_from_device = AsyncMock(return_value=[])
     mock_skill_service.runtime_uses_pool_paths = runtime_uses_pool_paths
+    mock_skill_service.active_dir = None
 
     # Factory that returns the mock service from create()
     mock_skill_service_factory = MagicMock()
-    mock_skill_service_factory.create.return_value = mock_skill_service
+    def _create_skill_service(**kwargs):
+        mock_skill_service.active_dir = kwargs.get("active_dir")
+        return mock_skill_service
+
+    mock_skill_service_factory.create.side_effect = _create_skill_service
 
     # Mock path_factory - all get_* methods return temp Path objects
     mock_path_factory = MagicMock()
-    mock_path_factory.get_bot_skills_dir.return_value = MagicMock()
+    mock_path_factory.get_bot_skills_dir.return_value = management_active_root
     mock_path_factory.get_bot_skills_local_dir.return_value = MagicMock()
     mock_path_factory.get_bot_engine_dir.return_value = MagicMock()
     mock_path_factory.get_bot_skills_repo_dir.return_value = MagicMock()
@@ -100,7 +117,7 @@ def _skill_service_di_app(
     mock_bot_repo.get_by_id_and_owner.return_value = {
         "bot_id": "default",
         "owner_id": "user_001",
-        "active_engine": "openclaw",
+        "active_engine": engine_type,
         "bot_type": bot_type,
     }
     mock_bot_repo.list_by_owner.return_value = (0, [])
@@ -116,6 +133,32 @@ def _skill_service_di_app(
     mock_resolver.resolve_for_bot.return_value = mock_ctx_obj
     mock_device_sync_dispatcher = MagicMock()
     mock_device_sync_dispatcher.dispatch.return_value = mock_device_sync
+
+    runtime_active_roots = {
+        "openclaw": "/home/admin/.openclaw/workspace/skills",
+        "claude_code": "/home/admin/.claude/skills",
+        "aicoding": "/home/admin/.claude/skills",
+        "hermes": "/home/admin/.hermes/skills",
+    }
+    if runtime_probe_result is None:
+        runtime_probe_result = RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.READY,
+            engine=engine_type,
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id="prep-test",
+            evidence={
+                "resolved_layout": {
+                    "active_root": runtime_active_roots.get(
+                        engine_type, "/unused/active"
+                    )
+                }
+            },
+        )
+    mock_runtime_layout_probe = MagicMock()
+    mock_runtime_layout_probe.probe_bot = AsyncMock(
+        return_value=runtime_probe_result
+    )
+    mock_skill_service.runtime_layout_probe = mock_runtime_layout_probe
 
     class _TestModule(Module):
         def configure(self, binder):
@@ -140,6 +183,10 @@ def _skill_service_di_app(
             binder.bind(DeviceContextResolver, to=mock_resolver)
             binder.bind(DeviceSyncDispatcher, to=mock_device_sync_dispatcher)
             binder.bind(BotRepository, to=mock_bot_repo)
+            binder.bind(
+                RuntimeLayoutProbeServiceProtocol,
+                to=mock_runtime_layout_probe,
+            )
 
     injector = Injector([_TestModule()])
     attach_injector(app, injector)
@@ -148,6 +195,33 @@ def _skill_service_di_app(
 
 
 class TestActiveSkillsRuntimeRead:
+    @pytest.mark.parametrize(
+        ("engine_type", "runtime_active_root"),
+        [
+            ("openclaw", "/home/admin/.openclaw/workspace/skills"),
+            ("claude_code", "/home/admin/.claude/skills"),
+            ("aicoding", "/home/admin/.claude/skills"),
+            ("hermes", "/home/admin/.hermes/skills"),
+        ],
+    )
+    def test_desktop_active_list_uses_engine_resolved_active_root(
+        self, mock_ctx, engine_type, runtime_active_root
+    ):
+        with _skill_service_di_app(
+            mock_ctx,
+            bot_type="desktop",
+            engine_type=engine_type,
+        ) as (client, mock_svc, _):
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 200, response.text
+            assert mock_svc.active_dir == Path("/backend/legacy/skills")
+            mock_svc.get_active_skills_from_device.assert_awaited_once_with(
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+                active_dir=Path(runtime_active_root),
+            )
+
     def test_desktop_active_list_reads_the_live_device(self, mock_ctx):
         with _skill_service_di_app(
             mock_ctx, bot_type="desktop"
@@ -173,6 +247,7 @@ class TestActiveSkillsRuntimeRead:
             mock_svc.get_active_skills_from_device.assert_awaited_once_with(
                 bot_id=mock_ctx.bot_id,
                 owner_id=mock_ctx.user_id,
+                active_dir=Path("/home/admin/.openclaw/workspace/skills"),
             )
             mock_svc.get_active_skills.assert_not_called()
 
@@ -186,6 +261,93 @@ class TestActiveSkillsRuntimeRead:
 
             assert response.status_code == 200, response.text
             mock_svc.get_active_skills.assert_called_once_with()
+            mock_svc.get_active_skills_from_device.assert_not_awaited()
+
+    def test_desktop_active_list_preserves_old_image_fallback(self, mock_ctx):
+        fallback_root = Path("/backend/legacy/skills")
+        old_image_probe = RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            engine="claude_code",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id=None,
+            evidence={"reason": "runtime_layout_probe_endpoint_absent"},
+        )
+        with _skill_service_di_app(
+            mock_ctx,
+            bot_type="desktop",
+            engine_type="claude_code",
+            runtime_probe_result=old_image_probe,
+            management_active_root=fallback_root,
+        ) as (client, mock_svc, _):
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 200, response.text
+            assert mock_svc.active_dir == fallback_root
+            mock_svc.get_active_skills_from_device.assert_awaited_once_with(
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+                active_dir=fallback_root,
+            )
+
+    def test_desktop_teclaw_keeps_artifact_layout_without_probe(self, mock_ctx):
+        management_root = Path("/backend/teclaw/skills")
+        with _skill_service_di_app(
+            mock_ctx,
+            bot_type="desktop",
+            engine_type="teclaw",
+            management_active_root=management_root,
+        ) as (client, mock_svc, _):
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 200, response.text
+            assert mock_svc.active_dir == management_root
+            mock_svc.get_active_skills_from_device.assert_awaited_once_with(
+                bot_id=mock_ctx.bot_id,
+                owner_id=mock_ctx.user_id,
+                active_dir=management_root,
+            )
+            mock_svc.runtime_layout_probe.probe_bot.assert_not_awaited()
+
+    def test_desktop_active_list_does_not_fallback_when_runtime_is_unbound(
+        self, mock_ctx
+    ):
+        unbound_probe = RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            engine="claude_code",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id=None,
+            evidence={"reason": "current_runtime_not_bound"},
+        )
+        with _skill_service_di_app(
+            mock_ctx,
+            bot_type="desktop",
+            engine_type="claude_code",
+            runtime_probe_result=unbound_probe,
+        ) as (client, mock_svc, _):
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 500
+            assert mock_svc.active_dir is None
+            mock_svc.get_active_skills_from_device.assert_not_awaited()
+
+    def test_desktop_active_list_fails_closed_on_invalid_resolved_root(self, mock_ctx):
+        invalid_probe = RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.READY,
+            engine="claude_code",
+            layout_contract_version=LAYOUT_CONTRACT_VERSION,
+            preparation_id="prep-test",
+            evidence={"resolved_layout": {"active_root": "relative/skills"}},
+        )
+        with _skill_service_di_app(
+            mock_ctx,
+            bot_type="desktop",
+            engine_type="claude_code",
+            runtime_probe_result=invalid_probe,
+        ) as (client, mock_svc, _):
+            response = client.get("/api/skills/active/list")
+
+            assert response.status_code == 500
+            assert mock_svc.active_dir is None
             mock_svc.get_active_skills_from_device.assert_not_awaited()
 
     def test_desktop_active_list_does_not_mask_device_failure_as_empty(
