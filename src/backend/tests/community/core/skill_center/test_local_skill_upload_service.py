@@ -540,6 +540,29 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
 
 
 @pytest.mark.asyncio
+async def test_invalid_upload_is_rejected_before_device_or_cleanup_side_effects():
+    class _UnavailableDeviceResolver:
+        def resolve_for_bot(self, *_args):
+            raise RuntimeError("device context unavailable")
+
+    class _CleanupMustNotBeRead(_Cleanup):
+        def list_pending(self, **_kwargs):
+            raise AssertionError("invalid package must not retry cleanup")
+
+    service = _service(_Filesystem())
+    service._device_context_resolver_provider = lambda: _UnavailableDeviceResolver()
+    service._cleanup_repo = _CleanupMustNotBeRead()
+
+    with pytest.raises(LocalSkillInvalidPackageError):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=b"not a zip archive",
+        )
+
+
+@pytest.mark.asyncio
 async def test_upload_resolves_package_storage_with_bot_entity():
     filesystem = _Filesystem()
     factory = _Factory(filesystem)

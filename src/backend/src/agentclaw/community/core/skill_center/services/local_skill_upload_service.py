@@ -113,6 +113,7 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
+            name, description, files = self._unpack(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             await self._retry_pending_cleanup(
                 bot=bot,
@@ -120,7 +121,6 @@ class LocalSkillUploadService:
                 bot_id=bot_id,
                 is_teclaw=is_teclaw,
             )
-            name, description, files = self._unpack(package)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
             default_set = self._ensure_default_set(
