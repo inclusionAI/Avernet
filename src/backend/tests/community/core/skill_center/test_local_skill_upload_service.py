@@ -51,6 +51,12 @@ class _Repo:
     def list_bot_local_by_name(self, **kwargs):
         return []
 
+    def get_bot_local_by_locator(self, **_kwargs):
+        return None
+
+    def get_by_id(self, _skill_id):
+        return None
+
     def create(self, row):
         row = {
             **row,
@@ -345,6 +351,18 @@ class _ReplacementRepo(_Repo):
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
+
+    def get_bot_local_by_locator(self, *, bot_id, user_id, locator):
+        return next(
+            (
+                row
+                for row in self.rows
+                if row["bolt_id"] == bot_id
+                and row["user_id"] == user_id
+                and row["git_path"] == f"local://{locator}"
+            ),
+            None,
+        )
 
     def get_bot_local_skill(self, *, skill_id, **_kwargs):
         return next(
@@ -1083,6 +1101,36 @@ async def test_later_serialized_upload_retries_durable_cleanup_work():
     assert result["operation"] == "updated"
     assert 12 in cleanup.completed
     assert cleanup.failed == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_skips_a_locator_reused_by_a_current_local_skill():
+    filesystem = _Filesystem()
+    locator = "/private/skills-local/upload-skill"
+    filesystem.files[f"{locator}/SKILL.md"] = b"authoritative"
+
+    class _ReusedLocatorCleanup(_PendingCleanup):
+        def list_pending(self, **_kwargs):
+            return [{"id": 12, "skill_id": "stale", "package_locator": locator}]
+
+    cleanup = _ReusedLocatorCleanup()
+    service = _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=False)]),
+        _ReplacementRuntime([True]),
+        cleanup,
+    )
+
+    await service._retry_pending_cleanup(
+        bot={"env": "dev", "entity_id": "owner", "active_engine": "moltis"},
+        owner_id="owner",
+        bot_id="bot",
+        is_teclaw=False,
+    )
+
+    assert cleanup.cancelled == [12]
+    assert cleanup.completed == []
+    assert filesystem.files[f"{locator}/SKILL.md"] == b"authoritative"
 
 
 @pytest.mark.asyncio
