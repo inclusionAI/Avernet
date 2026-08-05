@@ -29,6 +29,8 @@ class CapturedServiceSkillsLayout:
     engine: str
     scope: BotSkillLayoutScope
     active_layout: SkillLayout
+    phase: SkillLayoutPhase
+    migration_generation: str | None
     layout_contract_version: str | None
 
 
@@ -61,6 +63,24 @@ class ServiceSkillsManifestBuilder:
             bot_id=str(bot.get("bot_id") or ""),
         )
         state = self._layout_repository.get(scope)
+
+        if state.phase not in {
+            SkillLayoutPhase.LEGACY_ACTIVE,
+            SkillLayoutPhase.POOL_ACTIVE,
+        }:
+            raise ServiceSkillsManifestError(
+                "service build requires a terminal Skills layout state"
+            )
+        if (
+            state.phase is SkillLayoutPhase.LEGACY_ACTIVE
+            and state.active_layout is not SkillLayout.LEGACY
+        ) or (
+            state.phase is SkillLayoutPhase.POOL_ACTIVE
+            and state.active_layout is not SkillLayout.POOL
+        ):
+            raise ServiceSkillsManifestError(
+                "service build found an inconsistent terminal Skills layout"
+            )
 
         if engine == "aicoding":
             raise ServiceSkillsManifestError(
@@ -95,9 +115,12 @@ class ServiceSkillsManifestBuilder:
             engine=engine,
             scope=scope,
             active_layout=state.active_layout,
-            layout_contract_version=(
-                state.layout_contract_version if is_pool else None
-            ),
+            phase=state.phase,
+            migration_generation=state.migration_generation,
+            # Capture the raw persisted value even for Legacy.  Legacy emits no
+            # Pool contract, but a concurrent writer changing this field still
+            # means the layout state moved while the physical snapshot ran.
+            layout_contract_version=state.layout_contract_version,
         )
 
     def finalize(
@@ -107,14 +130,12 @@ class ServiceSkillsManifestBuilder:
     ) -> dict[str, Any]:
         engine = captured.engine
         current = self._layout_repository.get(captured.scope)
-        current_contract = (
-            current.layout_contract_version
-            if current.active_layout is SkillLayout.POOL
-            else None
-        )
         if (
             current.active_layout is not captured.active_layout
-            or current_contract != captured.layout_contract_version
+            or current.phase is not captured.phase
+            or current.migration_generation != captured.migration_generation
+            or current.layout_contract_version
+            != captured.layout_contract_version
         ):
             raise ServiceSkillsManifestError(
                 "draft Skills layout changed during service build"
@@ -124,7 +145,11 @@ class ServiceSkillsManifestBuilder:
             "schema_version": 1,
             "engine": engine,
             "active_layout": captured.active_layout.value,
-            "layout_contract_version": captured.layout_contract_version,
+            "layout_contract_version": (
+                captured.layout_contract_version
+                if captured.active_layout is SkillLayout.POOL
+                else None
+            ),
         }
 
 

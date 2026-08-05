@@ -17,6 +17,7 @@ from agentclaw.community.api.skills_pool_recovery_service import (
     SkillsPoolRecoveryServiceProtocol,
 )
 from agentclaw.community.api.skills_pool_rollback_service import (
+    SkillsPoolRollbackOutcome,
     SkillsPoolRollbackServiceProtocol,
 )
 from agentclaw.community.api.skills_pool_rollout_service import (
@@ -418,12 +419,16 @@ async def rollback_bot(
         owner_id=request.owner_id,
         bot_id=bot_id,
     )
-    return _response(
-        await service.rollback(
-            scope=scope,
-            rollback_generation=request.rollback_generation,
-            lease_owner=f"operator-api:{uuid4().hex}",
-            operator=user.staffId,
-            note=request.note,
-        )
+    result = await service.rollback(
+        scope=scope,
+        rollback_generation=request.rollback_generation,
+        lease_owner=f"operator-api:{uuid4().hex}",
+        operator=user.staffId,
+        note=request.note,
     )
+    if result.outcome is SkillsPoolRollbackOutcome.SERVICE_BOT_UNSUPPORTED:
+        raise HTTPException(
+            status_code=409,
+            detail="Service Bot Skills Pool rollback is disabled",
+        )
+    return _response(result)

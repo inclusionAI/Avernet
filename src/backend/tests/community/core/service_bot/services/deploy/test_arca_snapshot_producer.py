@@ -1,6 +1,7 @@
 """Unit tests for ``ArcaSnapshotProducer`` — behavior-equivalent build wrap."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -179,6 +180,159 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     class _StateChangingBuild(_RecordingBuild):
         def build(self, bot, version=1):
             repository.state = pool_state
+            return super().build(bot, version)
+
+    producer = ArcaSnapshotProducer(
+        _StateChangingBuild(
+            {
+                "success": True,
+                "migration_path": "/snapshot/8/openclaw",
+                "build_target_path": str(target),
+            }
+        ),
+        ServiceSkillsManifestBuilder(repository),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="draft Skills layout changed during service build",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            8,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "phase",
+    [
+        SkillLayoutPhase.POOL_PREPARING,
+        SkillLayoutPhase.POOL_READY,
+        SkillLayoutPhase.POOL_ACTIVATING_PRE_CUTOVER,
+        SkillLayoutPhase.POOL_CUTOVER_FINALIZING,
+        SkillLayoutPhase.POOL_CUTOVER_COMMITTED,
+        SkillLayoutPhase.LEGACY_ROLLBACK_PREPARING,
+        SkillLayoutPhase.LEGACY_ROLLBACK_COMMITTED,
+        SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
+    ],
+)
+def test_build_rejects_non_terminal_layout_before_physical_snapshot(
+    phase: SkillLayoutPhase,
+) -> None:
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    state = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.LEGACY,
+        target_layout=SkillLayout.POOL,
+        phase=phase,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+    )
+    build = _RecordingBuild({"success": True})
+    producer = ArcaSnapshotProducer(
+        build,
+        ServiceSkillsManifestBuilder(_LayoutRepository(state)),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="terminal Skills layout state",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            8,
+        )
+
+    assert build.calls == []
+
+
+@pytest.mark.unit
+def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
+    tmp_path,
+) -> None:
+    target = tmp_path / "openclaw"
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    initial = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.POOL,
+        target_layout=None,
+        phase=SkillLayoutPhase.POOL_ACTIVE,
+        migration_generation="generation-1",
+        persisted=True,
+        layout_contract_version="skills-pool-p3-v1",
+    )
+    repository = _LayoutRepository(initial)
+
+    class _StateChangingBuild(_RecordingBuild):
+        def build(self, bot, version=1):
+            repository.state = replace(
+                initial,
+                phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
+                migration_generation="generation-2",
+            )
+            return super().build(bot, version)
+
+    producer = ArcaSnapshotProducer(
+        _StateChangingBuild(
+            {
+                "success": True,
+                "migration_path": "/snapshot/8/openclaw",
+                "build_target_path": str(target),
+            }
+        ),
+        ServiceSkillsManifestBuilder(repository),
+    )
+
+    with pytest.raises(
+        ServiceSkillsManifestError,
+        match="draft Skills layout changed during service build",
+    ):
+        producer.produce_artifact(
+            {
+                "bot_id": "b1",
+                "entity_id": "u1",
+                "env": "dev",
+                "active_engine": "openclaw",
+            },
+            8,
+        )
+
+
+@pytest.mark.unit
+def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
+    tmp_path,
+) -> None:
+    target = tmp_path / "openclaw"
+    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
+    initial = BotSkillLayoutState(
+        scope=scope,
+        active_layout=SkillLayout.LEGACY,
+        target_layout=SkillLayout.POOL,
+        phase=SkillLayoutPhase.LEGACY_ACTIVE,
+        migration_generation=None,
+        persisted=True,
+        layout_contract_version=None,
+    )
+    repository = _LayoutRepository(initial)
+
+    class _StateChangingBuild(_RecordingBuild):
+        def build(self, bot, version=1):
+            repository.state = replace(
+                initial,
+                layout_contract_version="skills-pool-p3-v1",
+            )
             return super().build(bot, version)
 
     producer = ArcaSnapshotProducer(
