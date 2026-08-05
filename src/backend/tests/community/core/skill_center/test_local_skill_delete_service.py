@@ -421,6 +421,25 @@ async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(
 
 
 @pytest.mark.asyncio
+async def test_retry_repairs_an_incomplete_existing_source_before_purging_quarantine():
+    service, files, skills, _guard, cleanup = _service()
+    files.files["/skills/one/scripts/main.py"] = b"print('verified')\n"
+    files.partial_fail_delete.add("/skills/one")
+    files.fail_write_prefixes.add("/skills/one/")
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    files.fail_write_prefixes.clear()
+    files.partial_fail_delete.clear()
+    await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is True
+    assert files.files == {}
+    assert cleanup.repair_required
+
+
+@pytest.mark.asyncio
 async def test_database_failure_records_quarantine_cleanup_after_source_restores():
     service, files, skills, _guard, cleanup = _service(fail_delete=True)
     original_delete = files.delete_tree

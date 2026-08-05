@@ -50,6 +50,13 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                 db.flush()
             elif row.package_locator != package_locator:
                 raise ValueError("Local Skill cleanup package locator hash collision")
+            elif row.status in ("cancelled", "cleaned"):
+                row.skill_id = int(skill_id)
+                row.requires_runtime_restore = False
+                row.status = "preparing"
+                row.attempts = 0
+                row.last_error = None
+                row.cleaned_at = None
             elif row.status != "preparing":
                 raise ValueError("Local Skill cleanup locator is already in use")
             return int(row.id)

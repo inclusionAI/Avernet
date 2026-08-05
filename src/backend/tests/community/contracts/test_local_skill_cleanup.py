@@ -42,6 +42,27 @@ def test_cleanup_preparation_is_durable_but_not_purgeable_until_committed(world)
     assert repo.cancel_pending(work_id=work_id, **scope)
 
 
+def test_cleanup_preparation_reuses_terminal_work_for_the_same_locator(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    locator = "pool/local/retryable-locator"
+    work_id = repo.record_preparing(**scope, skill_id="9", package_locator=locator)
+    assert work_id is not None
+    assert repo.cancel_pending(work_id=work_id, **scope)
+    assert repo.record_preparing(**scope, skill_id="10", package_locator=locator) == work_id
+    assert repo.record_pending(
+        **scope, skill_id="10", package_locator=locator,
+        requires_runtime_restore=False,
+    ) == work_id
+    assert repo.mark_cleaned(work_id=work_id, **scope)
+    assert repo.record_preparing(**scope, skill_id="11", package_locator=locator) == work_id
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.status == "preparing"
+        assert row.skill_id == 11
+        assert row.last_error is None
+
+
 def test_cleanup_repository_isolated_by_the_full_deployment_wide_bot_scope(world) -> None:
     repo = world.get(LocalSkillCleanupRepository)
     values = {

@@ -141,10 +141,17 @@ class LocalSkillPackageStorage:
     async def restore_from(
         self, quarantine: "LocalSkillPackageStorage"
     ) -> tuple[bool, bool]:
-        """Restore the package and report source repair and quarantine purge separately."""
-        if await self._filesystem.exists(self.directory):
-            return False, False
+        """Verify or restore the package before purging its quarantine copy."""
         files = await quarantine._read_package_files()
+        if await self._filesystem.exists(self.directory):
+            try:
+                source_files = await self._read_package_files()
+            except OSError:
+                source_files = []
+            if source_files == files:
+                return True, await quarantine.cleanup()
+            if not await self.cleanup():
+                return False, False
         if not await self._restore_contents(files):
             return False, False
         return True, await quarantine.cleanup()
