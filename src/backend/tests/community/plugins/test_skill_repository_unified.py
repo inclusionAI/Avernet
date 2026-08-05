@@ -404,6 +404,34 @@ def test_get_skills_in_set_center_max_version(skills, sets):
     assert res[0]["version"] == 2  # MAX(version) PUBLISHED
 
 
+def test_get_all_active_skill_sets_uses_bot_scoped_default_set(sets):
+    bot_default = sets.create(
+        {
+            "name": "bot defaults",
+            "user_id": "owner-x",
+            "bolt_id": "bot-x",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+    global_default = sets.create(
+        {
+            "name": "global defaults",
+            "engine_type": "openclaw",
+            "is_default": True,
+            "is_active": True,
+        }
+    )
+
+    active = sets.get_all_active_skill_sets(
+        user_id="owner-x", bolt_id="bot-x", engine_type="openclaw"
+    )
+
+    assert [row["id"] for row in active] == [bot_default["id"]]
+    assert global_default["id"] not in {row["id"] for row in active}
+
+
 def test_set_active_skill_set_clears_then_activates(sets):
     a = sets.create({"name": "A", "bolt_id": "b", "is_active": 1})
     bset = sets.create({"name": "B", "bolt_id": "b"})
