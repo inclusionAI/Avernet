@@ -432,10 +432,11 @@ class TestOnChatAdditional:
             {
                 "sessionKey": "sk1",
                 "state": "error",
-                "message": {"content": [{"text": "err"}]},
+                "errorMessage": "some error",
             }
         )
         assert state.state == "error"
+        assert state.chat_complete.is_set() is True
 
     @pytest.mark.asyncio
     async def test_on_chat_verbose_ignored_state(self, mock_bot_ws):
