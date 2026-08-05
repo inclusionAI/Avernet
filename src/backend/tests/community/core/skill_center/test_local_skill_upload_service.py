@@ -410,6 +410,28 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
 
 
 @pytest.mark.parametrize(
+    ("metadata", "expected_description"),
+    [
+        (
+            b"---\nname: upload-skill\ndescription: |\n  first line\n  second line\n---\n",
+            "first line\nsecond line",
+        ),
+        (
+            b"---\nname: upload-skill\ndescription: >\n  first line\n  second line\n---\n",
+            "first line second line",
+        ),
+    ],
+)
+def test_zip_preserves_multiline_skill_description(metadata, expected_description):
+    name, description, _ = _service(_Filesystem())._unpack(
+        _zip({"SKILL.md": metadata})
+    )
+
+    assert name == "upload-skill"
+    assert description == expected_description
+
+
+@pytest.mark.parametrize(
     "path",
     [
         "/SKILL.md",
