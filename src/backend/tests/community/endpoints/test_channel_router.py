@@ -2,20 +2,61 @@
 
 Tests the following endpoints from ``adapters/http/channel/router.py``:
 - GET /api/channels/openclaw-configs
+
+``ChannelService.generate_openclaw_configs`` reads the bot's ``openclaw.json``
+off its workspace and merges the channel rows over it, so every case here is
+driven by the two things that really decide the outcome: whether the bot
+exists, and whether that file is on disk. The happy case writes a real
+template at the path the loader resolves for a local device filesystem; the
+error cases simply withhold one of the two, which is exactly how each failure
+arises in production. The router's catch-all 500 branch is the one thing no
+request can reach; that case injects its failure at the DI seam.
 """
 from __future__ import annotations
 
-from unittest.mock import patch, AsyncMock
 import json
 
+from agentclaw.community.core.channel.json_config_utils import _get_local_base_dir
+from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_failing_method,
     endpoint_test,
 )
+
+_TEMPLATE = {
+    "name": "test_bot",
+    "channels": {
+        "dingtalk": {
+            "enabled": True,
+            "accounts": {},
+        }
+    },
+}
+
+
+def _template_path():
+    """The file the generator actually opens, as production resolves it.
+
+    ``JsonConfigFile.load`` rewrites the bot workspace path to
+    ``${HOME}/.openclaw/<name>`` whenever the device filesystem is the local
+    one, so that — not the workspace directory — is where a local-mode
+    template has to be. Taken from the production helper so the test cannot
+    drift from the rule it depends on.
+    """
+    return _get_local_base_dir() / "openclaw.json"
+
+
+def _write_openclaw_template(world) -> None:
+    """Put a real ``openclaw.json`` where the generator will look for it."""
+    path = _template_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_TEMPLATE, indent=2), encoding="utf-8")
 
 
 # ============================================================================
@@ -24,9 +65,36 @@ from tests.community.framework import (
 
 
 def _seed_owner_with_bot(world):
-    """Seed a bot owner with a bot."""
+    """Seed a bot owner and a bot on an ACTIVE, non-BaaS-managed local device.
+
+    Two properties of the binding matter to this route. It must be ACTIVE, or
+    ``DeviceContextResolver`` refuses to mint a context and the generator never
+    reaches a filesystem. And its ``device_props`` must carry no
+    ``adapter_port``: that is precisely how the resolver tells a BaaS-managed
+    binding from one that is not, and the latter is what selects
+    ``LocalDeviceFileSystem``'s pathlib mode — the branch that reads the
+    ``openclaw.json`` this test writes to disk.
+    """
     make_staff_user(world, user_id="u_owner")
-    make_bot(world, bot_id="bot_test", owner_id="u_owner", bot_type="service", status="ACTIVE")
+    binding_id = world.get(DeviceBindingRepository).insert_binding(
+        entity_id="u_owner",
+        entity_type="staff",
+        device_id="channel_dev_test",
+        device_provider="local",
+        env=get_current_env(),
+        device_props={"openclaw_port": 18789},
+        status="ACTIVE",
+        apply_reason="channel endpoint test seed",
+        applied_by="u_owner",
+    )
+    make_bot(
+        world,
+        bot_id="bot_test",
+        owner_id="u_owner",
+        bot_type="service",
+        status="ACTIVE",
+        binding_id=binding_id,
+    )
 
 
 def _seed_other_user(world):
@@ -78,24 +146,10 @@ def _assert_forbidden_response(response, world):
 # ============================================================================
 
 
-def _seed_mock_generate_configs(world):
-    """Seed: mock generate_openclaw_configs to return test data."""
-    from agentclaw.community.core.channel.services.channel_service import OpenClawConfigs, ChannelService
-
-    async def mock_generate_openclaw_configs(self, *, bot_id, owner_id):
-        return OpenClawConfigs(
-            verify=json.dumps({"name": "test_verify", "channels": {}}, indent=2),
-            online=json.dumps({"name": "test_online", "channels": {}}, indent=2),
-            eval=json.dumps({"name": "test_eval", "channels": {"dingtalk": {"enabled": False}}}, indent=2),
-        )
-
-    patcher = patch.object(
-        ChannelService,
-        "generate_openclaw_configs",
-        mock_generate_openclaw_configs,
-    )
-    patcher.start()
-    world._channel_generate_configs_patcher = patcher
+def _seed_bot_with_openclaw_template(world):
+    """Seed the bot and the ``openclaw.json`` the generator merges over."""
+    _seed_owner_with_bot(world)
+    _write_openclaw_template(world)
 
 
 @endpoint_test(
@@ -106,7 +160,7 @@ def _seed_mock_generate_configs(world):
         query_params={"bot_id": "bot_test", "owner_id": "u_owner"},
         headers={"x-user-id": "u_owner"},
     ),
-    seed=lambda w: (_seed_owner_with_bot(w), _seed_mock_generate_configs(w)),
+    seed=_seed_bot_with_openclaw_template,
     expect=ExpectSuccess(
         status=200,
         json_contains={"success": True},
@@ -136,20 +190,15 @@ def get_openclaw_configs_non_owner_forbidden():
     """Non-owner cannot access another user's openclaw configs."""
 
 
-def _seed_mock_file_not_found(world):
-    """Seed: mock generate_openclaw_configs to raise FileNotFoundError."""
-    from agentclaw.community.core.channel.services.channel_service import ChannelService
+def _seed_bot_without_openclaw_template(world):
+    """Seed the bot but leave its workspace empty.
 
-    async def mock_generate_openclaw_configs(self, *, bot_id, owner_id):
-        raise FileNotFoundError("openclaw.json not found")
-
-    patcher = patch.object(
-        ChannelService,
-        "generate_openclaw_configs",
-        mock_generate_openclaw_configs,
-    )
-    patcher.start()
-    world._channel_file_not_found_patcher = patcher
+    A bot whose config has never been synced down is the real shape of this
+    failure — the generator has no template to merge over and raises
+    ``FileNotFoundError``.
+    """
+    _seed_owner_with_bot(world)
+    _template_path().unlink(missing_ok=True)
 
 
 @endpoint_test(
@@ -160,7 +209,7 @@ def _seed_mock_file_not_found(world):
         query_params={"bot_id": "bot_test", "owner_id": "u_owner"},
         headers={"x-user-id": "u_owner"},
     ),
-    seed=lambda w: (_seed_owner_with_bot(w), _seed_mock_file_not_found(w)),
+    seed=_seed_bot_without_openclaw_template,
     expect=ExpectError(
         status=500,
     ),
@@ -169,21 +218,9 @@ def get_openclaw_configs_file_not_found_error():
     """FileNotFoundError returns 500 status."""
 
 
-def _seed_mock_bot_not_found(world):
-    """Seed: mock generate_openclaw_configs to raise BotNotFoundError."""
-    from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
-    from agentclaw.community.core.channel.services.channel_service import ChannelService
-
-    async def mock_generate_openclaw_configs(self, *, bot_id, owner_id):
-        raise BotNotFoundError(f"Bot not found: {bot_id}")
-
-    patcher = patch.object(
-        ChannelService,
-        "generate_openclaw_configs",
-        mock_generate_openclaw_configs,
-    )
-    patcher.start()
-    world._channel_bot_not_found_patcher = patcher
+def _seed_owner_without_bot(world):
+    """Seed only the caller, so the bot lookup itself is what fails."""
+    make_staff_user(world, user_id="u_owner")
 
 
 @endpoint_test(
@@ -194,7 +231,7 @@ def _seed_mock_bot_not_found(world):
         query_params={"bot_id": "bot_test", "owner_id": "u_owner"},
         headers={"x-user-id": "u_owner"},
     ),
-    seed=lambda w: (_seed_owner_with_bot(w), _seed_mock_bot_not_found(w)),
+    seed=_seed_owner_without_bot,
     expect=ExpectError(
         status=400,
     ),
@@ -203,20 +240,22 @@ def get_openclaw_configs_bot_not_found_error():
     """BotNotFoundError returns 400 status."""
 
 
-def _seed_mock_unexpected_error(world):
-    """Seed: mock generate_openclaw_configs to raise unexpected error."""
-    from agentclaw.community.core.channel.services.channel_service import ChannelService
+def _seed_generator_breaks_unexpectedly(world):
+    """Seed the bot, then break the generator the way infrastructure would.
 
-    async def mock_generate_openclaw_configs(self, *, bot_id, owner_id):
-        raise RuntimeError("Unexpected error")
+    The 500 branch is the router's catch-all for faults no request can
+    provoke; the failure is injected at the DI seam so the branch is still
+    covered without pretending some input reaches it.
+    """
+    from agentclaw.community.api.channel_service import ChannelServiceProtocol
 
-    patcher = patch.object(
-        ChannelService,
+    _seed_bot_with_openclaw_template(world)
+    bind_failing_method(
+        world,
+        ChannelServiceProtocol,
         "generate_openclaw_configs",
-        mock_generate_openclaw_configs,
+        RuntimeError("Unexpected error"),
     )
-    patcher.start()
-    world._channel_unexpected_error_patcher = patcher
 
 
 @endpoint_test(
@@ -227,7 +266,7 @@ def _seed_mock_unexpected_error(world):
         query_params={"bot_id": "bot_test", "owner_id": "u_owner"},
         headers={"x-user-id": "u_owner"},
     ),
-    seed=lambda w: (_seed_owner_with_bot(w), _seed_mock_unexpected_error(w)),
+    seed=_seed_generator_breaks_unexpectedly,
     expect=ExpectError(
         status=500,
     ),

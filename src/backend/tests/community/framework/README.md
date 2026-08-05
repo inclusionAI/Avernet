@@ -183,6 +183,47 @@ state can't be richer than the live system permits.
 
 ---
 
+## No mocking in `tests/endpoints/`
+
+The framework guarantees that a case's declared `(method, path)` was
+really called. That guarantee is worth little if the code behind the
+route was replaced before the request went out — so **endpoint cases may
+not use `unittest.mock`, `monkeypatch`, `mocker`, or `setattr`**.
+`tests/framework/test_no_mock_in_endpoint_tests.py` enforces it (AST
+scan, so comments and docstrings that mention mocks are fine), and
+`test_no_mock_on_world_get.py` covers the related "overwrite a method on
+a `world.get(...)` handle" hack.
+
+In order of preference:
+
+1. **Seed the state that produces the outcome.** Most error branches are
+   reachable: a missing row → 404, a caller without the role → 403, a
+   malformed body → 422, a bot with no device binding → the service's own
+   `ValueError`. These test more than an injected exception does, and they
+   document the failure a user would actually hit.
+2. **Drive a system boundary through its DI seam.** Boundary plugins under
+   `plugins/local/` inherit `MockSeam`, so
+   `world.get(SomeBoundaryPlugin).set_response("method", value)` /
+   `.set_override("method", fn)` stands in for the *edge* — an HTTP
+   upstream, a device link, AgentPass — while everything inside stays real.
+   `MockSeam` also records `.calls`, so assertions read the calls the
+   endpoint actually made. Use `json_response(...)` /
+   `http_envelope_response(...)` from the framework to build replies.
+3. **Bind a stand-in through the injector** when a step genuinely cannot
+   run on a test host — a `sudo rsync` onto a NAS mount, a multi-minute
+   publish. `bind_method` / `bind_overrides` / `bind_failing_method`
+   (`tests/framework/di_seams.py`) build a *subclass* of whatever the graph
+   wired, override the named methods, and bind it on the per-test injector.
+   The production class is untouched and the substitution is discarded with
+   the test — neither is true of a class-level patch, which survives a
+   failed assertion and poisons whatever runs next.
+
+If a file constructs a service directly and never issues a request, it is
+a unit test: put it under `tests/services/` (or the matching tree), not
+here.
+
+---
+
 ## Isolation guarantees
 
 Every case runs against a **freshly-built injector** backed by a

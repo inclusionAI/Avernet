@@ -8,7 +8,6 @@ Covers:
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
 
 from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
@@ -33,6 +32,8 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_failing_method,
+    bind_method,
     endpoint_test,
 )
 
@@ -138,14 +139,19 @@ def _seed_first_draft(world) -> None:
 
 
 def _seed_can_restore_failure(world) -> None:
-    """Pass authorization, then force the service query seam to fail."""
+    """Pass authorization, then fail the lookup the way infrastructure would.
+
+    The lookup itself is a plain read, so nothing in the request can make it
+    fail; the failure goes in at the DI seam so the router's 500 envelope is
+    what gets asserted.
+    """
     _seed_restoreable_draft(world)
-    service = world.get(BotPublishServiceProtocol)
-    patch.object(
-        type(service),
+    bind_failing_method(
+        world,
+        BotPublishServiceProtocol,
         "can_restore_draft",
-        side_effect=RuntimeError("draft restore lookup failed"),
-    ).start()
+        RuntimeError("draft restore lookup failed"),
+    )
 
 
 async def _execute_restore_draft_stub(self, **kwargs):
@@ -166,16 +172,32 @@ async def _execute_restore_draft_stub(self, **kwargs):
 
 
 def _seed_restore_happy(world) -> None:
+    """Stand in for the rsync-backed restore, keeping its ledger effects.
+
+    ``execute_restore_draft`` copies a historical artifact tree over the NAS
+    mount with ``sudo rsync`` — the one step of this flow no test host can
+    perform. The stand-in writes the same operation-ledger rows the real
+    implementation writes, through the service's own repository, so the
+    endpoint's response and everything the assertions read back are produced
+    by the real code around it.
+    """
+    from agentclaw.community.api.publish_flow_service import (
+        PublishFlowServiceProtocol,
+    )
     from agentclaw.community.core.service_bot.services.publish_flow_service import (
         PublishFlowService,
     )
 
     _seed_restoreable_draft(world)
-    patch.object(
+    # The durable task handler receives the flow as its concrete class while the
+    # router injects the Protocol, so both keys have to reach the stand-in.
+    bind_method(
+        world,
         PublishFlowService,
         "execute_restore_draft",
-        new=_execute_restore_draft_stub,
-    ).start()
+        _execute_restore_draft_stub,
+        also_bind=(PublishFlowServiceProtocol,),
+    )
 
 
 def _assert_restore_completed(response, world) -> None:  # noqa: ARG001
@@ -228,13 +250,14 @@ def _seed_completed_restore_operation(world) -> None:
 
 
 def _seed_restore_status_failure(world) -> None:
+    """Take the operation ledger away underneath the status read."""
     _seed_restoreable_draft(world)
-    service = world.get(BotPublishServiceProtocol)
-    patch.object(
-        type(service),
+    bind_failing_method(
+        world,
+        BotPublishServiceProtocol,
         "get_draft_restore_status",
-        side_effect=RuntimeError("ledger unavailable"),
-    ).start()
+        RuntimeError("ledger unavailable"),
+    )
 
 
 @endpoint_test(

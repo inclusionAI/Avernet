@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 import jwt
 
 from agentclaw.community.core.bot_chat.models import BcsGroupSession
 from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
-from agentclaw.community.core.gateway_principal import PrincipalVerifierConfig
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.utils.gateway_principal_config import (
+    init_principal_verifier_config,
+)
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -71,16 +72,30 @@ def _principal_headers() -> dict[str, str]:
     return {"X-Avernet-Principal": token}
 
 
+class _Secret:
+    """The shape ``SecretResolver.get_secret`` returns for the signing key."""
+
+    secret_user = "test"
+    secret_value = _SIGNING_KEY
+
+
+class _Resolver:
+    """A secret store that holds the key this test's tokens are signed with."""
+
+    def get_secret(self, _secret_name: str) -> _Secret:
+        return _Secret()
+
+
 def _enable_public_auth(_world) -> None:
-    patch(
-        "agentclaw.community.adapters.http.openapi_v1.dependencies."
-        "get_principal_verifier_config",
-        return_value=PrincipalVerifierConfig(
-            signing_key=_SIGNING_KEY,
-            audience="backend",
-            issuer="gateway",
-        ),
-    ).start()
+    """Provision the gateway signing key through the production boot path.
+
+    ``init_principal_verifier_config`` is the same call ``adapters/http/app.py``
+    makes at boot; handing it a resolver that holds the key means the request
+    runs the real ``verify_principal_token`` over a real signature instead of a
+    verifier that was told to say yes. The community profile resolves no key, so
+    without this the public surface denies every request.
+    """
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
 def _seed_trace(world) -> None:
