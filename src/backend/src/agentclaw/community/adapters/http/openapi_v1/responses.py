@@ -16,6 +16,7 @@ a builder on success and let the decorator handle the mapped failures.
 
 from __future__ import annotations
 
+import inspect
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -24,6 +25,11 @@ from typing import Awaitable, Callable, Mapping, TypeVar
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from agentclaw.community.adapters.http.error_logging import (
+    capture_call_params,
+    log_public_error,
+    remember_call_params,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
@@ -415,7 +421,17 @@ def envelope_errors(
     The wrapped handler must take a ``request: Request`` parameter (used for the
     error envelope's ``request_id``). Unmapped exceptions are re-raised so the
     app's 500 handler still owns them.
+
+    Every failure is also logged here, with its traceback and the arguments the
+    handler was called with. This is the only frame that has both: the public
+    response carries a fixed message by design, so without this the sole record
+    of a mapped failure was the status code on the access log. Capture is lazy —
+    a successful request pays nothing — and the parameters are stashed on the
+    request for the unmapped case, where ``app.py`` logs further out.
     """
+    # Resolved once, at import: ``fn`` is the undecorated handler, so the bind
+    # in the except-branch recovers real parameter names for positional args.
+    signature = inspect.signature(fn)
 
     @wraps(fn)
     async def wrapper(*args: object, **kwargs: object) -> object:
@@ -425,9 +441,17 @@ def envelope_errors(
             request = _find_request(args, kwargs)
             if request is None:
                 raise
+            params = capture_call_params(signature, args, kwargs)
+            # Stashed before the mapping decision: an unmapped error is
+            # re-raised out of this frame, and the handler that catches it can
+            # no longer see the arguments.
+            remember_call_params(request, params)
             response = mapped_error_response(exc, request)
             if response is None:
                 raise
+            log_public_error(
+                request, exc, status=response.status_code, params=params
+            )
             return response
 
     return wrapper
