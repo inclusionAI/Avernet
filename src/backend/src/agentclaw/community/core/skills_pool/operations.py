@@ -694,7 +694,8 @@ class SkillsPoolRolloutOperations:
         for state in self._layouts.list_states(env=env, engine=engine):
             evidence = state.rollout_evidence
             if (
-                evidence is not None
+                self._claimed(state.active_layout, state.target_layout)
+                and evidence is not None
                 and evidence.engine_type == engine
                 and evidence.batch_id is not None
                 and evidence.batch_id not in accepted
