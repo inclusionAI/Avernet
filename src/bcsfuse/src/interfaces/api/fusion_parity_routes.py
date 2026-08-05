@@ -320,6 +320,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 logger.info(f"[Fusion][R5] req_dict fusion_mode: {req_dict.get('fusion_mode')}")
                 logger.info(f"[Fusion][R5] req_dict options: {req_dict.get('options', {})}")
 
+                # Q1: tolerate caller-supplied session_id (not used by Avernet G9,
+                # which scopes context by group_id). Strip before domain conversion
+                # so the domain FusionRequest (extra=forbid) does not reject it.
+                req_dict.pop("session_id", None)
+
                 real_request = RealFusionRequest(**req_dict)
                 logger.info(f"[Fusion][R5] Domain request fusion_mode: {real_request.fusion_mode}")
                 logger.info(f"[Fusion][R5] Converted FusionRequest to domain model successfully")

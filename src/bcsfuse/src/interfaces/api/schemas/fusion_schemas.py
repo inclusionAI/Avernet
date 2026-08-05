@@ -193,6 +193,13 @@ class FusionRequest(BaseModel):
         description="Fusion mode: agent (G1), conflict_alignment (G2), expert_diagnosis (G5), bot_profile_fuse (G9)",
     )
 
+    session_id: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Session identifier (accepted for caller compatibility; not "
+        "used — Avernet G9 scopes context by the path group_id).",
+    )
+
     options: FuseOptions = Field(
         default_factory=FuseOptions,
         description="Fusion options",
