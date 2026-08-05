@@ -122,10 +122,6 @@ async def get_skill(
     status_code=201,
     response_model=Envelope[SkillUpload],
     responses={
-        200: {
-            "model": Envelope[SkillUpload],
-            "description": "Same-name Local Skill replaced successfully.",
-        },
         413: {
             "model": ErrorEnvelope,
             "description": "ZIP package exceeds an upload limit.",
@@ -177,7 +173,9 @@ async def upload_skill(
 
 
 @router.post("/{skill_id}/activate", response_model=Envelope[SkillState])
-async def activate_skill(skill_id: str, principal: PrincipalDep) -> Envelope[SkillState]:
+async def activate_skill(
+    skill_id: str, principal: PrincipalDep
+) -> Envelope[SkillState]:
     """Set one Local Skill's desired state to Active."""
     raise NotImplementedError
 
