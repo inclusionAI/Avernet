@@ -254,7 +254,18 @@ class _Guard:
 class _Cleanup:
     def __init__(self):
         self.rows = []
+        self.preparing = []
         self.cancelled: list[int] = []
+
+    def record_preparing(self, **kwargs):
+        self.preparing.append(kwargs)
+        return len(self.preparing)
+
+    def commit_preparing(self, work_id, *, requires_runtime_restore):
+        row = self.preparing[work_id - 1]
+        self.rows.append(
+            {**row, "requires_runtime_restore": requires_runtime_restore}
+        )
 
     def record_pending(self, **kwargs):
         self.rows.append(kwargs)
@@ -275,7 +286,7 @@ class _Cleanup:
 
 
 class _CleanupRecordFailure(_Cleanup):
-    def record_pending(self, **_kwargs):
+    def record_preparing(self, **_kwargs):
         return None
 
 
@@ -329,6 +340,8 @@ class _ReplacementRepo(_Repo):
         super().__init__()
         self.rows = rows
         self.updates = []
+        self.atomic_replacements = []
+        self.cleanup = None
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
@@ -343,6 +356,34 @@ class _ReplacementRepo(_Repo):
         row = next(row for row in self.rows if row["id"] == skill_id)
         row.update(values)
         return row
+
+    def replace_bot_local_skill(self, **kwargs):
+        self.atomic_replacements.append(kwargs)
+        row = next(
+            (
+                row
+                for row in self.rows
+                if str(row["id"]) == str(kwargs["skill_id"])
+                and row["user_id"] == kwargs["owner_id"]
+                and row["bolt_id"] == kwargs["bot_id"]
+                and row["git_path"] == f"local://{kwargs['old_locator']}"
+            ),
+            None,
+        )
+        if row is None:
+            return None
+        row.update(
+            {
+                "description": kwargs["description"],
+                "git_path": f"local://{kwargs['new_locator']}",
+                "user_id": kwargs["owner_id"],
+            }
+        )
+        self.cleanup.commit_preparing(
+            kwargs["cleanup_work_id"],
+            requires_runtime_restore=kwargs["requires_runtime_restore"],
+        )
+        return kwargs["cleanup_work_id"]
 
 
 class _ConcurrentRepo(_ReplacementRepo):
@@ -395,6 +436,8 @@ class _DeviceResolver:
 def _replacement_service(
     filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local"
 ):
+    cleanup = cleanup or _Cleanup()
+    repo.cleanup = cleanup
     return LocalSkillUploadService(
         repo,
         _Sets(),
@@ -404,7 +447,7 @@ def _replacement_service(
         runtime,
         _Audit(),
         guard or _Guard(),
-        cleanup or _Cleanup(),
+        cleanup,
         lambda: _DeviceResolver(provider),
     )
 

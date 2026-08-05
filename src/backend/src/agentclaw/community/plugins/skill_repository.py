@@ -697,6 +697,66 @@ class SkillRepository:
             )
             return rowcount > 0
 
+    def replace_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        old_locator: str,
+        new_locator: str,
+        description: str,
+        requires_runtime_restore: bool,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically switch one Local Skill and commit obsolete-package work."""
+        from agentclaw.community.core.skill_center.local_skill_cleanup import (
+            LocalSkillCleanupWorkModel,
+        )
+
+        with self._db.transactional_orm_session() as db:
+            locator_hash = sha256(old_locator.encode("utf-8")).hexdigest()
+            cleanup = (
+                db.query(LocalSkillCleanupWorkModel)
+                .filter(
+                    LocalSkillCleanupWorkModel.id == cleanup_work_id,
+                    LocalSkillCleanupWorkModel.env == get_current_env(),
+                    LocalSkillCleanupWorkModel.owner_id == owner_id,
+                    LocalSkillCleanupWorkModel.bot_id == bot_id,
+                    LocalSkillCleanupWorkModel.package_locator == old_locator,
+                    LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
+                    LocalSkillCleanupWorkModel.status == "preparing",
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if cleanup is None:
+                raise RuntimeError("Local Skill cleanup preparation is missing")
+            skill = (
+                db.query(self.Skill)
+                .filter(
+                    self.Skill.id == int(skill_id),
+                    self.Skill.env == get_current_env(),
+                    self.Skill.user_id == _normalize_user_id(owner_id),
+                    self.Skill.bolt_id == bot_id,
+                    self.Skill.git_path == f"local://{old_locator}",
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if skill is None:
+                return None
+            skill.description = description
+            skill.git_path = f"local://{new_locator}"
+            skill.user_id = _normalize_user_id(owner_id)
+            skill.gmt_modified = func.now()
+            cleanup.requires_runtime_restore = requires_runtime_restore
+            cleanup.status = "pending"
+            cleanup.last_error = None
+            cleanup.cleaned_at = None
+            db.flush()
+            return int(cleanup.id)
+
     @staticmethod
     def _delete_skill_set_associations(db, skill_id: int) -> None:
         """Apply #684's association cleanup inside the caller's transaction."""

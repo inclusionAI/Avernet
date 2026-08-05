@@ -343,24 +343,28 @@ class LocalSkillUploadService:
         runtime_sync_attempted = False
         try:
             await staged.write(files)
-            updated = self._skill_repo.update(
-                skill["id"],
-                {
-                    "description": description,
-                    "git_path": f"local://{new_locator}",
-                    "user_id": owner_id,
-                },
-            )
-            if updated is None:
-                raise RuntimeError("Local Skill metadata switch failed")
-            switched = True
-            # Register deletion before runtime sync makes the committed switch
-            # recoverable even if a later obsolete-byte purge cannot start.
-            old_cleanup_work_id = self._record_cleanup(
-                bot, owner_id, bot_id, str(skill["id"]), old_locator
+            old_cleanup_work_id = self._cleanup_repo.record_preparing(
+                env=str(bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=str(skill["id"]),
+                package_locator=old_locator,
             )
             if old_cleanup_work_id is None:
                 raise LocalSkillStorageError()
+            committed_cleanup_id = self._skill_repo.replace_bot_local_skill(
+                skill_id=str(skill["id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                old_locator=old_locator,
+                new_locator=new_locator,
+                description=description,
+                requires_runtime_restore=bool(skill["active"]),
+                cleanup_work_id=old_cleanup_work_id,
+            )
+            if committed_cleanup_id != old_cleanup_work_id:
+                raise RuntimeError("Local Skill metadata switch failed")
+            switched = True
             runtime_sync_attempted = bool(skill["active"])
             if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
@@ -403,6 +407,9 @@ class LocalSkillUploadService:
                     runtime_sync_attempted=runtime_sync_attempted,
                 )
             else:
+                self._cancel_cleanup_if_registered(
+                    old_cleanup_work_id, bot, owner_id, bot_id
+                )
                 await self._discard_or_record(
                     bot=bot,
                     owner_id=owner_id,
