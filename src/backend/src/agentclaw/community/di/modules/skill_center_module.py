@@ -715,6 +715,7 @@ class SkillCenterModule(Module):
         device_sync_dispatcher: DeviceSyncDispatcher,
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
+        edit_guard: SkillsPoolEditGuard,
     ) -> SkillSetActivatorFactory:
         """Construct the per-request ``SkillSetActivator`` factory."""
         return SkillSetActivatorFactory(
@@ -723,6 +724,7 @@ class SkillCenterModule(Module):
             device_sync_dispatcher=device_sync_dispatcher,
             device_plugin=device_plugin,
             path_factory=path_factory,
+            edit_guard=edit_guard,
         )
 
     @singleton
@@ -736,6 +738,7 @@ class SkillCenterModule(Module):
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
         device_fs_dispatcher: DeviceFilesystemDispatcher,
+        edit_guard: SkillsPoolEditGuard,
     ) -> SkillSetSwitcherFactory:
         """Construct the per-request ``SkillSetSwitcher`` factory.
 
@@ -754,6 +757,7 @@ class SkillCenterModule(Module):
             device_plugin=device_plugin,
             path_factory=path_factory,
             device_fs_dispatcher=device_fs_dispatcher,
+            edit_guard=edit_guard,
         )
 
     @singleton

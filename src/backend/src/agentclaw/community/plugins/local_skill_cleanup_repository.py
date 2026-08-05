@@ -21,6 +21,39 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
+    def record_preparing(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+        package_locator: str,
+    ) -> int | None:
+        """Persist quarantine identity before the authoritative package moves."""
+        locator_hash = self._locator_hash(package_locator)
+        with self._db.orm_session() as db:
+            row = db.query(LocalSkillCleanupWorkModel).filter(
+                LocalSkillCleanupWorkModel.env == env,
+                LocalSkillCleanupWorkModel.owner_id == owner_id,
+                LocalSkillCleanupWorkModel.bot_id == bot_id,
+                LocalSkillCleanupWorkModel.package_locator_hash == locator_hash,
+            ).one_or_none()
+            if row is None:
+                row = LocalSkillCleanupWorkModel(
+                    env=env, owner_id=owner_id, bot_id=bot_id,
+                    skill_id=int(skill_id), package_locator=package_locator,
+                    package_locator_hash=locator_hash,
+                    requires_runtime_restore=False, status="preparing",
+                )
+                db.add(row)
+                db.flush()
+            elif row.package_locator != package_locator:
+                raise ValueError("Local Skill cleanup package locator hash collision")
+            elif row.status != "preparing":
+                raise ValueError("Local Skill cleanup locator is already in use")
+            return int(row.id)
+
     def record_pending(
         self,
         *,
@@ -153,7 +186,7 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                 LocalSkillCleanupWorkModel.env == env,
                 LocalSkillCleanupWorkModel.owner_id == owner_id,
                 LocalSkillCleanupWorkModel.bot_id == bot_id,
-                LocalSkillCleanupWorkModel.status == "pending",
+                LocalSkillCleanupWorkModel.status.in_(("pending", "preparing")),
             ).update(
                 {"status": "cancelled", "last_error": "cleanup target became authoritative"},
                 synchronize_session=False,

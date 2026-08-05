@@ -1,10 +1,12 @@
 """Unit tests for SkillSetSwitcher._cleanup_all_non_reserved_items via DeviceFileSystemPlugin (plan-05)."""
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
+def _edit_guard():
+    guard = MagicMock()
+    guard.acquire_for_edit_wait = AsyncMock(return_value=object())
+    return guard
 
 
 def _make_factory(dispatcher=None, **overrides):
@@ -19,6 +21,7 @@ def _make_factory(dispatcher=None, **overrides):
         device_plugin=overrides.get("device_plugin", MagicMock()),
         path_factory=overrides.get("path_factory", MagicMock()),
         device_fs_dispatcher=dispatcher or MagicMock(),
+        edit_guard=overrides.get("edit_guard", _edit_guard()),
     )
 
 
@@ -48,7 +51,6 @@ def test_switcher_constructed_with_dispatcher(tmp_path):
 def test_cleanup_uses_plugin_list_dir_then_delete_tree(monkeypatch, tmp_path):
     """改造后：_cleanup_all_non_reserved_items 通过 device_fs.list_dir +
     delete_tree 走 plugin，不再调用 pathlib.Path.iterdir / shutil.rmtree。"""
-    import asyncio
     from agentclaw.community.core.skill_center.services.skill_set_service import (
         SkillSetSwitcher,
     )
@@ -98,6 +100,7 @@ def test_cleanup_uses_plugin_list_dir_then_delete_tree(monkeypatch, tmp_path):
         device_plugin=MagicMock(),
         path_factory=path_factory,
         device_fs_dispatcher=dispatcher,
+        edit_guard=_edit_guard(),
         skills_dir=tmp_path / "skills",
         bot_id="bot-1",
         user_id="staff_u001",
@@ -142,6 +145,7 @@ def test_cleanup_skills_dir_does_not_exist_returns_empty(tmp_path):
         device_plugin=MagicMock(),
         path_factory=MagicMock(),
         device_fs_dispatcher=dispatcher,
+        edit_guard=_edit_guard(),
         skills_dir=tmp_path / "nope",
         bot_id="bot-1",
         user_id="staff_u001",
@@ -196,6 +200,7 @@ def test_cleanup_delete_failure_continues_and_logs(tmp_path, caplog):
         device_plugin=MagicMock(),
         path_factory=path_factory,
         device_fs_dispatcher=dispatcher,
+        edit_guard=_edit_guard(),
         skills_dir=tmp_path / "skills",
         bot_id="bot-1",
         user_id="staff_u001",
