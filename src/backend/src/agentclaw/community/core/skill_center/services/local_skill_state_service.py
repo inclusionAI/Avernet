@@ -82,12 +82,29 @@ class LocalSkillStateService:
                     skill_id=int(skill_id),
                 )
                 if not active:
-                    await self._cleanup_runtime_link(
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        skill_name=str(skill["name"]),
-                    )
+                    try:
+                        await self._cleanup_runtime_link(
+                            bot=bot,
+                            owner_id=owner_id,
+                            bot_id=bot_id,
+                            skill_name=str(skill["name"]),
+                        )
+                    except LocalSkillStorageError:
+                        try:
+                            self._write_desired_state(
+                                active=True,
+                                owner_id=owner_id,
+                                bot_id=bot_id,
+                                skill_set_id=int(default_set["id"]),
+                                skill_id=int(skill_id),
+                            )
+                        except Exception as exc:
+                            raise LocalSkillStorageError() from exc
+                        if not self._sync_runtime(
+                            bot=bot, owner_id=owner_id, bot_id=bot_id
+                        ):
+                            raise LocalSkillRuntimeSyncError()
+                        raise
             if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
                 if changed:
                     try:
