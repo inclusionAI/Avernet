@@ -64,7 +64,7 @@ def test_first_bot_and_first_personal_bot_uses_first_passport():
 
     passport.apply_first_agent_passport.assert_called_once()
     passport.apply_agent_passport.assert_not_called()
-    bot_service.is_first_personal_bot.assert_called_once_with("85020")
+    bot_service.is_first_personal_bot.assert_not_called()
     assert isinstance(outcome, Created)
     assert outcome.is_first_bot is True
 
@@ -89,9 +89,19 @@ def test_existing_personal_bot_uses_regular_passport():
     passport.apply_first_agent_passport.assert_not_called()
 
 
-def test_creating_service_bot_does_not_use_first_personal_passport():
+def test_first_service_bot_preserves_first_passport_behavior():
     passport, bot_service, _ = _run(
         bot_type="service", is_first_bot=True, is_first_personal_bot=True
+    )
+
+    passport.apply_first_agent_passport.assert_called_once()
+    passport.apply_agent_passport.assert_not_called()
+    bot_service.is_first_personal_bot.assert_not_called()
+
+
+def test_non_first_service_bot_uses_regular_passport():
+    passport, bot_service, _ = _run(
+        bot_type="service", is_first_bot=False, is_first_personal_bot=True
     )
 
     passport.apply_agent_passport.assert_called_once()

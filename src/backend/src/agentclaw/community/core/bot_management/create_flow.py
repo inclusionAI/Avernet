@@ -336,11 +336,11 @@ def create_bot_with_authorization(
     # Validate the name up front so an invalid one never reaches Passport or
     # create. An unset name stays unset — create_bot applies default naming.
     bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
-    # Keep the response contract tied to the owner's first Bot of any type, but
-    # choose Passport onboarding independently: a converted/existing service Bot
-    # must not consume the owner's first-personal-Bot entitlement.
+    # Preserve the existing first-Bot Passport path for every Bot type. When the
+    # owner already has service Bots, the first live personal Bot also uses that
+    # path; service and soft-deleted personal Bots do not consume this eligibility.
     is_first_bot = bot_service.is_first_bot(user_id)
-    use_first_passport = (
+    use_first_passport = is_first_bot or (
         spec.bot_type == "personal"
         and bot_service.is_first_personal_bot(user_id)
     )
