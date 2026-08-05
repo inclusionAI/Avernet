@@ -1224,12 +1224,15 @@ mod tests {
     }
 
     /// End-to-end round-trip: `SystemMessageDispatcherImpl` persists system
-    /// messages with `owner_bot_id = Some(recipient)` into a REAL
-    /// `MemoryMessageRepo`, and `MessageService::get_session_history` with
-    /// `view_bot_id=recipient` returns that recipient's own copy, hides the
-    /// other recipients' copies, and still returns public (owner=None) records.
-    /// This locks the §数据流 bridge between the write side (per-recipient
-    /// ownership persistence) and the query side (`PublicOrOwner` scoping).
+    /// messages by `PersistMode` into a REAL `MemoryMessageRepo` — personalized
+    /// copies with `owner_bot_id = Some(recipient)` and shared notices as a
+    /// single public (`owner = None`) record — and
+    /// `MessageService::get_session_history` with `view_bot_id=recipient`
+    /// returns that recipient's own copy plus public records, hides other
+    /// recipients' copies, and lets human viewers (no bot view) read the
+    /// public notices. This locks the §数据流 bridge between the write side
+    /// (PersistMode-driven ownership) and the query side (`PublicOrOwner`
+    /// scoping).
     #[tokio::test]
     async fn system_message_dispatch_round_trips_through_message_service_view_scoping() {
         use bcs_system_message::SystemMessageDispatcherImpl;
@@ -1281,9 +1284,9 @@ mod tests {
             .await
             .expect("dispatch succeeded");
 
-        // Viewer = existing mgr: sees its own notification (owner=mgr) + the
-        // public anchor; must NOT see new-bot's context injection (owner=new-bot)
-        // nor the other workers' notification copies.
+        // Viewer = existing mgr: sees the public join notice (owner=None) +
+        // the public anchor; must NOT see new-bot's context injection
+        // (owner=new-bot).
         let res_existing = service
             .get_session_history(session_cmd(group_id, &session_id, Some(&existing_id)))
             .await
@@ -1293,12 +1296,17 @@ mod tests {
         assert!(existing_contents.contains(&"public-anchor"),
             "public owner=None records still visible to mgr");
         assert!(existing_contents.iter().any(|c| c.contains("已加入协作群")),
-            "mgr's own notification (owner=mgr) is returned");
+            "public join notice (owner=None) is returned to mgr");
+        assert_eq!(
+            existing_contents.iter().filter(|c| c.contains("已加入协作群")).count(),
+            1,
+            "the shared notice is a single public record, not per-bot copies"
+        );
         assert!(existing_contents.iter().all(|c| !c.contains("你加入了 BCS 协作群.")),
             "new-bot's context injection (owner=new-bot) is hidden from mgr");
 
-        // Viewer = new-bot: sees its own context injection (owner=new-bot) + the
-        // public anchor; must NOT see the notification copies (owner=existing).
+        // Viewer = new-bot: sees its own context injection (owner=new-bot) +
+        // the public anchor + the public join notice.
         let res_new = service
             .get_session_history(session_cmd(group_id, &session_id, Some(&new_bot_id)))
             .await
@@ -1309,8 +1317,24 @@ mod tests {
             "public owner=None records still visible to new-bot");
         assert!(new_contents.iter().any(|c| c.contains("你加入了 BCS 协作群.")),
             "new-bot's own context injection (owner=new-bot) is returned");
-        assert!(new_contents.iter().all(|c| !c.contains("已加入协作群")),
-            "existing participants' notification copies are hidden from new-bot");
+        assert!(new_contents.iter().any(|c| c.contains("已加入协作群")),
+            "public join notice (owner=None) is returned to new-bot");
+
+        // Viewer = human (no bot view): sees the public anchor + the public
+        // join notice; must NOT see any per-bot owned copy. This is the
+        // regression guard for system messages vanishing from human history.
+        let res_human = service
+            .get_session_history(session_cmd(group_id, &session_id, None))
+            .await
+            .expect("human view session history");
+        let human_contents: Vec<&str> =
+            res_human.messages.iter().map(|m| m.content.as_str()).collect();
+        assert!(human_contents.contains(&"public-anchor"),
+            "public owner=None records visible to human viewers");
+        assert!(human_contents.iter().any(|c| c.contains("已加入协作群")),
+            "public join notice is visible to human viewers");
+        assert!(human_contents.iter().all(|c| !c.contains("你加入了 BCS 协作群.")),
+            "per-bot owned copies stay hidden from human viewers");
     }
 
     fn group_fixture(group_id: &str, driver_bot_id: &str) -> Group {

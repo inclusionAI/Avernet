@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    ActorKind, DeliveryType, Group, Participant, ParticipantMode, SystemMessageEvent,
+    ActorKind, DeliveryType, Group, Participant, ParticipantMode, PersistMode, SystemMessageEvent,
     SystemMessageEventKind, SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
@@ -69,15 +69,14 @@ impl SystemMessageProducerService for ParticipantModeChangedMessageProducer {
             .map(|p| p.bot_uuid.clone())
             .collect();
 
-        let bot_messages = if recipients.is_empty() {
-            vec![]
-        } else {
-            vec![SystemGroupMessage {
-                recipients,
-                message: content,
-                delivery_type: DeliveryType::Inject,
-            }]
-        };
+        // Identical text for every recipient: persist a single public record
+        // (owner = None) that human viewers also read in history.
+        let bot_messages = vec![SystemGroupMessage {
+            recipients,
+            message: content,
+            delivery_type: DeliveryType::Inject,
+            persist: PersistMode::Public,
+        }];
         (bot_messages, user_message)
     }
 }

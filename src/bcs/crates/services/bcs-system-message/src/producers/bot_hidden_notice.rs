@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    DeliveryType, Group, Participant, SystemMessageEvent, SystemMessageEventKind,
+    DeliveryType, Group, Participant, PersistMode, SystemMessageEvent, SystemMessageEventKind,
     SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
@@ -33,10 +33,14 @@ impl SystemMessageProducerService for BotHiddenNoticeProducer {
 
         let message = format!("{} 已设置为「不可协作」", hidden_bot_name);
         let user_message = Some(message.clone());
+        // The notice text is identical for every recipient, so persist a
+        // single public record (owner = None) with the mentioner's message;
+        // the others' copy is delivered but not persisted again.
         let mut messages = vec![SystemGroupMessage {
             recipients: vec![mentioner_bot_id.clone()],
             message: message.clone(),
             delivery_type: DeliveryType::Send,
+            persist: PersistMode::Public,
         }];
 
         let others: Vec<String> = participants
@@ -50,6 +54,7 @@ impl SystemMessageProducerService for BotHiddenNoticeProducer {
                 recipients: others,
                 message,
                 delivery_type: DeliveryType::Inject,
+                persist: PersistMode::Skip,
             });
         }
 
@@ -124,14 +129,16 @@ mod tests {
             .await;
 
         assert_eq!(messages.len(), 2);
-        // First message: Send to mentioner
+        // First message: Send to mentioner; carries the single public record.
         assert_eq!(messages[0].recipients, vec!["bot-driver"]);
         assert!(messages[0].message.contains("HiddenBot"));
         assert!(messages[0].message.contains("不可协作"));
         assert_eq!(messages[0].delivery_type, DeliveryType::Send);
-        // Second message: Inject to other bots
+        assert_eq!(messages[0].persist, PersistMode::Public);
+        // Second message: Inject to other bots; identical text, not persisted.
         assert_eq!(messages[1].recipients, vec!["bot-hidden"]);
         assert_eq!(messages[1].delivery_type, DeliveryType::Inject);
+        assert_eq!(messages[1].persist, PersistMode::Skip);
         assert_eq!(user_message.as_deref(), Some("HiddenBot 已设置为「不可协作」"));
     }
 

@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    DeliveryType, Group, Participant, SystemMessageEvent, SystemMessageEventKind,
+    DeliveryType, Group, Participant, PersistMode, SystemMessageEvent, SystemMessageEventKind,
     SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
@@ -50,15 +50,14 @@ impl SystemMessageProducerService for HumanJoinedMessageProducer {
             .map(|p| p.bot_uuid.clone())
             .collect();
 
-        let bot_messages = if recipients.is_empty() {
-            vec![]
-        } else {
-            vec![SystemGroupMessage {
-                recipients,
-                message,
-                delivery_type: DeliveryType::Inject,
-            }]
-        };
+        // Identical text for every recipient: persist a single public record
+        // (owner = None) that human viewers also read in history.
+        let bot_messages = vec![SystemGroupMessage {
+            recipients,
+            message,
+            delivery_type: DeliveryType::Inject,
+            persist: PersistMode::Public,
+        }];
         (bot_messages, user_message)
     }
 }
@@ -108,7 +107,11 @@ mod tests {
             .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants)
             .await;
 
-        assert!(messages.is_empty());
+        // No bot recipients, but the notice is still a public history record
+        // for human viewers (persisted with owner = None by the dispatcher).
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].recipients.is_empty());
+        assert_eq!(messages[0].persist, PersistMode::Public);
         assert_eq!(user_message.as_deref(), Some("Alice(human_42) 已加入协作群"));
     }
 }
