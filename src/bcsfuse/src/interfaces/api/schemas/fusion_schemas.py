@@ -160,6 +160,7 @@ class FusionRequest(BaseModel):
         driver_bot_id: Explicit driver bot ID
         mode: Fusion mode (backward compatible, fixed to "agent")
         fusion_mode: Fusion mode (G1/G2/G5)
+        session_id: Caller-supplied session id (accepted for compatibility, unused; context uses group_id)
         options: Fusion options
         metadata: Request metadata
     """
