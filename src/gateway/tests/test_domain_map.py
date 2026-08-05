@@ -113,15 +113,18 @@ def test_shipped_config_routes_bcsfuse_via_strip_rewrite() -> None:
     assert not fusion.serves_websocket
     assert fusion.rewrite is not None
     # Strip rewrite drops the domain prefix; the upstream's own /api/v1 and /v1 stay.
-    assert fusion.upstream_path(
-        "/openapi/v1/bcsfuse/api/v1/groups/group-1"
-    ) == "/api/v1/groups/group-1"
-    assert fusion.upstream_path(
-        "/openapi/v1/bcsfuse/v1/workers/w-1/config"
-    ) == "/v1/workers/w-1/config"
-    assert fusion.upstream_path(
-        "/openapi/v1/bcsfuse/v1/workers/config/batch"
-    ) == "/v1/workers/config/batch"
+    assert (
+        fusion.upstream_path("/openapi/v1/bcsfuse/api/v1/groups/group-1")
+        == "/api/v1/groups/group-1"
+    )
+    assert (
+        fusion.upstream_path("/openapi/v1/bcsfuse/v1/workers/w-1/config")
+        == "/v1/workers/w-1/config"
+    )
+    assert (
+        fusion.upstream_path("/openapi/v1/bcsfuse/v1/workers/config/batch")
+        == "/v1/workers/config/batch"
+    )
     assert fusion.schema.location == "schemas/bcsfuse.openapi.json"
 
     security = RouteSecurity.from_table(raw["user_config"]["route_security"])
