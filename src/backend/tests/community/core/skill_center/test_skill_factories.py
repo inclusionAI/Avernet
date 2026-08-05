@@ -799,8 +799,8 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
     from unittest.mock import AsyncMock
 
     switcher = test_injector.get(SkillSetSwitcherFactory).create()
-    switcher.skill_set_service.user_id = "viewer"
-    switcher.skill_set_service.entity_id = "owner"
+    switcher.skill_set_service.user_id = "owner"
+    switcher.skill_set_service.entity_id = "project-42"
     switcher.skill_set_service.bot_id = "bot"
 
     class _Guard:
@@ -822,7 +822,7 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
         owner_lookups.append((bot_id, owner_id))
         if owner_id != "owner":
             return None
-        return {"env": "dev", "entity_id": "owner"}
+        return {"env": "dev", "entity_id": "project-42"}
 
     switcher.skill_set_service._bot_repo.get_by_id_and_owner = get_by_id_and_owner
     switch_unlocked = AsyncMock(
@@ -832,18 +832,18 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
     switcher._switch_to_skill_set_unlocked = switch_unlocked
     switcher._sync_skill_set_to_active_unlocked = sync_unlocked
 
-    assert (await switcher.switch_to_skill_set("7", user_id="viewer")).success
-    assert (await switcher.sync_skill_set_to_active("8", user_id="viewer")).success
+    assert (await switcher.switch_to_skill_set("7", user_id="owner")).success
+    assert (await switcher.sync_skill_set_to_active("8", user_id="owner")).success
 
     assert [event[0] for event in guard.events] == [
         "acquire", "release", "acquire", "release"
     ]
     assert owner_lookups == [("bot", "owner"), ("bot", "owner")]
     assert [event[1].entity_id for event in guard.events if event[0] == "acquire"] == [
-        "owner", "owner"
+        "project-42", "project-42"
     ]
-    switch_unlocked.assert_awaited_once_with("7", user_id="viewer", proxy_token=None)
-    sync_unlocked.assert_awaited_once_with("8", "viewer")
+    switch_unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
+    sync_unlocked.assert_awaited_once_with("8", "owner")
 
 
 def test_pool_paths_propagate_to_switcher_and_activator(test_injector):

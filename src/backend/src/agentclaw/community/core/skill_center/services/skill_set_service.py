@@ -2011,10 +2011,11 @@ class _DeviceSyncMixin:
     skill_set_service: SkillSetService
 
     def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
+        """Resolve a Bot lock by owner, while retaining its entity as scope."""
         owner_id = (
-            self.skill_set_service.entity_id
-            or user_id
+            user_id
             or self.skill_set_service.user_id
+            or self.skill_set_service.entity_id
         )
         bot_id = self.skill_set_service.bot_id
         if not owner_id or not bot_id:
