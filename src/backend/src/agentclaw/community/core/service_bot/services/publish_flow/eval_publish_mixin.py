@@ -68,7 +68,7 @@ class EvalPublishMixin:
         # config_artifact read above is only the build-artifact presence guard. Eval
         # does not persist, so the applied overrides are discarded.
         delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
-        image_pin = self.resolve_publish_image_pin(publish_record, bot)
+        image_pin = self.resolve_publish_image_pin(publish_record)
 
         ext_info = {}
         if biz_id:

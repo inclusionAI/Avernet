@@ -86,7 +86,6 @@ class ReleaseRecordOps(Protocol):
     def resolve_publish_image_pin(
         self,
         publish_record: BotPublishRecord,
-        bot: dict,
     ) -> ServiceBotImagePin: ...
 
 
@@ -174,7 +173,7 @@ class ReleaseStageRunner:
         publish_id = publish_record.id
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = self._ops.resolve_publish_image_pin(publish_record, bot)
+        image_pin = self._ops.resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied
@@ -274,7 +273,7 @@ class ReleaseStageRunner:
         version = f"{publish_record.version}"
         owner_id = self._ext_state.owner_id(publish_record)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = self._ops.resolve_publish_image_pin(publish_record, bot)
+        image_pin = self._ops.resolve_publish_image_pin(publish_record)
 
         # Compose through the single delivery seam (LIVE overrides re-fetch); the raw
         # ext['config_artifact'] is never handed to BaaS. ``overrides`` is the applied

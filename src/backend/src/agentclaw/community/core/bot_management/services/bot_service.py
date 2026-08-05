@@ -72,6 +72,7 @@ from agentclaw.community.core.service_bot.services.arka_image_pin import (
     apply_default_image_to_ext,
     copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
+    persist_default_image_policy,
 )
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -394,27 +395,13 @@ class BotService:
         ):
             return
 
-        bot_id = str(bot["bot_id"])
-        updated_ext = apply_default_image_to_ext(bot.get("ext"))
-        self._repository.update_by_owner(bot_id, user_id, {"ext": updated_ext})
-
-        draft = self._bot_publish_repo.get_draft_by_publish_bot_id(
-            publish_bot_id=bot_id,
+        persist_default_image_policy(
+            bot_repository=self._repository,
+            publish_repository=self._bot_publish_repo,
+            bot_id=str(bot["bot_id"]),
+            owner_id=user_id,
             env=get_current_env(),
         )
-        if draft is None:
-            return
-        draft_ext = copy_image_policy_to_ext(updated_ext, draft.ext) or {}
-        updated_draft = self._bot_publish_repo.update_status_with_ext(
-            publish_id=draft.id,
-            target_status=draft.status,
-            ext=draft_ext,
-            source_status=draft.status,
-        )
-        if updated_draft is None:
-            raise BotServiceError(
-                f"Draft publish {draft.id} default-image persistence conflicted"
-            )
 
     def _build_engine_extra_envs(
         self,
@@ -4247,7 +4234,6 @@ class BotService:
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
         result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
-        self._persist_service_bot_default_image(bot, user_id=user_id)
 
         # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
         # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然
@@ -4258,7 +4244,14 @@ class BotService:
             update_data: Dict[str, Any] = {"status": "PENDING"}
             if publish_id is not None:
                 restart_publish_id = str(publish_id)
-                ext = clear_baas_publish_failure_ext(bot.get("ext"))
+                persisted_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
+                if isinstance(persisted_bot, dict):
+                    persisted_ext = persisted_bot.get("ext")
+                else:
+                    # Tests and defensive fallback: retain unrelated Bot ext but
+                    # never leak the in-memory DEFAULT intent into PENDING state.
+                    persisted_ext = copy_image_policy_to_ext(None, bot.get("ext"))
+                ext = clear_baas_publish_failure_ext(persisted_ext)
                 ext["restart_publish_id"] = restart_publish_id
                 update_data["ext"] = ext
                 self._device_binding_repo.update_device_props(
@@ -4297,6 +4290,13 @@ class BotService:
                         publish_id=publish_id,
                         started_at_epoch_s=time.time(),
                         bot_uuid=bot_uuid,
+                        image_policy_on_success=(
+                            "default"
+                            if bot_type == "service"
+                            and not self.is_teclaw_bot(active_engine)
+                            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
+                            else None
+                        ),
                     ),
                     deadline_seconds=86400,
                 )

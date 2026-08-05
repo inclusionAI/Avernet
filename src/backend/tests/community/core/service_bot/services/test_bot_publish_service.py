@@ -145,6 +145,7 @@ class TestCreatePublishImagePolicy:
         assert ext == {
             "migration_path": "/build/v1",
             "sbot_use_default_image": True,
+            "sbot_runtime_kind": "arka",
         }
         common_config.get_value.assert_not_called()
 
@@ -162,6 +163,7 @@ class TestCreatePublishImagePolicy:
             "migration_path": "/build/v1",
             "sbot_pin_image": True,
             "sbot_docker_image": "registry/arka:v2",
+            "sbot_runtime_kind": "arka",
         }
         common_config.get_value.assert_called_once()
 
@@ -175,7 +177,10 @@ class TestCreatePublishImagePolicy:
             common_config_value=None,
         )
 
-        assert ext == {"migration_path": "/build/v1"}
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_runtime_kind": "arka",
+        }
         common_config.get_value.assert_called_once()
 
     def test_teclaw_publish_does_not_consume_arka_common_config(self):
@@ -189,7 +194,10 @@ class TestCreatePublishImagePolicy:
             is_teclaw=True,
         )
 
-        assert ext == {"migration_path": "/build/v1"}
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_runtime_kind": "teclaw",
+        }
         common_config.get_value.assert_not_called()
 
 
