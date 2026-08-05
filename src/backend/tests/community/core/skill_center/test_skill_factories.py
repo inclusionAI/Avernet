@@ -365,6 +365,9 @@ def test_desktop_legacy_factory_preserves_existing_paths(test_injector):
     assert svc.is_desktop is True
     assert str(svc.local_dir) == ("/home/admin/.openclaw/workspace/skills/skills-local")
     assert str(svc.repo_dir) == ("/home/admin/.openclaw/workspace/skills/skills-repo")
+    assert svc.skill_service.local_dir == svc.local_dir
+    assert svc.skill_service.repo_dir == svc.repo_dir
+    assert svc.skill_service.active_dir == svc.skills_dir
 
 
 def test_desktop_pool_mapping_uses_canonical_pool_sources(test_injector):
