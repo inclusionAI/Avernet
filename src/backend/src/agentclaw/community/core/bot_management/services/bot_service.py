@@ -3870,6 +3870,15 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        if self.is_teclaw_bot(bot.get("active_engine")):
+            logger.warning(
+                "[bot_service.restart_bot] reject restart for teclaw bot: "
+                "bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            raise BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
+
         if bot.get("bot_type") == "desktop":
             raise BotServiceError(
                 f"Desktop bot {bot_id} cannot be stopped via BotService.stop_bot, "

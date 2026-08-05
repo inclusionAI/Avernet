@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
@@ -1010,7 +1011,7 @@ class TestRestartForOthers:
 
     def test_rejects_teclaw_bot(self, admin_client):
         tc, svc, _, _ = admin_client
-        svc.get_bot.return_value = {**BOT_SAMPLE, "active_engine": "teclaw"}
+        svc.restart_bot.side_effect = BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
 
         resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "default"})
 
@@ -1018,7 +1019,7 @@ class TestRestartForOthers:
         assert data["success"] is False
         assert data["error_code"] == 400
         assert data["message"] == "teclaw 类型的 Bot 不支持重启"
-        svc.restart_bot.assert_not_called()
+        svc.restart_bot.assert_called_once()
 
     def test_missing_target_user(self, admin_client):
         tc, svc, _, _ = admin_client

@@ -40,6 +40,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
@@ -369,19 +370,6 @@ async def restart_bot_for_others(
         target_user_id = target_user_id.strip()
         target_bot_id = target_bot_id.strip()
 
-        bot = bot_service.get_bot(target_bot_id, target_user_id)
-        if bot.get("active_engine") == "teclaw":
-            logger.warning(
-                "[bot_router.restart_bot_for_others] Restart is not supported for teclaw bot: "
-                f"bot_id={target_bot_id}, user_id={target_user_id}"
-            )
-            return ApiResponse(
-                success=False,
-                message="teclaw 类型的 Bot 不支持重启",
-                error_code=400,
-                data=None,
-            )
-
         # Call service to restart bot
         result = bot_service.restart_bot(
             bot_id=target_bot_id,
@@ -421,6 +409,14 @@ async def restart_bot_for_others(
             success=False,
             message=f"当前状态不允许重启Bot: {str(e)}",
             error_code=409,
+            data=None,
+        )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_bot_for_others] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
@@ -500,6 +496,14 @@ async def restart_scheduler(
             success=False,
             message=f"当前状态不允许重启Bot: {str(e)}",
             error_code=409,
+            data=None,
+        )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_scheduler] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
@@ -2676,6 +2680,14 @@ async def restart_bot(
             success=False,
             message=f"当前状态不允许重启Bot: {str(e)}",
             error_code=409,
+            data=None,
+        )
+    except BotOperationNotAllowedError as e:
+        logger.warning(f"[bot_router.restart_bot] Operation not allowed: {e}")
+        return ApiResponse(
+            success=False,
+            message=str(e),
+            error_code=400,
             data=None,
         )
     except BotServiceError as e:
