@@ -306,7 +306,7 @@ def deactivate_repushes_remaining_symlinks():
     """Deactivate removes the on-disk link, re-pushes the merged set."""
 
 
-# ---- deactivate: error (no on-disk entry → 400) ----
+# ---- deactivate: missing on-disk entry is idempotent ----
 def _seed_deactivate_missing(world) -> None:
     _seed_bot_with_active_git_skill(world, bot_id="bot_skill_deact_err", engine="openclaw")
     _clean_workspace_skills_dir(world, bot_id="bot_skill_deact_err", engine="openclaw")
@@ -316,14 +316,14 @@ def _seed_deactivate_missing(world) -> None:
 @endpoint_test(
     method="POST",
     path="/api/skills/{skill_id}/deactivate",
-    scenario="error_deactivate_missing_entry_400",
+    scenario="deactivate_missing_entry_is_idempotent",
     input=CaseInput(
         path_params={"skill_id": "foo"},
         query_params={"bot_id": "bot_skill_deact_err", "entity_id": _OWNER},
         headers={"x-user-id": _OWNER},
     ),
     seed=_seed_deactivate_missing,
-    expect=ExpectError(status=400),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
 )
-def deactivate_missing_entry_returns_400():
-    """Deactivate with no on-disk entry → 400, no push."""
+def deactivate_missing_entry_is_idempotent():
+    """A missing on-disk entry is already deactivated and still converges runtime state."""
