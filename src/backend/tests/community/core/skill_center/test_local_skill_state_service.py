@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
@@ -103,6 +105,8 @@ class _Runtime:
     def __init__(self, success: bool) -> None:
         self.success = success
         self.calls = 0
+        self.skill_service = MagicMock()
+        self.skill_service.deactivate_skill = AsyncMock(return_value=True)
 
     def sync_runtime(self):
         self.calls += 1
@@ -184,6 +188,18 @@ async def test_idempotent_deactivate_still_reconciles_without_mutating_database(
     assert result["active"] is False
     assert result["changed"] is False
     assert sets.events == []
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_deactivate_removes_stale_runtime_link_before_sync():
+    service, _skills, _sets, _guard, runtime, _factory = _service(active=True)
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=False)
+
+    runtime.skill_service.deactivate_skill.assert_awaited_once_with(
+        "one", bolt_id="bot", user_id="owner"
+    )
     assert runtime.calls == 1
 
 
