@@ -26,6 +26,11 @@ from websockets.asyncio.client import ClientConnection
 from secbaas.community.core.utils.env_utils import is_dev
 from secbaas.community.logger import get_logger
 
+from ._interaction_protocol import (
+    EngineInteractionResolveExchange,
+    build_interaction_resolve_request,
+)
+
 logger = get_logger("core-bot-run")
 
 # 事件处理器类型：同步或异步均可，不关心返回值
@@ -323,6 +328,24 @@ class BotWebSocketClient:
 
         return result
 
+    async def interaction_resolve(
+        self,
+        *,
+        interaction_id: str,
+        decision: str,
+    ) -> EngineInteractionResolveExchange:
+        """Resolve an interaction and return the exact validated RPC exchange."""
+        request = build_interaction_resolve_request(
+            request_id=self._next_request_id(),
+            interaction_id=interaction_id,
+            decision=decision,
+        )
+        response = await self._send_request_frame(request, timeout=30.0)
+        return EngineInteractionResolveExchange.from_frames(
+            request=request,
+            response=response,
+        )
+
     async def chat_abort(
         self,
         session_key: str,
@@ -478,28 +501,34 @@ class BotWebSocketClient:
         if not self._connected or self._ws is None:
             raise RuntimeError("Not connected")
 
-        request_id = self._next_request_id()
         request_frame = {
             "type": "req",
-            "id": request_id,
+            "id": self._next_request_id(),
             "method": method,
             "params": params,
         }
+        return await self._send_request_frame(request_frame, timeout=timeout)
 
-        # 注册 Future 等待响应
+    async def _send_request_frame(
+        self,
+        request_frame: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Send an already-built request frame and await its matching response."""
+        if not self._connected or self._ws is None:
+            raise RuntimeError("Not connected")
+
+        request_id = request_frame["id"]
+        method = request_frame["method"]
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
         self._pending_requests[request_id] = future
-
         await self._ws.send(json.dumps(request_frame))
 
-        # 等待响应
         try:
-            result = await asyncio.wait_for(future, timeout=timeout)
+            return await asyncio.wait_for(future, timeout=timeout)
         except TimeoutError:
-            self._pending_requests.pop(request_id, None)
             raise TimeoutError(f"Request {method} timed out")
         finally:
             self._pending_requests.pop(request_id, None)
-
-        return result

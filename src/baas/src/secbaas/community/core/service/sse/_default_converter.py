@@ -9,6 +9,7 @@
   - chunk.type == "aborted"   → SSE event: chat (中止)
   - chunk.type == "agent"     → SSE event: agent (引擎事件)
   - chunk.type == "heartbeat" → SSE 注释帧: : heartbeat
+  - chunk.type == "interaction" → SSE event: interaction.requested / interaction.resolve
   - chunk.type == "usage"     → 无独立事件（忽略）
 """
 
@@ -144,11 +145,29 @@ def _transform_chunk(chunk: StreamChunk, engine: str) -> dict[str, Any] | None:
     if ctype == "agent":
         return _transform_agent(_agent_payload(chunk), engine)
 
+    if ctype == "interaction":
+        return _transform_interaction(chunk)
+
     if ctype == "heartbeat":
         return {"event": ": heartbeat", "data": {}}
 
     # usage / unknown: no standalone SSE event.
     return None
+
+
+def _transform_interaction(chunk: StreamChunk) -> dict[str, Any] | None:
+    metadata = chunk.metadata or {}
+    event = metadata.get("event")
+    if event == "interaction.resolved":
+        event = "interaction.resolve"
+    if event not in {"interaction.requested", "interaction.resolve"}:
+        return None
+    payload = metadata.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    # Payload is already the public protocol envelope. The generic builder will
+    # only set missing runId/ts and assign the SSE seq/id.
+    return {"event": event, "data": payload}
 
 
 def _transform_agent(payload: dict[str, Any], engine: str) -> dict[str, Any] | None:

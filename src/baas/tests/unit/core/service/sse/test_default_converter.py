@@ -414,3 +414,43 @@ class TestEngineNameFallback:
             run_id="run-1",
         )
         assert event is not None
+
+
+class TestInteractionBranch:
+    def test_interaction_requested_passthrough_envelope(self):
+        converter = DefaultStreamConverter()
+        envelope = {
+            "type": "event",
+            "event": "interaction.requested",
+            "payload": {"sessionKey": "s", "interactionId": "int-1"},
+        }
+        event = converter.convert(
+            StreamChunk(
+                type="interaction",
+                metadata={"event": "interaction.requested", "payload": envelope},
+            ),
+            run_id="run-1",
+        )
+        assert event is not None
+        assert event.event == "interaction.requested"
+        data = _data(event)
+        assert data["type"] == "event"
+        assert data["event"] == "interaction.requested"
+        assert data["payload"]["interactionId"] == "int-1"
+
+    def test_interaction_resolved_is_exposed_as_resolve(self):
+        converter = DefaultStreamConverter()
+        envelope = {
+            "type": "event",
+            "event": "interaction.resolve",
+            "payload": {"sessionKey": "s", "interactionId": "int-1"},
+        }
+        event = converter.convert(
+            StreamChunk(
+                type="interaction",
+                metadata={"event": "interaction.resolved", "payload": envelope},
+            ),
+            run_id="run-1",
+        )
+        assert event is not None
+        assert event.event == "interaction.resolve"

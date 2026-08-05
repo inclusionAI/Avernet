@@ -13,12 +13,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from secbaas.community.api.sse import StreamChunk
+from secbaas.community.core.service.bot_interaction import InteractionDispatch
 from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
     ConcurrentSessionError,
     NotConnectedError,
     _capture_trace_context,
     _SessionState,
+)
+from secbaas.community.core.service.bot_run._interaction_protocol import (
+    EngineInteractionResolveExchange,
 )
 
 _TEST_SESSION_KEY = "test-session-key"
@@ -1259,3 +1263,173 @@ class TestCloseAdditional:
         await client.close()
         # Double close should not raise
         await client.close()
+
+
+class TestInteractionEvents:
+    @pytest.mark.asyncio
+    async def test_requested_passes_validated_identity_and_emits_chunk(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.record_requested.return_value = True
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        payload = {
+            "sessionKey": "sk1",
+            "interactionId": "int-1",
+            "seq": 42,
+            "expiresAtMs": 123456,
+            "options": [{"decision": "allow-once"}],
+        }
+        client._on_interaction_requested(payload)
+
+        service.record_requested.assert_called_once_with(
+            session_key="sk1",
+            interaction_id="int-1",
+            envelope={
+                "type": "event",
+                "event": "interaction.requested",
+                "payload": payload,
+                "seq": 42,
+            },
+            allowed_decisions=("allow-once",),
+            expires_at_ms=123456,
+        )
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "interaction"
+        assert chunk.metadata["event"] == "interaction.requested"
+        assert chunk.metadata["payload"]["event"] == "interaction.requested"
+        assert chunk.metadata["payload"]["seq"] == 42
+
+    @pytest.mark.asyncio
+    async def test_duplicate_requested_does_not_emit_duplicate_chunk(self, mock_bot_ws):
+        service = MagicMock()
+        service.record_requested.side_effect = [True, False]
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+        payload = {"sessionKey": "sk1", "interactionId": "int-1"}
+
+        client._on_interaction_requested(payload)
+        client._on_interaction_requested(payload)
+
+        assert state.stream_queue.qsize() == 1
+
+    @pytest.mark.asyncio
+    async def test_requested_persistence_failure_is_not_silently_ignored(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.record_requested.side_effect = RuntimeError("db unavailable")
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        with pytest.raises(RuntimeError, match="db unavailable"):
+            client._on_interaction_requested(
+                {"sessionKey": "sk1", "interactionId": "int-1"}
+            )
+
+        assert state.stream_queue.empty()
+
+    @pytest.mark.asyncio
+    async def test_resolved_uses_callback_identity_and_emits_public_chunk(
+        self, mock_bot_ws
+    ):
+        service = MagicMock()
+        service.mark_resolved.return_value = True
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        payload = {
+            "sessionKey": "sk1",
+            "interactionId": "int-1",
+            "decision": "allow-once",
+        }
+        client._on_interaction_resolved(payload)
+
+        service.mark_resolved.assert_called_once_with(
+            session_key="sk1",
+            interaction_id="int-1",
+            envelope={
+                "type": "event",
+                "event": "interaction.resolve",
+                "payload": payload,
+            },
+        )
+        chunk = state.stream_queue.get_nowait()
+        assert chunk.type == "interaction"
+        assert chunk.metadata["event"] == "interaction.resolve"
+        assert chunk.metadata["payload"]["event"] == "interaction.resolve"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_resolved_does_not_emit_duplicate_chunk(self, mock_bot_ws):
+        service = MagicMock()
+        service.mark_resolved.side_effect = [True, False]
+        client = AsyncChatClient(
+            uri="ws://host/ws", max_retries=0, interaction_service=service
+        )
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+        payload = {"sessionKey": "sk1", "interactionId": "int-1"}
+
+        client._on_interaction_resolved(payload)
+        client._on_interaction_resolved(payload)
+
+        assert state.stream_queue.qsize() == 1
+
+
+@pytest.mark.asyncio
+async def test_interaction_dispatch_uses_typed_claim_command(mock_bot_ws):
+    service = MagicMock()
+    service.claim_for_dispatch.return_value = InteractionDispatch(
+        session_key="sk1",
+        interaction_id="int-1",
+        decision="allow-once",
+    )
+    engine_client = MagicMock()
+    engine_request = {
+        "type": "req",
+        "id": "engine-1",
+        "method": "interaction.resolve",
+        "params": {"interactionId": "int-1", "decision": "allow-once"},
+    }
+    engine_response = {"type": "res", "id": "engine-1", "ok": True}
+    engine_client.interaction_resolve = AsyncMock(
+        return_value=EngineInteractionResolveExchange.from_frames(
+            request=engine_request,
+            response=engine_response,
+        )
+    )
+    client = AsyncChatClient(
+        uri="ws://host/ws", max_retries=0, interaction_service=service
+    )
+    client._client = engine_client
+
+    await client._dispatch_interaction_answer(
+        session_key="sk1",
+        interaction_id="int-1",
+        deadline_ms=None,
+    )
+
+    engine_client.interaction_resolve.assert_awaited_once_with(
+        interaction_id="int-1",
+        decision="allow-once",
+    )
+    service.record_engine_exchange.assert_called_once_with(
+        session_key="sk1",
+        interaction_id="int-1",
+        engine_req=engine_request,
+        engine_res=engine_response,
+    )

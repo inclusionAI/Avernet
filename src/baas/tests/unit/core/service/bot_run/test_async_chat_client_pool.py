@@ -105,6 +105,7 @@ class TestParamPassthrough:
             max_retries=3,
             retry_base_backoff=2.0,
             ignore_case=False,
+            interaction_service=None,
         )
 
         await pool.close_all()
