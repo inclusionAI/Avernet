@@ -127,6 +127,22 @@ def test_cleanup_repair_required_retains_the_quarantine_outside_purge_retries(wo
         assert row.last_error == "authoritative package repair required"
 
 
+def test_cleanup_lists_repair_required_work_only_for_the_affected_skill(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    assert repo.record_repair_required(
+        **scope, skill_id="9", package_locator="pool/local/delete-quarantine"
+    )
+    assert repo.record_repair_required(
+        **scope, skill_id="10", package_locator="pool/local/other-quarantine"
+    )
+
+    repair_work = repo.list_repair_required(**scope, skill_id="9")
+
+    assert len(repair_work) == 1
+    assert repair_work[0]["package_locator"] == "pool/local/delete-quarantine"
+
+
 def test_cleanup_ddl_uses_a_bounded_full_locator_digest_as_its_unique_key() -> None:
     sql = (
         Path(__file__).parents[3]

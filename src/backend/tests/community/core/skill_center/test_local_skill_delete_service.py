@@ -180,23 +180,58 @@ class _Cleanup:
         self.work = []
         self.preparing = []
         self.repair_required = []
+        self._records = {}
+        self._next_work_id = 1
 
     def record_preparing(self, **kwargs):
         self.preparing.append(kwargs)
-        return 1
+        work_id = self._next_work_id
+        self._next_work_id += 1
+        self._records[work_id] = {**kwargs, "id": work_id, "status": "preparing"}
+        return work_id
 
     def record_pending(self, **kwargs):
         self.work.append(kwargs)
-        return 1
+        for record in self._records.values():
+            if record["package_locator"] == kwargs["package_locator"]:
+                record.update(kwargs, status="pending")
+                return record["id"]
+        work_id = self._next_work_id
+        self._next_work_id += 1
+        self._records[work_id] = {**kwargs, "id": work_id, "status": "pending"}
+        return work_id
 
     def record_repair_required(self, **kwargs):
         self.repair_required.append(kwargs)
-        return 2
+        for record in self._records.values():
+            if record["package_locator"] == kwargs["package_locator"]:
+                record.update(kwargs, status="repair_required")
+                return record["id"]
+        work_id = self._next_work_id
+        self._next_work_id += 1
+        self._records[work_id] = {
+            **kwargs,
+            "id": work_id,
+            "status": "repair_required",
+        }
+        return work_id
+
+    def list_repair_required(self, **kwargs):
+        return [
+            record.copy()
+            for record in self._records.values()
+            if record["status"] == "repair_required"
+            and all(record[key] == value for key, value in kwargs.items())
+        ]
 
     def mark_cleaned(self, **_kwargs):
         return True
 
-    def cancel_pending(self, **_kwargs):
+    def cancel_pending(self, *, work_id, **_kwargs):
+        record = self._records.get(work_id)
+        if record is None:
+            return False
+        record["status"] = "cancelled"
         return True
 
 
@@ -348,11 +383,41 @@ async def test_quarantine_identity_is_durable_before_source_bytes_are_removed(mo
     )
     with pytest.raises(_ProcessCrash):
         await service.delete_local_skill(skill_id="9", actor_id="owner")
-
     assert cleanup.preparing[0]["skill_id"] == "9"
     assert cleanup.repair_required[0]["skill_id"] == "9"
     assert "/skills/one/SKILL.md" not in files.files
     assert any(".one.delete-" in path for path in files.files)
+
+
+@pytest.mark.asyncio
+async def test_next_delete_recovers_a_crash_retained_quarantine_before_retrying(monkeypatch):
+    service, files, skills, _guard, cleanup = _service()
+    original_quarantine = LocalSkillPackageStorage.quarantine_to
+
+    class _ProcessCrash(BaseException):
+        pass
+
+    async def crash_after_source_removal(package, quarantine):
+        await original_quarantine(package, quarantine)
+        raise _ProcessCrash()
+
+    monkeypatch.setattr(
+        LocalSkillPackageStorage, "quarantine_to", crash_after_source_removal
+    )
+    with pytest.raises(_ProcessCrash):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+    retained_work_id = cleanup.list_repair_required(
+        env="dev", owner_id="owner", bot_id="bot", skill_id="9"
+    )[0]["id"]
+
+    monkeypatch.setattr(
+        LocalSkillPackageStorage, "quarantine_to", original_quarantine
+    )
+    await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is True
+    assert files.files == {}
+    assert cleanup._records[retained_work_id]["status"] == "cancelled"
 
 
 @pytest.mark.asyncio
