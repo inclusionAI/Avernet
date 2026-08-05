@@ -37,7 +37,8 @@ struct GroupSessionWireClaims {
     aud: String,
     purpose: String,
     sub: String,
-    tenant: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tenant: Option<String>,
     uid: String,
     gid: String,
     sid: String,
@@ -202,7 +203,12 @@ impl GroupSessionTokenPort for GroupSessionJwtService {
 }
 
 fn valid_scope(scope: &GroupSessionTokenScope) -> bool {
-    [&scope.tenant, &scope.user_id, &scope.group_id, &scope.session_id]
+    let required_fields_valid = [&scope.user_id, &scope.group_id, &scope.session_id]
         .into_iter()
-        .all(|value| !value.trim().is_empty() && value.chars().count() <= MAX_CLAIM_LEN)
+        .all(|value| !value.trim().is_empty() && value.chars().count() <= MAX_CLAIM_LEN);
+    let tenant_valid = scope
+        .tenant
+        .as_ref()
+        .is_none_or(|value| !value.trim().is_empty() && value.chars().count() <= MAX_CLAIM_LEN);
+    required_fields_valid && tenant_valid
 }

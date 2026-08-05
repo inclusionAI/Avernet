@@ -189,7 +189,7 @@ fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
 
 fn human_principal(staff_no: &str) -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: staff_no.to_string(),
             username: staff_no.to_string(),
@@ -204,7 +204,7 @@ fn human_principal(staff_no: &str) -> AuthenticatedCaller {
 
 fn bot_only_caller(bot_uuid: &str) -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: None,
         bot: Some(AuthenticatedBotIdentity {
             bot_uuid: bot_uuid.into(),

@@ -1,3 +1,6 @@
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
+
 use bcs_service_api::application::v1::AuthenticatedCaller;
 use axum::http::{HeaderMap, HeaderValue};
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
@@ -13,6 +16,43 @@ use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
 const NOW: u64 = 1_785_657_600;
 const TEST_KEY_TEXT: &str = "TEST-ONLY-bcs-principal-contract-key-32-bytes";
 const TEST_KEY: &[u8] = TEST_KEY_TEXT.as_bytes();
+
+#[derive(Clone, Default)]
+struct SharedLogBuffer(Arc<Mutex<Vec<u8>>>);
+
+struct SharedLogWriter(SharedLogBuffer);
+
+impl Write for SharedLogWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0.0.lock().expect("log buffer lock").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedLogBuffer {
+    type Writer = SharedLogWriter;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        SharedLogWriter(self.clone())
+    }
+}
+
+fn capture_logs(run: impl FnOnce()) -> String {
+    let buffer = SharedLogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_target(false)
+        .with_writer(buffer.clone())
+        .finish();
+    tracing::dispatcher::with_default(&tracing::Dispatch::new(subscriber), run);
+    let bytes = buffer.0.lock().expect("log buffer lock").clone();
+    String::from_utf8(bytes).expect("diagnostic logs are UTF-8")
+}
 
 #[derive(Deserialize)]
 struct ContractFixture {
@@ -169,7 +209,7 @@ fn verifies_the_shared_all_identity_fixture_without_projecting_secrets() {
         "verified caller",
     );
 
-    assert_eq!(caller.tenant, "tenant-a");
+    assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(
         caller.user.as_ref().map(|value| value.id.as_str()),
         Some("user-1")
@@ -203,7 +243,7 @@ async fn header_verifier_extracts_one_signed_gateway_principal_token() {
         .await
         .expect("valid signed Gateway caller");
 
-    assert_eq!(caller.tenant, "tenant-a");
+    assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(caller.user.as_ref().map(|user| user.id.as_str()), Some("user-1"));
     assert_eq!(caller.bot.as_ref().map(|bot| bot.bot_uuid.as_str()), Some("bot-1"));
     assert!(caller.app.is_some());
@@ -258,6 +298,52 @@ fn accepts_user_only_bot_only_and_user_plus_bot() {
         assert_eq!(caller.user.is_some(), expect_user);
         assert_eq!(caller.bot.is_some(), expect_bot);
     }
+}
+
+#[test]
+fn accepts_user_only_with_null_or_missing_tenant() {
+    let fixture = fixture();
+    let user_only = select_principals(&fixture.principals, &["user"]);
+
+    let mut null_tenant = user_only.clone();
+    null_tenant[0]["tenant"] = Value::Null;
+    let caller = must_ok(
+        verify_principals(null_tenant),
+        "User with null tenant must verify",
+    );
+    assert_eq!(caller.tenant, None);
+
+    let mut missing_tenant = user_only;
+    must_some(
+        missing_tenant[0].as_object_mut(),
+        "User Principal object",
+    )
+    .remove("tenant");
+    let caller = must_ok(
+        verify_principals(missing_tenant),
+        "User with missing tenant must verify",
+    );
+    assert_eq!(caller.tenant, None);
+}
+
+#[test]
+fn nullable_user_tenant_does_not_weaken_required_principal_tenants() {
+    let fixture = fixture();
+    let mut principals = select_principals(&fixture.principals, &["user", "bot", "app"]);
+    principals[0]["tenant"] = Value::Null;
+    principals[0]["subject"]["tenant_id"] = Value::Null;
+
+    let caller = must_ok(
+        verify_principals(principals.clone()),
+        "required Principal tenants establish the normalized tenant",
+    );
+    assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
+
+    principals[1]["tenant"] = Value::Null;
+    assert_eq!(
+        verify_principals(principals),
+        Err(GatewayPrincipalVerificationError::InvalidClaims),
+    );
 }
 
 #[test]
@@ -467,7 +553,6 @@ fn rejects_mixed_and_contradictory_tenants() {
         "/1/tenant",
         "/1/bot/tenant",
         "/2/app/tenant",
-        "/0/subject/tenant_id",
     ] {
         let mut principals = fixture().principals;
         *must_some(principals.pointer_mut(pointer), "fixture pointer") = json!("tenant-b");
@@ -477,6 +562,15 @@ fn rejects_mixed_and_contradictory_tenants() {
             "tenant mutation at {pointer}",
         );
     }
+
+    let mut principals = fixture().principals;
+    principals[0]["tenant"] = json!("tenant-a");
+    principals[0]["subject"]["tenant_id"] = json!("tenant-b");
+    assert_eq!(
+        verify_principals(principals),
+        Err(GatewayPrincipalVerificationError::InvalidPrincipalSet),
+        "present User tenant and subject.tenant_id must agree",
+    );
 
     for value in ["", "   "] {
         let mut principals = fixture().principals;
@@ -544,6 +638,35 @@ fn verification_errors_do_not_expose_tokens_or_keys() {
         TEST_KEY_TEXT,
     ] {
         assert!(!message.contains(forbidden));
+    }
+}
+
+#[test]
+fn invalid_claim_logs_exact_path_and_fingerprint_without_token_material() {
+    let mut principals = fixture().principals;
+    principals[0]["tenant"] = json!({"invalid": "shape"});
+    let mut claims = valid_claims();
+    claims["principals"] = principals;
+    let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+    let header_segment = token.split('.').next().expect("JWT header segment");
+
+    let logs = capture_logs(|| {
+        assert_eq!(
+            verifier().verify_at(&token, NOW),
+            Err(GatewayPrincipalVerificationError::InvalidClaims),
+        );
+    });
+
+    assert!(logs.contains("claim_path=principals[0].tenant"), "{logs}");
+    assert!(logs.contains("token_fingerprint="), "{logs}");
+    for forbidden in [
+        token.as_str(),
+        header_segment,
+        TEST_KEY_TEXT,
+        "TEST_ONLY_BOT_TOKEN_MARKER",
+        "TEST_ONLY_ACCESS_KEY_TOKEN_MARKER",
+    ] {
+        assert!(!logs.contains(forbidden), "logs exposed {forbidden}: {logs}");
     }
 }
 

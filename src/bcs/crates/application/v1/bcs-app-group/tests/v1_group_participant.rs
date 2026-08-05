@@ -98,7 +98,7 @@ impl Fixture {
 
 fn human_caller(staff_no: &str) -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: staff_no.into(),
             username: staff_no.into(),

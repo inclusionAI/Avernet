@@ -563,7 +563,7 @@ fn bot_principal(bot_uuid: &str) -> AuthenticatedCaller {
 
 fn bot_principal_in_tenant(bot_uuid: &str, tenant: &str) -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: tenant.to_string(),
+        tenant: Some(tenant.to_string()),
         user: Some(AuthenticatedUserIdentity {
             id: bot_uuid.to_string(),
             username: bot_uuid.to_string(),
@@ -583,7 +583,7 @@ fn human_principal_with_profile(
     full_name: Option<&str>,
 ) -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: subject_id.into(),
             username: username.into(),

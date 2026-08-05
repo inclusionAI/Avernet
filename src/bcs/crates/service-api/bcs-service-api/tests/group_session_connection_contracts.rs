@@ -12,13 +12,13 @@ use bcs_service_api::port::{
 #[test]
 fn connection_binding_keeps_one_exact_session_scope() {
     let binding = GroupSessionConnectionBinding {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user_id: "user-a".into(),
         group_id: "group-a".into(),
         session_id: "session-a".into(),
     };
 
-    assert_eq!(binding.tenant, "tenant-a");
+    assert_eq!(binding.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(binding.user_id, "user-a");
     assert_eq!(binding.group_id, "group-a");
     assert_eq!(binding.session_id, "session-a");
