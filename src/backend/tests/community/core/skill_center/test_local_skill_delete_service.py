@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
@@ -140,6 +142,7 @@ class _Factory:
     def __init__(self, files):
         self.files = files
         self.locator_kwargs = None
+        self.storage_kwargs = None
 
     def local_skill_package_storage_for_locator(
         self, *, locator, entity_type, is_desktop, is_teclaw, **_kwargs
@@ -152,6 +155,7 @@ class _Factory:
         return LocalSkillPackageStorage(self.files, locator)
 
     def local_skill_package_storage(self, *, directory_name, **_kwargs):
+        self.storage_kwargs = _kwargs
         locator = f"/skills/{directory_name}"
         return locator, LocalSkillPackageStorage(self.files, locator)
 
@@ -198,7 +202,7 @@ class _Cleanup:
 
 def _service(
     *, active=False, fail_delete=False, active_during_delete=False,
-    on_acquire=None, status="ACTIVE",
+    on_acquire=None, status="ACTIVE", provider="local",
 ):
     files = _Files()
     skills = _Skills(
@@ -215,6 +219,9 @@ def _service(
         _Factory(files),
         guard,
         cleanup,
+        lambda: SimpleNamespace(
+            resolve_for_bot=lambda *_args: SimpleNamespace(provider=provider)
+        ),
     )
     return service, files, skills, guard, cleanup
 
@@ -229,6 +236,33 @@ async def test_inactive_delete_quarantines_then_removes_database_state_and_packa
     assert files.files == {}
     assert cleanup.work == []
     assert guard.events == [("dev", "owner", "bot"), "release"]
+
+
+@pytest.mark.asyncio
+async def test_teclaw_delete_uses_device_context_for_both_package_storages():
+    service, _files, _skills, _guard, _cleanup = _service(provider="teclaw")
+
+    await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    factory = service._skill_service_factory
+    assert factory.locator_kwargs["is_teclaw"] is True
+    assert factory.storage_kwargs["is_teclaw"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_fails_closed_when_device_context_cannot_be_resolved():
+    service, files, skills, _guard, _cleanup = _service()
+
+    def _unavailable_resolver():
+        raise RuntimeError("device binding unavailable")
+
+    service._device_context_resolver_provider = _unavailable_resolver
+
+    with pytest.raises(LocalSkillStorageError):
+        await service.delete_local_skill(skill_id="9", actor_id="owner")
+
+    assert skills.deleted is False
+    assert files.files == {"/skills/one/SKILL.md": b"name: one\ndescription: One\n"}
 
 
 @pytest.mark.asyncio
