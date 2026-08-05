@@ -21,6 +21,7 @@ from agentclaw.community.core.bot_management.capabilities import (
     has_declared_capabilities,
     is_template_factory_config,
 )
+from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -90,7 +91,11 @@ from agentclaw.community.core.devices.repository.protocol import (
     OssToNasRecordRepository,
 )
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
-from agentclaw.community.core.devices.services.device_service import DeviceService
+from agentclaw.community.core.devices.services.device_service import (
+    ARCA_DEVICE_PROVIDER,
+    BAAS_DEVICE_PROVIDER,
+    DeviceService,
+)
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.passport import PassportError
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -666,6 +671,83 @@ class BotService:
             template.template_uuid,
         )
         return template.template_uuid
+
+    def _resolve_restart_target_provider(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        bot: dict[str, Any],
+        source_provider: str | None,
+    ) -> str | None:
+        """Resolve an opt-in provider migration for an existing ARCA bot.
+
+        The database-backed template override is a positive-match switch. Any
+        absent, invalid, unmatched, or unreadable configuration preserves the
+        source provider and therefore the pre-existing restart behavior.
+        """
+        if source_provider != ARCA_DEVICE_PROVIDER:
+            return source_provider
+
+        active_engine = (
+            str(bot.get("active_engine") or "")
+            .strip()
+            .lower()
+            .replace("-", "_")
+        )
+        template_type = bot.get("template_type")
+        if active_engine not in {"openclaw", "hermes", "claude_code"}:
+            return source_provider
+        if active_engine == "claude_code" and template_type in CODING_TEMPLATE_TYPES:
+            return source_provider
+
+        template_resolver = getattr(self, "_baas_template_resolver", None)
+        if template_resolver is None:
+            return source_provider
+
+        owner_id = str(bot.get("owner_id") or user_id)
+        try:
+            override_uuid = template_resolver.resolve_template_override(
+                env=get_current_env(),
+                user_id=owner_id,
+                bot_type=str(bot.get("bot_type") or "personal"),
+            )
+        except Exception as e:
+            logger.warning(
+                "[bot_service.restart_provider] template override lookup failed; "
+                "preserving source provider: bot_id=%s owner_id=%s "
+                "source_provider=%s error=%s",
+                bot_id,
+                owner_id,
+                source_provider,
+                e,
+            )
+            return source_provider
+
+        if override_uuid is None:
+            logger.info(
+                "[bot_service.restart_provider] no template override hit; "
+                "preserving source provider: bot_id=%s owner_id=%s "
+                "source_provider=%s",
+                bot_id,
+                owner_id,
+                source_provider,
+            )
+            return source_provider
+
+        logger.info(
+            "[bot_service.restart_provider] template override hit; migrating provider: "
+            "bot_id=%s owner_id=%s source_provider=%s target_provider=%s "
+            "template_uuid=%s active_engine=%s template_type=%s",
+            bot_id,
+            owner_id,
+            source_provider,
+            BAAS_DEVICE_PROVIDER,
+            override_uuid,
+            active_engine,
+            template_type,
+        )
+        return BAAS_DEVICE_PROVIDER
 
     def _get_device_binding_repo(self):
         """Get the DeviceBindingRepository (injected via __init__)."""
@@ -3830,11 +3912,11 @@ class BotService:
             # against the wrong scope.
             raise BotServiceError(f"Bot {bot_id} has no entity_id; cannot restart")
 
-        # Restart is a lifecycle operation, not a fresh create rollout. When a
-        # current binding exists, preserve its provider so an existing ARCA bot
-        # cannot be migrated to BaaS merely because the owner later entered the
-        # create whitelist. An ACTIVE bot without a binding retains the legacy
-        # fallback to normal allocation. FAILED bots require a trustworthy
+        # Restart normally preserves its provider. Existing ARCA bots opt in to
+        # BaaS only when the same database-backed template override used during
+        # creation positively matches their owner; every other outcome keeps the
+        # legacy provider behavior. An ACTIVE bot without a binding retains the
+        # legacy fallback to normal allocation. FAILED bots require a trustworthy
         # historical provider because their current binding may be lost.
         current_device_provider = None
         binding_id = bot.get("binding_id")
@@ -3911,6 +3993,13 @@ class BotService:
                 f"bot_id={bot_id}, user_id={user_id}"
             )
 
+        restart_target_provider = self._resolve_restart_target_provider(
+            bot_id=bot_id,
+            user_id=user_id,
+            bot=bot,
+            source_provider=current_device_provider,
+        )
+
         # Idempotency guard: acquire the per-bot restart lock. If a restart is
         # already in progress, suppress this duplicate and return the current
         # in-progress bot — the frontend is already polling on PENDING, so this
@@ -3957,7 +4046,7 @@ class BotService:
                 bot = self._resolve_service_bot_arka_image_pin(bot)
             if (
                 binding_id
-                and current_device_provider == "baas"
+                and current_device_provider == BAAS_DEVICE_PROVIDER
                 and self._baas_service_provider is not None
             ):
                 # BaaS 原地重启：不 destroy、不 release binding，bot_uuid/device_uuid 不变,
@@ -3994,7 +4083,7 @@ class BotService:
                 bot_id=bot_id,
                 user_id=user_id,
                 nick_name=nick_name,
-                device_provider=current_device_provider,
+                device_provider=restart_target_provider,
                 restart_lock_key=lock_key,
                 bot_ext_override=(
                     bot.get("ext")
