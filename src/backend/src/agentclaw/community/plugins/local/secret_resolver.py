@@ -80,6 +80,7 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     def get_secret(self, secret_name: str) -> Any | None:
         if secret_name == _AIWORKBENCH_REPO_URL_SECRET_NAME:
             return self._get_aiworkbench_repo_url_secret()
+
         logger.info("[LocalMock] SecretResolver.get_secret(%s) -> None", secret_name)
         return None
 
