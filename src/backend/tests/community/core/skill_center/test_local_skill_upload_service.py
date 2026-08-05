@@ -138,12 +138,27 @@ class _Factory:
     def create(self, **kwargs):
         return self
 
-    def local_skill_package_storage(self, *, owner_id, bot_id, engine_type, name):
+    def local_skill_package_storage(
+        self,
+        *,
+        entity_id,
+        owner_id,
+        bot_id,
+        engine_type,
+        entity_type,
+        is_desktop,
+        is_teclaw,
+        name,
+    ):
         self.storage_calls.append(
             {
+                "entity_id": entity_id,
                 "owner_id": owner_id,
                 "bot_id": bot_id,
                 "engine_type": engine_type,
+                "entity_type": entity_type,
+                "is_desktop": is_desktop,
+                "is_teclaw": is_teclaw,
                 "name": name,
             }
         )
@@ -316,9 +331,13 @@ async def test_upload_resolves_package_storage_with_bot_entity():
 
     assert factory.storage_calls == [
         {
-            "owner_id": "project-entity",
+            "entity_id": "project-entity",
+            "owner_id": "owner",
             "bot_id": "bot",
             "engine_type": "moltis",
+            "entity_type": "staff",
+            "is_desktop": False,
+            "is_teclaw": False,
             "name": "upload-skill",
         }
     ]
@@ -423,9 +442,7 @@ def test_zip_accepts_root_skill_with_subdirectories_and_matching_wrapper():
     ],
 )
 def test_zip_preserves_multiline_skill_description(metadata, expected_description):
-    name, description, _ = _service(_Filesystem())._unpack(
-        _zip({"SKILL.md": metadata})
-    )
+    name, description, _ = _service(_Filesystem())._unpack(_zip({"SKILL.md": metadata}))
 
     assert name == "upload-skill"
     assert description == expected_description
