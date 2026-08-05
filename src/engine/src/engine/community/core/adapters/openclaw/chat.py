@@ -34,6 +34,32 @@ class OpenClawChatAdapter(ChatService):
     def __init__(self, port: OpenClawChatPort) -> None:
         self._port = port
 
+    async def inject(
+        self,
+        session_key: str,
+        message: str,
+        label: str | None = None,
+        auth: AuthContext | None = None,
+    ) -> dict[str, Any]:
+        """Inject a message and repair OpenClaw's transcript-only assistant role."""
+        token = auth.token if auth is not None else None
+        raw = await self._port.chat_inject(
+            session_key=session_key,
+            message=message,
+            label=label,
+            token=token,
+        )
+
+        if not raw.get("success"):
+            return {
+                "ok": False,
+                "error": raw.get("error")
+                or {"code": "UNKNOWN", "message": "chat.inject failed"},
+            }
+
+        payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
+        return {"ok": True, "payload": payload}
+
     async def stream(
         self,
         request: ChatRequest,
