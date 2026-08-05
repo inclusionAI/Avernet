@@ -45,6 +45,15 @@ CONTAINER_WORKSPACE_BASE = "/home/admin/.aicoding/workspace"
 # 10 MiB cap for inline preview to keep responses bounded.
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
 
+_ENCODING_ALIASES = {
+    "utf-8": "utf-8",
+    "utf8": "utf-8",
+    "utf_8": "utf-8",
+    "gb18030": "gb18030",
+    "gbk": "gbk",
+}
+_AUTO_DECODE_ENCODINGS = ("utf-8", "gb18030", "gbk")
+
 # Default number of workspace-relative levels returned by the file-tree API.
 # ``0`` is reserved for an unlimited recursive scan.
 DEFAULT_FILE_TREE_MAX_DEPTH = 3
@@ -76,6 +85,41 @@ def _build_file_tree_find_command(max_depth: int) -> str:
         "find -P . -ignore_readdir_race -mindepth 1 "
         f"{max_depth_arg}{_FILE_TREE_FIND_EXPRESSION}"
     )
+
+
+def _normalize_encoding(encoding: str | None) -> str | None:
+    """Normalize a supported preview encoding; blank values select auto mode."""
+    if encoding is None:
+        return None
+
+    value = encoding.strip().lower()
+    if not value:
+        return None
+
+    normalized = _ENCODING_ALIASES.get(value)
+    if normalized is None:
+        raise ValueError(f"unsupported file encoding: {encoding}")
+    return normalized
+
+
+def _decode_file_content(raw: bytes, encoding: str | None = None) -> str:
+    """Decode preview bytes using an explicit encoding or ordered fallbacks."""
+    normalized = _normalize_encoding(encoding)
+    if normalized is not None:
+        try:
+            return raw.decode(normalized)
+        except UnicodeDecodeError as exc:
+            raise ValueError(
+                f"file content cannot be decoded with encoding {normalized}"
+            ) from exc
+
+    for candidate in _AUTO_DECODE_ENCODINGS:
+        try:
+            return raw.decode(candidate)
+        except UnicodeDecodeError:
+            continue
+
+    return raw.decode("utf-8", errors="replace")
 
 
 def _resolve_workspace_base() -> str:
@@ -308,7 +352,11 @@ class WorkspaceService:
     # ── file preview ──────────────────────────────────────────────────
 
     async def preview_file(
-        self, session_id: str, path: str, cwd: str | None = None
+        self,
+        session_id: str,
+        path: str,
+        cwd: str | None = None,
+        encoding: str | None = None,
     ) -> FileContent:
         """Read a single workspace file (size-bounded, traversal-safe)."""
         if not path or not path.strip():
@@ -327,7 +375,7 @@ class WorkspaceService:
             )
 
         return FileContent(
-            content=raw.decode("utf-8", errors="replace"),
+            content=_decode_file_content(raw, encoding),
             size=size,
         )
 
