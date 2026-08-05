@@ -65,7 +65,13 @@ class NoopTaskService(TaskService):
     def on_event(self, event: TaskEvent) -> Optional[Task]:
         return None
 
-    def claim_node(self, task_id: str, node_id: str, executor_id: str) -> Optional[DispatchResult]:
+    def claim_node(
+        self,
+        task_id: str,
+        node_id: str,
+        executor_id: str,
+        run_mode: Optional[RunMode] = None,
+    ) -> Optional[DispatchResult]:
         return None
 
     def history(self, task_id: str, after_seq: int = 0) -> list:
