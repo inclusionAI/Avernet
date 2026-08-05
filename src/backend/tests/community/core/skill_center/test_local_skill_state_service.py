@@ -267,8 +267,28 @@ async def test_runtime_failure_restores_previous_desired_state_before_fixed_fail
 
     assert skills.active is False
     assert sets.events == ["remove", "add"]
-    assert runtime.calls == 1
+    assert runtime.calls == 2
     assert guard.events[-1] == "release"
+
+
+@pytest.mark.asyncio
+async def test_runtime_failure_republishes_the_rolled_back_desired_state():
+    service, skills, sets, _guard, runtime, _factory = _service(active=False)
+    outcomes = iter([False, True])
+
+    def sync_with_recovery():
+        runtime.calls += 1
+        return next(outcomes)
+
+    runtime.sync_runtime = sync_with_recovery
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
+
+    assert skills.active is False
+    assert sets.events == ["remove", "add"]
+    assert runtime.calls == 2
 
 
 @pytest.mark.asyncio
