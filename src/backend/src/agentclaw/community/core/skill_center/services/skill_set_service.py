@@ -1332,8 +1332,12 @@ class SkillSetService:
                     )
                 else:
                     # 相对名称格式: skill-name
-                    link_name = path_part.split('/')[-1] if '/' in path_part else path_part
-                    source = str(skills_local_dir / link_name)
+                    source_name = path_part.split('/')[-1] if '/' in path_part else path_part
+                    # Replacement packages are staged under a temporary
+                    # directory (for example ``.foo.replacement-*``), but
+                    # their runtime link must retain the logical Skill name.
+                    link_name = skill_name or source_name
+                    source = str(skills_local_dir / source_name)
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 

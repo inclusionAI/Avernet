@@ -524,6 +524,42 @@ def test_local_replacement_mapping_keeps_stable_skill_link_name(test_injector):
     ]
 
 
+def test_relative_local_replacement_mapping_keeps_stable_skill_link_name(
+    test_injector,
+    monkeypatch,
+):
+    monkeypatch.setenv("DEPLOY_PROFILE", "production")
+    factory = test_injector.get(SkillSetServiceFactory)
+    factory._bot_repo.get_by_id_and_owner = lambda *_: {"bot_type": "teclaw"}
+    factory._pool_layout_paths = lambda *_: (
+        "/home/admin/.openclaw/workspace/skills",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-local",
+        "/home/admin/.openclaw/workspace/skills-pool/skills-repo",
+    )
+    svc = factory.create(
+        user_id="u1",
+        entity_id="e1",
+        bot_id="b1",
+        engine_type="openclaw",
+    )
+    svc.get_active_skills = lambda **_: [
+        {
+            "name": "handmade",
+            "git_path": "local://skills-local/.handmade.replacement-123",
+        },
+    ]
+
+    mappings = svc.get_symlink_mappings(user_id="u1", bolt_id="b1")
+
+    assert [(item.source, item.target) for item in mappings] == [
+        (
+            "/home/admin/.openclaw/workspace/skills-pool/skills-local/"
+            ".handmade.replacement-123",
+            "/home/admin/.openclaw/workspace/skills/handmade",
+        ),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_real_skill_parameter_service_factory_create(test_injector):
     """Async factory: builds the per-bot device_fs and constructs the
