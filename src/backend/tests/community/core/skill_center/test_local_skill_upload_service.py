@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import zipfile
 
 import pytest
 
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillDuplicateError,
     LocalSkillInvalidPackageError,
     LocalSkillNotReadyError,
     LocalSkillStorageError,
@@ -95,7 +97,12 @@ class _Bot:
         self.status = status
 
     def get_by_id_and_owner(self, *_):
-        return {"status": self.status, "active_engine": "moltis"}
+        return {
+            "status": self.status,
+            "active_engine": "moltis",
+            "env": "test",
+            "entity_id": "owner",
+        }
 
 
 class _Filesystem:
@@ -183,6 +190,19 @@ class _Audit:
         self.rows.append(row)
 
 
+class _Guard:
+    def __init__(self):
+        self._lock = asyncio.Lock()
+
+    async def acquire_for_edit_wait(self, **_kwargs):
+        await self._lock.acquire()
+        return object()
+
+    def release(self, _lease):
+        self._lock.release()
+        return True
+
+
 def _service(
     filesystem, *, status="ACTIVE", collaborators=None, repo=None, sets=None, audit=None
 ):
@@ -193,7 +213,33 @@ def _service(
         collaborators or _Collaborators(),
         _Factory(filesystem),
         audit or _Audit(),
+        _Guard(),
     )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_name_uploads_are_serialized_before_duplicate_check():
+    class _StatefulRepo(_Repo):
+        def get_bot_local_by_name(self, **_kwargs):
+            return self.created[-1] if self.created else None
+
+    filesystem = _Filesystem()
+    repo = _StatefulRepo()
+    service = _service(filesystem, repo=repo)
+    package = _zip({"SKILL.md": b"---\nname: upload-skill\ndescription: useful\n---\n"})
+
+    results = await asyncio.gather(
+        service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        ),
+        service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        ),
+        return_exceptions=True,
+    )
+
+    assert len(repo.created) == 1
+    assert sum(isinstance(result, LocalSkillDuplicateError) for result in results) == 1
 
 
 @pytest.mark.asyncio
@@ -345,6 +391,14 @@ def test_zip_rejects_missing_multiple_outside_wrapper_and_normalized_duplicates(
 ):
     with pytest.raises(LocalSkillInvalidPackageError):
         _service(_Filesystem())._unpack(_zip(entries))
+
+
+@pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
+def test_zip_rejects_reserved_content_store_names(name):
+    with pytest.raises(LocalSkillInvalidPackageError):
+        _service(_Filesystem())._unpack(
+            _zip({"SKILL.md": f"name: {name}\ndescription: reserved\n".encode()})
+        )
 
 
 @pytest.mark.parametrize("kind", [0o120000, 0o160000, 0o060000])

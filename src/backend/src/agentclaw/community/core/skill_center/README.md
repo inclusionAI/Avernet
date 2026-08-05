@@ -40,6 +40,7 @@ internal_dependencies:
   - agentclaw.community.core.events
   - agentclaw.community.core.mcp
   - agentclaw.community.core.models
+  - agentclaw.community.core.skills_pool
   - agentclaw.community.core.workspace
   - agentclaw.community.di.modules
   - agentclaw.community.di.runtime_mode
