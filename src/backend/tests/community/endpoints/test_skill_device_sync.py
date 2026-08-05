@@ -327,3 +327,20 @@ def _seed_deactivate_missing(world) -> None:
 )
 def deactivate_missing_entry_is_idempotent():
     """A missing on-disk entry is already deactivated and still converges runtime state."""
+
+
+# ---- deactivate: reserved entry ----
+@endpoint_test(
+    method="POST",
+    path="/api/skills/{skill_id}/deactivate",
+    scenario="deactivate_reserved_entry_returns_error",
+    input=CaseInput(
+        path_params={"skill_id": "skills-local"},
+        query_params={"bot_id": "bot_skill_deact_err", "entity_id": _OWNER},
+        headers={"x-user-id": _OWNER},
+    ),
+    seed=_seed_deactivate_missing,
+    expect=ExpectError(status=400),
+)
+def deactivate_reserved_entry_returns_error():
+    """Deactivate must not remove the protected local-package directory."""

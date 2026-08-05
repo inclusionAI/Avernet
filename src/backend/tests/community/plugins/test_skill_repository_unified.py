@@ -913,6 +913,17 @@ def test_remove_default_skill_exclusion(sets, db):
     assert sets.remove_default_skill_exclusion("u1", "bot1", 7, 42) is False
 
 
+def test_remove_all_default_skill_exclusions_clears_prior_default_sets(sets, db):
+    sets.add_default_skill_exclusion("u1", "bot1", 7, 42)
+    sets.add_default_skill_exclusion("u1", "bot1", 8, 42)
+    sets.add_default_skill_exclusion("u1", "bot1", 8, 99)
+
+    assert sets.remove_all_default_skill_exclusions("u1", "bot1", 42) is True
+    assert sets.get_excluded_skills("u1", "bot1", 7) == []
+    assert sets.get_excluded_skills("u1", "bot1", 8) == [99]
+    assert sets.remove_all_default_skill_exclusions("u1", "bot1", 42) is False
+
+
 def test_get_excluded_skills_filters_by_set(sets, db):
     sets.add_default_skill_exclusion("u1", "bot1", 7, 42)
     sets.add_default_skill_exclusion("u1", "bot1", 7, 99)

@@ -199,8 +199,8 @@ class LocalSkillStateService:
         skill_id: int,
     ) -> None:
         if active:
-            changed = self._skill_set_repo.remove_default_skill_exclusion(
-                owner_id, bot_id, skill_set_id, skill_id
+            changed = self._skill_set_repo.remove_all_default_skill_exclusions(
+                owner_id, bot_id, skill_id
             )
         else:
             changed = self._skill_set_repo.add_default_skill_exclusion(

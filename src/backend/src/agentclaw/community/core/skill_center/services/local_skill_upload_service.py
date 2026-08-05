@@ -294,6 +294,26 @@ class LocalSkillUploadService:
             }
         )
 
+    def _ensure_default_set_membership(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        skill_id: str,
+    ) -> None:
+        """Repair legacy Local Skill membership before publishing a replacement."""
+        default_set = self._ensure_default_set(
+            owner_id=owner_id, bot_id=bot_id, engine_type=engine_type
+        )
+        members = self._skill_set_repo.get_skills_in_set(str(default_set["id"]))
+        if any(str(member.get("id")) == skill_id for member in members):
+            return
+        if not self._skill_set_repo.add_skill_to_set(
+            str(default_set["id"]), skill_id, user_id=owner_id
+        ):
+            raise LocalSkillStorageError()
+
     async def _replace(
         self,
         *,
@@ -366,6 +386,13 @@ class LocalSkillUploadService:
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = bool(skill["active"])
+            if runtime_sync_attempted:
+                self._ensure_default_set_membership(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                    skill_id=str(skill["id"]),
+                )
             if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
