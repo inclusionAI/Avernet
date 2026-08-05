@@ -80,5 +80,5 @@ def test_operation_responses_use_the_ratified_local_skill_models() -> None:
         ].endswith("Envelope_SkillState_")
 
     assert schema["components"]["schemas"]["SkillUpload"]["properties"]["operation"][
-        "const"
-    ] == "created"
+        "enum"
+    ] == ["created", "updated"]
