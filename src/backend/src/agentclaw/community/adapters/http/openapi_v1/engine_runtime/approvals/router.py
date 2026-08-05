@@ -1,4 +1,4 @@
-"""Approvals group — ``/openapi/v1/bots/{bot_id}/approvals``."""
+"""Approvals group — ``/openapi/v1/bots/approvals/{bot_id}``."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.di import Injected
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/approvals", tags=["approvals"])
+router = APIRouter(prefix="/openapi/v1/bots/approvals", tags=["approvals"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
@@ -76,7 +76,7 @@ def _reject_refused_set(raw: Any) -> None:
         raise EngineUpstreamError("engine refused the approval-mode change")
 
 
-@router.get("/mode", response_model=Envelope[ApprovalState])
+@router.get("/{bot_id}/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def get_approval_mode(
     bot_id: str,
@@ -98,7 +98,7 @@ async def get_approval_mode(
     return envelope(_state(result.data, session_key), request)
 
 
-@router.put("/mode", response_model=Envelope[ApprovalState])
+@router.put("/{bot_id}/mode", response_model=Envelope[ApprovalState])
 @envelope_errors
 async def set_approval_mode(
     bot_id: str,
@@ -124,7 +124,7 @@ async def set_approval_mode(
     return envelope(_state(result.data, body.session_key), request)
 
 
-@router.get("/modes", response_model=Envelope[list[ApprovalModeInfo]])
+@router.get("/{bot_id}/modes", response_model=Envelope[list[ApprovalModeInfo]])
 @envelope_errors
 async def list_approval_modes(
     bot_id: str,

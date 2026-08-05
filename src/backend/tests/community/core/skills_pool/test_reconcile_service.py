@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +42,21 @@ from agentclaw.community.core.skills_pool.types import (
 )
 from agentclaw.community.core.task_queue.types import Complete, Retry
 from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
+
+
+def _aicoding_engine_api():
+    """Load the sibling Engine source for the deliberate cross-layer test."""
+
+    engine_src = Path(__file__).resolve().parents[5] / "engine" / "src"
+    if str(engine_src) not in sys.path:
+        sys.path.insert(0, str(engine_src))
+    from engine.community.plugins.aicoding.layout_pool import (
+        SkillMapping,
+        activate_aicoding_pool,
+        inspect_aicoding_runtime_layout,
+    )
+
+    return SkillMapping, activate_aicoding_pool, inspect_aicoding_runtime_layout
 
 
 SCOPE = BotSkillLayoutScope(env="pre", entity_id="entity-1", bot_id="bot-1")
@@ -188,6 +206,7 @@ class FakeLayoutRepository:
             and kwargs["migration_generation"] == GENERATION
             and self.quarantine_conflict
         )
+
     def record_post_cutover_evidence(self, **kwargs: object) -> bool:
         if self._should_fail("post_cutover_evidence"):
             return False
@@ -240,13 +259,9 @@ class FakeLayoutRepository:
             return False
         self.events.append("post_failure")
         cutover_evidence = (self.state.last_probe_evidence or {}).get("cutover")
-        refresh_pending = (
-            self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-            and (
-                not isinstance(cutover_evidence, dict)
-                or cutover_evidence.get("post_cutover_evidence_recorded")
-                is not True
-            )
+        refresh_pending = self.state.last_failure_code == "MANUAL_REPAIR_RESOLVED" and (
+            not isinstance(cutover_evidence, dict)
+            or cutover_evidence.get("post_cutover_evidence_recorded") is not True
         )
         self.state = replace(
             self.state,
@@ -401,8 +416,16 @@ class FakeRuntime:
         self.pool_local = pool_local or default_local
         self.pool_repo = pool_repo or default_repo
         self.events: list[str] = []
+        self.probe_results: list[RuntimeLayoutProbeResult] = []
         self.publish_success = True
         self.verify_success = True
+        self.publish_results: list[bool] = []
+        self.verify_results: list[bool] = []
+        self.after_cutover = None
+        self.after_publish = None
+        self.after_verify = None
+        self.published_batches: list[dict[str, list[dict[str, str]]]] = []
+        self.verified_batches: list[dict[str, list[dict[str, str]]]] = []
         self.physical_cutovers = 0
         self.expected_registered_local_names = ["local-a", "local-b"]
         self.cutover_result = PoolCutoverResult(
@@ -439,14 +462,13 @@ class FakeRuntime:
     async def probe(self, **kwargs: object) -> RuntimeLayoutProbeResult:
         self.events.append("probe")
         assert kwargs["engine"] == self.engine
+        if self.probe_results:
+            return self.probe_results.pop(0)
         return self.probe_result
 
     async def cutover(self, **kwargs: object) -> PoolCutoverResult:
         self.events.append("cutover")
-        assert (
-            kwargs["registered_local_names"]
-            == self.expected_registered_local_names
-        )
+        assert kwargs["registered_local_names"] == self.expected_registered_local_names
         mappings = kwargs["mappings"]
         assert [mapping.to_dict() for mapping in mappings] == [
             {
@@ -471,7 +493,7 @@ class FakeRuntime:
         ):
             self.physical_cutovers += 1
         if self.cutover_result.committed:
-            return replace(
+            result = replace(
                 self.cutover_result,
                 evidence={
                     **self.cutover_result.evidence,
@@ -481,14 +503,42 @@ class FakeRuntime:
                     },
                 },
             )
-        return self.cutover_result
+        else:
+            result = self.cutover_result
+        if self.after_cutover is not None:
+            self.after_cutover()
+        return result
 
     async def publish_mappings(self, **kwargs: object) -> bool:
         self.events.append("mapping")
+        self.published_batches.append(
+            {
+                "mappings": [mapping.to_dict() for mapping in kwargs["mappings"]],
+                "retired_mappings": [
+                    mapping.to_dict() for mapping in kwargs["retired_mappings"]
+                ],
+            }
+        )
+        if self.after_publish is not None:
+            self.after_publish()
+        if self.publish_results:
+            return self.publish_results.pop(0)
         return self.publish_success
 
     async def verify_mappings(self, **kwargs: object) -> bool:
         self.events.append("verify")
+        self.verified_batches.append(
+            {
+                "mappings": [mapping.to_dict() for mapping in kwargs["mappings"]],
+                "retired_mappings": [
+                    mapping.to_dict() for mapping in kwargs["retired_mappings"]
+                ],
+            }
+        )
+        if self.after_verify is not None:
+            self.after_verify()
+        if self.verify_results:
+            return self.verify_results.pop(0)
         return self.verify_success
 
 
@@ -532,6 +582,254 @@ async def test_ready_claimed_bot_completes_pool_activation() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "hermes"])
+async def test_product_deactivation_during_cutover_retires_stale_mapping(
+    engine: str,
+) -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository(engine)
+    runtime = FakeRuntime(engine=engine)
+    runtime.after_cutover = lambda: skills.active.pop()
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=engine,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.published_batches == [
+        {
+            "mappings": [
+                {
+                    "corpus": "local",
+                    "relative_path": "local-a",
+                    "link_name": "local-a",
+                },
+                {
+                    "corpus": "local",
+                    "relative_path": "local-b",
+                    "link_name": "local-b",
+                },
+            ],
+            "retired_mappings": [
+                {
+                    "corpus": "repo",
+                    "relative_path": "business/repo-skill",
+                    "link_name": "repo-skill",
+                }
+            ],
+        }
+    ]
+    assert runtime.verified_batches == runtime.published_batches
+
+
+@pytest.mark.asyncio
+async def test_product_activation_after_verify_republishes_without_recutover() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    late = RegisteredSkillAsset(
+        skill_id=22,
+        name="late",
+        git_path="git://business/late",
+    )
+
+    def activate_after_first_verify() -> None:
+        if late not in skills.active:
+            skills.active.append(late)
+            runtime.after_verify = None
+
+    runtime.after_verify = activate_after_first_verify
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.events == [
+        "probe",
+        "cutover",
+        "mapping",
+        "verify",
+        "mapping",
+        "verify",
+    ]
+    assert runtime.published_batches[-1]["mappings"][-1] == {
+        "corpus": "repo",
+        "relative_path": "business/late",
+        "link_name": "late",
+    }
+
+
+@pytest.mark.asyncio
+async def test_same_name_recreated_during_cutover_retires_old_identity() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+
+    def replace_repo_skill() -> None:
+        skills.active[-1] = RegisteredSkillAsset(
+            skill_id=22,
+            name="repo-skill",
+            git_path="git://replacement/repo-skill",
+        )
+
+    runtime.after_cutover = replace_repo_skill
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.published_batches[0]["mappings"][-1] == {
+        "corpus": "repo",
+        "relative_path": "replacement/repo-skill",
+        "link_name": "repo-skill",
+    }
+    assert runtime.published_batches[0]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mapping_publish_retry_keeps_retirement_candidate() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.published_batches[1]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mapping_verify_retry_keeps_retirement_candidate() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.verify_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.physical_cutovers == 1
+    assert runtime.verified_batches[1]["retired_mappings"] == [
+        {
+            "corpus": "repo",
+            "relative_path": "business/repo-skill",
+            "link_name": "repo-skill",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exact_reactivation_cancels_durable_retirement() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    original = skills.active[-1]
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False, True]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    skills.active.append(original)
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
+    assert runtime.published_batches[1]["retired_mappings"] == []
+    assert runtime.published_batches[1]["mappings"][-1]["link_name"] == ("repo-skill")
+
+
+@pytest.mark.asyncio
+async def test_continuous_product_churn_is_bounded_without_database_commit() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    late = RegisteredSkillAsset(
+        skill_id=22,
+        name="late",
+        git_path="git://business/late",
+    )
+
+    def toggle_after_verify() -> None:
+        if late in skills.active:
+            skills.active.remove(late)
+        else:
+            skills.active.append(late)
+
+    runtime.after_verify = toggle_after_verify
+
+    result = await build_service(
+        layouts,
+        runtime,
+        skills=skills,
+    ).reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    assert result.retryable is True
+    assert layouts.state.last_failure_code == "MAPPING_SNAPSHOT_CHANGED"
+    assert runtime.physical_cutovers == 1
+    assert len(runtime.published_batches) == 4
+    assert "database" not in layouts.events
+
+
+@pytest.mark.asyncio
+async def test_malformed_durable_retirement_fails_before_retry_mutation() -> None:
+    layouts = FakeLayoutRepository()
+    skills = FakeSkillRepository()
+    runtime = FakeRuntime()
+    runtime.after_cutover = lambda: skills.active.pop()
+    runtime.publish_results = [False]
+    service = build_service(layouts, runtime, skills=skills)
+
+    first = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+    assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
+    layouts.state = replace(
+        layouts.state,
+        last_failure_evidence={"retired_mappings": "not-a-list"},
+    )
+
+    second = await service.reconcile(scope=SCOPE, lease_owner="worker-1")
+
+    assert second.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert len(runtime.published_batches) == 1
+
+
+@pytest.mark.asyncio
 async def test_historical_local_versions_share_engine_locator_on_commit() -> None:
     layouts = FakeLayoutRepository()
     runtime = FakeRuntime()
@@ -561,16 +859,13 @@ async def test_historical_local_versions_share_engine_locator_on_commit() -> Non
     assert result.outcome is SkillsPoolReconcileOutcome.POOL_ACTIVE
     assert layouts.committed_locators == {
         11: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-a"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"
         ),
         12: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-b"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-b"
         ),
         13: (
-            "local:///home/admin/.openclaw/workspace/skills-pool/"
-            "skills-local/local-a"
+            "local:///home/admin/.openclaw/workspace/skills-pool/skills-local/local-a"
         ),
     }
 
@@ -598,9 +893,7 @@ async def test_conflicting_same_name_sources_fail_before_cutover() -> None:
     )
 
     assert result.outcome is SkillsPoolReconcileOutcome.INVALID
-    assert result.evidence == {
-        "reason": "duplicate managed target: local-a"
-    }
+    assert result.evidence == {"reason": "duplicate managed target: local-a"}
     assert runtime.events == ["probe"]
     assert runtime.physical_cutovers == 0
     assert layouts.events == ["failure"]
@@ -644,7 +937,10 @@ async def test_pre_upgrade_runtime_reconciles_activating_generation() -> None:
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -714,7 +1010,10 @@ async def test_activating_old_runtime_without_identity_waits_for_upgrade() -> No
     runtime = FakeRuntime()
     runtime.probe_result = replace(
         runtime.probe_result,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -900,13 +1199,13 @@ async def test_hermes_h0_ready_uses_its_own_pool_paths_for_full_activation() -> 
     )
     runtime.probe_result = replace(
         runtime.probe_result,
-            evidence={
-                "checks": {
-                    "legacy_local_bridge_valid": True,
-                    "stable_repo_bridge_valid": True,
-                },
-                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        evidence={
+            "checks": {
+                "legacy_local_bridge_valid": True,
+                "stable_repo_bridge_valid": True,
             },
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
 
     result = await build_service(
@@ -1063,9 +1362,9 @@ async def test_repair_refresh_mapping_failure_reuses_persisted_locator_evidence(
 
     assert first.outcome is SkillsPoolReconcileOutcome.MAPPING_FAILED
     assert layouts.state.phase is SkillLayoutPhase.POOL_CUTOVER_COMMITTED
-    assert layouts.state.last_probe_evidence["cutover"]["evidence"][
-        "local_locators"
-    ]["local-a"].endswith("/local-a")
+    assert layouts.state.last_probe_evidence["cutover"]["evidence"]["local_locators"][
+        "local-a"
+    ].endswith("/local-a")
 
     runtime.events.clear()
     layouts.events.clear()
@@ -1948,6 +2247,161 @@ async def test_pool_active_reconciliation_rejects_invalid_current_runtime() -> N
     assert runtime.events == ["probe"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("logical_engine", ["aicoding", "claude_code"])
+async def test_pool_active_aicoding_bridge_uses_engine_repair_then_requires_ready_probe(
+    logical_engine: str,
+) -> None:
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine=logical_engine)
+    initial_probe = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={"reason": "active_managed_entry_invalid"},
+    )
+    runtime.probe_results = [initial_probe, runtime.probe_result]
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine=logical_engine,
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert result.evidence["active_aicoding_bridge_reconciled"] is True
+    assert result.evidence["reconciled_mapping_count"] == 3
+    assert result.evidence["engine_repair"]["status"] == "COMMITTED"
+    assert runtime.events == ["probe", "cutover", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_does_not_accept_unproven_engine_repair() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+    initial_probe = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={"reason": "active_managed_entry_invalid"},
+    )
+    still_invalid = replace(
+        initial_probe,
+        evidence={"reason": "unknown_active_entry"},
+    )
+    runtime.probe_results = [initial_probe, still_invalid]
+
+    result = await build_service(
+        layouts,
+        runtime,
+        engine="claude_code",
+    ).reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert result.retryable is False
+    assert (
+        result.evidence["reason"] == "active_aicoding_bridge_reconciliation_incomplete"
+    )
+    assert runtime.events == ["probe", "cutover", "probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_does_not_repair_local_corpus_bridge() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="aicoding")
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={
+            "reason": "retired_local_bridge_present",
+        },
+    )
+
+    result = await build_service(layouts, runtime, engine="aicoding").reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.INVALID
+    assert runtime.events == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_keeps_untrusted_engine_repair_failed() -> (
+    None
+):
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            lease_owner=None,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+        )
+    )
+    runtime = FakeRuntime(engine="claude_code")
+    runtime.probe_result = replace(
+        runtime.probe_result,
+        status=RuntimeLayoutProbeStatus.INVALID,
+        evidence={"reason": "active_managed_entry_invalid"},
+    )
+    runtime.cutover_result = PoolCutoverResult(
+        committed=False,
+        status=PoolCutoverStatus.INVALID,
+        evidence={"reason": "untrusted_active_bridge"},
+    )
+
+    result = await build_service(layouts, runtime, engine="claude_code").reconcile(
+        scope=SCOPE,
+        lease_owner="post-restart-worker",
+    )
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is False
+    assert result.evidence["engine_repair"] == {
+        "committed": False,
+        "status": "INVALID",
+        "evidence": {"reason": "untrusted_active_bridge"},
+    }
+    assert runtime.events == ["probe", "cutover"]
+
+
 class StickyClaimService:
     """Expose the real reconciliation service through the durable task seam."""
 
@@ -2057,7 +2511,10 @@ def test_real_reconciliation_retry_resumes_same_generation_without_repeating_cut
         engine="openclaw",
         layout_contract_version=LAYOUT_CONTRACT_VERSION,
         preparation_id=PREPARATION_ID,
-        evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+        evidence={
+            "marker": "valid",
+            "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+        },
     )
     runtime.cutover_result = PoolCutoverResult(
         committed=True,
@@ -2144,7 +2601,10 @@ class ReadyProbeService:
             engine="openclaw",
             layout_contract_version=LAYOUT_CONTRACT_VERSION,
             preparation_id=PREPARATION_ID,
-            evidence={"marker": "valid", "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION},
+            evidence={
+                "marker": "valid",
+                "cutover_evidence_contract_version": CUTOVER_EVIDENCE_CONTRACT_VERSION,
+            },
         )
 
 
@@ -2189,3 +2649,288 @@ def test_stale_signal_uses_current_resolved_binding_for_real_mutations() -> None
         ("bot-1", "owner-1"),
     ]
     assert transport.bindings == ["binding-new", "binding-new", "binding-new"]
+
+
+class _LocalAICodingResolver:
+    def resolve_for_bot(self, bot_id: str, user_id: str) -> SimpleNamespace:
+        assert (bot_id, user_id) == (SCOPE.bot_id, "owner-1")
+        return SimpleNamespace(conn_info={"binding": "local-engine"})
+
+
+class _LocalAICodingProbe:
+    def __init__(self, *, home: Path, pool_repo: Path) -> None:
+        self._home = home
+        self._pool_repo = pool_repo
+        self.calls = 0
+
+    async def probe_bot(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ) -> RuntimeLayoutProbeResult:
+        assert (bot_id, user_id, engine) == (SCOPE.bot_id, "owner-1", "aicoding")
+        self.calls += 1
+        _, _, inspect_aicoding_runtime_layout = _aicoding_engine_api()
+        inspection = inspect_aicoding_runtime_layout(
+            home=self._home,
+            mapping_contract_version="skills-pool-mapping-v2",
+            repo_is_mounted=lambda path: path == self._pool_repo,
+        )
+        return RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus(inspection.status.value),
+            engine=engine,
+            layout_contract_version=inspection.layout_contract_version,
+            preparation_id=inspection.preparation_id,
+            evidence=inspection.evidence,
+        )
+
+
+class _LocalAICodingEngineTransport:
+    """Execute the Backend adapter payload through the actual Engine operation."""
+
+    def __init__(self, *, home: Path, pool_local: Path, pool_repo: Path) -> None:
+        self._home = home
+        self._pool_local = pool_local
+        self._pool_repo = pool_repo
+        self.calls: list[str] = []
+
+    async def invoke(
+        self,
+        conn_info: object,
+        method: str,
+        path: str,
+        *,
+        body: dict[str, object],
+        timeout: float,
+    ) -> dict[str, object]:
+        assert conn_info == {"binding": "local-engine"}
+        assert method == "POST"
+        assert timeout == 30.0
+        self.calls.append(path)
+        assert path == "/api/skills/layout/activate"
+
+        engine_skill_mapping, activate_aicoding_pool, _ = _aicoding_engine_api()
+        mappings = []
+        for intent in body["mappings"]:
+            assert isinstance(intent, dict)
+            corpus = intent["corpus"]
+            relative_path = intent["relative_path"]
+            link_name = intent["link_name"]
+            assert isinstance(corpus, str)
+            assert isinstance(relative_path, str)
+            assert isinstance(link_name, str)
+            source_root = self._pool_local if corpus == "local" else self._pool_repo
+            mappings.append(
+                engine_skill_mapping(
+                    source=str(source_root / relative_path),
+                    target=str(self._home / ".claude" / "skills" / link_name),
+                )
+            )
+
+        result = activate_aicoding_pool(
+            migration_generation=str(body["migration_generation"]),
+            preparation_id=str(body["preparation_id"]),
+            registered_local_names=list(body["registered_local_names"]),
+            mappings=mappings,
+            home=self._home,
+            repo_is_mounted=lambda candidate: candidate == self._pool_repo,
+        )
+        return {"success": True, "data": result.to_data()}
+
+
+def _prepared_local_aicoding_runtime(
+    tmp_path: Path,
+) -> tuple[Path, Path, Path, Path]:
+    """Build the persistent filesystem shape seen by a POOL_ACTIVE Bot."""
+
+    home = tmp_path / "home" / "admin"
+    workspace = home / ".aicoding" / "workspace"
+    legacy_local = workspace / "skills" / "skills-local"
+    active_root = home / ".claude" / "skills"
+    pool_root = workspace / "skills-pool"
+    pool_local = pool_root / "skills-local"
+    pool_repo = pool_root / "skills-repo"
+    repo_bridge = home / ".aicoding" / "skills-repo"
+
+    (legacy_local / "handmade").mkdir(parents=True)
+    (legacy_local / "handmade" / "SKILL.md").write_text("legacy")
+    (pool_local / "handmade").mkdir(parents=True)
+    (pool_local / "handmade" / "SKILL.md").write_text("pool")
+    (pool_repo / "business" / "shared").mkdir(parents=True)
+    (pool_repo / "business" / "shared" / "SKILL.md").write_text("repo")
+    active_root.mkdir(parents=True)
+    (active_root / "skills-local").symlink_to(legacy_local, target_is_directory=True)
+    repo_bridge.symlink_to(pool_repo, target_is_directory=True)
+    (pool_root / ".pool-ready").write_text(
+        json.dumps(
+            {
+                "engine": "aicoding",
+                "layout_contract_version": LAYOUT_CONTRACT_VERSION,
+                "preparation_id": PREPARATION_ID,
+                "prepared_at": "2026-07-24T00:00:00Z",
+                "pool_local_root": str(pool_local),
+                "pool_repo_root": str(pool_repo),
+                "validation_summary": {
+                    "all_valid": True,
+                    "pool_local": {"path": str(pool_local), "valid": True},
+                    "pool_repo": {
+                        "path": str(pool_repo),
+                        "readable_mount": True,
+                        "valid": True,
+                    },
+                    "structural_bridges": [
+                        {
+                            "name": "stable_local_bridge",
+                            "path": str(active_root / "skills-local"),
+                            "target": str(legacy_local),
+                            "valid": True,
+                        },
+                        {
+                            "name": "stable_repo_bridge",
+                            "path": str(repo_bridge),
+                            "target": str(pool_repo),
+                            "valid": True,
+                        },
+                    ],
+                    "managed_active_entries": [],
+                    "external_active_entry_count": 0,
+                },
+            }
+        )
+    )
+    return home, pool_local, pool_repo, repo_bridge
+
+
+def _pool_active_aicoding_service(
+    *,
+    tmp_path: Path,
+) -> tuple[
+    SkillsPoolReconcileService,
+    _LocalAICodingEngineTransport,
+    _LocalAICodingProbe,
+    Path,
+    Path,
+]:
+    home, pool_local, pool_repo, repo_bridge = _prepared_local_aicoding_runtime(
+        tmp_path
+    )
+    active_root = home / ".claude" / "skills"
+    engine_skill_mapping, activate_aicoding_pool, _ = _aicoding_engine_api()
+    initial = activate_aicoding_pool(
+        migration_generation=GENERATION,
+        preparation_id=PREPARATION_ID,
+        registered_local_names=["handmade"],
+        mappings=[
+            engine_skill_mapping(
+                source=str(pool_local / "handmade"),
+                target=str(active_root / "handmade"),
+            ),
+            engine_skill_mapping(
+                source=str(pool_repo / "business" / "shared"),
+                target=str(active_root / "shared"),
+            ),
+        ],
+        home=home,
+        repo_is_mounted=lambda candidate: candidate == pool_repo,
+    )
+    assert initial.committed
+
+    skills = FakeSkillRepository(engine="aicoding")
+    skills.registered = [
+        RegisteredSkillAsset(
+            skill_id=1,
+            name="handmade",
+            git_path="local://handmade",
+        )
+    ]
+    skills.active = [
+        *skills.registered,
+        RegisteredSkillAsset(
+            skill_id=2,
+            name="shared",
+            git_path="git://business/shared",
+        ),
+    ]
+    transport = _LocalAICodingEngineTransport(
+        home=home,
+        pool_local=pool_local,
+        pool_repo=pool_repo,
+    )
+    probe = _LocalAICodingProbe(home=home, pool_repo=pool_repo)
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=_LocalAICodingResolver(),
+        adapter_transport=transport,
+        probe_service=probe,
+    )
+    layouts = FakeLayoutRepository(
+        claimed_state(
+            active_layout=SkillLayout.POOL,
+            target_layout=None,
+            phase=SkillLayoutPhase.POOL_ACTIVE,
+            preparation_id=PREPARATION_ID,
+            data_plane_cutover_committed=True,
+            lease_owner=None,
+        )
+    )
+    service = SkillsPoolReconcileService(
+        bot_repository=FakeBotRepository("aicoding"),
+        layout_repository=layouts,
+        skill_repository=skills,
+        runtime=runtime,
+    )
+    return service, transport, probe, active_root, repo_bridge
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_uses_real_engine_activate_contract(
+    tmp_path: Path,
+) -> None:
+    """Backend must call Engine before declaring a retired repo bridge healthy."""
+
+    service, transport, probe, active_root, repo_bridge = _pool_active_aicoding_service(
+        tmp_path=tmp_path
+    )
+    (active_root / "shared").unlink()
+    (active_root / "shared").symlink_to(
+        repo_bridge / "business" / "shared",
+        target_is_directory=True,
+    )
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-after-restart")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.ALREADY_ACTIVE
+    assert transport.calls == ["/api/skills/layout/activate"]
+    assert probe.calls == 2
+    assert (active_root / "shared").readlink() == (
+        active_root.parent.parent
+        / ".aicoding"
+        / "workspace"
+        / "skills-pool"
+        / "skills-repo"
+        / "business"
+        / "shared"
+    )
+
+
+@pytest.mark.asyncio
+async def test_pool_active_aicoding_bridge_stops_when_real_engine_rejects_repair(
+    tmp_path: Path,
+) -> None:
+    """A real Engine rejection must stop Backend before its post-repair probe."""
+
+    service, transport, probe, active_root, repo_bridge = _pool_active_aicoding_service(
+        tmp_path=tmp_path
+    )
+    untrusted_target = repo_bridge / "business" / "missing"
+    (active_root / "shared").unlink()
+    (active_root / "shared").symlink_to(untrusted_target, target_is_directory=True)
+
+    result = await service.reconcile(scope=SCOPE, lease_owner="worker-after-restart")
+
+    assert result.outcome is SkillsPoolReconcileOutcome.CUTOVER_FAILED
+    assert result.retryable is False
+    assert transport.calls == ["/api/skills/layout/activate"]
+    assert probe.calls == 1
+    assert (active_root / "shared").readlink() == untrusted_target

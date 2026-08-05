@@ -24,7 +24,7 @@ Track A 和 Track B 都假设公共 API 的数据在**后端库表**里。Bot �
 这对内部 TeamClaw 前端没问题，对外部租户则是错的。它把 proxypass 拓扑和裸设备
 token 暴露了出去，并且让**从未被设计成公共契约的 engine** 成为集成方直接编程的对象。
 
-**Track C 把 engine 面向客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，
+**Track C 把 engine 面向客户端的 HTTP 包装到 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，
 并用一个净化过的 socket 信息端点取代连接信息的移交。**
 
 有两点让它比 Track A/B 更省力：
@@ -60,13 +60,17 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ## 公共面 —— 16 个端点
 
-全部按 bot 收敛在 `/openapi/v1/bots/{bot_id}/…` 之下，全部返回
+全部按 bot 收敛在 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，全部返回
 `openapi_v1/contracts.py` 的 `Envelope[T]` / `Page[T]` 形状。
 
 > **每条路径都以字面量前缀 `/openapi/v1/bots/` 开头。** 下表中的 `…` 只是为了
-> 表格宽度而做的缩写。这是硬性约束，不是风格问题：它让 Track C 与既有六个类别
+> 表格宽度而做的缩写。这是硬性约束，不是风格问题：它让 Track C 与既有类别
 > 保持一致，而且**网关正是按这个前缀转发到 agentclaw 的**，所以挂在别处的路由
 > 在生产上根本不可达。有测试对此做断言。
+>
+> **组件名在 `{bot_id}` 之前。** 这五个组最初以
+> `/openapi/v1/bots/{bot_id}/<component>/…` 上线，已于 2026-08-03 规范化 ——
+> 见 [`README.zh-CN.md`](README.zh-CN.md) 的**寻址规则**。下表用的是当前地址。
 
 ### sessions（7）—— engine `/api/sessions`
 
@@ -81,13 +85,13 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
-| GET | `…/sessions` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[SessionPage]` |
-| POST | `…/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
-| GET | `…/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
-| DELETE | `…/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
-| GET | `…/sessions/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[MessagePage]` |
-| DELETE | `…/sessions/{session_id}/messages` | `DELETE …/messages` | 清空历史 → `Envelope[Deleted]` |
-| PATCH | `…/sessions/{session_id}` | `POST …/{session_id}/update` | **差异：** 公共面上部分更新是资源上的 `PATCH`，不是 `/update` 子路径。请求体只有 `title`/`model`，见下 |
+| GET | `…/sessions/{bot_id}` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[SessionPage]` |
+| POST | `…/sessions/{bot_id}` | `POST /api/sessions` | `201 Envelope[Session]` |
+| GET | `…/sessions/{bot_id}/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
+| DELETE | `…/sessions/{bot_id}/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
+| GET | `…/sessions/{bot_id}/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[MessagePage]` |
+| DELETE | `…/sessions/{bot_id}/{session_id}/messages` | `DELETE …/messages` | 清空历史 → `Envelope[Deleted]` |
+| PATCH | `…/sessions/{bot_id}/{session_id}` | `POST …/{session_id}/update` | **差异：** 公共面上部分更新是资源上的 `PATCH`，不是 `/update` 子路径。请求体只有 `title`/`model`，见下 |
 
 这一组有两点不是读者会默认的形状：
 
@@ -110,9 +114,9 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
-| GET | `…/engine/status` | `GET /api/engine/status` | 进程 / 切换阶段 / 连接数 |
-| GET | `…/engine/capabilities` | `GET /api/engine/capabilities` | **Track C 里最重要的端点** —— 见下文《能力》 |
-| GET | `…/engine/available` | `GET /api/engine/list` | **差异：** `list` 是动词路径，公共面改用名词。已注册引擎 + active 标记 + 版本 |
+| GET | `…/engine/{bot_id}/status` | `GET /api/engine/status` | 进程 / 切换阶段 / 连接数 |
+| GET | `…/engine/{bot_id}/capabilities` | `GET /api/engine/capabilities` | **Track C 里最重要的端点** —— 见下文《能力》 |
+| GET | `…/engine/{bot_id}/available` | `GET /api/engine/list` | **差异：** `list` 是动词路径，公共面改用名词。已注册引擎 + active 标记 + 版本 |
 
 > **`POST /api/engine/switch` 与 `POST /api/engine/restart` 刻意不包装。**
 > PR #494 已经让 `engine` 在 `PUT /openapi/v1/bots/{bot_id}` 上不可变
@@ -124,20 +128,20 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
-| GET | `…/models` | `GET /api/models` | `Envelope[Page[Model]]` |
-| GET | `…/models/{model_id}` | `GET /api/models/{model_id:path}` | **模型 id 里带斜杠**（`openai/gpt-5.3`）。engine 用 `:path` 转换器；公共路由必须在「URL 编码」与「`:path` 转换器」之间定下来并写进文档 |
+| GET | `…/models/{bot_id}` | `GET /api/models` | `Envelope[Page[Model]]` |
+| GET | `…/models/{bot_id}/{model_id}` | `GET /api/models/{model_id:path}` | **模型 id 里带斜杠**（`openai/gpt-5.3`）。engine 用 `:path` 转换器；公共路由必须在「URL 编码」与「`:path` 转换器」之间定下来并写进文档 |
 
 ### approvals（3）—— engine `/api/approvals`
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
-| GET | `…/approvals/mode` | `POST /api/approvals/mode/get` | **差异：** 读操作用 `GET` + `session_key` query，不用 `POST` |
-| PUT | `…/approvals/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
-| GET | `…/approvals/modes` | `GET /api/approvals/modes` | 静态枚举；注意这是 engine 侧唯一**没有**能力门禁的路由 |
+| GET | `…/approvals/{bot_id}/mode` | `POST /api/approvals/mode/get` | **差异：** 读操作用 `GET` + `session_key` query，不用 `POST` |
+| PUT | `…/approvals/{bot_id}/mode` | `POST /api/approvals/mode/set` | body `{session_key, mode}` |
+| GET | `…/approvals/{bot_id}/modes` | `GET /api/approvals/modes` | 静态枚举；注意这是 engine 侧唯一**没有**能力门禁的路由 |
 
 ### connection（1）—— 新增，engine 无对应物
 
-`GET /openapi/v1/bots/{bot_id}/connection` → `Envelope[Connection]`
+`GET /openapi/v1/bots/connection/{bot_id}` → `Envelope[Connection]`
 
 `get_device_connection` 的公共替代品。返回可直接使用的 socket，不返回 proxypass 拓扑：
 
@@ -148,7 +152,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
   "sockets": [
     {
       "kind": "chat",
-      "url": "wss://<gateway>/openapi/v1/engine/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
+      "url": "wss://<gateway>/openapi/v1/bots/messages/ws/<target>/api/openclaw/ws?x-proxypass-token=<scoped token>"
     }
   ]
 }
@@ -176,19 +180,21 @@ socket 也是干净的。
   内部 console 打开同一条 socket 用的就是同样的方式。_2026-07-31 更正。_
 - **地址是网关的，不是它背后那一跳的。** 对外发布的 origin 取自 `gateway` 配置块
   （`base_url` / `base_url_pre`，按环境选择），前缀是
-  `/openapi/v1/engine/{target}{path}`，由网关改写到那一跳上。前面没有网关的部署
+  `/openapi/v1/bots/messages/ws/{target}{path}`，由网关改写到那一跳上。前面没有网关的部署
   —— 也就是 community 构建的常态 —— 是一个有名字的 upstream 错误，不是 500，
   也不是发布一个没人服务的地址。该前缀位于对外发布的 API 命名空间之内，而不是
-  主机根路径：`engine` 就是一个普通的网关 domain，和 `bots` 用同一套按首段解析的
-  查找逻辑，因此这条 socket 与分发它地址的那个端点处在同一张对外表面上。
-  _2026-08-02 更正。_
+  主机根路径；并且位于 `bots` 作用域**之内**，而不是与之并列：网关按 path pattern
+  解析 domain，因此这个前缀由 engine proxy 服务，而 `/openapi/v1/bots/**` 下的其余
+  地址由本服务服务。首段标识这张表面的**归属方**，而不是背后的进程 —— 管理面与运行时
+  在这里属于同一个归属方。该占用只在 socket 平面成立，因此发往同一地址的 HTTP 请求
+  仍会到达本服务。_2026-08-03 迁移；此前为 `/openapi/v1/engine`。_
 - **provider 给的 URL 是被改写地址，不是被重新拼装。** 获取设备连接时仍然请求
   **`ws_conn_mode="relay"`**，provider 也仍然围绕我们给它的引擎 path 拼出一条完整
   URL —— 正是这个 path 透传，才让 `claude_code` bot 不会拿到 openclaw 的默认路径、
   在连接时被 4001 拒掉。之后只改两处：origin 换成网关的，`/proxypass/` 前缀换成
-  `/openapi/v1/engine/`。该前缀之后的一切 —— target、引擎 path、provider 自己带的 query ——
+  `/openapi/v1/bots/messages/ws/`。该前缀之后的一切 —— target、引擎 path、provider 自己带的 query ——
   原封不动透传，因此本端点对一套并不属于它的 URL 语法不持任何假设，也不会悄悄丢掉
-  没预料到的部分。若 provider 给回的形状是 `/openapi/v1/engine` 前缀无法表达的 —— BaaS 的
+  没预料到的部分。若 provider 给回的形状是 `/openapi/v1/bots/messages/ws` 前缀无法表达的 —— BaaS 的
   LOCAL 平台返回 `/wsrelay/{session_id}` —— 则直接拒绝而不是发布，这样错误的假设会在
   服务端暴露，而不是变成一条连不上的 socket。_2026-07-31 更正。_
 - **`expires_at` 必填**，让调用方知道该重新获取，而不是在 token 过期后静默失败。
@@ -200,7 +206,7 @@ socket 也是干净的。
   请求的 TTL（120 分钟，对齐 `core/grt_chat/services/grt_chat_service.py:25`）：
   一个量级正确的上界胜过让必填字段缺失。签发方的值会归一化为 UTC ISO 8601，
   保证两条分支产出同一种格式。_2026-07-30 更正。_
-- socket 集合是**由能力推导出来的**，因此本端点与 `…/engine/capabilities`
+- socket 集合是**由能力推导出来的**，因此本端点与 `…/engine/{bot_id}/capabilities`
   永远不允许互相矛盾。
 
 ---
@@ -226,11 +232,11 @@ socket 也是干净的。
 | `api/routers/openclaw_http` | `/api/openclaw` | 3 | — | 🟡 **延后** | `test-connection` / `disconnect` / `config`。它在 proxypass 数组里写作 `'api/openclaw'` —— **没有前导斜杠**，因此 `url.startsWith()` 永远匹配不到 `/api/openclaw/...`，该条目按现状是死的（`requestConfig.ts:191`）。而且是 openclaw 专有的网关调试工具 |
 | `api/default_config` | `/api/openclaw` | 1 | — | 🟡 **延后** | 同一个失效前缀条目 |
 | `api/zero_check` | `/api/openclaw/zero-check` | 2 | — | 🟡 **延后** | 同一个失效前缀条目 |
-| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / 非 v1** | `GET /terminal`、`/terminal/health`、`WS /ws/terminal`。也**不能**经 `…/connection` 触达 —— 终端 socket 曾经实现过又被移除（见上文 connection 条目）；那两个 HTTP 路由是 shell 自身的引导 |
+| `api/web_shell` | — | 2 | 1 | ⛔ **C3 / 非 v1** | `GET /terminal`、`/terminal/health`、`WS /ws/terminal`。也**不能**经 `…/connection/{bot_id}` 触达 —— 终端 socket 曾经实现过又被移除（见上文 connection 条目）；那两个 HTTP 路由是 shell 自身的引导 |
 | `api/routers/ws` | — | — | 1 | 🔌 **C3 —— 连接信息** | `/api/openclaw/ws` |
 | `api/routers/claude_code_ws` | `/api/claude_code` | — | 1 | 🔌 **C3 —— 连接信息** | `/api/claude_code/ws` |
 | `openclaw/router` | `/api/openclaw` | — | 1 | 🔌 **C3** | `/client` —— 网关侧 socket，不是租户 socket |
-| `api/app`（模块级） | — | 6 | 2 | ⛔ / 🔌 | `/health`、`/readiness`、`/config`、`/test-connection`、`/disconnect`、`/api/evaluation/report` 属运维面。`WS /ws` 与 `WS /api/{engine}/ws` 是通用对话 socket → `…/connection` |
+| `api/app`（模块级） | — | 6 | 2 | ⛔ / 🔌 | `/health`、`/readiness`、`/config`、`/test-connection`、`/disconnect`、`/api/evaluation/report` 属运维面。`WS /ws` 与 `WS /api/{engine}/ws` 是通用对话 socket → `…/connection/{bot_id}` |
 | `api/aicoding_sessions` | `/api/aicoding/sessions` | 10 | — | ⛔ **C4** | 仅 aicoding |
 | `api/aicoding/skill_router` | `/api/aicoding` | 1 | — | ⛔ **C4** | 仅 aicoding |
 | `api/aicoding/data_proxy_router` | `/data` | 1 | — | ⛔ **C4** | harness-data 反向代理 |
@@ -261,7 +267,7 @@ engine 返回 `ApiResponse{success, data, message, warning, total}`
   工程文案且不总是英文；而且规则 C2 把除一个以外的全部 limited 能力都挡在本面之外
   —— 只有 `claude_code` 的 `SESSION_CREATE` 能触达，而那条说明讲的是 session key
   如何建立，并非结果不完整。它只**记录在服务端日志**，不再往外传。`Envelope`
-  保持不变；`…/engine/capabilities` 才是调用方发现限制的地方。_2026-07-30 决定。_
+  保持不变；`…/engine/{bot_id}/capabilities` 才是调用方发现限制的地方。_2026-07-30 决定。_
 
 ### 2. 能力是公共契约的逃生舱
 
@@ -272,8 +278,8 @@ engine 的每个 handler 都会调用 `check_capability()`
 名下的两个 bot 会给出不同答案。**
 
 - `CapabilityNotSupportedError` / 传输层的 501 需要一条 `ENVELOPE_ERRORS` 条目，
-  配固定公共文案，并指引调用方去看 `…/engine/capabilities`。
-- 这正是 `…/engine/capabilities` 进入 v1 而非延后的原因：它是调用方在事前判断
+  配固定公共文案，并指引调用方去看 `…/engine/{bot_id}/capabilities`。
+- 这正是 `…/engine/{bot_id}/capabilities` 进入 v1 而非延后的原因：它是调用方在事前判断
   另外 16 个端点里哪些会被自己的 bot 真正应答的唯一方式。
 
 ### 3. `user_id` 必须来自 principal，绝不来自调用方
@@ -344,7 +350,7 @@ engine 的每个 handler 都会调用 `check_capability()`
 
 一处刻意的背离：`GET /api/approvals/modes` 是 engine 侧唯一**没有**能力门禁的
 路由（`approvals/router.py:104`），所以在 `claude_code` bot 上它照样公布三个模式，
-而 get 与 set 都返回 501。公共侧的 `…/approvals/modes` 以 `APPROVAL_SET` 为门禁，
+而 get 与 set 都返回 501。公共侧的 `…/approvals/{bot_id}/modes` 以 `APPROVAL_SET` 为门禁，
 使它列出的每个模式都是写入端点真正接受的值。之所以取写能力而非读能力：engine
 把 `APPROVAL_GET` 与 `APPROVAL_SET` 定义为两个独立能力，并分别为两条路由各设一
 道门禁，因此引擎可能只声明读而不声明写；此时若以读为门禁，就会公布三个"可选"
@@ -377,14 +383,16 @@ Track B 的坑：**基类放最后** —— `ENVELOPE_ERRORS` 按插入顺序第
 
 ## 路由注意事项
 
-新组位于 `/openapi/v1/bots/{bot_id}/{sessions,engine,models,approvals,connection}`
-—— 比 `{bot_id}` 通配符**深一段**，因此不需要 `openapi_v1/__init__.py:32-40` 中
-`_SUBGROUPS` 强制的"字面子组优先"顺序。但仍必须保证注册后
-`/openapi/v1/bots/mcp`（字面市场组）继续先于 `/openapi/v1/bots/{bot_id}` 命中。
+这些组位于 `/openapi/v1/bots/{sessions,engine,models,approvals,connection}/{bot_id}`
+—— 各自处在**自己的字面量**之后，因此彼此之间不可能互相遮蔽，相互顺序是自由的。
+但它们仍必须注册在 bots 组之前，以保证那些提供单段集合根的组件（`resources`、
+`routines`）继续先于 `/openapi/v1/bots/{bot_id}` 命中。
 
-留意一处近似冲突：按 bot 收敛的 MCP 会是 `/openapi/v1/bots/{bot_id}/mcp/...`，
-它与现有市场组 `/openapi/v1/bots/mcp/...` 是**不同的资源**。Track C 不新增它
-（规则 C2），但后来的读者绝不能把两者合并。
+_已被取代的旧说明（2026-08-03 之前）：这些组原本比 `{bot_id}` 通配符深一段，那才是
+它们顺序自由的原因。如今顺序自由的理由不同了 —— 它们各自带有字面前缀 —— 本节原先提示
+的那处近似冲突也随之消失：按 bot 收敛的 MCP 现在会是 `/openapi/v1/bots/mcp/{bot_id}/...`，
+它嵌套在市场组自己的字面量**之下**，而不再是从另一侧与之竞争。Track C 不新增它
+（规则 C2）。_
 
 ---
 

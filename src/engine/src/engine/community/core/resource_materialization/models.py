@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -33,6 +34,7 @@ class MaterializationRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int | None = Field(default=None, ge=0)
     content_hash: str | None = Field(default=None, min_length=1, max_length=128)
+    uploaded_at: datetime | None = None
 
     def model_post_init(self, __context, /) -> None:
         if self.transfer_api_version == "session_v2":
@@ -71,6 +73,7 @@ class ManifestEntry(BaseModel):
     observed_size: int | None = None
     observed_mtime_ns: int | None = None
     observed_inode: int | None = None
+    uploaded_at: datetime | None = None
 
 
 @dataclass(frozen=True)

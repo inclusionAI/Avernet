@@ -2,6 +2,7 @@
 
 Also contains _SkillsEnsureError (relocated from engines/openclaw/skills.py).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -63,11 +64,12 @@ class _SkillsPortMixin:
         params: dict[str, Any],
         *,
         source_layout: MappingSourceLayout,
+        key: str = "mappings",
     ) -> ResolvedMappingPayload:
         return resolve_mapping_payload(
             engine="openclaw",
             source_layout=source_layout,
-            payload=params.get("mappings", []),
+            payload=params.get(key, []),
             mapping_contract_version=params.get("mapping_contract_version"),
         )
 
@@ -78,9 +80,7 @@ class _SkillsPortMixin:
             activate_openclaw_pool,
             migration_generation=params["migration_generation"],
             preparation_id=params["preparation_id"],
-            registered_local_names=list(
-                params.get("registered_local_names", [])
-            ),
+            registered_local_names=list(params.get("registered_local_names", [])),
             mappings=list(
                 self._pool_mappings(
                     params,
@@ -96,15 +96,11 @@ class _SkillsPortMixin:
         result = await asyncio.to_thread(
             rollback_openclaw_pool,
             rollback_generation=params["rollback_generation"],
-            registered_local_names=list(
-                params.get("registered_local_names", [])
-            ),
+            registered_local_names=list(params.get("registered_local_names", [])),
         )
         return PoolLayoutActivationPortResult(**result.to_data())
 
-    async def cleanup_pool_quarantine(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def cleanup_pool_quarantine(self, params: dict[str, Any]) -> dict[str, Any]:
         result = await asyncio.to_thread(
             cleanup_quarantine,
             engine="openclaw",
@@ -113,9 +109,7 @@ class _SkillsPortMixin:
         )
         return result.to_data()
 
-    async def probe_pool_layout(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def probe_pool_layout(self, params: dict[str, Any]) -> dict[str, Any]:
         result = await asyncio.to_thread(
             inspect_runtime_layout,
             engine="openclaw",
@@ -124,9 +118,7 @@ class _SkillsPortMixin:
         )
         return result.to_data()
 
-    async def publish_pool_mappings(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def publish_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
         resolved = self._pool_mappings(
             params,
             source_layout=MappingSourceLayout(
@@ -136,23 +128,31 @@ class _SkillsPortMixin:
                 )
             ),
         )
-        result = await asyncio.to_thread(
-            publish_pool_mappings,
-            mappings=list(resolved.mappings),
+        retired = self._pool_mappings(
+            params,
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            key="retired_mappings",
+        )
+        publish_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            publish_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            publish_pool_mappings,
+            **publish_kwargs,
         )
         data = result.to_data()
         if result.published and resolved.resolved_locators:
-            data["evidence"]["resolved_mappings"] = list(
-                resolved.resolved_locators
-            )
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
 
-    async def verify_pool_mappings(
-        self, params: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def verify_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
         resolved = self._pool_mappings(
             params,
             source_layout=MappingSourceLayout(
@@ -162,18 +162,28 @@ class _SkillsPortMixin:
                 )
             ),
         )
-        result = await asyncio.to_thread(
-            verify_skill_mappings,
-            mappings=list(resolved.mappings),
+        retired = self._pool_mappings(
+            params,
             source_layout=MappingSourceLayout(
                 params.get("source_layout", MappingSourceLayout.POOL.value)
             ),
+            key="retired_mappings",
+        )
+        verify_kwargs: dict[str, Any] = {
+            "mappings": list(resolved.mappings),
+            "source_layout": MappingSourceLayout(
+                params.get("source_layout", MappingSourceLayout.POOL.value)
+            ),
+        }
+        if retired.mappings:
+            verify_kwargs["retired_mappings"] = list(retired.mappings)
+        result = await asyncio.to_thread(
+            verify_skill_mappings,
+            **verify_kwargs,
         )
         data = result.to_data()
         if result.valid and resolved.resolved_locators:
-            data["evidence"]["resolved_mappings"] = list(
-                resolved.resolved_locators
-            )
+            data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
 
     def _skills_resolve_base_dir(self) -> Path:
@@ -183,7 +193,8 @@ class _SkillsPortMixin:
         ``engines/openclaw/skills.py:OpenClawSkillsService._resolve_base_dir``.
         """
         base = os.getenv(
-            self._SKILLS_LINK_BASE_DIR_ENV, self._DEFAULT_SKILLS_LINK_BASE_DIR,
+            self._SKILLS_LINK_BASE_DIR_ENV,
+            self._DEFAULT_SKILLS_LINK_BASE_DIR,
         ).strip()
         if not base:
             base = self._DEFAULT_SKILLS_LINK_BASE_DIR
@@ -194,10 +205,9 @@ class _SkillsPortMixin:
     def _get_ensure_lock(cls, key: str) -> Any:
         import asyncio as _asyncio
         from collections import defaultdict
+
         if not hasattr(cls, "_skills_ensure_locks_store"):
-            cls._skills_ensure_locks_store: dict[str, Any] = defaultdict(
-                _asyncio.Lock
-            )
+            cls._skills_ensure_locks_store: dict[str, Any] = defaultdict(_asyncio.Lock)
         return cls._skills_ensure_locks_store[key]
 
     @staticmethod
@@ -340,12 +350,17 @@ class _SkillsPortMixin:
         ``engines/openclaw/skills.py:OpenClawSkillsService.ensure_center_skills``.
         """
         log.info("[skills.ensure] start")
-        nas_root = Path(os.environ.get(
-            self._SKILLS_CENTER_NAS_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_NAS_ROOT
-        ))
-        local_root = Path(os.environ.get(
-            self._SKILLS_CENTER_LOCAL_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_LOCAL_ROOT
-        ))
+        nas_root = Path(
+            os.environ.get(
+                self._SKILLS_CENTER_NAS_ROOT_ENV, self._DEFAULT_SKILLS_CENTER_NAS_ROOT
+            )
+        )
+        local_root = Path(
+            os.environ.get(
+                self._SKILLS_CENTER_LOCAL_ROOT_ENV,
+                self._DEFAULT_SKILLS_CENTER_LOCAL_ROOT,
+            )
+        )
 
         ok: list[dict[str, Any]] = []
         failed: list[dict[str, Any]] = []
@@ -360,17 +375,23 @@ class _SkillsPortMixin:
                 # (→ HTTP 500) rather than being silently logged as failures.
                 log.warning(
                     "[skills.ensure] failed uuid=%s ver=%s: %s",
-                    item.get("skill_uuid"), item.get("version"), e,
+                    item.get("skill_uuid"),
+                    item.get("version"),
+                    e,
                 )
-                failed.append({
-                    "skill_uuid": item.get("skill_uuid", ""),
-                    "version": item.get("version", ""),
-                    "reason": str(e),
-                })
+                failed.append(
+                    {
+                        "skill_uuid": item.get("skill_uuid", ""),
+                        "version": item.get("version", ""),
+                        "reason": str(e),
+                    }
+                )
 
         log.info(
             "[skills.ensure] done total=%d ok=%d failed=%d",
-            len(params.get("items", [])), len(ok), len(failed),
+            len(params.get("items", [])),
+            len(ok),
+            len(failed),
         )
         return {"ok": ok, "failed": failed}
 
@@ -437,7 +458,11 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.symlink] sync done total=%d created=%d updated=%d kept=%d removed=%d",
-            len(desired), len(created), len(updated), len(kept), len(removed),
+            len(desired),
+            len(created),
+            len(updated),
+            len(kept),
+            len(removed),
         )
         return {
             "total": len(desired),
@@ -462,7 +487,8 @@ class _SkillsPortMixin:
         clean_target_dir = params.get("clean_target_dir", True)
         log.info(
             "[skills.bindpath] start sync requested_count=%d clean_target_dir=%s",
-            len(requested), clean_target_dir,
+            len(requested),
+            clean_target_dir,
         )
 
         desired: dict[Path, Path] = {}
@@ -479,7 +505,10 @@ class _SkillsPortMixin:
             target = _convert_path(str(target_raw))
             log.info(
                 "[skills.bindpath] item source_raw=%s → %s target_raw=%s → %s",
-                source_raw, source, target_raw, target,
+                source_raw,
+                source,
+                target_raw,
+                target,
             )
             if target in desired:
                 raise ValueError(f"target 重复: {target}")
@@ -535,7 +564,11 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.bindpath] sync done total=%d created=%d updated=%d kept=%d removed=%d",
-            len(desired), len(created), len(updated), len(kept), len(removed),
+            len(desired),
+            len(created),
+            len(updated),
+            len(kept),
+            len(removed),
         )
         return {
             "total": len(desired),
@@ -565,7 +598,8 @@ class _SkillsPortMixin:
             dir_path = _convert_path(str(dir_raw))
             log.info(
                 "[skills.clean] dir_raw=%s → %s",
-                dir_raw, dir_path,
+                dir_raw,
+                dir_path,
             )
             if not dir_path.is_dir():
                 continue
@@ -577,6 +611,7 @@ class _SkillsPortMixin:
 
         log.info(
             "[skills.clean] scanned=%d removed=%d",
-            directories_scanned, len(removed),
+            directories_scanned,
+            len(removed),
         )
         return {"directories_scanned": directories_scanned, "removed": removed}

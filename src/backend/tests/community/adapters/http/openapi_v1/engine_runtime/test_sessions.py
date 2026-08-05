@@ -50,7 +50,7 @@ def client(make_client):
 
 
 def _base(bot: str = BOT) -> str:
-    return f"/openapi/v1/bots/{bot}/sessions"
+    return f"/openapi/v1/bots/sessions/{bot}"
 
 
 # ── success paths ─────────────────────────────────────────────────────────────

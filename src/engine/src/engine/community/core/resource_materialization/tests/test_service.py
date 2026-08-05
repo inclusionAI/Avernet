@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -59,6 +60,7 @@ def _request(content: bytes, **overrides) -> MaterializationRequest:
         "filename": "report.txt",
         "size_bytes": len(content),
         "content_hash": hashlib.sha256(content).hexdigest(),
+        "uploaded_at": "2026-08-03T10:20:30Z",
     }
     values.update(overrides)
     return MaterializationRequest(**values)
@@ -91,6 +93,7 @@ async def test_materialize_writes_atomic_file_manifest_and_callback(tmp_path: Pa
     assert entry.observed_size == len(content)
     assert entry.observed_mtime_ns is not None
     assert entry.observed_inode is not None
+    assert entry.uploaded_at == datetime(2026, 8, 3, 10, 20, 30, tzinfo=UTC)
 
 
 @pytest.mark.asyncio

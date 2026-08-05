@@ -1,6 +1,6 @@
 # `agentclaw.community.core.engine_runtime`
 
-Engine-runtime relay — forwards one public `/openapi/v1/bots/{bot_id}/…`
+Engine-runtime relay — forwards one public `/openapi/v1/bots/<component>/{bot_id}/…`
 request to that bot's engine adapter and normalises the answer.
 
 ## Context Boundary

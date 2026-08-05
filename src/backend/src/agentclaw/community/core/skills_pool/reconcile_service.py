@@ -1,8 +1,4 @@
-"""已认领 Bot 的 Skills Pool 激活闭环。
-
-本模块只编排控制面步骤；最终同步和原子 bridge 由当前运行时完成，数据库
-仓储负责 locator 与 ``POOL_ACTIVE`` 的同事务提交。
-"""
+"""编排已认领 Bot 的 Skills Pool 激活闭环。"""
 
 from __future__ import annotations
 
@@ -15,10 +11,16 @@ from agentclaw.community.core.bot_management.repository.protocol import (
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CUTOVER_EVIDENCE_CONTRACT_VERSION,
+    RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
 )
 from agentclaw.community.core.skills_pool.aicoding_retirement import (
+    is_aicoding_active_mapping_reconciliation_candidate,
     is_trusted_aicoding_repo_retirement_resume,
+)
+from agentclaw.community.core.skills_pool.active_aicoding_bridge_repair import (
+    ActiveAICodingBridgeRepairStatus,
+    request_active_aicoding_bridge_repair,
 )
 from agentclaw.community.core.skills_pool.models import (
     FILESYSTEM_POOL_ENGINES,
@@ -26,11 +28,22 @@ from agentclaw.community.core.skills_pool.models import (
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     build_logical_skill_mappings,
+    logical_skill_mappings_from_evidence,
     local_locators_from_evidence,
     local_skill_name,
 )
+from agentclaw.community.core.skills_pool.mapping_convergence import (
+    MappingConvergenceStatus,
+    converge_post_cutover_mappings,
+)
 from agentclaw.community.core.skills_pool.repository.protocol import (
     SkillsPoolLayoutRepositoryProtocol,
+)
+from agentclaw.community.core.skills_pool.reconcile_support import (
+    cutover_failure_profile,
+    persisted_cutover_evidence,
+    post_commit_cutover_failure_profile,
+    probe_outcome,
 )
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
@@ -162,12 +175,10 @@ class SkillsPoolReconcileService:
             state.data_plane_cutover_committed,
             probe.status.value,
         )
-        finalizing_repo_retirement_resume = (
-            is_trusted_aicoding_repo_retirement_resume(
-                state=state,
-                engine=engine,
-                probe=probe,
-            )
+        finalizing_repo_retirement_resume = is_trusted_aicoding_repo_retirement_resume(
+            state=state,
+            engine=engine,
+            probe=probe,
         )
         if (
             probe.status is not RuntimeLayoutProbeStatus.READY
@@ -234,7 +245,7 @@ class SkillsPoolReconcileService:
                         SkillsPoolReconcileOutcome.STATE_RACE_LOST
                     )
             return SkillsPoolReconcileResult(
-                self._probe_outcome(probe.status),
+                SkillsPoolReconcileOutcome(probe_outcome(probe.status)),
                 evidence=probe.evidence,
                 retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
@@ -335,6 +346,9 @@ class SkillsPoolReconcileService:
         try:
             local_names = [local_skill_name(asset) for asset in local_assets]
             mappings = build_logical_skill_mappings(active_assets)
+            durable_retired_mappings = logical_skill_mappings_from_evidence(
+                state.last_failure_evidence
+            )
         except ValueError as error:
             evidence = {"reason": str(error)}
             recorded = self._record_failure_for_boundary(
@@ -359,7 +373,7 @@ class SkillsPoolReconcileService:
 
         cutover_finalizing = state.phase is SkillLayoutPhase.POOL_CUTOVER_FINALIZING
         repair_evidence_refresh = state.last_failure_code == "MANUAL_REPAIR_RESOLVED"
-        locator_evidence = self._persisted_cutover_evidence(state)
+        locator_evidence = persisted_cutover_evidence(state)
         logger.info(
             "[skills_pool.reconcile] mapping intent ready bot_id=%s generation=%s "
             "phase=%s committed=%s local_count=%s mapping_count=%s",
@@ -416,8 +430,8 @@ class SkillsPoolReconcileService:
             if not cutover.committed:
                 evidence = cutover.to_dict()
                 if state.data_plane_cutover_committed:
-                    outcome, stage, retryable = (
-                        self._post_commit_cutover_failure_profile(cutover.status)
+                    outcome, stage, retryable = post_commit_cutover_failure_profile(
+                        cutover.status
                     )
                     recorded = self._layouts.record_post_cutover_failure(
                         scope=scope,
@@ -434,7 +448,7 @@ class SkillsPoolReconcileService:
                             preparation_id=probe.preparation_id,
                         )
                     return SkillsPoolReconcileResult(
-                        outcome,
+                        SkillsPoolReconcileOutcome(outcome),
                         preparation_id=probe.preparation_id,
                         evidence=evidence,
                         retryable=retryable,
@@ -481,7 +495,7 @@ class SkillsPoolReconcileService:
                         evidence=evidence,
                         retryable=False,
                     )
-                failure_profile = self._cutover_failure_profile(cutover.status)
+                failure_profile = cutover_failure_profile(cutover.status)
                 if failure_profile is not None:
                     outcome, stage, retryable = failure_profile
                     cutover_evidence = cutover.to_dict()
@@ -500,7 +514,7 @@ class SkillsPoolReconcileService:
                             preparation_id=probe.preparation_id,
                         )
                     return SkillsPoolReconcileResult(
-                        outcome,
+                        SkillsPoolReconcileOutcome(outcome),
                         preparation_id=probe.preparation_id,
                         evidence=cutover_evidence,
                         retryable=retryable,
@@ -633,44 +647,56 @@ class SkillsPoolReconcileService:
                     )
             locator_evidence = cutover.evidence
 
-        if not self._layouts.holds_lease(
+        convergence = await converge_post_cutover_mappings(
+            layouts=self._layouts,
+            skills=self._skills,
+            runtime=self._runtime,
             scope=scope,
-            migration_generation=generation,
+            generation=generation,
             lease_owner=lease_owner,
-        ):
+            user_id=user_id,
+            engine=engine,
+            cutover_mappings=mappings,
+            durable_retired_mappings=durable_retired_mappings,
+        )
+        if convergence.status is MappingConvergenceStatus.LEASE_NOT_HELD:
             return SkillsPoolReconcileResult(
                 SkillsPoolReconcileOutcome.LEASE_NOT_HELD,
                 preparation_id=probe.preparation_id,
             )
-        if not await self._runtime.publish_mappings(
-            bot_id=scope.bot_id,
-            user_id=user_id,
-            mappings=mappings,
-        ):
+        convergence_failure = {
+            MappingConvergenceStatus.INVALID: (
+                SkillsPoolReconcileOutcome.INVALID,
+                "MAPPING_DATA_INVALID",
+                "mapping_snapshot",
+            ),
+            MappingConvergenceStatus.PUBLISH_FAILED: (
+                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                "MAPPING_PUBLISH_FAILED",
+                "mapping_publish",
+            ),
+            MappingConvergenceStatus.VERIFY_FAILED: (
+                SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
+                "MAPPING_VERIFY_FAILED",
+                "mapping_verify",
+            ),
+            MappingConvergenceStatus.SNAPSHOT_CHANGED: (
+                SkillsPoolReconcileOutcome.MAPPING_FAILED,
+                "MAPPING_SNAPSHOT_CHANGED",
+                "mapping_convergence",
+            ),
+        }.get(convergence.status)
+        if convergence_failure is not None:
+            outcome, failure_code, failure_stage = convergence_failure
             return self._record_post_cutover_failure(
                 scope=scope,
                 generation=generation,
                 lease_owner=lease_owner,
                 preparation_id=probe.preparation_id,
-                outcome=SkillsPoolReconcileOutcome.MAPPING_FAILED,
-                failure_code="MAPPING_PUBLISH_FAILED",
-                failure_stage="mapping_publish",
-                evidence={"mapping_count": len(mappings)},
-            )
-        if not await self._runtime.verify_mappings(
-            bot_id=scope.bot_id,
-            user_id=user_id,
-            mappings=mappings,
-        ):
-            return self._record_post_cutover_failure(
-                scope=scope,
-                generation=generation,
-                lease_owner=lease_owner,
-                preparation_id=probe.preparation_id,
-                outcome=SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
-                failure_code="MAPPING_VERIFY_FAILED",
-                failure_stage="mapping_verify",
-                evidence={"mapping_count": len(mappings)},
+                outcome=outcome,
+                failure_code=failure_code,
+                failure_stage=failure_stage,
+                evidence=convergence.evidence,
             )
 
         try:
@@ -797,9 +823,22 @@ class SkillsPoolReconcileService:
             user_id=str(owner_id),
             engine=engine,
         )
+        if is_aicoding_active_mapping_reconciliation_candidate(
+            state=state,
+            engine=engine,
+            probe=probe,
+        ):
+            return await self._reconcile_active_aicoding_repo_bridges(
+                scope=scope,
+                state=state,
+                bot_id=scope.bot_id,
+                user_id=str(owner_id),
+                engine=engine,
+                initial_probe=probe,
+            )
         if probe.status is not RuntimeLayoutProbeStatus.READY:
             return SkillsPoolReconcileResult(
-                self._probe_outcome(probe.status),
+                SkillsPoolReconcileOutcome(probe_outcome(probe.status)),
                 evidence=probe.evidence,
                 retryable=(probe.status is RuntimeLayoutProbeStatus.TRANSIENT_ERROR),
             )
@@ -836,6 +875,7 @@ class SkillsPoolReconcileService:
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
                 mappings=mappings,
+                retired_mappings=[],
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_FAILED,
@@ -846,6 +886,7 @@ class SkillsPoolReconcileService:
                 bot_id=scope.bot_id,
                 user_id=str(owner_id),
                 mappings=mappings,
+                retired_mappings=[],
             ):
                 return SkillsPoolReconcileResult(
                     SkillsPoolReconcileOutcome.MAPPING_VERIFY_FAILED,
@@ -858,91 +899,57 @@ class SkillsPoolReconcileService:
             evidence=probe.evidence,
         )
 
-    @staticmethod
-    def _probe_outcome(
-        status: RuntimeLayoutProbeStatus,
-    ) -> SkillsPoolReconcileOutcome:
-        return {
-            RuntimeLayoutProbeStatus.NOT_CAPABLE: (
-                SkillsPoolReconcileOutcome.NOT_CAPABLE
-            ),
-            RuntimeLayoutProbeStatus.TRANSIENT_ERROR: (
-                SkillsPoolReconcileOutcome.TRANSIENT_ERROR
-            ),
-            RuntimeLayoutProbeStatus.INVALID: SkillsPoolReconcileOutcome.INVALID,
-        }.get(status, SkillsPoolReconcileOutcome.INVALID)
-
-    @staticmethod
-    def _cutover_failure_profile(
-        status: PoolCutoverStatus,
-    ) -> tuple[SkillsPoolReconcileOutcome, str, bool] | None:
-        return {
-            PoolCutoverStatus.DATA_INCONSISTENT: (
-                SkillsPoolReconcileOutcome.DATA_INCONSISTENT,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.ACTIVE_ENTRY_CONFLICT: (
-                SkillsPoolReconcileOutcome.ACTIVE_ENTRY_CONFLICT,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.NOT_ATOMIC: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "atomic_cutover",
-                False,
-            ),
-            PoolCutoverStatus.INVALID: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "pre_cutover_validation",
-                False,
-            ),
-            PoolCutoverStatus.TRANSIENT_ERROR: (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "pre_cutover_filesystem",
-                True,
-            ),
-        }.get(status)
-
-    @classmethod
-    def _post_commit_cutover_failure_profile(
-        cls,
-        status: PoolCutoverStatus,
-    ) -> tuple[SkillsPoolReconcileOutcome, str, bool]:
-        """Classify refresh failures after the irreversible boundary is known."""
-
-        if status in {
-            PoolCutoverStatus.UNKNOWN,
-            PoolCutoverStatus.TRANSIENT_ERROR,
-            PoolCutoverStatus.POST_CUTOVER_SYNC_PENDING,
-        }:
-            return (
-                SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-                "post_cutover_refresh",
-                True,
-            )
-        profile = cls._cutover_failure_profile(status)
-        if profile is not None:
-            outcome, _, retryable = profile
-            return outcome, "post_cutover_refresh", retryable
-        return (
-            SkillsPoolReconcileOutcome.CUTOVER_FAILED,
-            "post_cutover_refresh",
-            False,
-        )
-
-    @staticmethod
-    def _persisted_cutover_evidence(
+    async def _reconcile_active_aicoding_repo_bridges(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
         state: BotSkillLayoutState,
-    ) -> dict[str, object] | None:
-        probe_evidence = state.last_probe_evidence
-        if not isinstance(probe_evidence, dict):
-            return None
-        cutover = probe_evidence.get("cutover")
-        if not isinstance(cutover, dict):
-            return None
-        evidence = cutover.get("evidence")
-        return evidence if isinstance(evidence, dict) else None
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        initial_probe: RuntimeLayoutProbeResult,
+    ) -> SkillsPoolReconcileResult:
+        repair = await request_active_aicoding_bridge_repair(
+            skills=self._skills,
+            runtime=self._runtime,
+            scope=scope,
+            state=state,
+            bot_id=bot_id,
+            user_id=user_id,
+            engine=engine,
+            initial_probe=initial_probe,
+        )
+        if repair.status is ActiveAICodingBridgeRepairStatus.ENGINE_REJECTED:
+            assert repair.cutover_status is not None
+            outcome, _, retryable = post_commit_cutover_failure_profile(
+                repair.cutover_status
+            )
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome(outcome),
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
+                retryable=retryable,
+            )
+        if repair.status is ActiveAICodingBridgeRepairStatus.PROBE_NOT_READY:
+            assert repair.probe_status is not None
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome(probe_outcome(repair.probe_status)),
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
+                retryable=repair.retryable,
+            )
+        if repair.status is not ActiveAICodingBridgeRepairStatus.REPAIRED:
+            return SkillsPoolReconcileResult(
+                SkillsPoolReconcileOutcome.INVALID,
+                preparation_id=repair.preparation_id,
+                evidence=repair.evidence,
+                retryable=False,
+            )
+        return SkillsPoolReconcileResult(
+            SkillsPoolReconcileOutcome.ALREADY_ACTIVE,
+            preparation_id=repair.preparation_id,
+            evidence=repair.evidence,
+        )
 
     def _handle_engine_drift(
         self,
@@ -988,10 +995,3 @@ class SkillsPoolReconcileService:
             SkillsPoolReconcileOutcome.BOT_CHANGED,
             evidence=evidence,
         )
-
-
-__all__ = [
-    "SkillsPoolReconcileOutcome",
-    "SkillsPoolReconcileResult",
-    "SkillsPoolReconcileService",
-]

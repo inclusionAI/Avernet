@@ -20,8 +20,15 @@ class ClusterMismatchError(Exception):
 class MissingPrincipalError(Exception):
     """Raised when a public request has no authenticated caller (→ 401).
 
-    In the current pre-auth state ``require_principal`` is a stub returning
-    ``None``, so every real request raises this until the gateway verifier lands.
+    One error for two causes, deliberately: no ``X-Avernet-Principal`` header at
+    all, and a header whose token failed verification. ``require_principal``
+    funnels both here so the caller cannot tell them apart — see
+    ``openapi_v1/dependencies.py``. Which one it was is logged, with the reason,
+    at the point of failure.
+
+    ``app.py`` registers a handler for this type directly rather than letting
+    the catch-all answer it; the docstring there explains why that placement
+    matters.
     """
 
 

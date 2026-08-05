@@ -887,3 +887,95 @@ class TestStubBotServicePluginGetBinding:
         result = await plugin.get_binding("bot_001", "owner_001", "online")
 
         assert result is None
+
+
+class TestAiohttpBotServicePluginRuntimeEngineSelection:
+    """Runtime engine is selected only at the Backend HTTP consumption boundary."""
+
+    @staticmethod
+    def _binding_inner(**overrides):
+        inner = {
+            "bot_id": "bot_personal_001",
+            "owner_id": "20881234",
+            "bot_type": "personal",
+            "engine_type": "claude_code",
+            "template_type": "generCC",
+            "binding_id": 101,
+            "device_provider": "arca",
+            "device_id": "ARCA-SANDBOX-001",
+        }
+        inner.update(overrides)
+        return inner
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "runtime_engine_type",
+        ["openclaw", "teclaw", "aicoding", "hermes", "claude_code"],
+    )
+    async def test_supported_runtime_engine_overrides_original_engine(
+        self, runtime_engine_type
+    ):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(
+                active_runtime_engine_type=f"  {runtime_engine_type}  "
+            )
+        )
+
+        result = await plugin.get_binding(
+            "bot_personal_001", "20881234", "online"
+        )
+
+        assert result.engine_type == runtime_engine_type
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("runtime_engine_type", "bot_type", "warning_expected"),
+        [
+            (None, "personal", True),
+            ("", "personal", True),
+            ("   ", "personal", True),
+            (123, "personal", True),
+            ("unsupported", "personal", True),
+            ("unsupported", "service", True),
+            ("", "service", False),
+        ],
+    )
+    async def test_invalid_runtime_engine_falls_back_to_original_engine(
+        self, runtime_engine_type, bot_type, warning_expected
+    ):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(
+            return_value=self._binding_inner(
+                bot_type=bot_type,
+                active_runtime_engine_type=runtime_engine_type,
+            )
+        )
+
+        with patch(
+            "secbaas.community.plugins.bot_service.real._plugin.logger"
+        ) as mock_logger:
+            result = await plugin.get_binding(
+                "bot_personal_001", "20881234", "online"
+            )
+
+        assert result.engine_type == "claude_code"
+        if warning_expected:
+            mock_logger.warning.assert_called_once()
+        else:
+            mock_logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_missing_runtime_engine_field_keeps_old_backend_behavior(self):
+        plugin = AiohttpBotServicePlugin(base_url="https://agentclaw.example.com")
+        plugin._get_binding_raw = AsyncMock(return_value=self._binding_inner())
+
+        with patch(
+            "secbaas.community.plugins.bot_service.real._plugin.logger"
+        ) as mock_logger:
+            result = await plugin.get_binding(
+                "bot_personal_001", "20881234", "online"
+            )
+
+        assert result.engine_type == "claude_code"
+        mock_logger.warning.assert_not_called()

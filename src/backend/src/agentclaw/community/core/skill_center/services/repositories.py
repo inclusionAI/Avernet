@@ -54,6 +54,14 @@ class SkillRepository(Protocol):
     def delete(self, skill_id: str) -> bool:
         ...
 
+    def list_skill_set_references(
+        self,
+        skill_id: str,
+        skill_uuid: str | None = None,
+    ) -> list[dict]:
+        """Return every current-environment SkillSet association for a Skill."""
+        ...
+
     def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:
         """Return bot ids whose active skill-sets reference this skill
         (deletion blockers); empty list if none."""

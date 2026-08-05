@@ -19,7 +19,7 @@ class BotServiceProtocol(Protocol):
     """Bot 服务接口 —— 供 dormant 模块查询 / 操作 Bot。
 
     实现类需提供这几个方法（签名宽松，便于跨实现复用）：
-      - get_bot(bot_id, user_id)        查询单个 bot
+      - get_bot(bot_id, user_id)        查询单个 bot；不存在时返回 None
       - update_status(bot_id, user_id, status)   修改 status 字段
       - stop_bot(bot_id, user_id, release_reason)  释放容器 + binding 置 PENDING
       - start_bot(bot_id, user_id, nick_name)      重新分配容器
