@@ -146,6 +146,8 @@ class TestSkillServiceActivation:
 
     @pytest.mark.asyncio
     async def test_deactivate_nonexistent(self, skill_dirs, mock_skill_repo):
+        device_fs = MagicMock()
+        device_fs.delete_tree = AsyncMock(return_value=True)
         svc = SkillService(
             skill_repo=mock_skill_repo,
             skill_repo_sync=_lenient_skill_repo_sync(),
@@ -154,11 +156,12 @@ class TestSkillServiceActivation:
             repo_dir=skill_dirs["repo_dir"],
             local_dir=skill_dirs["local_dir"],
             market_cache=MagicMock(),
-            device_fs_factory=MagicMock(),
+            device_fs_factory=MagicMock(return_value=device_fs),
             git_sync_service_factory=MagicMock(),
         )
         result = await svc.deactivate_skill("does-not-exist")
         assert result is True
+        device_fs.delete_tree.assert_awaited_once()
 
 
 # ── TestSkillServiceSync ─────────────────────────────────────────────
