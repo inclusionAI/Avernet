@@ -7,6 +7,7 @@ Schemas are checked in as code. No build-time generation pipeline exists yet.
 - `baas.openapi.json` — BaaS service OpenAPI spec
 - `bcn.openapi.json` — BCN collaboration service OpenAPI spec
 - `bots.openapi.json` — Bots service OpenAPI spec
+- `bcsfuse.openapi.json` — bcsfuse fusion + fusable-query endpoints exposed under `/openapi/v1/bcsfuse`
 
 ## Future: build-time generation
 
