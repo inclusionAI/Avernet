@@ -39,6 +39,7 @@ internal_dependencies:
   - agentclaw.community.core.desktop_bot
   - agentclaw.community.core.mcp
   - agentclaw.community.core.devices
+  - agentclaw.community.core.events
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.skill_center

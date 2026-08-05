@@ -1598,7 +1598,7 @@ class TestAsyncReleasesLock:
         device_service.apply_device.assert_called_once()
         assert device_service.apply_device.call_args.kwargs["device_provider"] == "baas"
 
-    def test_allocator_persists_default_image_after_successful_recreate(self):
+    def test_allocator_defers_default_image_while_recreate_is_pending(self):
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
         bot = _make_bot(status="PENDING", bot_type="service")
@@ -1621,6 +1621,50 @@ class TestAsyncReleasesLock:
             "service_bot_config": {"device_count": 2},
             "sbot_use_default_image": True,
         }
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch.object(
+            svc, "_persist_service_bot_default_image"
+        ) as persist_default:
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="u1",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=["openclaw"],
+                active_engine="openclaw",
+                device_provider="arca",
+                bot_ext_override=default_ext,
+            )
+
+        persist_default.assert_not_called()
+        assert device_service.apply_device.call_args.kwargs["device_props_extra"] == {
+            "image_policy_on_active": "default"
+        }
+        update = svc._repository.update_by_owner.call_args.args[2]
+        assert "ext" not in update
+
+    def test_allocator_persists_default_image_when_recreate_is_already_active(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status="PENDING", bot_type="service")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status="ACTIVE",
+        )
+        svc._device_service_provider = lambda: device_service
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._template_service.get_template_config.return_value = None
+        svc._query_admin_worknos = MagicMock(return_value=[])
+        default_ext = {"sbot_use_default_image": True}
 
         with patch(
             "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",

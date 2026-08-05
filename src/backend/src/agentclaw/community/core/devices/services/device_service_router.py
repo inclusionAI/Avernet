@@ -307,6 +307,7 @@ class DeviceServiceRouter(DeviceService):
         admins: list[str] | None = None,
         template_type: str | None = None,
         template_config: dict | None = None,
+        device_props_extra: dict[str, Any] | None = None,
     ):
         """申请新设备 - 根据员工工号 + bot 属性路由到对应 Provider.
 
@@ -378,6 +379,7 @@ class DeviceServiceRouter(DeviceService):
             admins=admins,
             template_type=template_type,
             template_config=template_config,
+            device_props_extra=device_props_extra,
         )
 
     @override
