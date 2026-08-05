@@ -16,7 +16,6 @@ from scripts.validate_openapi_contract import (  # noqa: E402
 
 GROUPS_PATH = "/openapi/v1/collaboration/groups"
 GROUP_PATH = "/openapi/v1/collaboration/groups/{group_id}"
-BOT_GROUPS_PATH = "/openapi/v1/collaboration/bots/{bot_id}/groups"
 
 
 def test_contract_obeys_bcn_openapi_rules() -> None:
@@ -35,7 +34,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
     assert "sender_routes" not in serialized
     assert "routing_policy" not in serialized
 
-    list_operation = contract["paths"][BOT_GROUPS_PATH]["get"]
+    list_operation = contract["paths"][GROUPS_PATH]["get"]
     assert list_operation["operationId"] == "list_groups"
     query_names = {
         parameter["name"]
@@ -43,6 +42,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         if parameter["in"] == "query"
     }
     assert query_names == {
+        "view_bot_id",
         "offset",
         "limit",
         "q",
@@ -55,7 +55,7 @@ def test_group_contract_keeps_the_approved_compatibility_surface() -> None:
         for parameter in list_operation["parameters"]
         if parameter["in"] == "path"
     }
-    assert path_names == {"bot_id"}
+    assert path_names == set()
 
     assert (
         contract["paths"][GROUPS_PATH]["post"]["responses"]["201"]["content"][
@@ -205,11 +205,11 @@ def test_update_group_participant_endpoint_is_not_in_public_contract() -> None:
     assert "delete" in path_item
 
 
-def test_list_groups_is_scoped_by_path_bot_without_view_bot_query() -> None:
+def test_list_groups_uses_the_shared_view_actor_query() -> None:
     contract = load_contract(CONTRACT_ROOT)
-    path = "/openapi/v1/collaboration/bots/{bot_id}/groups"
+    path = "/openapi/v1/collaboration/groups"
 
-    assert path in contract["paths"]
+    assert "/openapi/v1/collaboration/bots/{bot_id}/groups" not in contract["paths"]
     operation = contract["paths"][path]["get"]
     assert operation["operationId"] == "list_groups"
     path_names = {
@@ -223,8 +223,9 @@ def test_list_groups_is_scoped_by_path_bot_without_view_bot_query() -> None:
         if parameter["in"] == "query"
     }
 
-    assert path_names == {"bot_id"}
+    assert path_names == set()
     assert query_names == {
+        "view_bot_id",
         "offset",
         "limit",
         "q",
@@ -232,9 +233,7 @@ def test_list_groups_is_scoped_by_path_bot_without_view_bot_query() -> None:
         "kind",
         "strategy",
     }
-    assert "view_bot_id" not in query_names
-    assert "get" not in contract["paths"]["/openapi/v1/collaboration/groups"]
-    assert "post" in contract["paths"]["/openapi/v1/collaboration/groups"]
+    assert "post" in contract["paths"][path]
 
 
 def test_delete_group_accepts_optional_acting_bot_id_query() -> None:

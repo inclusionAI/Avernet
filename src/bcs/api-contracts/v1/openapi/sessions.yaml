@@ -1,5 +1,11 @@
 CreateSessionRequest:
   type: object
+  description: >-
+    Creates a new Session using the parent Group as the source of truth for
+    driver and participants. The request body does not accept driver_bot_uuid or
+    participants; the Session roster inherits all parent Group participants,
+    including both Bot and Human actors, and the parent driver Bot is ensured as
+    the Session driver.
   additionalProperties: false
   properties:
     title:
@@ -49,7 +55,10 @@ GroupSessionsPath:
             $ref: "#/CreateSessionRequest"
     responses:
       "201":
-        description: Created session detail.
+        description: >-
+          Created session detail. Participants are inherited from the parent
+          Group roster, including Human participants, with the parent driver Bot
+          ensured as driver.
         content:
           application/json:
             schema:

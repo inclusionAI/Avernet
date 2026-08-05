@@ -23,7 +23,7 @@ EXPECTED_OPERATIONS = {
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/mine"),
-    ("get", "/openapi/v1/collaboration/bots/{bot_id}/groups"),
+    ("get", "/openapi/v1/collaboration/groups"),
     ("post", "/openapi/v1/collaboration/groups"),
     ("get", "/openapi/v1/collaboration/groups/{group_id}"),
     ("patch", "/openapi/v1/collaboration/groups/{group_id}"),

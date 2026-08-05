@@ -947,7 +947,7 @@ impl GroupService for GroupServiceImpl {
         command: ListGroups,
     ) -> Result<Page<GroupSummary>, ApplicationError> {
         let view_actor_id = self
-            .resolve_view_actor(&command.caller, Some(command.bot_id.as_str()))
+            .resolve_view_actor(&command.caller, command.view_bot_id.as_deref())
             .await?;
         if command.limit == 0 || command.limit > 100 {
             return Err(ApplicationError::invalid(

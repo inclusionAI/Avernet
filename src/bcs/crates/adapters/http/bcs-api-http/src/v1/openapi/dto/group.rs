@@ -47,6 +47,7 @@ pub struct ListGroupsQuery {
     #[serde(default = "default_limit")]
     pub limit: u64,
     pub q: Option<String>,
+    pub view_bot_id: Option<String>,
     #[serde(default)]
     pub membership: MembershipQuery,
     #[serde(default)]

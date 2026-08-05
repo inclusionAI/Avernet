@@ -18,8 +18,7 @@ use crate::v1::openapi::dto::group::{
 
 pub fn router() -> Router<ApiState> {
     Router::new()
-        .route("/bots/{bot_id}/groups", get(list_groups))
-        .route("/groups", post(create_group))
+        .route("/groups", get(list_groups).post(create_group))
         .route(
             "/groups/{group_id}",
             get(get_group).patch(update_group).delete(delete_group),
@@ -38,10 +37,8 @@ async fn list_groups(
     State(state): State<ApiState>,
     Extension(caller): Extension<AuthenticatedCaller>,
     Extension(request_id): Extension<RequestId>,
-    path: Result<Path<String>, PathRejection>,
     query: Result<Query<ListGroupsQuery>, QueryRejection>,
 ) -> Result<Response, ErrorResponse> {
-    let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let membership = query.membership_filter();
     let kind = query.kind_filter();
@@ -49,7 +46,7 @@ async fn list_groups(
         .group_service
         .list_groups(ListGroups {
             caller,
-            bot_id,
+            view_bot_id: query.view_bot_id,
             offset: query.offset,
             limit: query.limit,
             q: query.q,

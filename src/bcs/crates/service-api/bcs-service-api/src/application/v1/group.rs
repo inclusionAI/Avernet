@@ -246,7 +246,7 @@ impl<T> Page<T> {
 #[derive(Debug, Clone)]
 pub struct ListGroups {
     pub caller: AuthenticatedCaller,
-    pub bot_id: String,
+    pub view_bot_id: Option<String>,
     pub offset: u64,
     pub limit: u64,
     pub q: Option<String>,

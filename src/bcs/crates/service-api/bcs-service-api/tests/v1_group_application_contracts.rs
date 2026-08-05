@@ -109,7 +109,7 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
 fn list_command_carries_caller_view_actor_and_all_approved_filters() {
     let command = ListGroups {
         caller: human_caller(),
-        bot_id: "bot-1".into(),
+        view_bot_id: Some("bot-1".into()),
         offset: 10,
         limit: 25,
         q: Some("planning".into()),
@@ -119,7 +119,7 @@ fn list_command_carries_caller_view_actor_and_all_approved_filters() {
     };
 
     assert_eq!(command.caller.user.expect("User").id, "staff-1");
-    assert_eq!(command.bot_id, "bot-1");
+    assert_eq!(command.view_bot_id.as_deref(), Some("bot-1"));
     assert_eq!(command.membership, MembershipFilter::SessionOnly);
     assert_eq!(command.kind, GroupKindFilter::All);
 }

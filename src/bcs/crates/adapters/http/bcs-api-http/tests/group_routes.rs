@@ -378,7 +378,7 @@ async fn group_routes_forward_the_verified_caller() {
         .clone()
         .oneshot(authenticated_request(
             "GET",
-            "/openapi/v1/collaboration/bots/bot-1/groups?offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
+            "/openapi/v1/collaboration/groups?view_bot_id=bot-1&offset=5&limit=10&membership=session_only&kind=all&strategy=state_machine",
             Value::Null,
         ))
         .await
@@ -392,7 +392,7 @@ async fn group_routes_forward_the_verified_caller() {
         let list = service.list.lock().expect("list lock");
         let list = list.as_ref().expect("list command");
         assert_eq!(caller_user_id(&list.caller), "staff-1");
-        assert_eq!(list.bot_id, "bot-1");
+        assert_eq!(list.view_bot_id.as_deref(), Some("bot-1"));
         assert_eq!(list.offset, 5);
         assert_eq!(list.limit, 10);
         assert_eq!(list.strategy, Some(GroupStrategy::StateMachine));

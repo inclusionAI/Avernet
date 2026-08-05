@@ -41,7 +41,7 @@ def test_session_list_and_history_use_the_shared_view_actor_contract() -> None:
 def test_view_actor_failures_are_forbidden_without_a_bot_not_found_response() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operations = [
-        contract["paths"]["/openapi/v1/collaboration/bots/{bot_id}/groups"]["get"],
+        contract["paths"]["/openapi/v1/collaboration/groups"]["get"],
         contract["paths"][
             "/openapi/v1/collaboration/groups/{group_id}/sessions"
         ]["get"],

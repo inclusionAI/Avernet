@@ -1,12 +1,12 @@
-BotGroupsPath:
+GroupsPath:
   get:
     operationId: list_groups
     tags: ["Collaboration / Groups"]
-    summary: List groups visible to the path Bot.
+    summary: List Groups for the selected View Actor.
     x-avernet-security:
       user: required
     parameters:
-      - $ref: ../shared.yaml#/BotIdPath
+      - $ref: ../shared.yaml#/ViewBotIdQuery
       - name: offset
         in: query
         schema:
@@ -54,10 +54,13 @@ BotGroupsPath:
       "200":
         description: >-
           Groups ordered by created_at descending (group_id ascending
-          tie-breaker) after path-Bot relation, strategy, kind, and search
-          filtering and deduplication, then paginated with offset/limit. Both
-          items and total are scoped before pagination. An authorized Bot with
-          no matching Group relation receives an empty page.
+          tie-breaker) after selected View Actor relation, strategy, kind, and
+          search filtering and deduplication, then paginated with offset/limit.
+          Omitting view_bot_id selects the authenticated Human Actor. An explicit
+          Human Actor must be that same User; an explicit Bot must be owned by
+          the authenticated User. Both items and total are scoped before
+          pagination. An authorized View Actor with no matching Group relation
+          receives an empty page.
         content:
           application/json:
             schema:
@@ -80,7 +83,7 @@ BotGroupsPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "403":
         description: >-
-          The path Bot is not managed by the authenticated Human.
+          The selected View Actor is not authorized for the authenticated Human.
         x-error-codes:
           - forbidden
         content:
@@ -89,8 +92,6 @@ BotGroupsPath:
               $ref: ../shared.yaml#/ErrorEnvelope
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
-
-GroupsPath:
   post:
     operationId: create_group
     tags: ["Collaboration / Groups"]

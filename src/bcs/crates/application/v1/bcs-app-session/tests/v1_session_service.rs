@@ -1467,6 +1467,11 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
     fixture
         .store_manager_worker_group_with_originator("g1", "driver", &["expert"], "human_driver", None)
         .await;
+    let mut group = fixture.groups.get("g1").await.expect("group exists");
+    group
+        .participants
+        .push(Participant::human("human_driver", ParticipantRole::Observer));
+    fixture.groups.upsert(group).await.expect("store Human participant");
 
     let outcome = fixture
         .service
@@ -1480,6 +1485,18 @@ async fn create_session_inherits_parent_group_participants_without_request_roste
         .expect("session should inherit parent group roster");
 
     assert!(outcome.session.participants.iter().any(|p| p.actor_id == "expert"));
+    let inherited_human = outcome
+        .session
+        .participants
+        .iter()
+        .find(|p| p.actor_id == "human_driver")
+        .expect("Human Group participant should be inherited into Session");
+    assert_eq!(inherited_human.actor_kind, ActorKind::Human);
+    assert!(outcome
+        .session
+        .participants
+        .iter()
+        .any(|p| p.actor_id == "driver" && p.role == ParticipantRole::Driver));
 }
 
 /// Build the ManagerWorker session used by every view_bot_id authz test: a

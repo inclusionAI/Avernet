@@ -681,7 +681,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("target"),
-            bot_id: "target".into(),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 10,
             q: None,
@@ -713,7 +713,7 @@ async fn list_filters_deduplicates_before_pagination_and_direct_wins() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("target"),
-            bot_id: "target".into(),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 1,
             q: None,
@@ -747,26 +747,32 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
         .save_created_by("owned-by-alice", "alice", true)
         .await
         .expect("assign Alice's Bot ownership");
-    for (group_id, actor_id) in [
-        ("human-group", "human_alice"),
-        ("owned-bot-group", "owned-by-alice"),
-    ] {
-        fixture
-            .groups
-            .upsert(normal_group(
-                group_id,
-                "owned-by-someone-else",
-                vec![Participant::bot(actor_id, ParticipantRole::Consultant)],
-                GroupStrategy::Chat,
-                1,
-            ))
-            .await
-            .expect("store Group");
-    }
+    fixture
+        .groups
+        .upsert(normal_group(
+            "human-group",
+            "owned-by-someone-else",
+            vec![Participant::human("human_alice", ParticipantRole::Observer)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store Human Group");
+    fixture
+        .groups
+        .upsert(normal_group(
+            "owned-bot-group",
+            "owned-by-someone-else",
+            vec![Participant::bot("owned-by-alice", ParticipantRole::Consultant)],
+            GroupStrategy::Chat,
+            1,
+        ))
+        .await
+        .expect("store owned Bot Group");
 
-    let list = |bot_id: &str| ListGroups {
+    let list = |view_bot_id: Option<&str>| ListGroups {
         caller: bot_principal("alice"),
-        bot_id: bot_id.to_string(),
+        view_bot_id: view_bot_id.map(str::to_string),
         offset: 0,
         limit: 20,
         q: None,
@@ -777,19 +783,19 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
 
     let default_view = fixture
         .service
-        .list_groups(list("human_alice"))
+        .list_groups(list(None))
         .await
         .expect("omission selects the Human Actor");
     assert_eq!(default_view.total, 1);
     let explicit_human = fixture
         .service
-        .list_groups(list("human_alice"))
+        .list_groups(list(Some("human_alice")))
         .await
         .expect("the caller's Human Actor is an explicit valid view");
     assert_eq!(explicit_human.total, 1);
     let owned_bot = fixture
         .service
-        .list_groups(list("owned-by-alice"))
+        .list_groups(list(Some("owned-by-alice")))
         .await
         .expect("an exact-created_by Bot is an explicit valid view");
     assert_eq!(owned_bot.total, 1);
@@ -797,7 +803,7 @@ async fn list_defaults_to_the_authenticated_human_and_accepts_only_authorized_vi
     for invalid_view in ["human_bob", "owned-by-someone-else", "unknown-bot"] {
         let error = fixture
             .service
-            .list_groups(list(invalid_view))
+            .list_groups(list(Some(invalid_view)))
             .await
             .expect_err("unauthorized View Actor must not fall back");
         assert!(matches!(error, ApplicationError::Forbidden(_)));
@@ -983,7 +989,7 @@ async fn list_groups_sorts_by_created_at_desc_not_updated_at() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("target"),
-            bot_id: "target".into(),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 10,
             q: None,
@@ -1158,7 +1164,7 @@ async fn dm_kind_rejects_a_strategy_filter() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("target"),
-            bot_id: "target".into(),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -1182,7 +1188,7 @@ async fn explicit_view_requires_the_target_bot_to_exist_and_be_owned() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("missing"),
-            bot_id: "missing".into(),
+            view_bot_id: Some("missing".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -1212,7 +1218,7 @@ async fn explicit_view_propagates_registry_database_failure() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("stored-bot"),
-            bot_id: "stored-bot".into(),
+            view_bot_id: Some("stored-bot".into()),
             offset: 0,
             limit: 20,
             q: None,
@@ -2870,7 +2876,7 @@ async fn session_only_nonmember_dm_summary_omits_peer_actor() {
         .service
         .list_groups(ListGroups {
             caller: bot_principal("target"),
-            bot_id: "target".into(),
+            view_bot_id: Some("target".into()),
             offset: 0,
             limit: 20,
             q: None,
