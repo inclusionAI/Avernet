@@ -5,6 +5,7 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     DEFAULT_TECLAW_ENGINE_TYPES,
 )
@@ -36,10 +37,12 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
         bot_repository: BotRepository,
         publish_repository: BotPublishRepositoryProtocol,
         binding_repository: DeviceBindingRepository,
+        common_config_service: CommonConfigService,
     ) -> None:
         self._bot_repository = bot_repository
         self._publish_repository = publish_repository
         self._binding_repository = binding_repository
+        self._common_config_service = common_config_service
 
     async def startup(self) -> None:
         from agentclaw.community.core.events.bus import get_event_bus
@@ -89,6 +92,7 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
             bot_id=bot_id,
             owner_id=owner_id,
             env=str(getattr(binding, "env", None) or ""),
+            common_config_service=self._common_config_service,
         )
         # Clear only after both Bot and Draft have accepted DEFAULT. A failed
         # persistence leaves the intent durable for diagnosis/retry.
@@ -97,7 +101,7 @@ class DefaultImagePolicyActivationListener(LifecycleBase):
             props={IMAGE_POLICY_ON_ACTIVE_KEY: None},
         )
         logger.info(
-            "[default_image_policy_listener] persisted DEFAULT before activation: "
+            "[default_image_policy_listener] finalized DEFAULT intent before activation: "
             "bot_id=%s binding_id=%s",
             bot_id,
             event.binding_id,

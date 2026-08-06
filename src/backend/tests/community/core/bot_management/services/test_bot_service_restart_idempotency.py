@@ -183,6 +183,15 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
         return dict(state)
 
     repository.update_by_owner.side_effect = update_bot
+
+    def compare_and_set_ext(*, bot_id, owner_id, expected_ext, ext):
+        del bot_id, owner_id
+        if state.get("ext") != expected_ext:
+            return None
+        state["ext"] = ext
+        return dict(state)
+
+    repository.compare_and_set_ext.side_effect = compare_and_set_ext
     return repository, state
 
 
@@ -973,7 +982,7 @@ class TestRestartGuardOrchestration:
         with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
             svc.restart_bot(bot_id="bot001", user_id="user001")
 
-        common_config.get_value.assert_not_called()
+        common_config.get_value.assert_called_once()
         assert state["ext"]["service_bot_config"] == {"device_count": 3}
         assert "sbot_use_default_image" not in state["ext"]
         payload = svc._task_queue_service.enqueue.call_args.args[1]
@@ -983,6 +992,93 @@ class TestRestartGuardOrchestration:
             "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
+
+    @pytest.mark.parametrize(
+        "config_value",
+        [None, {}, {"image": ""}],
+        ids=["missing-or-disabled", "missing-image", "empty-image"],
+    )
+    def test_restart_baas_without_active_image_policy_has_no_marker_intent(
+        self, config_value
+    ):
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = config_value
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        }
+        bot_repository, state = _stateful_bot_repository(bot)
+        svc = _make_service(
+            repo,
+            bot_repository=bot_repository,
+            common_config_service=common_config,
+            task_queue_service=MagicMock(),
+        )
+        svc._template_service.get_template_config.return_value = {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        baas.upgrade_bot.return_value = {"publish_id": 101}
+        svc._baas_service_provider = lambda: baas
+
+        with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert state["ext"] == {
+            "service_bot_config": {"device_count": 3},
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        }
+        payload = svc._task_queue_service.enqueue.call_args.args[1]
+        assert "image_policy_on_success" not in payload
+        assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+        common_config.get_value.assert_called_once()
+
+    def test_restart_arca_without_active_image_policy_has_no_marker_override(self):
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = None
+        svc = _make_service(repo, common_config_service=common_config)
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        }
+        svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="arca"
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), patch.object(
+            svc, "start_bot", return_value=bot
+        ) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["bot_ext_override"] is None
+        svc._repository.compare_and_set_ext.assert_not_called()
+        common_config.get_value.assert_called_once()
 
     def test_restart_baas_service_ignores_existing_publish_migration_path(self):
         """普通 restart 只重启当前 bot；历史发布记录里的 migration_path 不参与。"""

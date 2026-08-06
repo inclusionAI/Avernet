@@ -24,6 +24,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
+  - agentclaw.community.core.common_config
   - agentclaw.community.core.config_compose    # teclaw_paths — namespaces/mappers used by the device-fs dispatcher (B6)
   - agentclaw.community.core.events
   - agentclaw.community.core.service_bot

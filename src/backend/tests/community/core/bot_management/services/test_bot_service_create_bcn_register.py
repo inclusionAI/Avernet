@@ -188,7 +188,41 @@ class TestCreateBotBcnRegister:
             "envs": {"A": "1"},
         }
         assert template_config["image"] == "registry/arca:v1"
-        common_config.get_value.assert_not_called()
+        common_config.get_value.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "config_value",
+        [None, {}, {"image": ""}],
+        ids=["missing-or-disabled", "missing-image", "empty-image"],
+    )
+    def test_service_bot_create_without_active_image_policy_has_no_markers(
+        self, config_value
+    ):
+        svc = _make_service()
+        _attach_device_service(svc)
+        common_config = MagicMock()
+        common_config.get_value.return_value = config_value
+        svc._common_config_service = common_config
+
+        svc.create_bot(
+            user_id="u1",
+            nick_name="nick",
+            bot_name="legacy-service-bot",
+            bot_id="service-legacy-1",
+            engine_type="openclaw",
+            bot_type="service",
+            template_type="service",
+            ext={
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        )
+
+        inserted_ext = svc._repository.insert.call_args.args[0]["ext"]
+        assert inserted_ext == {"service_bot_config": {"device_count": 3}}
+        common_config.get_value.assert_called_once()
 
     def test_claude_code_application_coding_does_not_trigger_bcn_register(self):
         """claude_code + applicationCoding 创建时不应触发 BCN 注册。"""

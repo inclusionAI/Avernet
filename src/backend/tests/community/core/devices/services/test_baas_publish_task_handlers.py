@@ -76,13 +76,20 @@ def _make_restart_handler(
     publish_repository: MagicMock | None = None,
     template_service: MagicMock | None = None,
     baas_service: MagicMock | None = None,
+    common_config_service: MagicMock | None = None,
     clock=lambda: 200.0,
 ) -> tuple[BaasRestartPublishPollHandler, MagicMock]:
+    if common_config_service is None:
+        common_config_service = MagicMock()
+        common_config_service.get_value.return_value = {
+            "image": "registry/arca:default"
+        }
     handler = BaasRestartPublishPollHandler(
         binding_repository=repo,
         baas_service=baas_service,
         bot_repository=bot_repository,
         publish_repository=publish_repository or MagicMock(),
+        common_config_service=common_config_service,
         baas_device_service=baas_device_service,
         template_service=template_service or MagicMock(),
         poll_delay_seconds=10.0,
@@ -1536,6 +1543,7 @@ def test_baas_publish_task_lifecycle_registers_all_handlers():
         task_queue_service=MagicMock(),
         baas_device_service=MagicMock(),
         bot_repository=MagicMock(),
+        common_config_service=MagicMock(),
         template_service=MagicMock(),
     )
 
@@ -1845,6 +1853,7 @@ def test_restart_default_policy_is_persisted_only_after_active():
             bot_id="bot-001",
             owner_id="owner-001",
             env="dev",
+            common_config_service=handler._common_config_service,
         )
         repo.update_device_props.assert_called_once_with(
             binding_id=42,
@@ -1858,6 +1867,84 @@ def test_restart_default_policy_is_persisted_only_after_active():
         assert received[0].publish_kind == "restart"
     finally:
         reset_event_bus()
+
+
+@pytest.mark.parametrize("config_value", [None, {}, {"image": ""}])
+def test_restart_success_does_not_persist_default_policy_when_switch_is_inactive(
+    config_value,
+):
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.PENDING.value,
+        device_props={
+            "restart_publish_id": 1002,
+            "restart_image_policy_on_success": "default",
+        },
+    )
+    bot_repository = MagicMock()
+    bot_repository.get_by_binding_id.return_value = {
+        "bot_id": "bot-001",
+        "owner_id": "owner-001",
+        "status": DeviceBindingStatus.PENDING.value,
+    }
+    bot_repository.get_by_id_and_owner.return_value = {
+        "ext": {
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        }
+    }
+    publish_repository = MagicMock()
+    publish_repository.get_draft_by_publish_bot_id.return_value = None
+    baas_device_service = MagicMock()
+    baas_device_service.poll_publish_once.return_value = DeviceBindingStatus.ACTIVE.value
+    baas_device_service.refresh_codefuse_token_on_publish_success.return_value = None
+    common_config = MagicMock()
+    common_config.get_value.return_value = config_value
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=bot_repository,
+        publish_repository=publish_repository,
+        baas_device_service=baas_device_service,
+        common_config_service=common_config,
+    )
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=1002,
+            started_at_epoch_s=190.0,
+            bot_uuid="baas-bot-1",
+        )
+    )
+
+    assert outcome == Complete()
+    bot_repository.compare_and_set_ext.assert_called_once_with(
+        bot_id="bot-001",
+        owner_id="owner-001",
+        expected_ext={
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        },
+        ext={
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+            "restart_publish_id": "1002",
+        },
+    )
+    publish_repository.compare_and_set_ext.assert_not_called()
+    repo.update_device_props.assert_called_once_with(
+        binding_id=42,
+        props={
+            "restart_request_id": None,
+            "restart_workflow_baseline": None,
+            "restart_image_policy_on_success": None,
+        },
+    )
 
 
 def test_restart_failed_publish_does_not_persist_default_policy():

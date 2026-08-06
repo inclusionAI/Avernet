@@ -73,8 +73,10 @@ from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_default_image_to_ext,
+    clear_image_policy_from_ext,
     overlay_image_pin_on_template_config,
     persist_default_image_policy,
+    resolve_current_arca_image,
 )
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -372,17 +374,30 @@ class BotService:
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
 
+    def _service_bot_image_policy_enabled(self) -> bool:
+        """Whether draft create/restart should opt into image policy."""
+        return (
+            resolve_current_arca_image(
+                self._common_config_service,
+                env=get_current_env(),
+            )
+            is not None
+        )
+
     def _mark_service_bot_default_image(
         self,
         bot: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Mark a draft ARCA bot to follow the provider default image."""
+        """Apply the draft ARCA image policy only when fully configured."""
         if bot.get("bot_type") != "service" or self.is_teclaw_bot(
             bot.get("active_engine")
         ):
             return bot
         updated_bot = dict(bot)
-        updated_bot["ext"] = apply_default_image_to_ext(bot.get("ext"))
+        if self._service_bot_image_policy_enabled():
+            updated_bot["ext"] = apply_default_image_to_ext(bot.get("ext"))
+        else:
+            updated_bot["ext"] = clear_image_policy_from_ext(bot.get("ext"))
         return updated_bot
 
     def _persist_service_bot_default_image(
@@ -392,8 +407,10 @@ class BotService:
         user_id: str,
     ) -> None:
         """Persist an accepted draft restart's default policy to Bot and Draft."""
-        if bot.get("bot_type") != "service" or self.is_teclaw_bot(
-            bot.get("active_engine")
+        if (
+            bot.get("bot_type") != "service"
+            or self.is_teclaw_bot(bot.get("active_engine"))
+            or not self._service_bot_image_policy_enabled()
         ):
             return
 
@@ -403,6 +420,7 @@ class BotService:
             bot_id=str(bot["bot_id"]),
             owner_id=user_id,
             env=get_current_env(),
+            common_config_service=self._common_config_service,
         )
 
     def _build_engine_extra_envs(
@@ -1304,10 +1322,13 @@ class BotService:
         if resolved_bot_type == "service" and not self.is_teclaw_bot(
             resolved_active_engine
         ):
-            # New ARCA service bots intentionally follow the provider default.
-            # Persist an explicit marker so their future publish records are not
-            # mistaken for legacy records that require Pin compatibility.
-            ext = apply_default_image_to_ext(ext)
+            # The CommonConfig record is the master switch. Missing, disabled,
+            # or lacking a valid image preserves the pre-feature behavior and
+            # removes any caller-supplied image-policy fields.
+            if self._service_bot_image_policy_enabled():
+                ext = apply_default_image_to_ext(ext)
+            else:
+                ext = clear_image_policy_from_ext(ext)
 
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
@@ -4087,6 +4108,7 @@ class BotService:
                     bot.get("ext")
                     if bot.get("bot_type") == "service"
                     and not self.is_teclaw_bot(bot.get("active_engine"))
+                    and (bot.get("ext") or {}).get("sbot_use_default_image") is True
                     else None
                 ),
             )

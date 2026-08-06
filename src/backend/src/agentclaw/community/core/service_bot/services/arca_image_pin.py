@@ -72,8 +72,8 @@ def resolve_current_arca_image(
 ) -> str | None:
     """Return the enabled legacy-protection image.
 
-    Missing/disabled means the feature is not active and preserves the historical
-    platform-default behavior. An enabled but malformed value fails closed.
+    Missing, disabled, or lacking a valid image means the feature is inactive
+    and preserves the historical platform-default behavior.
     """
     if common_config_service is None:
         return None
@@ -89,9 +89,7 @@ def resolve_current_arca_image(
     image = value.get("image") if isinstance(value, dict) else None
     if isinstance(image, str) and image.strip():
         return image.strip()
-    raise ImagePinConfigError(
-        f"Enabled {IMAGE_PIN_PARAM_CODE} config has no valid image: env={env}"
-    )
+    return None
 
 
 def runtime_kind_from_provider(device_provider: str | None) -> str | None:
@@ -163,6 +161,16 @@ def apply_default_image_to_ext(ext: dict[str, Any] | None) -> dict[str, Any]:
     updated.pop(IMAGE_PIN_VALUE_KEY, None)
     updated[IMAGE_DEFAULT_KEY] = True
     return updated
+
+
+def clear_image_policy_from_ext(
+    ext: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Remove all image-policy fields while preserving unrelated ext fields."""
+    updated = dict(ext or {})
+    for key in IMAGE_POLICY_KEYS:
+        updated.pop(key, None)
+    return updated or None
 
 
 def apply_image_pin_to_ext(
@@ -265,9 +273,25 @@ def persist_default_image_policy(
     bot_id: str,
     owner_id: str,
     env: str,
+    common_config_service: CommonConfigService | None,
     max_cas_attempts: int = 3,
-) -> None:
-    """Idempotently persist DEFAULT to the current Bot and Draft after success."""
+) -> bool:
+    """Persist DEFAULT only while the fully configured master switch is active.
+
+    The restart intent can outlive the request that created it. Re-checking the
+    CommonConfig here prevents an asynchronous completion from adding image
+    policy fields after the switch was disabled, deleted, or lost its image.
+    Existing Bot/Draft markers are ignored but left untouched.
+    """
+    if resolve_current_arca_image(common_config_service, env=env) is None:
+        logger.info(
+            "[arca_image_pin] skipped default-image policy because it is "
+            "inactive: bot_id=%s env=%s",
+            bot_id,
+            env,
+        )
+        return False
+
     updated_bot_ext: dict[str, Any] | None = None
     for _attempt in range(max_cas_attempts):
         bot = bot_repository.get_by_id_and_owner(bot_id, owner_id)
@@ -299,15 +323,15 @@ def persist_default_image_policy(
             publish_bot_id=bot_id, env=env
         )
         if draft is None:
-            return
+            return True
         draft_ext = copy_image_policy_to_ext(updated_bot_ext, draft.ext) or {}
         if draft_ext == (draft.ext or {}):
-            return
+            return True
         updated = publish_repository.compare_and_set_ext(
             publish_id=draft.id, expected_ext=draft.ext, ext=draft_ext
         )
         if updated is not None:
-            return
+            return True
     raise ImagePinPersistenceError(
         f"Draft image policy CAS conflicted repeatedly: bot_id={bot_id}"
     )
