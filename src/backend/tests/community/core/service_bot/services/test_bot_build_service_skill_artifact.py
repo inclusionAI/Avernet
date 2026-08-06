@@ -116,6 +116,14 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
         artifact_pool_root = artifact_engine_root / "workspace" / "skills-pool"
         runtime_pool_root = Path("/home/admin/.claude_code/workspace/skills-pool")
 
+    # Simulate retrying the same publish version after a previous or partial
+    # build left excluded corpus bridges in the reused artifact directory.
+    # ``rsync --delete`` alone preserves excluded destination entries.
+    stale_active_corpus = artifact_active_root / "skills-repo"
+    stale_pool_corpus = artifact_pool_root / "skills-repo"
+    _write_skill(stale_active_corpus / "stale-active-skill")
+    _write_skill(stale_pool_corpus / "stale-pool-skill")
+
     repo_target = pool_root / "skills-repo" / "repo-skill"
     local_target = pool_root / "skills-local" / "local-skill"
     _write_skill(repo_target)
@@ -171,7 +179,8 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
     assert (artifact_active_root / "repo-skill").readlink() == runtime_repo_target
     assert (artifact_active_root / "local-skill").readlink() == runtime_local_target
     assert (artifact_pool_root / "skills-local" / "local-skill" / "SKILL.md").is_file()
-    assert not (artifact_pool_root / "skills-repo").exists()
+    assert not stale_active_corpus.exists()
+    assert not stale_pool_corpus.exists()
     assert all(
         not call.kwargs["shell_cmd"].startswith("rsync ")
         for call in device_service.exec_shell_new.call_args_list

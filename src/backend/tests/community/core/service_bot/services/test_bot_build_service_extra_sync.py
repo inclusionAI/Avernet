@@ -136,7 +136,13 @@ class TestMigrateBotInstanceExtraSync:
         )
 
         extra_cmd = extra_calls[0].kwargs["cmd"]
-        assert extra_cmd[:4] == ["sudo", "rsync", "-av", "--delete"]
+        assert extra_cmd[:5] == [
+            "sudo",
+            "rsync",
+            "-av",
+            "--delete",
+            "--delete-excluded",
+        ]
         # excludes 必须复用主 rsync 的同一份
         assert "--exclude=projects" in extra_cmd
         assert "--exclude=sessions" in extra_cmd

@@ -776,6 +776,11 @@ class BotBuildService:
                 "rsync",
                 "-av",           # 归档模式 + 详细输出
                 "--delete",       # 删除目标目录中不存在于源目录的文件
+                # The versioned target is reused when the same publish version
+                # retries. Excluded mount/corpus paths must not survive from an
+                # earlier partial artifact, otherwise Pool active roots can
+                # expose the full repository through a stale bridge.
+                "--delete-excluded",
                 *excludes,
                 f"{source_dir}/",
                 f"{target_dir}/",
@@ -806,6 +811,7 @@ class BotBuildService:
                     "rsync",
                     "-av",
                     "--delete",
+                    "--delete-excluded",
                     *excludes,
                     f"{extra_source}/",
                     f"{extra_target}/",
