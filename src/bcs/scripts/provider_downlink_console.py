@@ -1157,13 +1157,24 @@ class Console:
 """
 
 
-def setup_logging(log_file: Path) -> None:
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        filename=str(log_file),
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s",
-    )
+def setup_logging(log_file: Path) -> Path | None:
+    log_format = "%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s"
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            filename=str(log_file),
+            level=logging.INFO,
+            format=log_format,
+        )
+        return log_file
+    except OSError as error:
+        logging.basicConfig(
+            stream=sys.stderr,
+            level=logging.INFO,
+            format=log_format,
+        )
+        LOGGER.warning("log file disabled path=%s error=%s", log_file, error)
+        return None
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -1222,7 +1233,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     state_path = Path(args.state_file)
     log_path = Path(args.log_file) if args.log_file else state_path.with_suffix(".log")
-    setup_logging(log_path)
+    active_log_path = setup_logging(log_path)
     LOGGER.info("starting provider console args=%s", vars(args))
 
     state = ProviderState.load(state_path)
@@ -1250,7 +1261,10 @@ def main(argv: list[str]) -> int:
     print(f"  webhook_url: http://{host}:{port}/webhook", flush=True)
     print(f"  health:      http://{host}:{port}/health", flush=True)
     print(f"  state_file:  {state.path}", flush=True)
-    print(f"  log_file:    {log_path}", flush=True)
+    if active_log_path is not None:
+        print(f"  log_file:    {active_log_path}", flush=True)
+    else:
+        print("  log_file:    <stderr; file path not writable>", flush=True)
     if state.provider_id:
         print(f"  provider_id: {state.provider_id}", flush=True)
     else:

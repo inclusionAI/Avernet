@@ -2,6 +2,8 @@
 """Unit tests for provider_downlink_console.py."""
 
 import json
+import logging
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -319,6 +321,26 @@ class ProviderConsoleStateTest(unittest.TestCase):
             self.assertEqual(headers["x-bcn-provider-bot-ref"], "reviewer-v2")
             self.assertEqual(state.callback_results[0]["auth_token_kind"], "provider_admin_token")
             self.assertEqual(state.callback_results[0]["ok"], True)
+
+    def test_setup_logging_falls_back_to_stderr_when_file_is_not_writable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "provider.log"
+            calls = []
+
+            def fake_basic_config(**kwargs):
+                calls.append(kwargs)
+                if "filename" in kwargs:
+                    raise PermissionError("denied")
+
+            with patch.object(provider_console.logging, "basicConfig", fake_basic_config):
+                selected = provider_console.setup_logging(log_path)
+
+            self.assertIsNone(selected)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0]["filename"], str(log_path))
+            self.assertNotIn("filename", calls[1])
+            self.assertEqual(calls[1]["stream"], sys.stderr)
+            self.assertEqual(calls[1]["level"], logging.INFO)
 
     def test_provider_register_accepts_provider_admin_auth_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
