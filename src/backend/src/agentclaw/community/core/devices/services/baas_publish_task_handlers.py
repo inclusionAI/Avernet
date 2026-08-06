@@ -446,6 +446,7 @@ class BaasRestartPublishPollHandler:
         )
         preflight = self._preflight(
             binding=binding,
+            binding_id=binding_id,
             publish_id=publish_id,
             request_id=request_id,
         )
@@ -610,9 +611,13 @@ class BaasRestartPublishPollHandler:
                 return value if isinstance(value, str) else None
         return payload_value
 
-    @staticmethod
     def _preflight(
-        *, binding: Any, publish_id: int, request_id: str | None
+        self,
+        *,
+        binding: Any,
+        binding_id: int,
+        publish_id: int,
+        request_id: str | None,
     ) -> TaskOutcome | None:
         if binding is None:
             return Complete()
@@ -632,6 +637,12 @@ class BaasRestartPublishPollHandler:
         # matching restart tasks must still poll that publish. FAILED remains a
         # terminal persisted result for the current binding.
         if getattr(binding, "status", None) == DeviceBindingStatus.FAILED.value:
+            if request_matches:
+                # A previous attempt may have persisted FAILED and then lost a
+                # transient race while clearing the durable intent. Retry that
+                # cleanup before completing the task; an exception here keeps
+                # TaskWorker retrying instead of permanently blocking restart.
+                self._clear_restart_recovery_intent(binding_id=binding_id)
             return Complete()
         return None
 
