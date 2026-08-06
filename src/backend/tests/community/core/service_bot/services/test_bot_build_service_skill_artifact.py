@@ -56,7 +56,13 @@ def _install_passthrough_sudo(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     sudo = bin_dir / "sudo"
-    sudo.write_text("#!/bin/sh\nexec \"$@\"\n", encoding="utf-8")
+    sudo.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = chown ]; then exit 0; fi\n"
+        "if [ \"$1\" = -u ]; then shift 2; fi\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
     sudo.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 
@@ -161,6 +167,8 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
         registry=registry,
         channel_service=channel_service,
     )
+    service._prepare_artifact_for_build = MagicMock()
+    service._finalize_runtime_artifact = MagicMock()
 
     result = service.build(
         bot={
@@ -181,6 +189,12 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
     assert (artifact_pool_root / "skills-local" / "local-skill" / "SKILL.md").is_file()
     assert not stale_active_corpus.exists()
     assert not stale_pool_corpus.exists()
+    assert service._prepare_artifact_for_build.call_count == 2
+    assert all(
+        call.args == (artifact_engine_root,)
+        for call in service._prepare_artifact_for_build.call_args_list
+    )
+    service._finalize_runtime_artifact.assert_called_once_with(artifact_engine_root)
     assert all(
         not call.kwargs["shell_cmd"].startswith("rsync ")
         for call in device_service.exec_shell_new.call_args_list
