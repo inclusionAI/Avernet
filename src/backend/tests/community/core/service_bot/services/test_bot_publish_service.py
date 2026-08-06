@@ -13,9 +13,9 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
     BotPublishServiceError,
+    BotTypeNotSupportedError,
     BotNotFoundError,
     BotAlreadyServiceTypeError,
-    BotTypeNotSupportedError,
 )
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -1183,22 +1183,23 @@ class TestUpgradeBotToService:
         """aicoding 类型 Bot 不支持升级，抛出 BotTypeNotSupportedError。"""
         mock_repo = Mock()
         mock_bot_repo = Mock()
-
         mock_bot = {
             "id": 100,
             "bot_id": "bot_001",
             "bot_type": "personal",
-            "active_engine": "aicoding",  # aicoding 类型
+            "active_engine": "aicoding",
             "owner_id": "user_001",
         }
         mock_bot_repo.get_by_id_and_owner.return_value = mock_bot
-
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=mock_bot_repo,
         )
 
-        with pytest.raises(BotTypeNotSupportedError, match="aicoding type bot cannot be upgraded"):
+        with pytest.raises(
+            BotTypeNotSupportedError,
+            match="aicoding type bot cannot be upgraded",
+        ):
             service.upgrade_bot_to_service(
                 bot_id="bot_001",
                 owner_id="user_001",

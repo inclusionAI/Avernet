@@ -394,15 +394,15 @@ class BotBuildService:
     def _build_extra_properties(
         *, bot: Dict[str, Any], user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Resolve opaque engine properties through the guarded extension seam."""
+        """Resolve opaque provisioning properties through the guarded extension seam."""
         from agentclaw.community.core.bot_management.engines import (
-            build_engine_extra_properties_fail_open,
+            build_extra_properties_fail_open,
         )
 
         template_config = bot.get("template_config")
         if not isinstance(template_config, dict):
             template_config = None
-        params = build_engine_extra_properties_fail_open(
+        params = build_extra_properties_fail_open(
             bot_id=str(bot.get("bot_id") or ""),
             owner_id=user_id,
             bot_type=str(bot.get("bot_type") or "service"),

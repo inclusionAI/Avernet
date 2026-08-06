@@ -274,14 +274,21 @@ class TestGetBot:
         assert result["bot_id"] == "bot001"
         assert "device_binding" not in result
 
-    def test_attaches_template_config(self):
+    def test_attaches_persisted_template_config(self):
         svc = _make_service()
         bot = _make_bot(binding_id=None)
         svc._repository.get_by_id_and_owner.return_value = bot
-        svc._template_service.get_template.return_value = {"ext": {"key": "val"}}
+        persisted_template = {
+            "bot_template_config": {
+                "ext_config": {"thetaKey": "enc:v1:persisted-ciphertext"}
+            }
+        }
+        svc._template_service.get_template.return_value = {"ext": persisted_template}
 
         result = svc.get_bot("bot001", "user001")
-        assert result["template_config"] == {"key": "val"}
+
+        assert result["template_config"] == persisted_template
+        svc._template_service.get_template.assert_called_once_with("bot001")
 
     def test_template_exception_does_not_propagate(self):
         svc = _make_service()

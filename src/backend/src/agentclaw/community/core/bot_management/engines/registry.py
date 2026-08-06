@@ -6,10 +6,15 @@ from typing import Any
 
 from agentclaw.community.log import get_logger
 
-from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
+from .aicoding.strategy import (
+    AicodingProvisioningStrategy,
+    CODING_TEMPLATE_TYPES,
+    ThetaKeyExtraPropertiesContributor,
+)
 from .default import DefaultProvisioningStrategy
 from .provisioning import (
     EngineExtraProperties,
+    ExtraPropertiesContributor,
     BotProvisioningContext,
     EngineProvisioningStrategy,
 )
@@ -20,6 +25,7 @@ logger = get_logger()
 class EngineProvisioningRegistry:
     def __init__(self) -> None:
         self._strategies: dict[str, EngineProvisioningStrategy] = {}
+        self._extra_properties_contributors: list[ExtraPropertiesContributor] = []
         self._default = DefaultProvisioningStrategy()
 
     def register(self, strategy: EngineProvisioningStrategy) -> None:
@@ -31,6 +37,29 @@ class EngineProvisioningRegistry:
                 f"engine provisioning strategy already registered: {engine_type}"
             )
         self._strategies[engine_type] = strategy
+
+    def register_extra_properties_contributor(
+        self, contributor: ExtraPropertiesContributor
+    ) -> None:
+        self._extra_properties_contributors.append(contributor)
+
+    def build_extra_properties(
+        self, ctx: BotProvisioningContext
+    ) -> EngineExtraProperties | None:
+        """Merge engine and independent extension contributions.
+
+        The registry is the composition seam: generic callers pass one context,
+        while each extension independently decides whether it applies.
+        """
+        merged: dict[str, Any] = {}
+        strategy_properties = self.resolve_for_context(ctx).build_extra_properties(ctx)
+        if strategy_properties is not None:
+            merged.update(strategy_properties.to_dict())
+        for contributor in self._extra_properties_contributors:
+            properties = contributor.contribute(ctx)
+            if properties is not None:
+                merged.update(properties.to_dict())
+        return EngineExtraProperties(merged) if merged else None
 
     def resolve(self, engine_type: str) -> EngineProvisioningStrategy:
         """Resolve the strategy for a known engine type.
@@ -74,6 +103,9 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     registry = EngineProvisioningRegistry()
     registry.register(AicodingProvisioningStrategy("aicoding"))
     registry.register(AicodingProvisioningStrategy("claude_code"))
+    registry.register_extra_properties_contributor(
+        ThetaKeyExtraPropertiesContributor()
+    )
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry
@@ -121,7 +153,7 @@ def resolve_provisioning(
     return ctx, strategy
 
 
-def build_engine_extra_properties_fail_open(
+def build_extra_properties_fail_open(
     *,
     bot_id: str,
     owner_id: str,
@@ -131,13 +163,13 @@ def build_engine_extra_properties_fail_open(
     template_config: dict[str, Any] | None = None,
     log_context: str = "engine_provisioning",
 ) -> EngineExtraProperties | None:
-    """Build opaque engine properties without blocking generic provisioning.
+    """Build opaque provisioning properties without blocking generic provisioning.
 
     Strategy resolution and execution are extension hooks. Any failure falls
     back to ``None`` so generic lifecycle services preserve their legacy path.
     """
     try:
-        ctx, strategy = resolve_provisioning(
+        ctx, _ = resolve_provisioning(
             bot_id=bot_id,
             owner_id=owner_id,
             bot_type=bot_type,
@@ -145,10 +177,10 @@ def build_engine_extra_properties_fail_open(
             template_type=template_type,
             template_config=template_config,
         )
-        return strategy.build_extra_properties(ctx)
+        return get_engine_provisioning_registry().build_extra_properties(ctx)
     except Exception as exc:
         logger.warning(
-            "[%s] Engine extra properties fallback=none bot_id=%s error_type=%s",
+            "[%s] Provisioning extra properties fallback=none bot_id=%s error_type=%s",
             log_context,
             bot_id,
             type(exc).__name__,
@@ -156,10 +188,16 @@ def build_engine_extra_properties_fail_open(
         return None
 
 
+# Compatibility alias for callers outside this repository. Generic lifecycle
+# code uses the engine-agnostic name above.
+build_engine_extra_properties_fail_open = build_extra_properties_fail_open
+
+
 __all__ = [
     "EngineExtraProperties",
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
+    "build_extra_properties_fail_open",
     "build_engine_extra_properties_fail_open",
     "get_engine_provisioning_registry",
     "resolve_provisioning",

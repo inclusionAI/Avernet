@@ -536,7 +536,13 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
     # DI refactor replaced the module-level get_bot_service() shim with
     # the injected self._bot_service; set it directly instead of patching.
     bot_service = Mock()
-    bot_service.get_bot.return_value = {'bot_id': 'bot-source'}
+    persisted_template = {
+        'bot_template_config': {
+            'ext_config': {'thetaKey': 'enc:v1:persisted-ciphertext'}
+        }
+    }
+    bot = {'bot_id': 'bot-source', 'template_config': persisted_template}
+    bot_service.get_bot.return_value = bot
     svc._bot_service = bot_service
     svc._execute_first_release = AsyncMock(return_value='FIRST')
     svc._execute_upgrade_release = AsyncMock(return_value='UPGRADE')
@@ -544,7 +550,8 @@ async def test_execute_release_phase_falls_back_to_first_release_when_last_publi
     result = await svc.execute_release_phase(publish_record, operator='u1')
 
     assert result == 'FIRST'
-    svc._execute_first_release.assert_awaited_once()
+    bot_service.get_bot.assert_called_once_with(bot_id='bot-source', user_id='u1')
+    assert svc._execute_first_release.await_args.kwargs['bot'] == bot
     svc._execute_upgrade_release.assert_not_awaited()
 
 

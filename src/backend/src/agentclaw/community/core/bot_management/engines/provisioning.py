@@ -53,6 +53,21 @@ class BotProvisioningContext:
     template_config: Optional[Dict[str, Any]] = None
 
 
+class ExtraPropertiesContributor(ABC):
+    """Independent contributor to the opaque provisioning property envelope.
+
+    Contributors are evaluated for every bot. Concrete extensions decide from
+    the provisioning snapshot whether they have anything to contribute; generic
+    lifecycle services never branch on an engine or extension-specific field.
+    """
+
+    @abstractmethod
+    def contribute(
+        self, ctx: BotProvisioningContext
+    ) -> EngineExtraProperties | None:
+        """Return extension-owned properties, or ``None`` when not applicable."""
+
+
 class EngineProvisioningStrategy(ABC):
     """Per-engine provisioning hooks used by public services.
 

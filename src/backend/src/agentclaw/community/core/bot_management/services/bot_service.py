@@ -467,12 +467,12 @@ class BotService:
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
     ) -> "Optional[Dict[str, Any]]":
-        """Build opaque engine properties through the provisioning strategy."""
+        """Build opaque provisioning properties through the provisioning strategy."""
         from agentclaw.community.core.bot_management.engines import (
-            build_engine_extra_properties_fail_open,
+            build_extra_properties_fail_open,
         )
 
-        params = build_engine_extra_properties_fail_open(
+        params = build_extra_properties_fail_open(
             bot_id=bot_id,
             owner_id=owner_id,
             active_engine=active_engine,

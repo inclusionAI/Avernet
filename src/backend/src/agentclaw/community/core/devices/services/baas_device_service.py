@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import (
-    build_engine_extra_properties_fail_open,
+    build_extra_properties_fail_open,
     resolve_provisioning,
 )
 from agentclaw.community.core.devices.errors import DeviceServiceError
@@ -331,7 +331,7 @@ class BaasDeviceService(DeviceService):
                 "active_engine": engine,
                 "bot_type": effective_bot_type,
             }
-            extra_properties = build_engine_extra_properties_fail_open(
+            extra_properties = build_extra_properties_fail_open(
                 bot_id=bolt_id,
                 owner_id=effective_owner_id,
                 active_engine=engine,

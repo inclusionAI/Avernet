@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 
 from ..provisioning import (
     EngineExtraProperties,
+    ExtraPropertiesContributor,
     BotProvisioningContext,
     EngineProvisioningStrategy,
 )
@@ -135,31 +136,6 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
         return envs or None
 
-    def build_extra_properties(
-        self, ctx: BotProvisioningContext
-    ) -> EngineExtraProperties | None:
-        """Build AICoding-owned properties from the governed template snapshot."""
-        template_config = ctx.template_config
-        if not self.consumes_template_config(
-            ctx.template_type,
-            active_engine=ctx.active_engine,
-            template_config=template_config,
-        ) or not isinstance(template_config, dict):
-            return None
-
-        bot_template_config = template_config.get("bot_template_config")
-        if not isinstance(bot_template_config, dict):
-            return None
-        ext_config = bot_template_config.get("ext_config")
-        if not isinstance(ext_config, dict):
-            return None
-        theta_key = ext_config.get("thetaKey")
-        if not isinstance(theta_key, str) or not theta_key.strip():
-            return None
-        return EngineExtraProperties(
-            values={"aicoding": {"theta_key": theta_key.strip()}}
-        )
-
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         return self.consumes_template_config(
             ctx.template_type,
@@ -187,3 +163,33 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         self, ctx: BotProvisioningContext, *, token_changed: bool
     ) -> None:
         return None
+
+
+class ThetaKeyExtraPropertiesContributor(ExtraPropertiesContributor):
+    """Contribute theta credentials solely from the persisted template snapshot.
+
+    Applicability stays inside the extension: only AICoding-compatible engines
+    may consume the field, while generic lifecycle services remain unaware of
+    both the engine gate and ``ext_config.thetaKey``.
+    """
+
+    def contribute(
+        self, ctx: BotProvisioningContext
+    ) -> EngineExtraProperties | None:
+        if ctx.active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
+            return None
+        template_config = ctx.template_config
+        if not isinstance(template_config, dict):
+            return None
+        bot_template_config = template_config.get("bot_template_config")
+        if not isinstance(bot_template_config, dict):
+            return None
+        ext_config = bot_template_config.get("ext_config")
+        if not isinstance(ext_config, dict):
+            return None
+        theta_key = ext_config.get("thetaKey")
+        if not isinstance(theta_key, str) or not theta_key.strip():
+            return None
+        return EngineExtraProperties(
+            values={"aicoding": {"theta_key": theta_key.strip()}}
+        )

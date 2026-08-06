@@ -383,29 +383,48 @@ def test_template_only_user_template_factory_config_without_active_engine_is_noo
     assert strategy.extract_runtime_token(ctx) is None
 
 
-def test_aicoding_strategy_builds_extra_properties_from_theta_key():
-    strategy = AicodingProvisioningStrategy("aicoding")
-    ctx = BotProvisioningContext(
-        active_engine="aicoding",
-        template_type="personalCoding",
-        bot_id="b1",
-        owner_id="u1",
-        bot_type="personal",
-        template_config={
-            "bot_template_config": {
-                "ext_config": {"thetaKey": "  encrypted-theta  "},
-            },
-        },
+def test_theta_extra_properties_are_limited_to_supported_engines():
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_properties_fail_open,
     )
 
-    params = strategy.build_extra_properties(ctx)
+    for active_engine in ("aicoding", "claude_code"):
+        params = build_extra_properties_fail_open(
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            active_engine=active_engine,
+            template_type="unrelated-template",
+            template_config={
+                "bot_template_config": {
+                    "ext_config": {"thetaKey": "  encrypted-theta  "},
+                },
+            },
+        )
 
-    assert params is not None
-    assert params.to_dict() == {"aicoding": {"theta_key": "encrypted-theta"}}
+        assert params is not None
+        assert params.to_dict() == {"aicoding": {"theta_key": "encrypted-theta"}}
+
+    for active_engine in ("openclaw", "teclaw", "hermes", "future_engine"):
+        assert build_extra_properties_fail_open(
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            active_engine=active_engine,
+            template_type="unrelated-template",
+            template_config={
+                "bot_template_config": {
+                    "ext_config": {"thetaKey": "encrypted-theta"},
+                },
+            },
+        ) is None
 
 
-def test_aicoding_strategy_invalid_theta_key_keeps_legacy_behavior():
-    strategy = AicodingProvisioningStrategy("aicoding")
+def test_invalid_theta_key_keeps_legacy_behavior_for_supported_engine():
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_properties_fail_open,
+    )
+
     for template_config in (
         {},
         {"bot_template_config": None},
@@ -413,15 +432,14 @@ def test_aicoding_strategy_invalid_theta_key_keeps_legacy_behavior():
         {"bot_template_config": {"ext_config": {"thetaKey": ""}}},
         {"bot_template_config": {"ext_config": {"thetaKey": 123}}},
     ):
-        ctx = BotProvisioningContext(
-            active_engine="aicoding",
-            template_type="personalCoding",
+        assert build_extra_properties_fail_open(
             bot_id="b1",
             owner_id="u1",
             bot_type="personal",
+            active_engine="aicoding",
+            template_type="personalCoding",
             template_config=template_config,
-        )
-        assert strategy.build_extra_properties(ctx) is None
+        ) is None
 
 
 def test_default_strategy_does_not_build_extra_properties():
@@ -446,7 +464,7 @@ def test_extra_properties_guard_falls_back_without_logging_exception_message():
     from unittest.mock import MagicMock, patch
 
     from agentclaw.community.core.bot_management.engines import (
-        build_engine_extra_properties_fail_open,
+        build_extra_properties_fail_open,
     )
 
     registry = MagicMock()
@@ -462,7 +480,7 @@ def test_extra_properties_guard_falls_back_without_logging_exception_message():
             "agentclaw.community.core.bot_management.engines.registry.logger.warning"
         ) as warning,
     ):
-        result = build_engine_extra_properties_fail_open(
+        result = build_extra_properties_fail_open(
             bot_id="b1",
             owner_id="u1",
             bot_type="personal",
