@@ -56,7 +56,13 @@ def _install_passthrough_sudo(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     sudo = bin_dir / "sudo"
-    sudo.write_text("#!/bin/sh\nexec \"$@\"\n", encoding="utf-8")
+    sudo.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = chown ]; then exit 0; fi\n"
+        "if [ \"$1\" = -u ]; then shift 2; fi\n"
+        "exec \"$@\"\n",
+        encoding="utf-8",
+    )
     sudo.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
 

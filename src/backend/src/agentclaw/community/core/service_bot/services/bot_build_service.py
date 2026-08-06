@@ -16,6 +16,7 @@ import copy
 import hashlib
 import json
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -76,6 +77,29 @@ _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 # Draft restoration copies a potentially large historical workspace. Bound the
 # whole operation, rather than granting each individual command a fresh timeout.
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
+
+# ARCA/DaaS starts service-bot hooks as ``admin``.  The current image contract
+# fixes that runtime identity at uid/gid 1000; draft restore already uses the
+# same ownership contract below.  A versioned artifact is not publishable until
+# this identity can traverse and read it.
+_PUBLISHED_RUNTIME_OWNER = "1000:1000"
+_PUBLISHED_RUNTIME_UID = "#1000"
+_RUNTIME_ARTIFACT_READABILITY_PROBE = (
+    "import os, sys\n"
+    "def check(path):\n"
+    "    with os.scandir(path) as entries:\n"
+    "        for entry in entries:\n"
+    "            if entry.is_symlink():\n"
+    "                os.readlink(entry.path)\n"
+    "            elif entry.is_dir(follow_symlinks=False):\n"
+    "                check(entry.path)\n"
+    "            elif entry.is_file(follow_symlinks=False):\n"
+    "                with open(entry.path, \"rb\"):\n"
+    "                    pass\n"
+    "            else:\n"
+    "                os.lstat(entry.path)\n"
+    "check(sys.argv[1])\n"
+)
 
 
 class BotBuildServiceError(Exception):
@@ -312,6 +336,17 @@ class BotBuildService:
                     target_dir=target_dir,
                 )
 
+            # All artifact writers must finish before ownership is normalized.
+            # In particular, MCP and OpenClaw stage configs are generated after
+            # rsync and would be missed by an rsync-only --chown fix.
+            artifact_writes_success = (
+                migration_success
+                and mcp_success
+                and openclaw_configs_success
+            )
+            if artifact_writes_success:
+                self._finalize_runtime_artifact(target_dir)
+
             logger.info(
                 f"[BotBuildService.build] Step 2 completed: "
                 f"migration_success={migration_success}, "
@@ -320,7 +355,7 @@ class BotBuildService:
             )
 
             # 构建结果
-            success = migration_success and mcp_success and openclaw_configs_success
+            success = artifact_writes_success
             result = {
                 "success": success,
                 "bot_id": bot_id,
@@ -699,6 +734,57 @@ class BotBuildService:
             )
 
         return result
+
+    def _finalize_runtime_artifact(self, target_dir: Path) -> None:
+        """Make a completed artifact readable by the Published Runtime.
+
+        Backend is the sole writer of the versioned artifact, but ``rsync -a``
+        deliberately preserves the Draft NAS ownership and modes.  Those
+        identities are not guaranteed to match the ``admin`` user used by
+        DaaS ``start_service.sh``.  Normalize only the constructed artifact
+        root, without following active-Skill symlinks, then perform the same
+        recursive read that the Published startup path requires.
+
+        Any failure is fatal at build time.  Deferring it to the BaaS start hook
+        leaves a publish in VALIDATE_PUB with a sandbox that can see the mount
+        but cannot install its contents.
+        """
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chown",
+                "-hR",
+                _PUBLISHED_RUNTIME_OWNER,
+                str(target_dir),
+            ],
+            command_name="normalize artifact owner",
+            error_message="normalize artifact owner failed",
+        )
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chmod",
+                "-R",
+                "u+rwX",
+                str(target_dir),
+            ],
+            command_name="normalize artifact mode",
+            error_message="normalize artifact mode failed",
+        )
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "-u",
+                _PUBLISHED_RUNTIME_UID,
+                sys.executable,
+                "-I",
+                "-c",
+                _RUNTIME_ARTIFACT_READABILITY_PROBE,
+                str(target_dir),
+            ],
+            command_name="verify artifact runtime readability",
+            error_message="artifact is not readable by published runtime",
+        )
 
     def _migrate_bot_instance(
         self,
