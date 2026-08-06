@@ -770,8 +770,9 @@ class BaasDeviceService(DeviceService):
             ttl: TTL（BaaS 层忽略，由服务端决定）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
             ws_conn_mode: WebSocket 连接模式透传（可选）；不传则不覆盖
-            path: 目标 in-device 路径（可选）；BaaS 用它拼 ``ws_url``，故 relay 下它
-                决定 URL 指向哪个引擎 socket，不传落到默认 ``api/openclaw/ws``
+            path: 目标 in-device 路径（可选，自带前导斜杠）；BaaS 用它拼 ``ws_url``，
+                故 relay 下它决定 URL 指向哪个引擎 socket，不传落到默认
+                ``/api/openclaw/ws``
 
         Returns:
             DeviceConnectionInfo: 设备连接信息
@@ -791,8 +792,13 @@ class BaasDeviceService(DeviceService):
                 device_affinity=operator.staff_id,
                 device_uuid=device_uuid,
                 ws_conn_mode=ws_conn_mode,
+                # Verbatim, leading slash included. BaaS appends this to the
+                # routing target with no separator of its own
+                # (``build_proxypass_url`` → ``…/proxypass/{target}{path}``), so
+                # stripping the slash published ``…@0:20003api/openclaw/ws`` — a
+                # URL whose handshake cannot reach the engine.
                 # Only override when asked; None would blank get_ws_info's default.
-                **({"path": path.lstrip("/")} if path else {}),
+                **({"path": path} if path else {}),
             )
         except BaasServiceError as e:
             logger.error(f"[BaasDeviceService.get_device_connection] BaaS error: {e}")

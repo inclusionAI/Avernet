@@ -1742,7 +1742,7 @@ class BaasService:  # pragma: no cover
         self,
         bind_id: int,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1755,7 +1755,10 @@ class BaasService:  # pragma: no cover
         Args:
             bind_id: 设备绑定 ID
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws。
+                BaaS 侧 ``build_proxypass_url`` 是
+                ``f"{scheme}://{host}/proxypass/{target}{path}"`` 直接拼接，
+                不补分隔符；缺斜杠会拼出 ``…@0:20003api/openclaw/ws``。
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
@@ -1786,7 +1789,7 @@ class BaasService:  # pragma: no cover
         self,
         bot_uuid: str,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1799,7 +1802,8 @@ class BaasService:  # pragma: no cover
         Args:
             bot_uuid: Bot UUID（= device_id）
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws
+                （拼接契约见 :meth:`get_ws_info`）
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
