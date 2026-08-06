@@ -1010,10 +1010,13 @@ class TestReportDeviceAlive:
             },
         ]
         publish_repo = MagicMock()
+        common_config = MagicMock()
+        common_config.get_value.return_value = {"image": "registry/arca:default"}
         listener = DefaultImagePolicyActivationListener(
             bot_repository=policy_bot_repo,
             publish_repository=publish_repo,
             binding_repository=repo,
+            common_config_service=common_config,
         )
         get_event_bus().subscribe(DeviceAliveEvent, listener.handle, required=True)
 
@@ -1043,6 +1046,7 @@ class TestReportDeviceAlive:
             bot_id="bot-1",
             owner_id="u001",
             env="dev",
+            common_config_service=common_config,
         )
         repo.update_device_props.assert_called_once_with(
             binding_id=record.id,

@@ -132,7 +132,7 @@ class TestCreatePublishImagePolicy:
         )
         return publish_repo.insert.call_args.args[0]["ext"], common_config
 
-    def test_default_bot_copies_marker_without_reading_common_config(self):
+    def test_default_bot_copies_marker_when_switch_has_valid_image(self):
         ext, common_config = self._create(
             source_bot={
                 "bot_type": "service",
@@ -147,7 +147,34 @@ class TestCreatePublishImagePolicy:
             "sbot_use_default_image": True,
             "sbot_runtime_kind": "arca",
         }
-        common_config.get_value.assert_not_called()
+        common_config.get_value.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "config_value",
+        [None, {}, {"image": ""}],
+        ids=["missing-or-disabled", "missing-image", "empty-image"],
+    )
+    def test_existing_policy_is_not_copied_when_switch_is_inactive(
+        self, config_value
+    ):
+        ext, common_config = self._create(
+            source_bot={
+                "bot_type": "service",
+                "active_engine": "openclaw",
+                "ext": {
+                    "sbot_use_default_image": True,
+                    "sbot_pin_image": True,
+                    "sbot_docker_image": "stale:v1",
+                },
+            },
+            common_config_value=config_value,
+        )
+
+        assert ext == {
+            "migration_path": "/build/v1",
+            "sbot_runtime_kind": "arca",
+        }
+        common_config.get_value.assert_called_once()
 
     def test_legacy_arca_bot_snapshots_enabled_common_config_image(self):
         ext, common_config = self._create(

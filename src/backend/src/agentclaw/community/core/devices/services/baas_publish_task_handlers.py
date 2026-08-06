@@ -5,6 +5,7 @@ from dataclasses import replace
 from typing import Any, Callable, Optional
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.events.bus import get_event_bus
@@ -347,6 +348,7 @@ class BaasRestartPublishPollHandler:
         baas_device_service: Any | None = None,
         bot_repository: Any | None = None,
         publish_repository: Any | None = None,
+        common_config_service: CommonConfigService | None = None,
         template_service: Any | None = None,
         poll_delay_seconds: float = 10.0,
         clock: Callable[[], float] = time.time,
@@ -356,6 +358,7 @@ class BaasRestartPublishPollHandler:
         self._baas_device_service = baas_device_service or baas_service
         self._bot_repository = bot_repository
         self._publish_repository = publish_repository
+        self._common_config_service = common_config_service
         self._template_service = template_service
         self._poll_delay_seconds = poll_delay_seconds
         self._clock = clock
@@ -711,6 +714,7 @@ class BaasRestartPublishPollHandler:
                     bot_id=bot_id,
                     owner_id=owner_id,
                     env=get_current_env(),
+                    common_config_service=self._common_config_service,
                 )
             except Exception as exc:
                 logger.warning(
@@ -890,6 +894,7 @@ class BaasPublishTaskLifecycle(LifecycleBase):
         baas_device_service: Any,
         bot_repository: Any,
         publish_repository: Any | None = None,
+        common_config_service: CommonConfigService | None = None,
         template_service: Any = None,
     ) -> None:
         self._registry = registry
@@ -899,6 +904,7 @@ class BaasPublishTaskLifecycle(LifecycleBase):
         self._baas_device_service = baas_device_service
         self._bot_repository = bot_repository
         self._publish_repository = publish_repository
+        self._common_config_service = common_config_service
         self._template_service = template_service
 
     async def bootstrap(self) -> None:
@@ -923,6 +929,7 @@ class BaasPublishTaskLifecycle(LifecycleBase):
                 baas_device_service=self._baas_device_service,
                 bot_repository=self._bot_repository,
                 publish_repository=self._publish_repository,
+                common_config_service=self._common_config_service,
                 template_service=self._template_service,
             )
         )
