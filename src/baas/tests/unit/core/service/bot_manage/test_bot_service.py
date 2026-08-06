@@ -309,8 +309,17 @@ class TestRecordToResponse:
         result = bot_record_to_response(record)
         assert result.config == BotConfig()
 
-    def test_record_to_response_redacts_extra_properties_credentials(self):
-        """credential-bearing extra_properties must never reach the API response."""
+    def test_record_to_response_passes_extra_properties_raw(self):
+        """extra_properties ciphertext is passed through the HTTP response raw.
+
+        The ciphertext envelope is symmetric with the inbound create path (which
+        already carries it in plain HTTP bodies). Redacting it at the response
+        edge would break the update read-modify-write round-trip: a GET returns
+        ``{"<redacted>": True}``, a partial PUT sends that sentinel back, and
+        ``merge_deploy_config`` overwrites the real ciphertext \u2192 restart
+        silently falls back to the fixed key. Logging only (``log_safe_model``)
+        is responsible for egress redaction; HTTP responses keep the raw value.
+        """
         from secbaas.community.core.service.bot_manage._bot_service import (
             bot_record_to_response,
         )
@@ -336,19 +345,58 @@ class TestRecordToResponse:
         record.gmt_create = datetime(2025, 1, 1)
         record.gmt_modified = datetime(2025, 1, 2)
         # credential-bearing ciphertext stored in extra_config (deploy_config)
+        sentinel = {"aicoding": {"theta_key": "enc:v1:SENTINEL_CIPHERTEXT"}}
         record.extra_config = {
             "sla_grade": "standard",
             "deploy_config": {
-                "extra_properties": {"aicoding": {"theta_key": "enc:v1:SENTINEL_CIPHERTEXT"}},
+                "extra_properties": sentinel,
             },
         }
 
         result = bot_record_to_response(record)
-        # response must NOT carry the ciphertext
+        # response passes the raw ciphertext through (symmetric with inbound)
         dumped = result.model_dump()
         deploy_cfg = dumped.get("config", {}).get("deploy_config") or {}
-        assert deploy_cfg.get("extra_properties") == {"<redacted>": True}
-        assert "SENTINEL_CIPHERTEXT" not in str(dumped)
+        assert deploy_cfg.get("extra_properties") == sentinel
+        # the runtime BotConfig object is untouched
+        assert result.config.deploy_config.extra_properties == sentinel
+
+    def test_update_partial_round_trip_does_not_clobber_theta_key(self):
+        """Regression guard for the read-modify-write round-trip bug.
+
+        Scenario (what the BotResponse response-edge redactor caused):
+          1. GET /bot returns extra_properties == {"<redacted>": True}
+          2. User edits an unrelated deploy_config field and PUTs the whole
+             config back (standard form read-modify-write).
+          3. merge_deploy_config(stored=real_ciphertext, override={"<redacted>": True})
+             overwrites the real ciphertext with the sentinel
+          4. restart/recreate reads the sentinel back, can\'t decrypt \u2192 fixed key.
+
+        Now that responses pass the raw ciphertext through, an echo of the GET
+        result carries the real ciphertext, and merge_deploy_config preserves it.
+        This test locks that invariant directly.
+        """
+        from secbaas.community.api.bot_manage import BotConfig
+        from secbaas.community.api.device_manage import DeployConfig
+        from secbaas.community.core.service.bot_manage._bot_management_service import (
+            merge_deploy_config,
+        )
+
+        real_ciphertext = "enc:v1:SENTINEL_CIPHERTEXT"
+        envelope = {"aicoding": {"theta_key": real_ciphertext}}
+
+        # stored = what the DB holds (real ciphertext)
+        stored = DeployConfig(extra_properties=envelope, docker_image="img:v1")
+        # override = a partial echo of the response that changed an unrelated field
+        # (docker_image). Because responses are no longer redacted, the echo carries
+        # the real ciphertext, not a sentinel.
+        override = DeployConfig(extra_properties=envelope, docker_image="img:v2")
+
+        merged = merge_deploy_config(stored, override)
+        # theta_key ciphertext survived the merge (NOT replaced by a sentinel)
+        assert merged.extra_properties == envelope
+        # and the unrelated field was updated as intended
+        assert merged.docker_image == "img:v2"
 
     def test_bot_config_model_dump_preserves_extra_properties_for_persistence(self):
         """Persistence/merge transport uses BotConfig.model_dump and must keep
@@ -391,15 +439,23 @@ class TestRecordToResponse:
             == {"aicoding": {"theta_key": sentinel}}
         )
 
-    def test_bot_response_redacts_but_internal_model_dump_keeps_raw(self):
-        """Response edge redacts; the same BotConfig object stays raw for any
-        later persistence/merge use (no mutation from redaction)."""
+    def test_bot_response_passes_ciphertext_raw_and_runtime_unmutated(self):
+        """HTTP response passes ciphertext through raw; the same BotConfig object
+        stays raw for any later persistence/merge use (no mutation).
+
+        Regression guard for the read-modify-write round-trip: if the response
+        ever redacts ``extra_properties`` again, a partial update that echoes the
+        GET result back will overwrite the real ciphertext via
+        ``merge_deploy_config`` and break restart. Both the serialized response
+        and the runtime object must carry the raw value.
+        """
         from secbaas.community.api.bot_manage import BotConfig
         from secbaas.community.core.service.bot_manage._bot_service import (
             bot_record_to_response,
         )
 
         sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        envelope = {"aicoding": {"theta_key": sentinel}}
         record = MagicMock(spec=BotRecord)
         record.id = 42
         record.bot_uuid = "BOT-redact"
@@ -422,24 +478,27 @@ class TestRecordToResponse:
         record.gmt_modified = datetime(2025, 1, 2)
         record.extra_config = {
             "deploy_config": {
-                "extra_properties": {"aicoding": {"theta_key": sentinel}},
+                "extra_properties": envelope,
             },
         }
 
         result = bot_record_to_response(record)
-        # response (BotResponse.serializer) redacts
+        # serialized response carries the raw ciphertext (symmetric with inbound)
         assert (
             result.model_dump()["config"]["deploy_config"]["extra_properties"]
-            == {"<redacted>": True}
+            == envelope
         )
-        # but the runtime BotConfig carried by the response is NOT mutated
-        assert result.config.deploy_config.extra_properties == {
-            "aicoding": {"theta_key": sentinel}
-        }
+        # runtime object is untouched and still carries the raw value
+        assert result.config.deploy_config.extra_properties == envelope
 
-    def test_create_bot_response_subclass_inherits_response_redaction(self):
+    def test_create_bot_response_subclass_passes_ciphertext_raw(self):
         """All BotResponse subclasses (Create/Update/Scale/Restart/Stop/Destroy)
-        must redact extra_properties at the HTTP edge."""
+        pass extra_properties ciphertext through the HTTP response raw.
+
+        No response-edge redaction: the ciphertext is symmetric with the inbound
+        create path. Subclasses inherit nothing special \u2014 the raw value
+        flows through ``model_dump`` exactly as stored.
+        """
         from secbaas.community.api.bot_manage import (
             BotConfig,
             CreateBotResponse,
@@ -447,31 +506,33 @@ class TestRecordToResponse:
         )
 
         sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        envelope = {"aicoding": {"theta_key": sentinel}}
         config = BotConfig(
             deploy_config=DeployConfig(
-                extra_properties={"aicoding": {"theta_key": sentinel}}
+                extra_properties=envelope
             )
         )
 
         # Subclasses inherit the BotResponse required fields; construct via
-        # model_construct to focus the assertion on redaction inheritance rather
+        # model_construct to focus the assertion on raw pass-through rather
         # than populating every table-schema column.
         create_resp = CreateBotResponse.model_construct(config=config, publish_id=7)
         assert (
             create_resp.model_dump()["config"]["deploy_config"][
                 "extra_properties"
             ]
-            == {"<redacted>": True}
+            == envelope
         )
         assert create_resp.model_dump()["publish_id"] == 7
-        assert "SENTINEL_CIPHERTEXT" not in create_resp.model_dump_json()
+        # ciphertext is present in the serialized response (by design, symmetric)
+        assert sentinel in create_resp.model_dump_json()
 
         update_resp = UpdateBotResponse.model_construct(config=config)
         assert (
             update_resp.model_dump()["config"]["deploy_config"][
                 "extra_properties"
             ]
-            == {"<redacted>": True}
+            == envelope
         )
 
     def test_device_record_to_response_complete(self):
