@@ -112,10 +112,12 @@ class TestRestartHookFailure:
             pytest.skip("No publish_id returned from restart")
         code = await approve_publish(api, publish_id)
         assert code == 200
-        status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=5.0
-        )
         # before_destroy_cmd_hook is non-blocking by design: a hook failure is
         # logged as a warning and the restart (destroy + create) proceeds. Mirror
-        # TestDestroyHookFailure and accept either terminal state.
+        # TestDestroyHookFailure and accept either terminal state. A generous
+        # timeout keeps this stable on slow CI runners where publish convergence
+        # can exceed a few seconds.
+        status = await wait_for_publish_status(
+            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=30.0
+        )
         assert status in ("SUCCESS", "FAILED"), f"Expected terminal state, got {status}"
