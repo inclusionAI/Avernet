@@ -145,28 +145,28 @@ URL is assembled.
 
 ## Acceptance Criteria
 
-- [ ] A bot whose device is owned by the ARCA provider gets a published socket
+- [x] A bot whose device is owned by the ARCA provider gets a published socket
       URL instead of an upstream error.
-- [ ] For the same routing target, engine path and credential, the URL published
+- [x] For the same routing target, engine path and credential, the URL published
       for an ARCA-provider bot is byte-for-byte the URL published for a
       BaaS-provider bot.
-- [ ] The published URL addresses the gateway. It does not name the engine proxy,
+- [x] The published URL addresses the gateway. It does not name the engine proxy,
       and does not carry the proxy's own routing prefix.
-- [ ] The routing target reaches the published URL unchanged, including the `@`
+- [x] The routing target reaches the published URL unchanged, including the `@`
       and `:` its format uses, so that the credential's claim over that target
       still matches.
-- [ ] The credential is carried as a query parameter under the parameter name the
+- [x] The credential is carried as a query parameter under the parameter name the
       proxy already accepts, and is percent-encoded.
-- [ ] The published URL addresses the active engine's own socket path.
-- [ ] The published expiry bounds the credential the response actually carries.
-- [ ] Where a provider supplies a URL of its own, that URL is used — composing
+- [x] The published URL addresses the active engine's own socket path.
+- [x] The published expiry bounds the credential the response actually carries.
+- [x] Where a provider supplies a URL of its own, that URL is used — composing
       happens only where none was supplied.
-- [ ] A provider shape the endpoint still cannot serve fails with a named error
+- [x] A provider shape the endpoint still cannot serve fails with a named error
       that says the provider's connection kind was not recognised, rather than
       describing a missing URL.
-- [ ] The BaaS and local paths are unchanged: same published URL, same errors, for
+- [x] The BaaS and local paths are unchanged: same published URL, same errors, for
       every input that reaches them today.
-- [ ] A device the provider reports as unavailable, a bot of an unsupported type,
+- [x] A device the provider reports as unavailable, a bot of an unsupported type,
       and a shared bot are all refused exactly as they are today, on every
       provider.
 

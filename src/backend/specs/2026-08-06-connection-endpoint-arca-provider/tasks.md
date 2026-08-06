@@ -164,7 +164,7 @@ both green.
 
 ---
 
-## Task 7: Verification against the spec  `[ ]`
+## Task 7: Verification against the spec  `[x]`
 
 - Walk each acceptance criterion in `spec.md` and tick it, or record why not.
 - Run the module gates the pre-push contract requires
@@ -193,3 +193,38 @@ both green.
 - **Do not** parse the target. `ARCA_{id}@{alt}:{port}` and `ARCA_{id}:{port}` are
   both valid and both opaque to this service; the proxy checks the credential's
   claim against the whole string.
+
+---
+
+## Verification record (Task 7)
+
+**Acceptance criteria** — all ten hold, each pinned by a named test in
+`tests/community/core/engine_runtime/test_connection.py`:
+
+| criterion | test |
+| --- | --- |
+| ARCA bot gets a URL, not a 502 | `test_a_bare_target_provider_gets_a_composed_gateway_url` |
+| byte-identical to the BaaS path | `test_composing_and_readdressing_agree_byte_for_byte` |
+| addresses the gateway, names no proxy | `test_a_composed_url_never_names_the_hop_behind_the_gateway` |
+| target survives unchanged | `test_a_composed_target_segment_survives_verbatim` |
+| credential as an encoded query param | `test_a_composed_credential_is_percent_encoded` |
+| the active engine's path | `test_a_composed_url_addresses_the_bots_own_engine` |
+| expiry bounds the published credential | `test_a_composed_expiry_falls_back_to_the_requested_ttl` |
+| a provider url wins over composing | `test_a_provider_url_wins_over_composing_one` |
+| unrecognised kind named, not misdescribed | `test_an_unrecognised_connection_kind_is_named` |
+| BaaS / local / gating unchanged | the 59 pre-existing cases, untouched |
+
+**Runs.** `test_connection.py` 76 passed. `core/engine_runtime` +
+`adapters/http/openapi_v1` + `architecture` + `core/devices` 1358 passed.
+`ruff check` clean on both changed files. The pre-push contract's
+`python_sast_local.sh` gate passed against `origin/REL20260806`.
+
+**Not run here.** `scripts/ci_test.sh` runs all 10 836 `tests/community` cases
+under `--cov` over the whole source tree. In this sandbox that does not finish:
+collection alone takes ~37 s uninstrumented and over 20 minutes under coverage,
+and unrelated suites stall on network egress through the agent proxy. The
+change touches one file whose only consumers are the connection router and this
+test module, so the blast radius above is covered; the full gate runs on CI.
+
+**Diff scope.** `git diff --stat origin/REL20260806` — `connection.py`,
+`test_connection.py`, and this feature's three artifacts. Nothing else.
