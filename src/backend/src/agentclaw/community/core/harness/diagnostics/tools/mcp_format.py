@@ -330,6 +330,10 @@ def _format_mcp_block(mcp: dict, *, include_guide: bool) -> str:
 _BATCH_MAX_MCPS = 3
 _BATCH_CHAR_BUDGET = 4000
 _BATCH_CONCURRENCY = 3
+# MCPs with more tools than this get a batch to themselves: a 3-large-MCP batch
+# (e.g. 27+19+19 tools) piles ~3k chars of signatures on top of the TOOLS.md
+# source and blows antchat's 90s window. Small MCPs still pack 3-per-batch.
+_LARGE_MCP_TOOL_THRESHOLD = 12
 
 _BUCKET_ORDER = ("verified", "schema", "unreachable")
 _BUCKET_HEADERS = {
@@ -383,11 +387,20 @@ def _pack_mcp_batches(items: list[tuple[str, str, dict]]) -> list[list[tuple[str
     current: list[tuple[str, str, dict]] = []
     current_chars = 0
     for item in items:
-        if current and (len(current) >= _BATCH_MAX_MCPS or current_chars + len(item[1]) > _BATCH_CHAR_BUDGET):
+        tools = (item[2].get("tools") or [])
+        is_large = len(tools) > _LARGE_MCP_TOOL_THRESHOLD
+        # Close the current batch before a large MCP (it runs alone to keep
+        # that call's output — one full spec draft, not three — inside the
+        # 90s window), or when the count/char budget would be exceeded.
+        if current and (is_large or len(current) >= _BATCH_MAX_MCPS or current_chars + len(item[1]) > _BATCH_CHAR_BUDGET):
             batches.append(current)
             current, current_chars = [], 0
         current.append(item)
         current_chars += len(item[1])
+        # A large MCP occupies its batch alone.
+        if is_large:
+            batches.append(current)
+            current, current_chars = [], 0
     if current:
         batches.append(current)
     return batches
