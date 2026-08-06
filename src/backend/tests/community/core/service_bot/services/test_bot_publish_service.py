@@ -16,6 +16,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     BotNotFoundError,
     BotAlreadyServiceTypeError,
     BotTypeNotSupportedError,
+    PublishNotDeletableError,
 )
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
@@ -1741,6 +1742,69 @@ class TestDeleteServiceBot:
             bot_id="bot_001",
             user_id="user_001",
         )
+
+
+class TestDeleteServiceBotByBotId:
+    """delete_service_bot_by_bot_id 方法测试（公开 API 按 bot 寻址的入口）。"""
+
+    @staticmethod
+    def _service(mock_repo, mock_bot_service, mock_flow):
+        return _make_service(
+            bot_publish_repo=mock_repo,
+            bot_service=mock_bot_service,
+            publish_flow_service_provider=lambda: mock_flow,
+        )
+
+    def test_resolves_publish_id_then_runs_the_same_delete(self):
+        """按 bot_id 定位发布单后，走的仍是 delete_service_bot 的完整流程。"""
+        mock_repo, mock_bot_service, mock_flow = Mock(), Mock(), Mock()
+        draft_record = _create_mock_record(record_id=7, status=PublishStatus.DRAFT)
+        mock_repo.get_by_publish_bot_id.return_value = draft_record
+        mock_repo.get_by_id.return_value = draft_record
+        mock_repo.list_by_source_bot.return_value = [draft_record]
+        mock_flow.destroy_publish_history.return_value = {"success": True}
+        mock_bot_service.delete_bot.return_value = True
+
+        service = self._service(mock_repo, mock_bot_service, mock_flow)
+        assert service.delete_service_bot_by_bot_id(
+            bot_id="bot_001", owner_id="user_001"
+        ) is True
+
+        # owner 作用域由查询本身保证 —— owner_id 必须进到仓储查询里，
+        # 否则他人的发布单就能按 bot_id 删掉。
+        mock_repo.get_by_publish_bot_id.assert_called_once()
+        assert mock_repo.get_by_publish_bot_id.call_args[0][1] == "user_001"
+        mock_flow.destroy_publish_history.assert_called_once_with(
+            publish_id=7, stage=PublishStage.VERIFY
+        )
+        mock_bot_service.delete_bot.assert_called_once_with(
+            bot_id="bot_001", user_id="user_001"
+        )
+
+    def test_no_publication_raises_not_found(self):
+        """当前 owner 名下没有该 bot 的发布单 → PublishNotFoundError。"""
+        mock_repo, mock_bot_service, mock_flow = Mock(), Mock(), Mock()
+        mock_repo.get_by_publish_bot_id.return_value = None
+
+        service = self._service(mock_repo, mock_bot_service, mock_flow)
+        with pytest.raises(PublishNotFoundError, match="not found"):
+            service.delete_service_bot_by_bot_id(bot_id="bot_001", owner_id="user_001")
+
+        mock_flow.destroy_publish_history.assert_not_called()
+        mock_bot_service.delete_bot.assert_not_called()
+
+    def test_undeletable_publication_is_still_refused(self):
+        """入口换成 bot_id 并不放宽任何删除条件。"""
+        mock_repo, mock_bot_service, mock_flow = Mock(), Mock(), Mock()
+        success_record = _create_mock_record(record_id=7, status=PublishStatus.SUCCESS)
+        mock_repo.get_by_publish_bot_id.return_value = success_record
+        mock_repo.get_by_id.return_value = success_record
+
+        service = self._service(mock_repo, mock_bot_service, mock_flow)
+        with pytest.raises(PublishNotDeletableError, match="Cannot delete service bot"):
+            service.delete_service_bot_by_bot_id(bot_id="bot_001", owner_id="user_001")
+
+        mock_bot_service.delete_bot.assert_not_called()
 
 
 class TestRecordDraftArtifact:
