@@ -648,6 +648,7 @@ pub async fn handle_web_send(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
 
@@ -928,6 +929,7 @@ pub async fn handle_group_chat(
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         },
     )
     .await?;
@@ -1050,6 +1052,7 @@ pub async fn handle_persistent_group_send(
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
     for target in &decision.targets {
         let outbound = match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await
@@ -1106,6 +1109,7 @@ pub async fn handle_persistent_group_send(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
         match result {
@@ -1423,6 +1427,7 @@ pub async fn handle_group_callback(
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
 
     for target in &decision.targets {
@@ -1517,6 +1522,7 @@ pub async fn handle_group_callback(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 
@@ -1644,6 +1650,7 @@ pub async fn handle_chat_abort(
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
                 provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 

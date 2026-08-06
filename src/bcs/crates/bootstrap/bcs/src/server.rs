@@ -461,6 +461,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
                 sender_conn_id: None,
+                provider_bypass_headers: Vec::new(),
             })
             .await?;
         Ok(())

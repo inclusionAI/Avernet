@@ -567,6 +567,7 @@ fn web_send_cmd() -> WebSendCommand {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -577,6 +578,7 @@ fn group_chat_cmd() -> GroupChatCommand {
         requested_sender_id: None,
         message: "hello".to_string(),
         session_id: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -658,6 +660,7 @@ fn blocking_chat_cmd() -> BlockingA2aChatCommand {
         client: None,
         response_mode: ChatResponseMode::Full,
         organization_code: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -670,6 +673,7 @@ fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
         frame: BcsFrame::Request(RequestFrame::new("run-wrapper", "chat.send", None)),
         delivery_kind,
         provider_transport: Default::default(),
+        provider_bypass_headers: Vec::new(),
     }
 }
 

@@ -628,6 +628,7 @@ impl CollaborationRuntime {
                 frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch,
                 provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
             })
             .await
         {
