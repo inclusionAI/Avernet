@@ -45,15 +45,14 @@ _RETRY_JITTER = 0.4
 _DEFAULT_MAX_TOKENS = 32768
 # Diagnostics emit a short summary + a patchable draft (mapping table + a few
 # MCP call specs) + ``[SCORE:xx]`` — far smaller than a full-file patch
-# rewrite. Keep this at the default 32k rather than capping it: #717's timeout
-# was caused by the *input* payload (each tool's full inputSchema dumped into
-# the prompt), not the output budget — the gateway-timeout retry already
-# shrinks max_tokens to 8k and still times out when the prompt is huge. The
-# input-side fix lives in mcp_format.py (compact param table + per-MCP tool
-# cap). Capping here would risk truncating the draft and the trailing
-# ``[SCORE:xx]`` (which the parser then scores as "check failed") for no
-# timeout benefit.
-DIAGNOSTIC_MAX_TOKENS = 32768
+# rewrite. 8k covers that with headroom while keeping GLM out of the
+# slow-reasoning path that #307 lowered the old 256k to escape: a 32k budget
+# lets the model stall past antchat's ~90s gateway window even when the prompt
+# is small. (The matching *input*-side guard lives in mcp_format.py, which
+# renders each MCP as a compact text block instead of dumping the nested
+# inputSchema JSON.) 8k still leaves the trailing ``[SCORE:xx]`` room, since
+# the draft body is only a few KB.
+DIAGNOSTIC_MAX_TOKENS = 8192
 # Connection-level failures (gateway dropped mid send/read, or the send-hook
 # wrapper re-raised) get more retries than before — these are transient blips,
 # not "request too heavy" stalls, so giving up after one retry was premature.

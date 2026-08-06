@@ -235,16 +235,17 @@ _PARAM_DESC_MAX_CHARS = 120
 _TOOL_DESC_MAX_CHARS = 200
 
 
-def _compact_tool_for_prompt(tool: dict) -> dict:
-    """Compress one MCP tool to a flat, prompt-sized param table.
+def _compact_tool_for_prompt(tool: dict) -> str:
+    """Render one MCP tool as a single prompt line.
 
-    Drops the nested ``inputSchema`` JSON and keeps only what the diagnostic
-    LLM needs to transcribe a non-fabricated call spec: the tool name, a
-    one-line tool description, and a flat param list (name/type/required/
-    one-line desc). Returns ``params: []`` when the tool exposes no schema.
+    Drops the nested ``inputSchema`` JSON and emits a flat one-liner the
+    diagnostic LLM can transcribe a non-fabricated call spec from:
+    ``name(param:type*=required, …) — one-line desc``. Tools with no schema
+    render as ``name — desc``. One line per tool keeps an 88-tool MCP list to
+    a few KB instead of tens of KB of indented JSON.
     """
     schema = tool.get("inputSchema")
-    params: list[dict] = []
+    params: list[str] = []
     if isinstance(schema, dict):
         props = schema.get("properties")
         required = schema.get("required") or []
@@ -253,32 +254,25 @@ def _compact_tool_for_prompt(tool: dict) -> dict:
             for pname, pdef in props.items():
                 if not isinstance(pdef, dict):
                     continue
-                p_desc = (pdef.get("description") or "").strip()
-                p_desc = p_desc.split("\n", 1)[0][:_PARAM_DESC_MAX_CHARS]
-                params.append({
-                    "name": pname,
-                    "type": pdef.get("type", ""),
-                    "required": pname in required_set,
-                    "desc": p_desc,
-                })
+                ptype = pdef.get("type", "") or ""
+                star = "*" if pname in required_set else ""
+                params.append(f"{pname}:{ptype}{star}")
+    name = tool.get("name", "")
+    sig = f"{name}({', '.join(params)})" if params else name
     t_desc = (tool.get("description") or "").strip()
     t_desc = t_desc.split("\n", 1)[0][:_TOOL_DESC_MAX_CHARS]
-    return {
-        "name": tool.get("name", ""),
-        "desc": t_desc,
-        "params": params,
-    }
+    return f"{sig} — {t_desc}" if t_desc else sig
 
 
-def _compact_mcp_tools_for_prompt(mcp: dict) -> tuple[list[dict], int]:
-    """Return ``(compacted tools, count of named tools omitted past the cap)``.
+def _compact_mcp_tools_for_prompt(mcp: dict) -> tuple[list[str], int]:
+    """Return ``(one-line tool strings, count of named tools omitted past the cap)``.
 
     Caps each MCP's tools at ``_MAX_TOOLS_PER_MCP_IN_PROMPT`` so a 27-tool MCP
     doesn't dominate the message; the omitted count is surfaced separately so
-    the caller can annotate it (``tools_omitted``). Tools without a name are
-    dropped. Reads the *original* tools list — not a pre-slimmed copy — so the
-    bucketing and ``has_recoverable`` checks that run against ``mcp_details``
-    still see the unredacted ``inputSchema``.
+    the caller can annotate it (``…另N个``). Tools without a name are dropped.
+    Reads the *original* tools list — not a pre-slimmed copy — so the bucketing
+    and ``has_recoverable`` checks that run against ``mcp_details`` still see
+    the unredacted ``inputSchema``.
     """
     tools = mcp.get("tools") or []
     if not isinstance(tools, list):
@@ -287,6 +281,32 @@ def _compact_mcp_tools_for_prompt(mcp: dict) -> tuple[list[dict], int]:
     kept = named[:_MAX_TOOLS_PER_MCP_IN_PROMPT]
     compacted = [_compact_tool_for_prompt(t) for t in kept]
     return compacted, len(named) - len(kept)
+
+
+def _format_mcp_block(mcp: dict, *, include_guide: bool) -> str:
+    """Render one MCP as a compact text block for the prompt.
+
+    Single ``## server_code (name): description`` header plus a ``tools:``
+    list of one-line tool strings, and (when ``include_guide``) the verbatim
+    ``verified_guide``. Far smaller than the previous indented-JSON dump while
+    keeping every param name/type/required the LLM needs to transcribe a call
+    spec.
+    """
+    server_code = mcp.get("server_code", "")
+    name = mcp.get("name", "")
+    desc = (mcp.get("description") or "").strip().split("\n", 1)[0]
+    header = f"## {server_code} ({name}): {desc}" if desc else f"## {server_code} ({name})"
+    lines = [header]
+    guide = mcp.get("verified_guide") if include_guide else None
+    if guide:
+        lines.append(f"verified_guide:\n{guide}")
+    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
+    if compacted:
+        lines.append("tools:")
+        lines.extend(f"- {t}" for t in compacted)
+        if omitted:
+            lines.append(f"- …另{omitted}个未列出")
+    return "\n".join(lines)
 
 
 class ToolsMcpFormatDiagnostic(Diagnostic):
@@ -547,13 +567,16 @@ XX 为 0-100 的整数
         )
         kb_included = False
         if mcp_details:
-            # Bucket each MCP by what call-spec source is available:
-            #   verified    → verified_guide (human-verified, paste verbatim)
-            #   schema      → no verified_guide, but tools expose inputSchema (transcribe params)
-            #   unreachable → neither (platform must author; mapping-table row only, advisory)
-            verified_mcps: list[dict] = []
-            schema_mcps: list[dict] = []
-            unreachable_mcps: list[dict] = []
+            # Bucket each MCP by what call-spec source is available (unchanged
+            # from #717): verified → verified_guide verbatim; schema → no guide
+            # but tools expose inputSchema (transcribe params); unreachable →
+            # neither. Only the *rendering* changes: instead of json.dumps of
+            # the dict (nested inputSchema + indent = tens of KB), each MCP is
+            # rendered as a compact text block (_format_mcp_block) — same param
+            # name/type/required info, a fraction of the size.
+            verified_blocks: list[str] = []
+            schema_blocks: list[str] = []
+            unreachable_blocks: list[str] = []
             for mcp in mcp_details:
                 tools = mcp.get("tools") or []
                 has_schema = any(
@@ -561,58 +584,35 @@ XX 为 0-100 的整数
                     for t in (tools if isinstance(tools, list) else [])
                 )
                 if mcp.get("verified_guide"):
-                    # Keep the verified_guide全文 verbatim (that's the value);
-                    # slim only the tools list to a compact param table so the
-                    # full inputSchema JSON doesn't bloat the prompt.
-                    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
-                    slim_mcp = {
-                        "server_code": mcp["server_code"],
-                        "name": mcp.get("name", ""),
-                        "description": mcp.get("description", ""),
-                        "verified_guide": mcp.get("verified_guide"),
-                        "tools": compacted,
-                    }
-                    if omitted:
-                        slim_mcp["tools_omitted"] = omitted
-                    verified_mcps.append(slim_mcp)
+                    verified_blocks.append(_format_mcp_block(mcp, include_guide=True))
                 elif has_schema:
-                    # Transcribe params from the compact param table, not the
-                    # full inputSchema JSON (which is what blew up the prompt
-                    # for bots with many MCP tools).
-                    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
-                    slim_mcp = {
-                        "server_code": mcp["server_code"],
-                        "name": mcp.get("name", ""),
-                        "description": mcp.get("description", ""),
-                        "verified_guide": None,
-                        "tools": compacted,
-                    }
-                    if omitted:
-                        slim_mcp["tools_omitted"] = omitted
-                    schema_mcps.append(slim_mcp)
+                    schema_blocks.append(_format_mcp_block(mcp, include_guide=False))
                 else:
-                    unreachable_mcps.append({
-                        "server_code": mcp["server_code"],
-                        "name": mcp.get("name", ""),
-                        "description": mcp.get("description", ""),
-                        "verified_guide": None,
-                        "注意": "该 MCP 既无人工校验调用规范也无工具 inputSchema，只能在「场景与工具映射速查」表格中列出，注意事项写「调用规范由平台补全中」；禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例",
-                    })
+                    # Unreachable: mapping-table row only (no tools, no schema).
+                    server_code = mcp["server_code"]
+                    name = mcp.get("name", "")
+                    desc = (mcp.get("description") or "").strip().split("\n", 1)[0]
+                    header = f"## {server_code} ({name}): {desc}" if desc else f"## {server_code} ({name})"
+                    unreachable_blocks.append(
+                        header + "\n注意: 该 MCP 既无人工校验调用规范也无工具 inputSchema，"
+                        "只能在「场景与工具映射速查」表格中列出，注意事项写「调用规范由平台补全中」；"
+                        "禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例"
+                    )
 
-            if verified_mcps:
+            if verified_blocks:
                 user_msg += (
                     "\n--- ✅ 已验证 MCP（verified_guide 不为空，引用原文生成调用规范） ---\n"
-                    f"{json.dumps(verified_mcps, ensure_ascii=False)}\n"
+                    + "\n\n".join(verified_blocks) + "\n"
                 )
-            if schema_mcps:
+            if schema_blocks:
                 user_msg += (
                     "\n--- 🛠 可据参数表转录 MCP（无 verified_guide，但工具含 params 参数表：可据参数表转录调用规范，禁止编造示例/命令） ---\n"
-                    f"{json.dumps(schema_mcps, ensure_ascii=False)}\n"
+                    + "\n\n".join(schema_blocks) + "\n"
                 )
-            if unreachable_mcps:
+            if unreachable_blocks:
                 user_msg += (
                     "\n--- ⛔ 无 schema MCP（既无 verified_guide 又无 inputSchema，仅写入映射表，禁止生成调用规范/示例） ---\n"
-                    f"{json.dumps(unreachable_mcps, ensure_ascii=False)}\n"
+                    + "\n\n".join(unreachable_blocks) + "\n"
                 )
 
             # 查询内网知识库补充 MCP 上下文
