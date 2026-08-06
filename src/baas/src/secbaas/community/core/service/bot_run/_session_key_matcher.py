@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 from secbaas.community.logger import get_logger
 
-from ._session_state import _SessionState
+from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
 
@@ -36,7 +36,7 @@ class _MatchResult:
     """
 
     key: str
-    state: _SessionState
+    state: SessionState
     matched_by: str
 
 
@@ -69,7 +69,7 @@ class SessionKeyMatcher:
     """
 
     def __init__(
-        self, store: dict[str, _SessionState], ignore_case: bool = False
+        self, store: dict[str, SessionState], ignore_case: bool = False
     ) -> None:
         """初始化匹配器。
 

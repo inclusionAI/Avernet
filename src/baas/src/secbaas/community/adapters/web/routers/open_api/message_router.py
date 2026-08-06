@@ -348,7 +348,7 @@ async def resolve_message_interaction(
 
     The HTTP response is the protocol ``res`` envelope. ``ok=true`` means the
     answer was persisted and queued for the owner worker; final application is
-    later pushed on the same SSE stream as ``interaction.resolve``.
+    later pushed on the same SSE stream as ``interaction.resolved``.
     """
     if api_key_record.app_type not in ("system", "app"):
         logger.warning(

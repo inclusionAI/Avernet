@@ -70,7 +70,8 @@ class AsyncChatClientPool:
             session_key_timeout: 同一 sessionKey 并发等待超时（秒）
             max_retries: WS 断连后自动重连次数，0 表示不重试
             retry_base_backoff: 重连退避基数（秒）
-            system_config_service: 系统配置服务，传递给 AsyncChatClient 用于读取开关
+            system_config_service: 系统配置服务，用于创建连接时读取运行开关
+            interaction_service: 交互持久化与应答服务；仅在交互开关启用时注入连接
         """
         self._max_size = max_size
         self._max_conns_per_sandbox = max_conns_per_sandbox
@@ -180,7 +181,9 @@ class AsyncChatClientPool:
                 max_retries=self._max_retries,
                 retry_base_backoff=self._retry_base_backoff,
                 ignore_case=self._read_ignore_case(self._system_config_service),
-                interaction_service=self._interaction_service,
+                interaction_service=self._interaction_service
+                if self._enable_process_interaction(self._system_config_service)
+                else None,
             )
             await new_client.connect()
 
@@ -237,6 +240,25 @@ class AsyncChatClientPool:
         except Exception:
             logger.warning(
                 "failed to read session_key_ignore_case config, defaulting to false",
+                exc_info=True,
+            )
+            return False
+        if resp is None:
+            return False
+        return (resp.conf_value or "").strip().lower() == "true"
+
+    @staticmethod
+    def _enable_process_interaction(
+        system_config_service: SystemConfigManageService | None,
+    ) -> bool:
+        """读取新连接是否启用 interaction 事件处理，缺省为关闭。"""
+        if system_config_service is None:
+            return False
+        try:
+            resp = system_config_service.get_config(SystemConfigKey.INTERACTION_PROCESS)
+        except Exception:
+            logger.warning(
+                "failed to read interaction_process config, defaulting to false",
                 exc_info=True,
             )
             return False
