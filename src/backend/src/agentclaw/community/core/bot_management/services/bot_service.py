@@ -4150,21 +4150,47 @@ class BotService:
         if not bot_uuid:
             raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
 
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            RESTART_REQUEST_ID_KEY,
+            RESTART_WORKFLOW_BASELINE_KEY,
+        )
+
         raw_binding_props = (
             binding.get("device_props", {})
             if isinstance(binding, dict)
             else (getattr(binding, "device_props", None) or {})
         )
         binding_props = raw_binding_props if isinstance(raw_binding_props, dict) else {}
-        if binding_props.get("restart_request_id"):
+        restart_request_id = binding_props.get(RESTART_REQUEST_ID_KEY)
+        restart_workflow_baseline = binding_props.get(RESTART_WORKFLOW_BASELINE_KEY)
+        has_durable_recovery_intent = (
+            isinstance(restart_request_id, str)
+            and bool(restart_request_id)
+            and isinstance(restart_workflow_baseline, int)
+            and not isinstance(restart_workflow_baseline, bool)
+            and restart_workflow_baseline >= 0
+        )
+        if has_durable_recovery_intent:
             logger.info(
                 "[bot_service._restart_bot_baas] restart already has a durable "
-                "recovery intent: bot_id=%s binding_id=%s request_id=%s",
+                "recovery intent: bot_id=%s binding_id=%s request_id=%s baseline=%s",
                 bot_id,
                 binding_id,
-                binding_props["restart_request_id"],
+                restart_request_id,
+                restart_workflow_baseline,
             )
             return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
+        if restart_request_id:
+            logger.warning(
+                "[bot_service._restart_bot_baas] ignoring legacy restart intent "
+                "without a valid workflow baseline: bot_id=%s binding_id=%s "
+                "request_id=%s baseline=%r",
+                bot_id,
+                binding_id,
+                restart_request_id,
+                restart_workflow_baseline,
+            )
 
         active_engine = (bot.get("active_engine") or "").strip()
         bot_type = bot.get("bot_type") or "personal"
@@ -4304,9 +4330,6 @@ class BotService:
 
         from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
             BAAS_RESTART_PUBLISH_POLL_TASK,
-            RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
-            RESTART_REQUEST_ID_KEY,
-            RESTART_WORKFLOW_BASELINE_KEY,
             build_restart_publish_poll_payload,
         )
 
@@ -4370,7 +4393,11 @@ class BotService:
             try:
                 self._device_binding_repo.update_device_props(
                     binding_id=binding_id,
-                    props={RESTART_REQUEST_ID_KEY: None},
+                    props={
+                        RESTART_REQUEST_ID_KEY: None,
+                        RESTART_WORKFLOW_BASELINE_KEY: None,
+                        RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
+                    },
                 )
                 self._device_binding_repo.update_status(
                     binding_id=binding_id,
