@@ -1201,7 +1201,8 @@ async fn web_send_resets_message_count_routes_and_delivers() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1266,6 +1267,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1304,6 +1306,7 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1344,6 +1347,7 @@ async fn accepted_chat_send_records_run_context_for_callback() {
             idempotency_key: Some("idempotency-1".to_string()),
             source_im_message_id: Some("source-msg-1".to_string()),
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1431,6 +1435,7 @@ async fn web_send_delivers_to_registered_provider_target_without_ws_connection()
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1472,6 +1477,7 @@ async fn provider_stream_gray_created_by_enables_sse_for_provider_chat_send() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1513,6 +1519,7 @@ async fn provider_stream_gray_created_by_miss_keeps_provider_callback() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1554,6 +1561,7 @@ async fn provider_stream_gray_mode_disabled_sends_provider_chat_send_over_sse() 
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1613,6 +1621,7 @@ async fn provider_stream_gray_created_by_still_keeps_inject_on_callback() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1733,6 +1742,7 @@ async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1777,7 +1787,8 @@ async fn web_send_in_human_bot_dm_uses_dm_routing_and_keeps_frontend_echo() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1828,6 +1839,7 @@ async fn web_send_in_human_bot_dm_omits_group_context_by_default() -> ServiceRes
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -1880,7 +1892,8 @@ async fn web_send_blocking_interceptor_prevents_bot_delivery() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1922,7 +1935,8 @@ async fn web_send_delivery_frame_contains_recipient_group_context() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -1992,7 +2006,8 @@ async fn web_send_with_session_id_routes_v2_by_substituting_wire_group_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2060,6 +2075,7 @@ async fn web_send_with_legacy_session_id_routes_v2_with_group_wire_id() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2116,7 +2132,8 @@ async fn web_send_with_session_id_routes_v3_with_explicit_bcs_session_id() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2180,6 +2197,7 @@ async fn web_send_to_provider_with_session_id_uses_explicit_bcs_session_id() {
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2245,6 +2263,7 @@ async fn web_send_direct_bot_projection_hides_bcs_group_context() -> ServiceResu
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await?;
 
@@ -2304,7 +2323,8 @@ async fn web_send_prefers_human_from_name_in_delivered_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2356,7 +2376,8 @@ async fn web_send_inject_delivery_uses_event_frame() {
         thinking: None,
         idempotency_key: None,
         source_im_message_id: None,
-    sender_conn_id: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();
@@ -2410,7 +2431,8 @@ async fn web_send_delivers_to_private_group_targets() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2457,7 +2479,8 @@ async fn web_send_partial_delivery_failure_is_represented_in_outcome() {
             thinking: None,
             idempotency_key: None,
             source_im_message_id: None,
-        sender_conn_id: None,
+            sender_conn_id: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2498,6 +2521,7 @@ async fn group_chat_validates_sender_and_returns_legacy_delivery_projection() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2549,6 +2573,7 @@ async fn group_chat_uses_session_participants_for_human_sender_validation() {
             requested_sender_id: Some("human_2".to_string()),
             message: "hello from the session Human".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2597,6 +2622,7 @@ async fn group_chat_rejects_bot_that_is_not_a_session_participant() {
             requested_sender_id: Some("bot-observer".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2637,6 +2663,7 @@ async fn group_chat_rejects_session_from_another_group() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2672,6 +2699,7 @@ async fn group_chat_rejects_session_without_participants() {
             requested_sender_id: Some("bot-driver".to_string()),
             message: "should not be delivered".to_string(),
             session_id: Some(session_id.to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2710,6 +2738,7 @@ async fn group_chat_treats_requested_sender_id_literally_without_trimming() {
             requested_sender_id: Some(" bot-driver ".to_string()),
             message: "hello as my bot".to_string(),
             session_id: Some("session-1".to_string()),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -2744,6 +2773,7 @@ async fn group_chat_uses_human_staff_number_as_display_name_when_speaking_as_own
         requested_sender_id: Some("bot-driver".to_string()),
         message: "hello as my bot".to_string(),
         session_id: Some("session-1".to_string()),
+        provider_bypass_headers: Vec::new(),
     })
     .await
     .unwrap();

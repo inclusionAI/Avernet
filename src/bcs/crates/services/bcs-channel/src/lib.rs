@@ -1160,6 +1160,7 @@ impl ChannelService for BcsChannelService {
                     idempotency_key: Some(dispatch_msg_id.clone()),
                     source_im_message_id: Some(dispatch_msg_id.clone()),
                     sender_conn_id: None,
+                    provider_bypass_headers: Vec::new(),
                 })
                 .await
                 .map_err(|error| {

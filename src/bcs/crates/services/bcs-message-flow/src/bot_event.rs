@@ -727,6 +727,7 @@ async fn relay_final_chat_event(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
         match delivery {
@@ -864,6 +865,7 @@ async fn handle_task_bot_event(
             frame,
             delivery_kind,
             provider_transport,
+            provider_bypass_headers: Vec::new(),
         })
         .await?;
     if !result.delivered {

@@ -42,6 +42,7 @@ struct CapturedRequest {
     message_id: Option<String>,
     timestamp: Option<String>,
     legacy_protocol_version: Option<String>,
+    sandbox_bypass: Option<String>,
     body: Value,
 }
 
@@ -88,6 +89,7 @@ async fn provider_delivery_injects_current_gateway_span_context() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .instrument(span)
         .await
@@ -99,6 +101,84 @@ async fn provider_delivery_injects_current_gateway_span_context() {
     assert_eq!(fields[0], "00");
     assert_eq!(fields[1], expected_trace_id);
     assert_eq!(fields[2], expected_parent_span_id);
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_applies_configured_bypass_headers() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let result = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target(webhook_url),
+            run_id: "run-bypass".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-bypass",
+                "chat.send",
+                Some(json!({
+                    "session_key": "group:bypass",
+                    "message": { "text": "hello" }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
+            provider_bypass_headers: vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )],
+        })
+        .await
+        .unwrap();
+
+    assert!(result.delivered);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.sandbox_bypass.as_deref(), Some("sandbox-route-1"));
+    assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_delivery_ignores_reserved_bypass_headers() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let transport = HttpProviderTransport::allowing_private_networks_for_tests();
+    let result = transport
+        .deliver(BotDeliveryCommand {
+            target: provider_target(webhook_url),
+            run_id: "run-reserved-bypass".to_string(),
+            frame: BcsFrame::Request(RequestFrame::new(
+                "run-reserved-bypass",
+                "chat.send",
+                Some(json!({
+                    "session_key": "group:reserved",
+                    "message": { "text": "hello" }
+                })),
+            )),
+            delivery_kind: BotDeliveryKind::Send,
+            provider_transport: Default::default(),
+            provider_bypass_headers: vec![
+                ("authorization".to_string(), "Bearer attacker".to_string()),
+                ("bcn-message-id".to_string(), "attacker-message-id".to_string()),
+            ],
+        })
+        .await
+        .unwrap();
+
+    assert!(result.delivered);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
+    assert_ne!(request.message_id.as_deref(), Some("attacker-message-id"));
+
     server.abort();
 }
 
@@ -233,6 +313,7 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -301,6 +382,7 @@ async fn provider_delivery_forwards_extensions_when_present() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -333,6 +415,7 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect_err("private webhook URL should be rejected before request");
@@ -357,6 +440,7 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect_err("private webhook URL should be rejected before request");
@@ -419,6 +503,7 @@ async fn provider_delivery_protocol2_sse_ingests_events() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: ProviderTransportPreference::CallbackSse,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -498,6 +583,7 @@ async fn provider_delivery_protocol2_task_kinds_sse_ingest_events() {
                 )),
                 delivery_kind,
                 provider_transport: ProviderTransportPreference::CallbackSse,
+                provider_bypass_headers: Vec::new(),
             })
             .await
             .unwrap();
@@ -566,6 +652,7 @@ async fn provider_delivery_falls_back_to_actor_id_for_sender_name() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -773,6 +860,7 @@ async fn provider_delivery_posts_chat_inject_body_with_bcn_group_id() {
             )),
             delivery_kind: BotDeliveryKind::Inject,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -817,6 +905,7 @@ async fn provider_delivery_rejects_chat_send_when_frame_id_differs_from_run_id()
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect_err("chat.send frame id must match run_id");
@@ -909,6 +998,10 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
         .get("x-bcs-protocol-version")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let sandbox_bypass = headers
+        .get("x-sandbox-bypass")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     *captured.lock().await = Some(CapturedRequest {
         traceparent,
         authorization,
@@ -918,6 +1011,7 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
         message_id,
         timestamp,
         legacy_protocol_version,
+        sandbox_bypass,
         body,
     });
 }
@@ -1089,6 +1183,7 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
             )),
             delivery_kind: BotDeliveryKind::Inject,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect("2.0 inject JSON ack must be accepted, not InternalError");
@@ -1128,6 +1223,7 @@ async fn provider_delivery_2_0_chat_send_with_sse_preference_advertises_sse() {
             )),
             delivery_kind: BotDeliveryKind::Send,
             provider_transport: ProviderTransportPreference::CallbackSse,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect("2.0 send JSON ack should be accepted while advertising SSE");
@@ -1175,6 +1271,7 @@ async fn provider_delivery_2_0_task_kinds_accept_json_callback_fallback() {
                 )),
                 delivery_kind,
                 provider_transport: ProviderTransportPreference::CallbackSse,
+                provider_bypass_headers: Vec::new(),
             })
             .await
             .expect("2.0 task JSON ack should fall back to callbacks");
@@ -1219,6 +1316,7 @@ async fn provider_delivery_2_0_inject_propagates_json_rejection() {
             )),
             delivery_kind: BotDeliveryKind::Inject,
             provider_transport: Default::default(),
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .expect("rejection is a normal ack, not a transport error");

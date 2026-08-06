@@ -1,6 +1,7 @@
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
+use axum::http::HeaderName;
 use bcs_fuse_client::FuseClient;
 pub use bcs_http::state::BotRuntimeTokenResolverPort;
 use bcs_http::state::{
@@ -79,6 +80,12 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
                 .with_credentials(state.provider_credentials.clone()),
         ),
     );
+    let provider_bypass_header_names = config
+        .provider_http
+        .bypass_headers
+        .iter()
+        .filter_map(|name| HeaderName::try_from(name.trim()).ok())
+        .collect();
 
     HttpAppState::new(services_with_secret)
         .with_bot_runtime_token_resolver(runtime_token_resolver)
@@ -137,6 +144,7 @@ pub(crate) async fn build_http_app_state(state: Arc<BcsServerState>) -> HttpAppS
         )
         .with_allowed_switch_provider_ids(config.allowed_switch_provider_ids.clone())
         .with_provider_stream_gray_list(state.provider_stream_gray_list.clone())
+        .with_provider_bypass_header_names(provider_bypass_header_names)
         .with_judge_enabled(config.llm.is_enabled())
         .with_channel_http_ingress(state.channel_http_ingress.clone())
         .with_auth_chain(state.auth_chain.clone(), state.auth_config.clone())

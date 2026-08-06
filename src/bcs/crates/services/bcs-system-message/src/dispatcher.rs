@@ -318,6 +318,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         frame,
                         delivery_kind,
                         provider_transport,
+                        provider_bypass_headers: Vec::new(),
                     },
                 });
             }

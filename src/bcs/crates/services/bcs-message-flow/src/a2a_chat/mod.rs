@@ -308,6 +308,7 @@ impl A2aChatRunService for A2aChat {
                 response_mode: cmd.response_mode,
                 caller_wait_mode: None,
                 organization_code: cmd.organization_code,
+                provider_bypass_headers: cmd.provider_bypass_headers,
             })
             .await;
 
@@ -361,6 +362,7 @@ impl A2aChatRunService for A2aChat {
                 response_mode: cmd.response_mode,
                 caller_wait_mode: cmd.caller_wait_mode,
                 organization_code: cmd.organization_code,
+                provider_bypass_headers: cmd.provider_bypass_headers,
             })
             .await;
 
@@ -628,6 +630,7 @@ impl A2aChatService for A2aChat {
                 frame,
                 delivery_kind: BotDeliveryKind::Send,
                 provider_transport: Default::default(),
+                provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await
         {
