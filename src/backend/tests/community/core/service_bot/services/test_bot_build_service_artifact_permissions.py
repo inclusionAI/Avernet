@@ -170,16 +170,16 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
         str(target_dir),
     ]
     probe_cmd = calls[2].kwargs["cmd"]
-    assert probe_cmd[:3] == [
-        "sudo",
-        "-u",
-        "#1000",
-    ]
-    assert Path(probe_cmd[3]).name.startswith("python")
-    assert probe_cmd[4:6] == ["-I", "-c"]
-    assert "follow_symlinks=False" in probe_cmd[6]
-    assert 'open(entry.path, "rb")' in probe_cmd[6]
-    assert probe_cmd[7] == str(target_dir)
+    assert probe_cmd[0] == "sudo"
+    assert "-u" not in probe_cmd
+    assert Path(probe_cmd[1]).name.startswith("python")
+    assert probe_cmd[2:4] == ["-I", "-c"]
+    assert "os.setgroups([])" in probe_cmd[4]
+    assert "os.setgid(runtime_gid)" in probe_cmd[4]
+    assert "os.setuid(runtime_uid)" in probe_cmd[4]
+    assert "follow_symlinks=False" in probe_cmd[4]
+    assert 'open(entry.path, "rb")' in probe_cmd[4]
+    assert probe_cmd[5:] == ["1000", "1000", str(target_dir)]
 
 
 @pytest.mark.unit

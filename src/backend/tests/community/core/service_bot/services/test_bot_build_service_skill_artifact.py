@@ -167,6 +167,7 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
         registry=registry,
         channel_service=channel_service,
     )
+    service._finalize_runtime_artifact = MagicMock()
 
     result = service.build(
         bot={
@@ -187,6 +188,7 @@ def test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_w
     assert (artifact_pool_root / "skills-local" / "local-skill" / "SKILL.md").is_file()
     assert not stale_active_corpus.exists()
     assert not stale_pool_corpus.exists()
+    service._finalize_runtime_artifact.assert_called_once_with(artifact_engine_root)
     assert all(
         not call.kwargs["shell_cmd"].startswith("rsync ")
         for call in device_service.exec_shell_new.call_args_list

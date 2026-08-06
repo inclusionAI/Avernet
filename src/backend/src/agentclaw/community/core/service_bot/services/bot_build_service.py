@@ -83,9 +83,9 @@ _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 # same ownership contract below.  A versioned artifact is not publishable until
 # this identity can traverse and read it.
 _PUBLISHED_RUNTIME_OWNER = "1000:1000"
-_PUBLISHED_RUNTIME_UID = "#1000"
-_RUNTIME_ARTIFACT_READABILITY_PROBE = (
-    "import os, sys\n"
+_PUBLISHED_RUNTIME_UID = 1000
+_PUBLISHED_RUNTIME_GID = 1000
+_RUNTIME_ARTIFACT_TREE_READ_PROBE = (
     "def check(path):\n"
     "    with os.scandir(path) as entries:\n"
     "        for entry in entries:\n"
@@ -98,7 +98,25 @@ _RUNTIME_ARTIFACT_READABILITY_PROBE = (
     "                    pass\n"
     "            else:\n"
     "                os.lstat(entry.path)\n"
-    "check(sys.argv[1])\n"
+)
+_RUNTIME_ARTIFACT_READABILITY_PROBE = (
+    "import os, sys\n"
+    + _RUNTIME_ARTIFACT_TREE_READ_PROBE
+    + "check(sys.argv[1])\n"
+)
+_NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE = (
+    "import os, sys\n"
+    "runtime_uid = int(sys.argv[1])\n"
+    "runtime_gid = int(sys.argv[2])\n"
+    "artifact_path = sys.argv[3]\n"
+    # Do not ask sudo to resolve uid 1000 through the Backend host's NSS
+    # database.  The identity belongs to the separate DaaS runtime image and
+    # may deliberately be unknown on the build host.
+    "os.setgroups([])\n"
+    "os.setgid(runtime_gid)\n"
+    "os.setuid(runtime_uid)\n"
+    + _RUNTIME_ARTIFACT_TREE_READ_PROBE
+    + "check(artifact_path)\n"
 )
 
 
@@ -774,12 +792,12 @@ class BotBuildService:
         self._run_local_command(
             cmd=[
                 "sudo",
-                "-u",
-                _PUBLISHED_RUNTIME_UID,
                 sys.executable,
                 "-I",
                 "-c",
-                _RUNTIME_ARTIFACT_READABILITY_PROBE,
+                _NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE,
+                str(_PUBLISHED_RUNTIME_UID),
+                str(_PUBLISHED_RUNTIME_GID),
                 str(target_dir),
             ],
             command_name="verify artifact runtime readability",
