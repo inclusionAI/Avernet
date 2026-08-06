@@ -79,10 +79,11 @@ _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 
 # ARCA/DaaS starts service-bot hooks as ``admin``.  The current image contract
-# fixes that runtime identity at uid/gid 1000; draft restore already uses the
-# same ownership contract below.  A versioned artifact is not publishable until
-# this identity can traverse and read it.
-_PUBLISHED_RUNTIME_OWNER = "1000:1000"
+# fixes that runtime identity at uid/gid 1000. A versioned artifact is not
+# publishable until this identity can traverse and read it, but it must remain
+# immutable to that runtime because rollback reuses the same version path.
+_PUBLISHED_ARTIFACT_OWNER = "0:1000"
+_PUBLISHED_ARTIFACT_MODE = "u=rwX,g=rX,o="
 _PUBLISHED_RUNTIME_UID = 1000
 _PUBLISHED_RUNTIME_GID = 1000
 _RUNTIME_ARTIFACT_TREE_READ_PROBE = (
@@ -757,11 +758,11 @@ class BotBuildService:
         """Make a completed artifact readable by the Published Runtime.
 
         Backend is the sole writer of the versioned artifact, but ``rsync -a``
-        deliberately preserves the Draft NAS ownership and modes.  Those
-        identities are not guaranteed to match the ``admin`` user used by
-        DaaS ``start_service.sh``.  Normalize only the constructed artifact
-        root, without following active-Skill symlinks, then perform the same
-        recursive read that the Published startup path requires.
+        deliberately preserves the Draft NAS ownership and modes. Normalize
+        only the constructed artifact root to root ownership with the runtime
+        group granted read/traverse access, without following active-Skill
+        symlinks, then perform the same recursive read that Published startup
+        requires.
 
         Any failure is fatal at build time.  Deferring it to the BaaS start hook
         leaves a publish in VALIDATE_PUB with a sandbox that can see the mount
@@ -772,7 +773,7 @@ class BotBuildService:
                 "sudo",
                 "chown",
                 "-hR",
-                _PUBLISHED_RUNTIME_OWNER,
+                _PUBLISHED_ARTIFACT_OWNER,
                 str(target_dir),
             ],
             command_name="normalize artifact owner",
@@ -783,7 +784,7 @@ class BotBuildService:
                 "sudo",
                 "chmod",
                 "-R",
-                "u+rwX",
+                _PUBLISHED_ARTIFACT_MODE,
                 str(target_dir),
             ],
             command_name="normalize artifact mode",

@@ -141,7 +141,7 @@ def test_build_finalizes_complete_artifact_after_all_writers(
 def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     tmp_path: Path,
 ) -> None:
-    """Finalizer 不得跟随 Pool 软链，且必须用 Runtime UID 验读。"""
+    """Finalizer 不得跟随 Pool 软链，且 Published Runtime 只能读制品。"""
     service = BotBuildService.__new__(BotBuildService)
     service._run_local_command = MagicMock()
     target_dir = tmp_path / "artifact" / "openclaw"
@@ -159,14 +159,14 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
         "sudo",
         "chown",
         "-hR",
-        "1000:1000",
+        "0:1000",
         str(target_dir),
     ]
     assert calls[1].kwargs["cmd"] == [
         "sudo",
         "chmod",
         "-R",
-        "u+rwX",
+        "u=rwX,g=rX,o=",
         str(target_dir),
     ]
     probe_cmd = calls[2].kwargs["cmd"]
