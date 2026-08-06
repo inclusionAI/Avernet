@@ -351,11 +351,7 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
-                "extra_properties": (
-                    extra_properties.to_dict()
-                    if extra_properties is not None
-                    else None
-                ),
+                "extra_properties": extra_properties,
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。
                 "mount_home_dir_storage": True,
             }

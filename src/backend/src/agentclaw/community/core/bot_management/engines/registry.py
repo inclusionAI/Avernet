@@ -159,11 +159,13 @@ def build_extra_properties_fail_open(
     template_type: str | None = None,
     template_config: dict[str, Any] | None = None,
     log_context: str = "engine_provisioning",
-) -> EngineExtraProperties | None:
-    """Build opaque provisioning properties without blocking generic provisioning.
+) -> dict[str, Any] | None:
+    """Build opaque provisioning properties (as a plain dict) without blocking.
 
-    Strategy resolution and execution are extension hooks. Any failure falls
-    back to ``None`` so generic lifecycle services preserve their legacy path.
+    Strategy resolution and execution are extension hooks. Returns the engine
+    property envelope as a plain ``dict`` so generic lifecycle services forward
+    it verbatim with no engine knowledge. Any failure falls back to ``None`` so
+    the legacy path is preserved.
     """
     try:
         ctx, _ = resolve_provisioning(
@@ -174,7 +176,8 @@ def build_extra_properties_fail_open(
             template_type=template_type,
             template_config=template_config,
         )
-        return get_engine_provisioning_registry().build_extra_properties(ctx)
+        props = get_engine_provisioning_registry().build_extra_properties(ctx)
+        return props.to_dict() if props is not None else None
     except Exception as exc:
         logger.warning(
             "[%s] Provisioning extra properties fallback=none bot_id=%s error_type=%s",
@@ -215,7 +218,15 @@ def build_extra_envs_fail_open(
             template_type=template_type,
             template_config=template_config,
         )
-        return strategy.build_extra_envs(ctx)
+        extra_envs = strategy.build_extra_envs(ctx)
+        if extra_envs:
+            logger.info(
+                "[%s] Setting engine extra_envs for bot %s: %s",
+                log_context,
+                bot_id,
+                extra_envs,
+            )
+        return extra_envs
     except Exception as exc:
         logger.warning(
             "[%s] Provisioning extra_envs fallback=none bot_id=%s error_type=%s",
@@ -250,7 +261,14 @@ def extract_runtime_token_fail_open(
             template_type=template_type,
             template_config=template_config,
         )
-        return strategy.extract_runtime_token(ctx)
+        token = strategy.extract_runtime_token(ctx)
+        if token:
+            logger.info(
+                "[%s] Resolved engine runtime token for bot %s",
+                log_context,
+                bot_id,
+            )
+        return token
     except Exception as exc:
         logger.warning(
             "[%s] Provisioning runtime token fallback=none bot_id=%s error_type=%s",
@@ -331,7 +349,7 @@ def build_extra_properties_from_bot(
     ``build_extra_properties_fail_open``. Generic services call this instead of
     hand-rolling bot-dict field extraction + fail-open + ``to_dict``.
     """
-    params = build_extra_properties_fail_open(
+    return build_extra_properties_fail_open(
         bot_id=str(bot.get("bot_id") or ""),
         owner_id=str(bot.get("owner_id") or ""),
         bot_type=str(bot.get("bot_type") or ""),
@@ -340,7 +358,6 @@ def build_extra_properties_from_bot(
         template_config=_coerce_template_config(bot.get("template_config")),
         log_context=log_context,
     )
-    return params.to_dict() if params is not None else None
 
 
 

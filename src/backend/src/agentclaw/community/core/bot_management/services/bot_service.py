@@ -22,6 +22,11 @@ from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
 from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
+from agentclaw.community.core.bot_management.engines import (
+    build_extra_envs_fail_open,
+    build_extra_properties_fail_open,
+    extract_runtime_token_fail_open,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -404,116 +409,6 @@ class BotService:
             owner_id=user_id,
             env=get_current_env(),
         )
-
-    def _build_engine_extra_envs(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        active_engine: "str | None",
-        bot_type: str,
-        template_type: "str | None",
-        template_config: "Optional[Dict[str, Any]]",
-        log_context: str,
-    ) -> "Optional[Dict[str, Any]]":
-        """Build engine-specific extra_envs via the provisioning strategy seam.
-
-        Thin delegate over ``build_extra_envs_fail_open`` so BotService stays a
-        pure caller — engine-specific knowledge lives in the strategy. Fails
-        soft (returns ``None``) so device allocation is never blocked by the
-        engine layer.
-        """
-        from agentclaw.community.core.bot_management.engines import (
-            build_extra_envs_fail_open,
-        )
-
-        extra_envs = build_extra_envs_fail_open(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=template_type,
-            template_config=template_config,
-            log_context=log_context,
-        )
-        if extra_envs:
-            logger.info(
-                "[%s] Setting engine extra_envs for bot %s: %s",
-                log_context,
-                bot_id,
-                extra_envs,
-            )
-        return extra_envs
-
-    def _build_extra_properties(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        active_engine: "str | None",
-        bot_type: str,
-        template_type: "str | None",
-        template_config: "Optional[Dict[str, Any]]",
-        log_context: str,
-    ) -> "Optional[Dict[str, Any]]":
-        """Build opaque provisioning properties via the provisioning strategy seam.
-
-        Thin delegate over ``build_extra_properties_fail_open`` + ``to_dict`` so
-        BotService stays a pure caller — engine-specific knowledge lives in the
-        strategy.
-        """
-        from agentclaw.community.core.bot_management.engines import (
-            build_extra_properties_fail_open,
-        )
-
-        params = build_extra_properties_fail_open(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=template_type,
-            template_config=template_config,
-            log_context=log_context,
-        )
-        return params.to_dict() if params is not None else None
-
-    def _extract_engine_runtime_token(
-        self,
-        *,
-        bot_id: str,
-        owner_id: str,
-        active_engine: "str | None",
-        bot_type: str,
-        template_type: "str | None",
-        template_config: "Optional[Dict[str, Any]]",
-        log_context: str,
-    ) -> "Optional[str]":
-        """Resolve the engine runtime token via the provisioning strategy seam.
-
-        Thin delegate over ``extract_runtime_token_fail_open`` so BotService
-        stays a pure caller — engine-specific knowledge lives in the strategy.
-        Fails soft (returns ``None``).
-        """
-        from agentclaw.community.core.bot_management.engines import (
-            extract_runtime_token_fail_open,
-        )
-
-        token = extract_runtime_token_fail_open(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            active_engine=active_engine,
-            bot_type=bot_type,
-            template_type=template_type,
-            template_config=template_config,
-            log_context=log_context,
-        )
-        if token:
-            logger.info(
-                "[%s] Resolved engine runtime token for bot %s",
-                log_context,
-                bot_id,
-            )
-        return token
 
     @staticmethod
     def _should_trigger_memory_initialization(
@@ -1473,7 +1368,7 @@ class BotService:
                         device_template_config,
                         bot_record.get("ext"),
                     )
-                    extra_envs = self._build_engine_extra_envs(
+                    extra_envs = build_extra_envs_fail_open(
                         bot_id=str(bot_id),
                         owner_id=user_id,
                         active_engine=resolved_active_engine,
@@ -1767,7 +1662,7 @@ class BotService:
                     )
 
                 # Engine strategy 重启场景：传入额外的环境变量。
-                extra_envs = self._build_engine_extra_envs(
+                extra_envs = build_extra_envs_fail_open(
                     bot_id=str(bot_id),
                     owner_id=owner_id or user_id,
                     active_engine=active_engine,
@@ -2529,7 +2424,7 @@ class BotService:
                 # Runtime token 变化时按引擎策略刷新运行中容器。仅当本次入参
                 # 携带 token 字段且与旧值解密后不同才触发；异步执行，失败只告警
                 # 不阻断主流程。
-                runtime_token = self._extract_engine_runtime_token(
+                runtime_token = extract_runtime_token_fail_open(
                     bot_id=bot_id,
                     owner_id=bot.get("owner_id") or user_id,
                     active_engine=bot.get("active_engine"),
@@ -4209,7 +4104,7 @@ class BotService:
         # 变量（BOT_TYPE / RELAY_DEFAULT_* / AIX_DEVFLOW_INFO / GIT_ADDRESSES），
         # template_config 提供沙箱覆写（envs / image / resource_spec）。两者
         # 不能互相门控。
-        extra_envs: Optional[Dict[str, Any]] = self._build_engine_extra_envs(
+        extra_envs: Optional[Dict[str, Any]] = build_extra_envs_fail_open(
             bot_id=str(bot_id),
             owner_id=user_id,
             active_engine=active_engine,
@@ -4218,7 +4113,7 @@ class BotService:
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
-        extra_properties = self._build_extra_properties(
+        extra_properties = build_extra_properties_fail_open(
             bot_id=str(bot_id),
             owner_id=user_id,
             active_engine=active_engine,

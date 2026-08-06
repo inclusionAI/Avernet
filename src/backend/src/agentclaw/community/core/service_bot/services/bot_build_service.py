@@ -402,7 +402,7 @@ class BotBuildService:
         template_config = bot.get("template_config")
         if not isinstance(template_config, dict):
             template_config = None
-        params = build_extra_properties_fail_open(
+        return build_extra_properties_fail_open(
             bot_id=str(bot.get("bot_id") or ""),
             owner_id=user_id,
             bot_type=str(bot.get("bot_type") or "service"),
@@ -411,7 +411,6 @@ class BotBuildService:
             template_config=template_config,
             log_context="bot_build_service",
         )
-        return params.to_dict() if params is not None else None
 
     def _resolve_baas_template_uuid(
         self,

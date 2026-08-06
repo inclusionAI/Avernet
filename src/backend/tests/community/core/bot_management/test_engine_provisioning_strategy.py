@@ -403,7 +403,7 @@ def test_theta_extra_properties_are_limited_to_supported_engines():
         )
 
         assert params is not None
-        assert params.to_dict() == {"aicoding": {"theta_key": "encrypted-theta"}}
+        assert params == {"aicoding": {"theta_key": "encrypted-theta"}}
 
     for active_engine in ("openclaw", "teclaw", "hermes", "future_engine"):
         assert build_extra_properties_fail_open(
@@ -561,7 +561,7 @@ def test_fail_open_helpers_delegate_to_strategy_hooks():
 
 
 def test_from_bot_helpers_adapt_bot_dict():
-    """build_*_from_bot bundles bot-dict adaptation + fail-open + to_dict."""
+    """build_*_from_bot bundles bot-dict adaptation + fail-open (returns dict)."""
     from agentclaw.community.core.bot_management.engines import (
         build_extra_properties_from_bot,
     )
