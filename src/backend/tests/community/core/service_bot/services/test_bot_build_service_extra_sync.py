@@ -207,9 +207,14 @@ def test_mcp_config_skipped_when_device_returns_non_json_stdout():
 
 
 def test_service_publish_builds_extra_properties_from_template_snapshot():
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_properties_from_bot,
+    )
+
     bot = {
         "bot_id": "service-bot-1",
         "bot_type": "service",
+        "owner_id": "owner-1",
         "active_engine": "aicoding",
         "template_type": "applicationCoding",
         "template_config": {
@@ -219,7 +224,9 @@ def test_service_publish_builds_extra_properties_from_template_snapshot():
         },
     }
 
-    assert BotBuildService._build_extra_properties(bot=bot, user_id="owner-1") == {
+    assert build_extra_properties_from_bot(
+        bot=bot, log_context="bot_build_service"
+    ) == {
         "aicoding": {"theta_key": "encrypted-service-theta"}
     }
 
@@ -227,21 +234,26 @@ def test_service_publish_builds_extra_properties_from_template_snapshot():
 def test_service_publish_provisioning_failure_keeps_historical_fixed_key_path():
     from unittest.mock import patch
 
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_properties_from_bot,
+    )
+
     registry = MagicMock()
     registry.resolve_for_context.side_effect = RuntimeError("extension unavailable")
     with patch(
         "agentclaw.community.core.bot_management.engines.registry.get_engine_provisioning_registry",
         return_value=registry,
     ):
-        result = BotBuildService._build_extra_properties(
+        result = build_extra_properties_from_bot(
             bot={
                 "bot_id": "service-bot-1",
                 "bot_type": "service",
+                "owner_id": "owner-1",
                 "active_engine": "aicoding",
                 "template_type": "applicationCoding",
                 "template_config": {},
             },
-            user_id="owner-1",
+            log_context="bot_build_service",
         )
 
     assert result is None

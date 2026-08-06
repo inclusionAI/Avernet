@@ -390,28 +390,6 @@ class BotBuildService:
             )
             return False
 
-    @staticmethod
-    def _build_extra_properties(
-        *, bot: Dict[str, Any], user_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """Resolve opaque provisioning properties through the guarded extension seam."""
-        from agentclaw.community.core.bot_management.engines import (
-            build_extra_properties_fail_open,
-        )
-
-        template_config = bot.get("template_config")
-        if not isinstance(template_config, dict):
-            template_config = None
-        return build_extra_properties_fail_open(
-            bot_id=str(bot.get("bot_id") or ""),
-            owner_id=user_id,
-            bot_type=str(bot.get("bot_type") or "service"),
-            active_engine=bot.get("active_engine"),
-            template_type=bot.get("template_type"),
-            template_config=template_config,
-            log_context="bot_build_service",
-        )
-
     def _resolve_baas_template_uuid(
         self,
         *,
@@ -574,6 +552,9 @@ class BotBuildService:
                     device_count=1,
                 )
             else:
+                from agentclaw.community.core.bot_management.engines import (
+                    build_extra_properties_from_bot,
+                )
                 create_kwargs: dict[str, Any] = {
                     "bot": bot,
                     "owner_id": user_id,
@@ -585,8 +566,8 @@ class BotBuildService:
                     "version": version,
                     "ext_info": ext_info,
                     "extra_envs": extra_envs,
-                    "extra_properties": self._build_extra_properties(
-                        bot=bot, user_id=user_id
+                    "extra_properties": build_extra_properties_from_bot(
+                        bot=bot, log_context="bot_build_service"
                     ),
                 }
                 template_uuid = self._resolve_baas_template_uuid(
@@ -1207,6 +1188,9 @@ class BotBuildService:
                     device_count=1,
                 )
             else:
+                from agentclaw.community.core.bot_management.engines import (
+                    build_extra_properties_from_bot,
+                )
                 upgrade_kwargs: dict[str, Any] = {
                     "bot_uuid": bot_uuid,
                     "bot": bot,
@@ -1217,8 +1201,8 @@ class BotBuildService:
                     "stage": publish_stage.value,
                     "version": version,
                     "extra_envs": extra_envs,
-                    "extra_properties": self._build_extra_properties(
-                        bot=bot, user_id=user_id
+                    "extra_properties": build_extra_properties_from_bot(
+                        bot=bot, log_context="bot_build_service"
                     ),
                 }
                 template_uuid = self._resolve_baas_template_uuid(
