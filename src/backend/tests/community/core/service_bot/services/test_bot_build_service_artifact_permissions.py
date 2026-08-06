@@ -72,9 +72,19 @@ def _registry() -> EngineSandboxRegistry:
     [
         (
             "openclaw",
-            ["migrate", "prepare", "mcp", "stage-configs", "finalize"],
+            [
+                "prepare",
+                "migrate",
+                "prepare",
+                "mcp",
+                "stage-configs",
+                "finalize",
+            ],
         ),
-        ("claude_code", ["migrate", "prepare", "mcp", "finalize"]),
+        (
+            "claude_code",
+            ["prepare", "migrate", "prepare", "mcp", "finalize"],
+        ),
     ],
 )
 def test_build_finalizes_complete_artifact_after_all_writers(
@@ -95,7 +105,7 @@ def test_build_finalizes_complete_artifact_after_all_writers(
 
     def migrate(**kwargs: object) -> bool:
         events.append("migrate")
-        Path(kwargs["target_dir"]).mkdir(parents=True)
+        Path(kwargs["target_dir"]).mkdir(parents=True, exist_ok=True)
         return True
 
     def generate_mcp(**kwargs: object) -> bool:
@@ -119,7 +129,7 @@ def test_build_finalizes_complete_artifact_after_all_writers(
         events.append("finalize")
 
     def prepare(target_dir: Path) -> None:
-        assert target_dir.is_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
         events.append("prepare")
 
     service._migrate_bot_instance = MagicMock(side_effect=migrate)
@@ -161,6 +171,11 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     assert [call.kwargs["command_name"] for call in calls] == [
         "seal artifact owner",
         "seal artifact mode",
+        "seal artifact version owner",
+        "seal artifact version mode",
+        "protect artifact store owner",
+        "protect artifact store mode",
+        "protect artifact version entry",
         "verify artifact runtime readability",
     ]
     assert calls[0].kwargs["cmd"] == [
@@ -177,7 +192,37 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
         "u=rwX,g=rX,o=",
         str(target_dir),
     ]
-    probe_cmd = calls[2].kwargs["cmd"]
+    assert calls[2].kwargs["cmd"] == [
+        "sudo",
+        "chown",
+        "0:1000",
+        str(target_dir.parent),
+    ]
+    assert calls[3].kwargs["cmd"] == [
+        "sudo",
+        "chmod",
+        "u=rwX,g=rX,o=",
+        str(target_dir.parent),
+    ]
+    assert calls[4].kwargs["cmd"] == [
+        "sudo",
+        "chown",
+        "0:1000",
+        str(target_dir.parent.parent),
+    ]
+    assert calls[5].kwargs["cmd"] == [
+        "sudo",
+        "chmod",
+        "u=rwx,g=rwx,o=",
+        str(target_dir.parent.parent),
+    ]
+    assert calls[6].kwargs["cmd"] == [
+        "sudo",
+        "chmod",
+        "+t",
+        str(target_dir.parent.parent),
+    ]
+    probe_cmd = calls[7].kwargs["cmd"]
     assert probe_cmd[0] == "sudo"
     assert "-u" not in probe_cmd
     assert Path(probe_cmd[1]).name.startswith("python")
@@ -188,6 +233,8 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     assert "follow_symlinks=False" in probe_cmd[4]
     assert 'open(entry.path, "rb")' in probe_cmd[4]
     assert "artifact unexpectedly writable by published runtime" in probe_cmd[4]
+    assert "artifact path unexpectedly replaceable by published runtime" in probe_cmd[4]
+    assert "version path unexpectedly replaceable by published runtime" in probe_cmd[4]
     assert probe_cmd[5:] == ["1000", "1000", str(target_dir)]
 
 

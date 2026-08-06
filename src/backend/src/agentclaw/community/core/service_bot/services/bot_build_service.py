@@ -132,6 +132,24 @@ _NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE = (
     "    raise PermissionError(\n"
     "        'artifact unexpectedly writable by published runtime'\n"
     "    )\n"
+    "def assert_not_replaceable(path, message):\n"
+    "    sibling = f\"{path}.runtime-rename-probe-{os.getpid()}\"\n"
+    "    try:\n"
+    "        os.rename(path, sibling)\n"
+    "    except OSError as exc:\n"
+    "        if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):\n"
+    "            raise\n"
+    "    else:\n"
+    "        os.rename(sibling, path)\n"
+    "        raise PermissionError(message)\n"
+    "assert_not_replaceable(\n"
+    "    artifact_path,\n"
+    "    'artifact path unexpectedly replaceable by published runtime',\n"
+    ")\n"
+    "assert_not_replaceable(\n"
+    "    os.path.dirname(artifact_path),\n"
+    "    'version path unexpectedly replaceable by published runtime',\n"
+    ")\n"
 )
 
 
@@ -335,8 +353,7 @@ class BotBuildService:
             # A previous attempt for this version may already have sealed the
             # target read-only. Re-open it only for the Backend writer before
             # retrying; a successful build seals it again below.
-            if target_dir.exists() and source_dir.exists():
-                self._prepare_artifact_for_build(target_dir)
+            self._prepare_artifact_for_build(target_dir)
 
             # 2.1 执行 rsync 迁移
             migration_success = self._migrate_bot_instance(
@@ -841,6 +858,57 @@ class BotBuildService:
             ],
             command_name="seal artifact mode",
             error_message="seal artifact mode failed",
+        )
+        version_dir = target_dir.parent
+        artifact_store = version_dir.parent
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chown",
+                _PUBLISHED_ARTIFACT_OWNER,
+                str(version_dir),
+            ],
+            command_name="seal artifact version owner",
+            error_message="seal artifact version owner failed",
+        )
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chmod",
+                _PUBLISHED_ARTIFACT_MODE,
+                str(version_dir),
+            ],
+            command_name="seal artifact version mode",
+            error_message="seal artifact version mode failed",
+        )
+        # The bot-data mount remains writable because the active engine lives
+        # beside versioned artifacts. Make root the directory owner and use
+        # sticky-directory semantics so runtime gid 1000 can manage its own
+        # active entries but cannot rename a root-owned version directory.
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chown",
+                _PUBLISHED_ARTIFACT_OWNER,
+                str(artifact_store),
+            ],
+            command_name="protect artifact store owner",
+            error_message="protect artifact store owner failed",
+        )
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chmod",
+                "u=rwx,g=rwx,o=",
+                str(artifact_store),
+            ],
+            command_name="protect artifact store mode",
+            error_message="protect artifact store mode failed",
+        )
+        self._run_local_command(
+            cmd=["sudo", "chmod", "+t", str(artifact_store)],
+            command_name="protect artifact version entry",
+            error_message="protect artifact version entry failed",
         )
         self._run_local_command(
             cmd=[
