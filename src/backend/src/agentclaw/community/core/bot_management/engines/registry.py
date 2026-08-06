@@ -289,10 +289,21 @@ def should_encrypt_template_token_fail_open(
     template_config: dict[str, Any] | None = None,
     log_context: str = "engine_provisioning",
 ) -> bool:
-    """Ask the engine strategy whether to encrypt the template token, fail-open.
+    """Ask the engine strategy whether to encrypt the template token.
 
-    Single fail-open entry point for the ``should_encrypt_template_token`` hook.
-    Returns ``False`` (do not encrypt → legacy path) on any extension failure.
+    Single entry point for the ``should_encrypt_template_token`` hook. Unlike
+    the extra-properties/envs fail-open seams (which return an empty envelope
+    / None on failure — a safe no-op), the token-encryption decision controls
+    whether a plaintext credential is persisted to ``ac_templates.ext``. A
+    fail-open ``False`` here would persist the plaintext token on any
+    provisioning/strategy failure, which is an irreversible security breach.
+
+    Therefore this seam is **fail-closed on credential persistence**: on any
+    extension failure it returns ``True`` (conservative: encrypt). The caller
+    :func:`TemplateService._encrypt_token_field` already skips encryption when
+    there is no token or the token is already ciphertext, so a conservative
+    ``True`` only encrypts an actual plaintext token and never breaks templates
+    that carry no token.
     """
     try:
         ctx, strategy = resolve_provisioning(
@@ -306,12 +317,14 @@ def should_encrypt_template_token_fail_open(
         return strategy.should_encrypt_template_token(ctx)
     except Exception as exc:
         logger.warning(
-            "[%s] Provisioning encrypt check fallback=false bot_id=%s error_type=%s",
+            "[%s] Provisioning encrypt check fallback=closed(encrypt) bot_id=%s error_type=%s",
             log_context,
             bot_id,
             type(exc).__name__,
         )
-        return False
+        # Fail-closed on credential persistence: never let a plaintext token
+        # reach storage when we cannot determine the engine policy.
+        return True
 
 
 def _coerce_template_config(value: Any) -> dict[str, Any] | None:

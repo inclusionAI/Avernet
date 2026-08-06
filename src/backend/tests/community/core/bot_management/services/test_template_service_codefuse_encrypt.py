@@ -157,3 +157,83 @@ class TestGetDecryptedCodefuseToken:
             "ext": {"token": CIPHER_PREFIX + "!!corrupt!!"},
         }
         assert svc.get_decrypted_codefuse_token("B1") is None
+
+
+class TestTemplateTokenEncryptFailClosed:
+    """reviewer must-fix: token encryption must fail-closed, never persist plaintext.
+
+    When provisioning/strategy resolution raises, the encrypt-check seam must
+    return True (conservative encrypt) so a plaintext token is never written to
+    ``ac_templates.ext``. ``_encrypt_token_field`` skips when there is no token
+    or the token is already ciphertext, so a conservative True only encrypts an
+    actual plaintext token.
+    """
+
+    def test_encrypt_check_returns_true_on_provisioning_exception(self, monkeypatch):
+        from agentclaw.community.core.bot_management.engines import registry
+
+        def _boom(**_kwargs):
+            raise RuntimeError("strategy resolution exploded")
+
+        monkeypatch.setattr(registry, "resolve_provisioning", _boom)
+        assert (
+            registry.should_encrypt_template_token_fail_open(
+                bot_id="B1",
+                owner_id="",
+                bot_type="",
+                template_type="applicationCoding",
+                template_config={"token": "plain-tok"},
+            )
+            is True
+        )
+
+    def test_encrypt_token_field_encrypts_plaintext_on_exception(self, monkeypatch):
+        svc, repo = _make_service()
+        from agentclaw.community.core.bot_management.engines import registry
+
+        def _boom(**_kwargs):
+            raise RuntimeError("strategy resolution exploded")
+
+        monkeypatch.setattr(registry, "resolve_provisioning", _boom)
+        cfg = {"token": "plain-tok-123", "other": "keep"}
+        svc.create_template(bot_id="B1", template_config=cfg, template_type="applicationCoding")
+        stored = repo.insert.call_args.args[0]["ext"]
+        # plaintext token must NOT reach storage; conservative encrypt applied
+        assert stored["token"].startswith(CIPHER_PREFIX)
+        assert stored["token"] != "plain-tok-123"
+        assert svc._vault.decrypt_or_passthrough(stored["token"]) == "plain-tok-123"
+        assert stored["other"] == "keep"
+
+    def test_encrypt_token_field_skips_when_no_token_even_on_exception(
+        self, monkeypatch
+    ):
+        svc, repo = _make_service()
+        from agentclaw.community.core.bot_management.engines import registry
+
+        def _boom(**_kwargs):
+            raise RuntimeError("strategy resolution exploded")
+
+        monkeypatch.setattr(registry, "resolve_provisioning", _boom)
+        cfg = {"other": "no-token-here"}
+        svc.create_template(bot_id="B1", template_config=cfg, template_type="normalCC")
+        stored = repo.insert.call_args.args[0]["ext"]
+        # no token present -> nothing to encrypt; config preserved verbatim
+        assert stored == {"other": "no-token-here"}
+        assert "token" not in stored
+
+    def test_encrypt_token_field_skips_when_token_already_ciphertext_on_exception(
+        self, monkeypatch
+    ):
+        svc, repo = _make_service()
+        from agentclaw.community.core.bot_management.engines import registry
+
+        def _boom(**_kwargs):
+            raise RuntimeError("strategy resolution exploded")
+
+        monkeypatch.setattr(registry, "resolve_provisioning", _boom)
+        already_cipher = svc._vault.encrypt("secret")
+        cfg = {"token": already_cipher}
+        svc.create_template(bot_id="B1", template_config=cfg, template_type="applicationCoding")
+        stored = repo.insert.call_args.args[0]["ext"]
+        # already-encrypted token is idempotent: not re-encrypted, stays ciphertext
+        assert stored["token"] == already_cipher
