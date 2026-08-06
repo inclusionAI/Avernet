@@ -4,6 +4,7 @@ Covers the install_engine step that was added so the BaaS path mirrors the
 arca path (script split out of start_service.sh, marker file coordinates with
 setup_supervisor_sync_service.sh).
 """
+import subprocess
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
@@ -32,6 +33,22 @@ def _make_service() -> BaasService:
 
 
 class TestGetInstallEngineCmd:
+    @staticmethod
+    def _run_with_paths(cmd, *, script_path, log_path, prefix=""):
+        test_cmd = cmd.replace(
+            "/home/admin/bin/install_engine.sh",
+            str(script_path),
+        ).replace(
+            "/home/admin/logs/install_engine.log",
+            str(log_path),
+        )
+        return subprocess.run(
+            ["bash", "-c", f"{prefix}{test_cmd}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
     def test_uses_install_engine_script_path(self):
         cmd = _make_service()._get_install_engine_cmd()
         assert "/home/admin/bin/install_engine.sh" in cmd
@@ -54,6 +71,50 @@ class TestGetInstallEngineCmd:
     def test_redirects_to_log(self):
         cmd = _make_service()._get_install_engine_cmd()
         assert "/home/admin/logs/install_engine.log" in cmd
+
+    def test_success_keeps_zero_exit_and_does_not_echo_log(self, tmp_path):
+        script_path = tmp_path / "install_engine.sh"
+        log_path = tmp_path / "install_engine.log"
+        script_path.write_text("echo install-ok\nexit 0\n", encoding="utf-8")
+
+        result = self._run_with_paths(
+            _make_service()._get_install_engine_cmd(),
+            script_path=script_path,
+            log_path=log_path,
+        )
+
+        assert result.returncode == 0
+        assert result.stderr == ""
+        assert log_path.read_text(encoding="utf-8") == "install-ok\n"
+
+    def test_failure_returns_original_exit_and_echoes_log_tail(self, tmp_path):
+        script_path = tmp_path / "install_engine.sh"
+        log_path = tmp_path / "install_engine.log"
+        script_path.write_text("echo precise-failure\nexit 7\n", encoding="utf-8")
+
+        result = self._run_with_paths(
+            _make_service()._get_install_engine_cmd(),
+            script_path=script_path,
+            log_path=log_path,
+        )
+
+        assert result.returncode == 7
+        assert "[install_engine] failed; last log lines:" in result.stderr
+        assert "precise-failure" in result.stderr
+
+    def test_tail_failure_cannot_replace_install_exit(self, tmp_path):
+        script_path = tmp_path / "install_engine.sh"
+        log_path = tmp_path / "install_engine.log"
+        script_path.write_text("echo original-failure\nexit 9\n", encoding="utf-8")
+
+        result = self._run_with_paths(
+            _make_service()._get_install_engine_cmd(),
+            script_path=script_path,
+            log_path=log_path,
+            prefix="tail() { return 42; }; ",
+        )
+
+        assert result.returncode == 9
 
 
 class TestGetStartCmdOrdering:

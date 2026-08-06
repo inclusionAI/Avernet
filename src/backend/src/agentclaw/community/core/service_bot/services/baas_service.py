@@ -2267,7 +2267,11 @@ class BaasService:  # pragma: no cover
         log_path = "/home/admin/logs/install_engine.log"
         install_cmd = (
             f"if [ -f {script_path} ]; then "
-            f"bash {script_path} >> {log_path} 2>&1; "
+            f"if bash {script_path} >> {log_path} 2>&1; then :; "
+            f"else rc=$?; "
+            f"echo '[install_engine] failed; last log lines:' >&2; "
+            f"tail -n 200 {log_path} >&2 || true; "
+            f"exit $rc; fi; "
             f"else echo '[install_engine] {script_path} not found, skip'; fi"
         )
         logger.info(f"[_get_install_engine_cmd] Executing cmd: {install_cmd}")
