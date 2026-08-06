@@ -146,3 +146,33 @@ def test_served_openapi_aggregates_bcn_with_existing_domains() -> None:
         "Collaboration / Sessions",
         "Collaboration / Invitations",
     ]
+
+
+_BCSFUSE_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bcsfuse.openapi.json"
+
+
+def _bcsfuse_served() -> dict[str, Any]:
+    description = json.loads(_BCSFUSE_FIXTURE.read_text())
+    return build_served_openapi(
+        ["bcsfuse"],
+        lambda _domain: description,
+        _SHIPPED_RULES,
+        title="gateway",
+        version="0.1.0",
+        description="test",
+    )
+
+
+def test_bcsfuse_paths_served_with_user_security() -> None:
+    paths = _bcsfuse_served()["paths"]
+    assert set(paths) == {
+        "/openapi/v1/bcsfuse/api/v1/groups/{group_id}/fuse",
+        "/openapi/v1/bcsfuse/v1/workers/{worker_id}/config",
+        "/openapi/v1/bcsfuse/v1/workers/config/batch",
+    }
+    for path, item in paths.items():
+        for method, operation in item.items():
+            if method in _METHODS:
+                assert operation["x-avernet-security"] == {"user": "required"}, (
+                    f"{method} {path}"
+                )

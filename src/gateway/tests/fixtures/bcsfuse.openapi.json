@@ -1,0 +1,16 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "bcsfuse", "version": "0.1.0"},
+  "paths": {
+    "/openapi/v1/bcsfuse/api/v1/groups/{group_id}/fuse": {
+      "post": {"summary": "Fuse group participants", "responses": {"200": {"description": "Fusion result"}}}
+    },
+    "/openapi/v1/bcsfuse/v1/workers/{worker_id}/config": {
+      "get": {"summary": "Get worker fusion config", "responses": {"200": {"description": "Worker config"}}},
+      "put": {"summary": "Update worker fusion config", "responses": {"200": {"description": "Worker config"}}}
+    },
+    "/openapi/v1/bcsfuse/v1/workers/config/batch": {
+      "post": {"summary": "Batch query fusion_enable (fusable bots)", "responses": {"200": {"description": "Batch config"}}}
+    }
+  }
+}
