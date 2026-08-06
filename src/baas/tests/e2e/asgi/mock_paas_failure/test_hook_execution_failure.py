@@ -101,6 +101,23 @@ class TestRestartHookFailure:
         bot = await create_and_activate_bot(
             api, f"restart-hook-fail-{unique_id}", device_count=1
         )
+        # The create/activate publish converges via an async after_create hook
+        # callback (a daemon thread -> asyncio callback that updates device and
+        # publish_record). create_and_activate_bot returns on a best-effort
+        # budget and may leave that callback in flight. Firing restart while the
+        # create callback is still pending for the same device races the restart
+        # callback and can leave the restart publish stuck in ACTIVE. Wait here
+        # for the create publish to reach a terminal state first, so the restart
+        # runs against a fully-converged device.
+        create_status = await wait_for_publish_status(
+            api,
+            bot["publish_id"],
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=30.0,
+        )
+        assert create_status in ("SUCCESS", "FAILED"), (
+            f"Create/activate publish did not converge before restart: {create_status}"
+        )
         resp = await api.client.post(
             api.bot_url(bot["bot_uuid"]) + "/restart",
             params=api.params(),
@@ -116,8 +133,13 @@ class TestRestartHookFailure:
         # logged as a warning and the restart (destroy + create) proceeds. Mirror
         # TestDestroyHookFailure and accept either terminal state. A generous
         # timeout keeps this stable on slow CI runners where publish convergence
-        # can exceed a few seconds.
+        # can exceed a few seconds; a larger poll interval eases event-loop
+        # contention so the async restart callback is not starved by tight polling.
         status = await wait_for_publish_status(
-            api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=30.0
+            api,
+            publish_id,
+            {"SUCCESS", "FAILED"},
+            timeout_seconds=30.0,
+            poll_interval=0.2,
         )
         assert status in ("SUCCESS", "FAILED"), f"Expected terminal state, got {status}"
