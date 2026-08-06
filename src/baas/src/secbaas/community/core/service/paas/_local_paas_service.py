@@ -110,6 +110,7 @@ if TYPE_CHECKING:
     from secbaas.community.spi.sandbox.desktop import (
         DesktopSandboxPlugin,
     )
+    from secbaas.community.spi.secret import SecretStorePlugin
 
 
 class LocalPaasService(PaasService, LocalPaasServiceProtocol):
@@ -147,18 +148,14 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         instance_router: InstanceRouter,
         server_ip: str,
         desktop_sandbox_plugin: DesktopSandboxPlugin,
+        secret_plugin: SecretStorePlugin,
         env: str | None = None,
-        device_template_repository: DeviceTemplateRepository
-        | None = None,  # Add per D-04
-        device_repository: DeviceRepository
-        | None = None,  # Phase 26: for callback handling
-        publish_record_repository: PublishRecordRepository
-        | None = None,  # Phase 26: for callback handling
-        worker_router: Any | None = None,  # Phase 31: New parameter
-        relay_repository: WsRelaySessionRepository
-        | None = None,  # Phase 65.1: for init-row pre-creation in relay flow
-        ws_conn_mode: str
-        | None = None,  # Phase 66: "direct" | "relay" (None → class default)
+        device_template_repository: DeviceTemplateRepository | None = None,
+        device_repository: DeviceRepository | None = None,
+        publish_record_repository: PublishRecordRepository | None = None,
+        worker_router: Any | None = None,
+        relay_repository: WsRelaySessionRepository | None = None,
+        ws_conn_mode: str | None = None,
     ) -> None:
         """Initialize LocalPaasService with all required dependencies.
 
@@ -168,23 +165,24 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             repository: LocalUserMachineRepository for baas_local_user_machine
                 table operations.
             connection_manager: ConnectionManager for WebSocket session state
-                tracking (forward reference - type hint only).
-            instance_router: InstanceRouter for cross-instance HTTP forwarding
-                (forward reference - type hint only).
+                tracking.
+            instance_router: InstanceRouter for cross-instance HTTP forwarding.
             server_ip: This secbaas server's IP address for routing.
-            env: Environment identifier (dev, pre, prod). If None, derived from
-                environment variables using get_current_env().
+            desktop_sandbox_plugin: DesktopSandboxPlugin for sandbox operations.
+            secret_plugin: SecretStorePlugin for proxypass JWT signing.
+            env: Environment identifier (dev, pre, prod). Auto-detected if None.
+            device_template_repository: Repository for device template queries.
             device_repository: DeviceRepository for baas_device table operations.
-                Required for Phase 26 callback handling.
-            publish_record_repository: PublishRecordRepository for baas_publish_record
-                table operations. Required for Phase 26 callback handling.
-            worker_router: Optional WorkerRouter for cross-process forwarding (Phase 31).
+            publish_record_repository: PublishRecordRepository for
+                baas_publish_record table operations.
+            worker_router: Optional WorkerRouter for cross-process forwarding.
+            relay_repository: WsRelaySessionRepository for init-row pre-creation
+                in relay flow.
+            ws_conn_mode: WebSocket connection mode ("direct" or "relay").
+                Defaults to class-level _DEFAULT_WS_CONN_MODE.
 
         Raises:
-            ValueError: If credentials is None. Type correctness of
-                ``credentials`` is enforced by the type annotation
-                (``LocalCredentials``); runtime field validation of
-                machine_id / bot_id is deferred to ``create_device()``.
+            ValueError: If credentials is None.
         """
         if credentials is None:
             raise ValueError("credentials is required")
@@ -217,6 +215,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         self._ws_conn_mode = (
             ws_conn_mode if ws_conn_mode is not None else self._DEFAULT_WS_CONN_MODE
         )
+        self._secret_plugin = secret_plugin
 
     async def get_credentials(self) -> LocalCredentials:
         """Get the credentials used by this service instance.
@@ -1008,14 +1007,8 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         target = f"LOCAL_{paas_device_id}@{self._credentials.template_id}:{port}"
 
         http_url = build_proxypass_url(target, resolved_path, scheme="https")
-        # Key retrieval via DI container is tracked as known debt —
-        # future refactoring should inject the secret plugin into the constructor.
-        from secbaas.community.bootstrap import get_container  # noqa: PLC0415
-
-        key = (
-            get_container()
-            .plugins.secret_plugin()
-            .get_secret("other_manual_agentclawproxy_proxypass_secret")
+        key = self._secret_plugin.get_secret(
+            "other_manual_agentclawproxy_proxypass_secret"
         )
         token = generate_proxypass_jwt(target, key, ttl=120)
 
@@ -2194,12 +2187,6 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             # down in DefaultPublishService.handle_device_callback via the
             # update_result_if_processing optimistic lock.
 
-            # Deferred imports: avoids circular dependency between
-            # secbaas.core.service.paas and secbaas.core.service.publish_manage
-            # (which transitively imports paas._factory
-            # -> paas._local_paas_service). Pyright/mypy still
-            # type-check these symbols via the inline imports at this scope.
-            # Move to module top once the cycle is resolved.
             from secbaas.community.api.publish_manage import DeviceCallbackRequest
 
             stdout_text = (
@@ -2218,13 +2205,11 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 stderr="",
                 tenant=device.tenant,
             )
-            from secbaas.community.bootstrap import get_container  # noqa: PLC0415
-
-            result = (
-                await get_container()
-                .services.publish_service()
-                .handle_device_callback(callback)
+            from secbaas.community.core.utils.callback_utils import (
+                handle_device_callback,
             )
+
+            result = await handle_device_callback(callback)
             logger.info(
                 f"[PUBLISH_CALLBACK_SUCCESS] device={device.device_uuid}, "
                 f"publish_id={record.publish_id}, source={source}, result={result}"

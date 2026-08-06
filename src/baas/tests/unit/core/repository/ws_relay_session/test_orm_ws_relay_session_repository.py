@@ -11,8 +11,7 @@ Covers the 15 behaviors specified in the Phase 65-01 PLAN:
   Test 11: update_active updates status/connected_server_instance/connected_route_info/gmt_modified
   Test 12: update_closed updates status/closed/gmt_close/gmt_modified
   Test 13: _validate_transition enforces state machine rules
-  Test 14: get_ws_relay_session_repository() returns WsRelaySessionRepository Protocol
-  Test 15: __init__.py exports 5 symbols
+  Test 14: __init__.py exports 5 symbols
 """
 
 import json
@@ -567,57 +566,28 @@ class TestValidateTransition:
         repository._validate_transition("closed", "closed")
 
 
-# ==================== Test 14: Factory function ====================
-
-
-class TestFactory:
-    """Tests for get_ws_relay_session_repository factory (Test 14)."""
-
-    def test_factory_returns_protocol(self):
-        """Test 14: get_ws_relay_session_repository() returns WsRelaySessionRepository Protocol."""
-        # This test verifies the factory function exists and has the right signature.
-        # Since it depends on the DI container (which requires full bootstrap),
-        # we verify the function exists and imports correctly without calling it.
-        from secbaas.community.core.repository.ws_relay_session import (
-            WsRelaySessionRepository,
-            get_ws_relay_session_repository,
-        )
-
-        assert callable(get_ws_relay_session_repository), (
-            "get_ws_relay_session_repository must be callable"
-        )
-
-        # Verify annotations point to Protocol
-        import inspect
-
-        hints = inspect.get_annotations(get_ws_relay_session_repository)
-        assert "return" in hints, "Factory must have return type annotation"
-
-
-# ==================== Test 15: __init__.py exports ====================
+# ==================== Test 14: __init__.py exports ====================
 
 
 class TestInitExports:
-    """Tests for __init__.py public re-exports (Test 15)."""
+    """Tests for __init__.py public re-exports."""
 
-    def test_init_exports_5_symbols(self):
-        """Test 15: __init__.py exports 5 symbols."""
+    def test_init_exports_4_symbols(self):
+        """__init__.py exports 4 symbols (factory function removed — tech debt paydown)."""
         from secbaas.community.core.repository.ws_relay_session import (
             OrmWsRelaySessionRepository,
             WsRelaySessionModel,
             WsRelaySessionRecord,
             WsRelaySessionRepository,
             __all__,
-            get_ws_relay_session_repository,
         )
 
-        assert len(__all__) == 5, f"Expected 5 symbols in __all__, got {len(__all__)}"
+        assert len(__all__) == 4, f"Expected 4 symbols in __all__, got {len(__all__)}"
         expected = {
             "WsRelaySessionRecord",
             "WsRelaySessionRepository",
             "OrmWsRelaySessionRepository",
             "WsRelaySessionModel",
-            "get_ws_relay_session_repository",
         }
         assert set(__all__) == expected, f"__all__ mismatch: {set(__all__) ^ expected}"
 
@@ -626,4 +596,3 @@ class TestInitExports:
         assert WsRelaySessionRepository is not None
         assert OrmWsRelaySessionRepository is not None
         assert WsRelaySessionModel is not None
-        assert get_ws_relay_session_repository is not None
