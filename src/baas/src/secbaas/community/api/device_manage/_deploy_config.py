@@ -7,7 +7,7 @@ all platform-specific fields. Platform type is determined at runtime from templa
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ._models import MountPermission, MountPoint, ResourceSpecification, Storage
 from ._outbound_rule import OutBoundOperationRule
@@ -301,19 +301,6 @@ class DeployConfig(BaseModel):
         default=None,
         description="Opaque engine-owned properties forwarded to platform extensions",
     )
-
-    @field_serializer("extra_properties")
-    def _redact_extra_properties(self, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        """Redact credential-bearing extra_properties on serialization.
-
-        The envelope may carry engine ciphertext (e.g. thetaKey) that the Arca
-        boundary decrypts. It must never leak through API responses or logs,
-        which all route through model_dump. Runtime objects keep the raw value;
-        only the serialized form is redacted.
-        """
-        if value is None:
-            return None
-        return {"<redacted>": True} if value else value
 
     # === Arca-specific fields ===
     mount_points: list[MountPoint] | None = Field(

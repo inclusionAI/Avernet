@@ -17,6 +17,7 @@ from secbaas.community.api.bot_manage import (
 )
 from secbaas.community.api.bot_runtime import BotNotFoundError
 from secbaas.community.api.device_manage import (
+    DeployConfig,
     DestroyDeviceResponse,
     DeviceConfig,
     DeviceResponse,
@@ -348,6 +349,130 @@ class TestRecordToResponse:
         deploy_cfg = dumped.get("config", {}).get("deploy_config") or {}
         assert deploy_cfg.get("extra_properties") == {"<redacted>": True}
         assert "SENTINEL_CIPHERTEXT" not in str(dumped)
+
+    def test_bot_config_model_dump_preserves_extra_properties_for_persistence(self):
+        """Persistence/merge transport uses BotConfig.model_dump and must keep
+        the raw ciphertext envelope (regression for the global-field_serializer
+        bug that redacted it on every model_dump, breaking restart/recreate)."""
+        from secbaas.community.api.bot_manage import BotConfig
+        from secbaas.community.api.publish_manage import PublishConfig
+
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        config = BotConfig(
+            deploy_config=DeployConfig(
+                extra_properties={"aicoding": {"theta_key": sentinel}}
+            )
+        )
+
+        # 1) BotConfig.model_dump (bot persistence: _bot_service create record)
+        dumped = config.model_dump()
+        assert (
+            dumped["deploy_config"]["extra_properties"]
+            == {"aicoding": {"theta_key": sentinel}}
+        )
+
+        # 2) roundtrip through model_validate (DB read-back): value survives
+        restored = BotConfig.model_validate(dumped)
+        assert restored.deploy_config.extra_properties == {
+            "aicoding": {"theta_key": sentinel}
+        }
+
+        # 3) PublishConfig.model_dump (publish snapshot: _publish_service)
+        publish_config = PublishConfig(
+            bot_name="n",
+            replica_desired=1,
+            deploy_config=DeployConfig(
+                extra_properties={"aicoding": {"theta_key": sentinel}}
+            ),
+        )
+        publish_dumped = publish_config.model_dump(exclude_none=True)
+        assert (
+            publish_dumped["deploy_config"]["extra_properties"]
+            == {"aicoding": {"theta_key": sentinel}}
+        )
+
+    def test_bot_response_redacts_but_internal_model_dump_keeps_raw(self):
+        """Response edge redacts; the same BotConfig object stays raw for any
+        later persistence/merge use (no mutation from redaction)."""
+        from secbaas.community.api.bot_manage import BotConfig
+        from secbaas.community.core.service.bot_manage._bot_service import (
+            bot_record_to_response,
+        )
+
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        record = MagicMock(spec=BotRecord)
+        record.id = 42
+        record.bot_uuid = "BOT-redact"
+        record.tenant = "t"
+        record.env = "e"
+        record.domain = "d"
+        record.is_deleted = 0
+        record.creator = "c"
+        record.modifier = "m"
+        record.status = "ACTIVE"
+        record.name = "n"
+        record.description = "desc"
+        record.template_uuid = "TPL-001"
+        record.replica_desired = 1
+        record.replica_minimum = 1
+        record.replica_maximum = 10
+        record.auto_scaling_enabled = 0
+        record.sla_grade = "standard"
+        record.gmt_create = datetime(2025, 1, 1)
+        record.gmt_modified = datetime(2025, 1, 2)
+        record.extra_config = {
+            "deploy_config": {
+                "extra_properties": {"aicoding": {"theta_key": sentinel}},
+            },
+        }
+
+        result = bot_record_to_response(record)
+        # response (BotResponse.serializer) redacts
+        assert (
+            result.model_dump()["config"]["deploy_config"]["extra_properties"]
+            == {"<redacted>": True}
+        )
+        # but the runtime BotConfig carried by the response is NOT mutated
+        assert result.config.deploy_config.extra_properties == {
+            "aicoding": {"theta_key": sentinel}
+        }
+
+    def test_create_bot_response_subclass_inherits_response_redaction(self):
+        """All BotResponse subclasses (Create/Update/Scale/Restart/Stop/Destroy)
+        must redact extra_properties at the HTTP edge."""
+        from secbaas.community.api.bot_manage import (
+            BotConfig,
+            CreateBotResponse,
+            UpdateBotResponse,
+        )
+
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        config = BotConfig(
+            deploy_config=DeployConfig(
+                extra_properties={"aicoding": {"theta_key": sentinel}}
+            )
+        )
+
+        # Subclasses inherit the BotResponse required fields; construct via
+        # model_construct to focus the assertion on redaction inheritance rather
+        # than populating every table-schema column.
+        create_resp = CreateBotResponse.model_construct(config=config, publish_id=7)
+        assert (
+            create_resp.model_dump()["config"]["deploy_config"][
+                "extra_properties"
+            ]
+            == {"<redacted>": True}
+        )
+        assert create_resp.model_dump()["publish_id"] == 7
+        assert "SENTINEL_CIPHERTEXT" not in create_resp.model_dump_json()
+
+        update_resp = UpdateBotResponse.model_construct(config=config)
+        assert (
+            update_resp.model_dump()["config"]["deploy_config"][
+                "extra_properties"
+            ]
+            == {"<redacted>": True}
+        )
 
     def test_device_record_to_response_complete(self):
         from secbaas.community.core.service.device_manage import (

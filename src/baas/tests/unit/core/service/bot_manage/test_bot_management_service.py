@@ -734,6 +734,22 @@ class TestListBots:
 class TestMergeDeployConfig:
     """Tests for merge_deploy_config field-level merge behavior."""
 
+    def test_merge_preserves_extra_properties_ciphertext_for_persistence(self):
+        """merge_deploy_config must keep the raw extra_properties envelope
+        (thetaKey ciphertext) so Arca provisioning sees it on restart/recreate.
+        Regression for the global-field_serializer bug that redacted on every
+        model_dump, silently dropping the credential on config merge."""
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        current = DeployConfig(
+            extra_properties={"aicoding": {"theta_key": sentinel}},
+            docker_image="img:v1",
+        )
+        override = DeployConfig(ttl_in_minutes=120)
+        result = merge_deploy_config(current, override)
+        assert result.extra_properties == {"aicoding": {"theta_key": sentinel}}
+        assert result.ttl_in_minutes == 120
+        assert result.docker_image == "img:v1"
+
     def test_merge_current_none_returns_override_only(self):
         """When current is None, result is equivalent to the override alone."""
         override = DeployConfig(ttl_in_minutes=120, docker_image="img:v2")

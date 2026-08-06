@@ -6,8 +6,9 @@ BotListResponse, BotQuery, and all response schemas.
 """
 
 from datetime import datetime
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
 
 from secbaas.community.api import WithRequestId
 from secbaas.community.api.device_manage import DeployConfig, DeviceInfo
@@ -93,6 +94,31 @@ class BotResponse(BaseModel):
     )
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @model_serializer(mode="wrap")
+    def _redact_extra_properties_for_response(
+        self, handler: Any
+    ) -> dict[str, Any]:
+        """Redact credential-bearing extra_properties only at the response edge.
+
+        The envelope may carry engine ciphertext (e.g. thetaKey) that the Arca
+        boundary decrypts. It must never leak through HTTP responses, but the
+        *raw value must survive internal persistence/config-merge transport*
+        (create -> publish snapshot -> restart/recreate). Therefore redaction
+        lives on the response model only: ``BotConfig.model_dump`` /
+        ``PublishConfig.model_dump`` (used by persistence) keep the raw value,
+        while any ``BotResponse`` (and subclasses Create/Update/Scale/Restart/
+        Stop/Destroy) is redacted when serialized for the HTTP edge.
+        """
+        data = handler(self)
+        config = data.get("config")
+        if isinstance(config, dict):
+            deploy_config = config.get("deploy_config")
+            if isinstance(deploy_config, dict):
+                extra = deploy_config.get("extra_properties")
+                if extra:
+                    deploy_config["extra_properties"] = {"<redacted>": True}
+        return data
 
 
 class BotListResponse(BaseModel):
