@@ -378,7 +378,7 @@ class BotService:
         """Whether draft create/restart should opt into image policy."""
         return (
             resolve_current_arca_image(
-                self._common_config_service,
+                getattr(self, "_common_config_service", None),
                 env=get_current_env(),
             )
             is not None
