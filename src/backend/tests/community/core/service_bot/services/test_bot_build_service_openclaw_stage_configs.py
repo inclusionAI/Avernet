@@ -23,6 +23,7 @@ def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service._common_whitelist_service = MagicMock()
     # build() tests in this module isolate stage-config and path selection;
     # artifact permission finalization has its own command-contract coverage.
+    service._prepare_artifact_for_build = MagicMock()
     service._finalize_runtime_artifact = MagicMock()
     return service
 

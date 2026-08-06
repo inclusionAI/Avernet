@@ -15,6 +15,7 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -106,7 +107,7 @@ _RUNTIME_ARTIFACT_READABILITY_PROBE = (
     + "check(sys.argv[1])\n"
 )
 _NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE = (
-    "import os, sys\n"
+    "import errno, os, sys\n"
     "runtime_uid = int(sys.argv[1])\n"
     "runtime_gid = int(sys.argv[2])\n"
     "artifact_path = sys.argv[3]\n"
@@ -118,6 +119,19 @@ _NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE = (
     "os.setuid(runtime_uid)\n"
     + _RUNTIME_ARTIFACT_TREE_READ_PROBE
     + "check(artifact_path)\n"
+    "write_probe = os.path.join(artifact_path, "
+    "f\".runtime-write-probe-{os.getpid()}\")\n"
+    "try:\n"
+    "    fd = os.open(write_probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
+    "except OSError as exc:\n"
+    "    if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):\n"
+    "        raise\n"
+    "else:\n"
+    "    os.close(fd)\n"
+    "    os.unlink(write_probe)\n"
+    "    raise PermissionError(\n"
+    "        'artifact unexpectedly writable by published runtime'\n"
+    "    )\n"
 )
 
 
@@ -318,6 +332,12 @@ class BotBuildService:
             # ============================================================
             # Step 2: Bot 实例迁移
             # ============================================================
+            # A previous attempt for this version may already have sealed the
+            # target read-only. Re-open it only for the Backend writer before
+            # retrying; a successful build seals it again below.
+            if target_dir.exists() and source_dir.exists():
+                self._prepare_artifact_for_build(target_dir)
+
             # 2.1 执行 rsync 迁移
             migration_success = self._migrate_bot_instance(
                 device_id=device_id,
@@ -329,6 +349,11 @@ class BotBuildService:
                 build_plan=build_plan,
                 provider=provider,
             )
+            if migration_success:
+                # ``rsync -a`` preserves Draft ownership and modes. Normalize
+                # them to the Backend writer before the remaining host-side
+                # config generators append to the artifact.
+                self._prepare_artifact_for_build(target_dir)
 
             # The host-side engine-root rsync is the sole writer of the
             # versioned artifact. It preserves active symlinks and local Skill
@@ -754,6 +779,31 @@ class BotBuildService:
 
         return result
 
+    def _prepare_artifact_for_build(self, target_dir: Path) -> None:
+        """Restore Backend writer access before building or retrying a version."""
+        writer_owner = f"{os.geteuid()}:{os.getegid()}"
+        self._run_local_command(
+            cmd=["sudo", "mkdir", "-p", str(target_dir)],
+            command_name="prepare artifact directory",
+            error_message="prepare artifact directory failed",
+        )
+        self._run_local_command(
+            cmd=[
+                "sudo",
+                "chown",
+                "-hR",
+                writer_owner,
+                str(target_dir),
+            ],
+            command_name="prepare artifact owner",
+            error_message="prepare artifact owner failed",
+        )
+        self._run_local_command(
+            cmd=["sudo", "chmod", "-R", "u+rwX", str(target_dir)],
+            command_name="prepare artifact mode",
+            error_message="prepare artifact mode failed",
+        )
+
     def _finalize_runtime_artifact(self, target_dir: Path) -> None:
         """Make a completed artifact readable by the Published Runtime.
 
@@ -762,7 +812,9 @@ class BotBuildService:
         only the constructed artifact root to root ownership with the runtime
         group granted read/traverse access, without following active-Skill
         symlinks, then perform the same recursive read that Published startup
-        requires.
+        requires. Because the Runtime is not the owner and receives no group
+        write bit, it cannot chmod, replace, or delete the source later reused
+        by restart and rollback.
 
         Any failure is fatal at build time.  Deferring it to the BaaS start hook
         leaves a publish in VALIDATE_PUB with a sandbox that can see the mount
@@ -776,8 +828,8 @@ class BotBuildService:
                 _PUBLISHED_ARTIFACT_OWNER,
                 str(target_dir),
             ],
-            command_name="normalize artifact owner",
-            error_message="normalize artifact owner failed",
+            command_name="seal artifact owner",
+            error_message="seal artifact owner failed",
         )
         self._run_local_command(
             cmd=[
@@ -787,8 +839,8 @@ class BotBuildService:
                 _PUBLISHED_ARTIFACT_MODE,
                 str(target_dir),
             ],
-            command_name="normalize artifact mode",
-            error_message="normalize artifact mode failed",
+            command_name="seal artifact mode",
+            error_message="seal artifact mode failed",
         )
         self._run_local_command(
             cmd=[

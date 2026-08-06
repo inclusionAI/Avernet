@@ -70,8 +70,11 @@ def _registry() -> EngineSandboxRegistry:
 @pytest.mark.parametrize(
     ("engine", "expected_events"),
     [
-        ("openclaw", ["migrate", "mcp", "stage-configs", "finalize"]),
-        ("claude_code", ["migrate", "mcp", "finalize"]),
+        (
+            "openclaw",
+            ["migrate", "prepare", "mcp", "stage-configs", "finalize"],
+        ),
+        ("claude_code", ["migrate", "prepare", "mcp", "finalize"]),
     ],
 )
 def test_build_finalizes_complete_artifact_after_all_writers(
@@ -115,7 +118,12 @@ def test_build_finalizes_complete_artifact_after_all_writers(
             assert (target_dir / "openclaw_verify.json").is_file()
         events.append("finalize")
 
+    def prepare(target_dir: Path) -> None:
+        assert target_dir.is_dir()
+        events.append("prepare")
+
     service._migrate_bot_instance = MagicMock(side_effect=migrate)
+    service._prepare_artifact_for_build = MagicMock(side_effect=prepare)
     service._generate_mcp_config = MagicMock(side_effect=generate_mcp)
     service._generate_openclaw_stage_configs = MagicMock(
         side_effect=generate_stage_configs
@@ -151,8 +159,8 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
 
     calls = service._run_local_command.call_args_list
     assert [call.kwargs["command_name"] for call in calls] == [
-        "normalize artifact owner",
-        "normalize artifact mode",
+        "seal artifact owner",
+        "seal artifact mode",
         "verify artifact runtime readability",
     ]
     assert calls[0].kwargs["cmd"] == [
@@ -179,7 +187,30 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     assert "os.setuid(runtime_uid)" in probe_cmd[4]
     assert "follow_symlinks=False" in probe_cmd[4]
     assert 'open(entry.path, "rb")' in probe_cmd[4]
+    assert "artifact unexpectedly writable by published runtime" in probe_cmd[4]
     assert probe_cmd[5:] == ["1000", "1000", str(target_dir)]
+
+
+@pytest.mark.unit
+def test_artifact_prepare_restores_backend_writer_access_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """重试已封存版本前，应先用纯数字宿主身份恢复 Backend 写权限。"""
+    monkeypatch.setattr(module.os, "geteuid", lambda: 43210)
+    monkeypatch.setattr(module.os, "getegid", lambda: 43211)
+    service = BotBuildService.__new__(BotBuildService)
+    service._run_local_command = MagicMock()
+    target_dir = tmp_path / "artifact"
+
+    service._prepare_artifact_for_build(target_dir)
+
+    calls = service._run_local_command.call_args_list
+    assert [call.kwargs["cmd"] for call in calls] == [
+        ["sudo", "mkdir", "-p", str(target_dir)],
+        ["sudo", "chown", "-hR", "43210:43211", str(target_dir)],
+        ["sudo", "chmod", "-R", "u+rwX", str(target_dir)],
+    ]
 
 
 @pytest.mark.unit
