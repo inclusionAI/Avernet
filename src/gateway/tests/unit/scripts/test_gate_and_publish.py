@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 _SCRIPT = (
-    Path(__file__).resolve().parents[1] / "scripts" / "gate_and_publish_openapi.py"
+    Path(__file__).resolve().parents[3] / "scripts" / "gate_and_publish_openapi.py"
 )
 _spec = importlib.util.spec_from_file_location("gate_and_publish_openapi", _SCRIPT)
 assert _spec is not None and _spec.loader is not None
@@ -19,7 +19,7 @@ gate = _mod.gate
 main = _mod.main
 
 _BCN_ARTIFACT = (
-    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bcn.openapi.json"
+    Path(__file__).resolve().parents[3] / "configs" / "schemas" / "bcn.openapi.json"
 )
 
 

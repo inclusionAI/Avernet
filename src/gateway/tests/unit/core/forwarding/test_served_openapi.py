@@ -15,14 +15,14 @@ from typing import Any
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import build_served_openapi
 
-_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "bots.openapi.json"
+_FIXTURE = Path(__file__).resolve().parents[3] / "fixtures" / "bots.openapi.json"
 _BAAS_ARTIFACT = (
-    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "baas.openapi.json"
+    Path(__file__).resolve().parents[4] / "configs" / "schemas" / "baas.openapi.json"
 )
 _BCN_ARTIFACT = (
-    Path(__file__).resolve().parents[1] / "configs" / "schemas" / "bcn.openapi.json"
+    Path(__file__).resolve().parents[4] / "configs" / "schemas" / "bcn.openapi.json"
 )
-_SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
+_SHIPPED_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 _METHODS = {"get", "post", "put", "delete", "patch"}
 _RULES = RouteSecurity.from_table({"/**": {"user": "required"}})
 _SHIPPED_RULES = RouteSecurity.from_yaml(_SHIPPED_CONFIG)

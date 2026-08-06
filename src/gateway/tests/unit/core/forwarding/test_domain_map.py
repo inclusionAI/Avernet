@@ -10,7 +10,7 @@ from gateway.community.core.forwarding import DomainMap, Server
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
 from gateway.community.spi.authn import Presence, PrincipalType
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
+_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 _VARS = {
     "backend_server_url": "http://backend:8080",
