@@ -463,7 +463,11 @@ class SystemConfigBaasTemplateResolver:
         env: str,
         user_id: str | None,
     ) -> str | None:
-        """如果 user_id 命中白名单，返回覆盖的 template_uuid，否则返回 None。"""
+        """如果 user_id 命中白名单，返回覆盖的 template_uuid。
+
+        同时支持历史单组 ``staff_ids/template_uuid`` 和新的
+        ``mappings`` 多组格式；未命中或配置不可唯一解析时返回 None。
+        """
         if not user_id:
             return None
 
@@ -486,30 +490,71 @@ class SystemConfigBaasTemplateResolver:
         if not isinstance(whitelist_config, dict):
             return None
 
-        staff_ids = whitelist_config.get("staff_ids")
-        if not isinstance(staff_ids, list) or not staff_ids:
-            return None
-
-        template_uuid = whitelist_config.get("template_uuid")
-        if not isinstance(template_uuid, str) or not template_uuid.strip():
-            return None
-
-        template_uuid = template_uuid.strip()
-        # 防止错误配置的 UUID 不经格式校验直接传给 BaaS，产生难以排查的下游错误。
-        if not template_uuid.startswith("TEMPLATE-"):
+        configured_mappings = whitelist_config.get("mappings")
+        if configured_mappings is None:
+            # 兼容已上线的单组格式，避免配置迁移期影响已有用户。
+            mappings = [whitelist_config]
+        elif not isinstance(configured_mappings, list):
             logger.warning(
-                "[template.whitelist] invalid template_uuid format in whitelist config: "
-                "env=%s config_key=%s template_uuid=%s",
+                "[template.whitelist] invalid mappings in whitelist config: "
+                "env=%s config_key=%s mappings_type=%s",
                 env,
                 PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
-                template_uuid,
+                type(configured_mappings).__name__,
+            )
+            return None
+        else:
+            mappings = configured_mappings
+
+        matched_template_uuids: set[str] = set()
+        normalized_user_id = str(user_id)
+        for mapping in mappings:
+            if not isinstance(mapping, dict):
+                continue
+
+            staff_ids = mapping.get("staff_ids")
+            if not isinstance(staff_ids, list) or normalized_user_id not in {
+                str(staff_id) for staff_id in staff_ids
+            }:
+                continue
+
+            template_uuid = mapping.get("template_uuid")
+            if not isinstance(template_uuid, str) or not template_uuid.strip():
+                logger.warning(
+                    "[template.whitelist] missing template_uuid for matched user: "
+                    "env=%s config_key=%s user_id=%s",
+                    env,
+                    PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
+                    user_id,
+                )
+                return None
+
+            template_uuid = template_uuid.strip()
+            # 防止错误配置的 UUID 不经格式校验直接传给 BaaS，产生难以排查的下游错误。
+            if not template_uuid.startswith("TEMPLATE-"):
+                logger.warning(
+                    "[template.whitelist] invalid template_uuid format in whitelist config: "
+                    "env=%s config_key=%s template_uuid=%s user_id=%s",
+                    env,
+                    PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
+                    template_uuid,
+                    user_id,
+                )
+                return None
+            matched_template_uuids.add(template_uuid)
+
+        if len(matched_template_uuids) > 1:
+            logger.warning(
+                "[template.whitelist] ambiguous template mappings for user: "
+                "env=%s config_key=%s user_id=%s template_uuids=%s",
+                env,
+                PERSONAL_BOT_TEST_TEMPLATE_WHITELIST_CONFIG_KEY,
+                user_id,
+                sorted(matched_template_uuids),
             )
             return None
 
-        if str(user_id) in {str(staff_id) for staff_id in staff_ids}:
-            return template_uuid
-
-        return None
+        return next(iter(matched_template_uuids), None)
 
     def _read_mapping(self, *, env: str) -> dict[str, Any]:
         """读取当前环境的 BaaS template 路由配置。"""
