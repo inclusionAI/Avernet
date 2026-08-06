@@ -84,7 +84,9 @@ _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
 # publishable until this identity can traverse and read it, but it must remain
 # immutable to that runtime because rollback reuses the same version path.
 _PUBLISHED_ARTIFACT_OWNER = "0:1000"
-_PUBLISHED_ARTIFACT_MODE = "u=rwX,g=rX,o="
+# Unknown Backend host identities may still need to stat or reopen an artifact.
+# ``o=X`` grants directory traversal only; regular files remain inaccessible.
+_PUBLISHED_ARTIFACT_MODE = "u=rwX,g=rX,o=X"
 _PUBLISHED_RUNTIME_UID = 1000
 _PUBLISHED_RUNTIME_GID = 1000
 _RUNTIME_ARTIFACT_TREE_READ_PROBE = (
@@ -899,7 +901,7 @@ class BotBuildService:
             cmd=[
                 "sudo",
                 "chmod",
-                "u=rwx,g=rwx,o=",
+                "u=rwx,g=rwx,o=x",
                 str(artifact_store),
             ],
             command_name="protect artifact store mode",

@@ -189,7 +189,7 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
         "sudo",
         "chmod",
         "-R",
-        "u=rwX,g=rX,o=",
+        "u=rwX,g=rX,o=X",
         str(target_dir),
     ]
     assert calls[2].kwargs["cmd"] == [
@@ -201,7 +201,7 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     assert calls[3].kwargs["cmd"] == [
         "sudo",
         "chmod",
-        "u=rwX,g=rX,o=",
+        "u=rwX,g=rX,o=X",
         str(target_dir.parent),
     ]
     assert calls[4].kwargs["cmd"] == [
@@ -213,7 +213,7 @@ def test_artifact_finalizer_is_symlink_safe_and_probes_as_runtime_admin(
     assert calls[5].kwargs["cmd"] == [
         "sudo",
         "chmod",
-        "u=rwx,g=rwx,o=",
+        "u=rwx,g=rwx,o=x",
         str(target_dir.parent.parent),
     ]
     assert calls[6].kwargs["cmd"] == [
