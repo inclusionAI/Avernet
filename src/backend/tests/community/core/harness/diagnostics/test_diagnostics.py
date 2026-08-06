@@ -10,8 +10,12 @@ from agentclaw.community.core.harness.diagnostics.agents.behavior_boundaries imp
 from agentclaw.community.core.harness.diagnostics.tools.declaration import ToolsDeclarationDiagnostic
 from agentclaw.community.core.harness.diagnostics.tools.mcp_format import (
     ToolsMcpFormatDiagnostic,
+    _BATCH_CHAR_BUDGET,
+    _BATCH_MAX_MCPS,
     _compact_tool_for_prompt,
     _MAX_TOOLS_PER_MCP_IN_PROMPT,
+    _pack_mcp_batches,
+    _synthesize_batch_responses,
 )
 from agentclaw.community.core.harness.diagnostics.config.soul import SoulPersonaDiagnostic
 from agentclaw.community.core.harness.models import Severity
@@ -1186,3 +1190,123 @@ class TestDiagnosticContextNoCache:
 
         result = await ctx.read_file("NONEXISTENT.md")
         assert result == ""
+
+
+class TestToolsMcpFormatBatching:
+    """D-TOOLS-002 batched prompt mode: prompt size decoupled from MCP count."""
+
+    def test_pack_splits_on_count(self):
+        items = [("schema", f"block-{i}", {"server_code": f"mcp.{i}"}) for i in range(7)]
+        batches = _pack_mcp_batches(items)
+        assert [len(b) for b in batches] == [_BATCH_MAX_MCPS, _BATCH_MAX_MCPS, 1]
+
+    def test_pack_splits_on_chars(self):
+        big = "x" * (_BATCH_CHAR_BUDGET - 100)
+        items = [
+            ("schema", big, {"server_code": "mcp.a"}),
+            ("schema", big, {"server_code": "mcp.b"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"]]
+
+    def test_pack_single_when_small(self):
+        items = [("schema", "tiny", {"server_code": "mcp.a"})]
+        assert len(_pack_mcp_batches(items)) == 1
+
+    def test_pack_oversized_block_gets_own_batch(self):
+        huge = "y" * (_BATCH_CHAR_BUDGET * 2)
+        items = [
+            ("schema", "a", {"server_code": "mcp.a"}),
+            ("schema", huge, {"server_code": "mcp.b"}),
+            ("schema", "c", {"server_code": "mcp.c"}),
+        ]
+        batches = _pack_mcp_batches(items)
+        assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"], ["mcp.c"]]
+
+    def test_synthesize_all_no_issue(self):
+        out = _synthesize_batch_responses([("无问题", ["mcp.a"]), ("无问题", ["mcp.b"])])
+        assert out == "无问题"
+
+    def test_synthesize_all_failed_returns_sentinel(self):
+        out = _synthesize_batch_responses([(None, ["mcp.a"]), ("[llm disabled]", ["mcp.b"])])
+        assert out == "[llm disabled]"
+
+    def test_synthesize_aggregates_scores_and_summaries(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a 的映射\n[SCORE:70]", ["mcp.a"]),
+            ("规范不全\n缺 b 的规范\n[SCORE:80]", ["mcp.b"]),
+        ])
+        assert out.startswith("映射表缺失；规范不全")
+        assert "缺 a 的映射" in out and "缺 b 的规范" in out
+        assert "[SCORE:50]" in out  # 100 - (30 + 20)
+
+    def test_synthesize_partial_failure_noted(self):
+        out = _synthesize_batch_responses([
+            ("映射表缺失\n缺 a\n[SCORE:70]", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "未完成诊断" in out and "mcp.b" in out
+        assert "[SCORE:70]" in out
+
+    def test_synthesize_only_failures_is_check_failed_not_pass(self):
+        out = _synthesize_batch_responses([
+            ("无问题", ["mcp.a"]),
+            (None, ["mcp.b"]),
+        ])
+        assert "部分 MCP 诊断失败" in out
+        assert "[SCORE:0]" in out
+
+    @pytest.mark.asyncio
+    async def test_analyze_splits_into_batches_and_aggregates(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcde"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {
+                "name": c,
+                "description": f"desc {c}",
+                "tools": [{
+                    "name": "t1",
+                    "inputSchema": {"type": "object", "properties": {"p": {"type": "string"}}},
+                }],
+            }
+            for c in "abcde"
+        })
+
+        captured: list[str] = []
+
+        async def fake_chat(system, user, **kwargs):
+            captured.append(user)
+            if "mcp.a" in user:
+                return "规范缺失\n缺 a 规范\n[SCORE:70]"
+            return "无问题"
+
+        ctx.llm.chat = fake_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(captured) == 2  # 5 MCPs / _BATCH_MAX_MCPS per batch
+        assert "第 1/2 批" in captured[0] and "第 2/2 批" in captured[1]
+        assert "mcp.a" in captured[0] and "mcp.d" not in captured[0]
+        assert "mcp.e" in captured[1] and "mcp.a" not in captured[1]
+        assert len(findings) == 1
+        assert findings[0].score == 70
+        assert findings[0].short_summary == "规范缺失"
+
+    @pytest.mark.asyncio
+    async def test_analyze_all_batches_failed_yields_llm01(self):
+        diag = ToolsMcpFormatDiagnostic()
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcde"]
+        ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
+        ctx.mcp_center = _MockMCPCenter({
+            f"mcp.{c}": {"name": c, "description": f"desc {c}", "tools": []}
+            for c in "abcde"
+        })
+
+        async def dead_chat(system, user, **kwargs):
+            return "[llm disabled]"
+
+        ctx.llm.chat = dead_chat
+        findings = await diag.analyze(ctx)
+
+        assert len(findings) == 1
+        assert findings[0].rule_id == "LLM01"
