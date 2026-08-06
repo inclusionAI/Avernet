@@ -89,7 +89,12 @@ _summary() {
         grep 'FAILED.*::' "$LOG_FILE" > "$tempfile" || true
         while IFS= read -r line; do
             FAILED_TESTS+=("$line")
-            ((log_failures++))
+            # Assign rather than ((log_failures++)): the post-increment form
+            # evaluates to 0 on the first pass and returns exit status 1, which
+            # aborts this function under the errexit that _run_pytest re-enables
+            # — the summary would then print its header and exit without ever
+            # naming the failing stages or tests.
+            log_failures=$(( log_failures + 1 ))
         done < "$tempfile"
         rm -f "$tempfile"
     fi
