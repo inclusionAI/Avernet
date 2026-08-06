@@ -695,11 +695,19 @@ def test_the_provider_is_asked_exactly_once():
 # ── providers that hand back a bare routing target (ARCA) ─────────────────────
 
 
-def test_a_bare_target_provider_gets_a_composed_gateway_url():
+@pytest.mark.parametrize("kind", ["proxy", "arca"])
+def test_a_bare_target_provider_gets_a_composed_gateway_url(kind):
     """The ARCA provider returns a target and a credential and no url. Composing
     one here is what makes the endpoint answer for those bots at all — before
-    this branch existed every one of them was a 502."""
-    assert _build(_svc(devices=_arca())).sockets[0].url == ARCA_URL
+    this branch existed every one of them was a 502.
+
+    Both members of ``_PROXY_TARGET_TYPES`` are exercised, and against the same
+    expected URL: the kind selects the branch and must not reach the output. The
+    provider answers ``"proxy"`` today and ``"arca"`` is the ``device_provider``
+    key the same device carries elsewhere, so a transposition in either literal
+    is a silent 502 for a whole provider — this is what fails first if one is
+    mistyped."""
+    assert _build(_svc(devices=_arca(type=kind))).sockets[0].url == ARCA_URL
 
 
 def test_a_composed_url_never_names_the_hop_behind_the_gateway():
