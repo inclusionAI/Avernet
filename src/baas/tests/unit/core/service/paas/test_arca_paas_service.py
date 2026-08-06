@@ -626,47 +626,39 @@ class TestArcaRequestCredentialExtension:
 
 class TestLogSafeModel:
     def test_dict_is_redacted(self):
-        from secbaas.community.core.service.paas._arca_paas_service import (
-            _log_safe_model,
-        )
+        from secbaas.community.core.utils.redact_utils import log_safe_model
 
-        assert _log_safe_model({"api_key": "secret", "status": "READY"}) == {
+        assert log_safe_model({"api_key": "secret", "status": "READY"}) == {
             "api_key": "<redacted>",
             "status": "READY",
         }
 
     def test_plain_object_uses_dict_and_redacts(self):
-        from secbaas.community.core.service.paas._arca_paas_service import (
-            _log_safe_model,
-        )
+        from secbaas.community.core.utils.redact_utils import log_safe_model
 
         class Info:
             def __init__(self):
                 self.authorization = "Bearer secret"
                 self.status = "READY"
 
-        assert _log_safe_model(Info()) == {
+        assert log_safe_model(Info()) == {
             "authorization": "<redacted>",
             "status": "READY",
         }
 
     def test_scalar_uses_safe_repr(self):
-        from secbaas.community.core.service.paas._arca_paas_service import (
-            _log_safe_model,
-        )
+        from secbaas.community.core.utils.redact_utils import log_safe_model
 
-        assert _log_safe_model(42) == "42"
+        assert log_safe_model(42) == "42"
 
     def test_model_dump_failure_returns_only_safe_error_metadata(self):
-        from secbaas.community.core.service.paas._arca_paas_service import (
-            _log_safe_model,
-        )
+        from secbaas.community.core.utils.redact_utils import log_safe_model
 
         class BrokenModel:
             def model_dump(self, **_kwargs):
                 raise RuntimeError("credential-bearing-message")
 
-        assert _log_safe_model(BrokenModel()) == {
+        assert log_safe_model(BrokenModel()) == {
             "value_type": "BrokenModel",
             "dump_error_type": "RuntimeError",
         }
