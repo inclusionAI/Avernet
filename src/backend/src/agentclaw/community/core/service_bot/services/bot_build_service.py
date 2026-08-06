@@ -196,6 +196,8 @@ class BotBuildService:
         self,
         bot: Dict[str, Any],
         version: int = 1,
+        *,
+        active_skills_snapshot_required: bool = False,
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -206,6 +208,8 @@ class BotBuildService:
         Args:
             bot: Bot 信息字典，包含: bot_id, entity_id, entity_type, device_id, bot_name, bot_desc
             version: 迁移版本号（整数），默认 1
+            active_skills_snapshot_required: active Skills 快照失败时是否阻断构建；
+                Pool 发布传 True，Legacy 和历史直接构建保持 best-effort
 
         Returns:
             dict: 构建结果信息
@@ -260,6 +264,13 @@ class BotBuildService:
                 bot_id=bot_id,
                 entity_type=entity_type,
             ) / version_str / build_plan.migration_subpath
+            migration_path_base = self._get_migration_path_base(
+                owner_id=entity_id,
+                bot_id=bot_id,
+            )
+            runtime_artifact_root = (
+                f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}"
+            )
 
             logger.info(
                 f"[BotBuildService.build] Step 1: "
@@ -280,6 +291,15 @@ class BotBuildService:
                 build_plan=build_plan,
                 provider=provider,
             )
+
+            if migration_success:
+                self._sync_skill_links(
+                    device_id=device_id,
+                    runtime_artifact_root=runtime_artifact_root,
+                    build_plan=build_plan,
+                    provider=provider,
+                    required=active_skills_snapshot_required,
+                )
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -308,17 +328,13 @@ class BotBuildService:
 
             # 构建结果
             success = migration_success and mcp_success and openclaw_configs_success
-            migration_path_base = self._get_migration_path_base(
-                owner_id=entity_id,
-                bot_id=bot_id,
-            )
             result = {
                 "success": success,
                 "bot_id": bot_id,
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "version": version_str,
-                "migration_path": f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}",
+                "migration_path": runtime_artifact_root,
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
@@ -630,17 +646,19 @@ class BotBuildService:
     def _sync_skill_links(
         self,
         device_id: str,
-        version: str,
+        runtime_artifact_root: str,
         build_plan: EngineBuildPlan,
         provider: EngineSandboxProvider,
+        required: bool,
     ) -> None:
         """同步 skill 软链到目标目录。
 
         Args:
             device_id: 设备 ID，用于执行远程命令
-            version: 版本号，用于拼接目标路径
+            runtime_artifact_root: 当前容器视角下的版本化发布制品根目录
             build_plan: 引擎构建计划
             provider: 当前引擎 provider
+            required: 失败时是否阻断构建
 
         Raises:
             BotBuildMigrationError: 同步失败
@@ -649,11 +667,12 @@ class BotBuildService:
             source_base_path = provider.get_base_path().rstrip('/')
             source_skill_path = f"{source_base_path}/{build_plan.skill_source_relpath.strip('/')}"
             target_skill_path = (
-                f"/home/admin/nfs/bot-data/{version}/"
-                f"{build_plan.migration_subpath}/{build_plan.skill_target_relpath.strip('/')}"
+                f"{runtime_artifact_root.rstrip('/')}/"
+                f"{build_plan.skill_target_relpath.strip('/')}"
             )
             skill_cmd = (
-                "rsync -av --exclude='skills-repo' --exclude='.skills-repo*' "
+                "rsync -av --delete --delete-excluded "
+                "--exclude='skills-repo' --exclude='.skills-repo*' "
                 f"{source_skill_path}/ {target_skill_path}/"
             )
 
@@ -668,16 +687,20 @@ class BotBuildService:
             )
 
             if result.exit_code != 0:
-                logger.error(
-                    "[BotBuildService._sync_skill_links] "
-                    "Active Skills mapping snapshot failed: "
-                    f"device_id={device_id}, exit_code={result.exit_code}, "
-                    f"stderr={result.stderr}"
-                )
-                raise BotBuildMigrationError(
+                message = (
                     "active Skills mapping snapshot failed: "
                     f"exit_code={result.exit_code}, stderr={result.stderr}"
                 )
+                log = logger.error if required else logger.warning
+                log(
+                    "[BotBuildService._sync_skill_links] "
+                    f"Active Skills mapping snapshot failed: device_id={device_id}, "
+                    f"required={required}, exit_code={result.exit_code}, "
+                    f"stderr={result.stderr}"
+                )
+                if required:
+                    raise BotBuildMigrationError(message)
+                return
 
             logger.info(
                 "[BotBuildService._sync_skill_links] "
@@ -686,13 +709,16 @@ class BotBuildService:
         except BotBuildMigrationError:
             raise
         except Exception as e:
-            logger.error(
+            log = logger.error if required else logger.warning
+            log(
                 f"[BotBuildService._sync_skill_links] "
-                f"Active Skills mapping snapshot failed: {device_id}, {e}"
+                f"Active Skills mapping snapshot failed: device_id={device_id}, "
+                f"required={required}, error={e}"
             )
-            raise BotBuildMigrationError(
-                f"active Skills mapping snapshot failed: {e}"
-            ) from e
+            if required:
+                raise BotBuildMigrationError(
+                    f"active Skills mapping snapshot failed: {e}"
+                ) from e
 
     def _run_local_command(
         self,
@@ -873,10 +899,6 @@ class BotBuildService:
                     command_name="rsync (extra)",
                     error_message="rsync extra sync failed",
                 )
-
-            # 同步 skill 软链到目标目录
-            if build_plan and provider:
-                self._sync_skill_links(device_id, version_str, build_plan, provider)
 
             logger.info(
                 f"[BotBuildService._migrate_bot_instance] "
