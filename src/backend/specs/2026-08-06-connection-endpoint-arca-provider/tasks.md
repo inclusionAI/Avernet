@@ -128,34 +128,34 @@ would break it.
 
 ---
 
-## Task 6: Tests  `[ ]`
+## Task 6: Tests  `[x]`
 
 Add to `tests/community/core/engine_runtime/test_connection.py`, beside the
 existing local-branch cases, using the reference values above.
 
-- [ ] A `proxy` device publishes the expected gateway URL, in full.
-- [ ] The published URL contains neither the engine proxy's host nor `/proxypass/`.
-- [ ] The target segment survives verbatim: `@` and `:` are not percent-encoded.
-- [ ] A bracketed target keeps its brackets.
-- [ ] The engine's own path is used — `claude_code` → `/api/claude_code/ws`.
-- [ ] A `proxy` device with an empty token publishes no query string.
-- [ ] A credential containing reserved characters is percent-encoded.
-- [ ] Composed and re-addressed branches agree byte-for-byte: a `proxy` device and
+- [x] A `proxy` device publishes the expected gateway URL, in full.
+- [x] The published URL contains neither the engine proxy's host nor `/proxypass/`.
+- [x] The target segment survives verbatim: `@` and `:` are not percent-encoded.
+- [x] A bracketed target keeps its brackets.
+- [x] The engine's own path is used — `claude_code` → `/api/claude_code/ws`.
+- [x] A `proxy` device with an empty token publishes no query string.
+- [x] A credential containing reserved characters is percent-encoded.
+- [x] Composed and re-addressed branches agree byte-for-byte: a `proxy` device and
       a `baas` device whose `url` is
       `wss://agentclawproxy-prod.example.com/proxypass/{same target}{same path}`
       publish the identical string.
-- [ ] An unrecognised kind with `url=""` raises the new named error; the message
+- [x] An unrecognised kind with `url=""` raises the new named error; the message
       carries the kind and not the credential.
-- [ ] **Ordering:** a `proxy` device that *also* carries a `/proxypass/…` URL is
+- [x] **Ordering:** a `proxy` device that *also* carries a `/proxypass/…` URL is
       re-addressed, not composed. Give the URL a tail that differs from
       `target + socket_path` (a different port, say `ARCA_OTHER@0:20099`) so the
       assertion can tell the two branches apart.
-- [ ] **Ordering:** a `proxy` device carrying `wss://host/wsrelay/6f2a…` is
+- [x] **Ordering:** a `proxy` device carrying `wss://host/wsrelay/6f2a…` is
       refused with the wrong-shape message rather than quietly composed around.
-- [ ] `expires_at` on a `proxy` device (which reports none) is `now + 7200s`.
-- [ ] A `proxy` device with an empty target still raises
+- [x] `expires_at` on a `proxy` device (which reports none) is `now + 7200s`.
+- [x] A `proxy` device with an empty target still raises
       `"device connection carries no routing target"`.
-- [ ] An unencodable (lone-surrogate) target on a `proxy` device is named, not a
+- [x] An unencodable (lone-surrogate) target on a `proxy` device is named, not a
       500 — extend the existing parametrised case rather than writing a new one.
 
 **Verify.** `pytest tests/community/core/engine_runtime/test_connection.py` and
