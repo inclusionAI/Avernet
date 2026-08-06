@@ -19,7 +19,7 @@ Reference values used throughout (from `plan.md`, "Worked trace"):
 
 ---
 
-## Task 1: Extract the shared gateway-URL builder  `[ ]`
+## Task 1: Extract the shared gateway-URL builder  `[x]`
 
 Pure refactor. No behaviour change, no new branch yet.
 
@@ -45,7 +45,7 @@ lossless.
 
 ---
 
-## Task 2: Name the bare-target connection kinds  `[ ]`
+## Task 2: Name the bare-target connection kinds  `[x]`
 
 - Add `_PROXY_TARGET_TYPES = frozenset({"proxy", "arca"})` beside
   `_PROXYPASS_PREFIX` (`connection.py:84`).
@@ -59,7 +59,7 @@ lossless.
 
 ---
 
-## Task 3: Compose the gateway URL for a bare routing target  `[ ]`
+## Task 3: Compose the gateway URL for a bare routing target  `[x]`
 
 - Add `_compose_onto_gateway(self, target: str, socket_path: str, token: str) -> str`:
   `_quote_or_reject(target, safe="@:[]", what="routing target")` +
@@ -91,7 +91,7 @@ green (no existing case uses `type="proxy"`).
 
 ---
 
-## Task 4: Name the unrecognised connection kind  `[ ]`
+## Task 4: Name the unrecognised connection kind  `[x]`
 
 - Add case 4 of `_socket_url` as the method's final statement: raise
   `EngineUpstreamError(f"device connection of kind {conn_type!r} carries no relay url and is not a kind this endpoint can compose one for")`.
@@ -111,7 +111,7 @@ still raise their original messages.
 
 ---
 
-## Task 5: Correct the stale comment on the provider call  `[ ]`
+## Task 5: Correct the stale comment on the provider call  `[x]`
 
 `_get_connection` (`connection.py:285-308`) claims that leaving `ws_conn_mode`
 unset is what makes a provider hand back a bare routing target, and that `path` is
