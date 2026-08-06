@@ -21,6 +21,7 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     ServiceSkillsManifestBuilder,
 )
+from agentclaw.community.core.skills_pool.types import SkillLayout
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
@@ -50,7 +51,20 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         return type changes.
         """
         captured_layout = self._skills_manifest_builder.capture(bot=bot)
-        result = self._build_service.build(bot=bot, version=version)
+        build_kwargs: dict[str, Any] = {}
+        if captured_layout is not None:
+            # Pool artifacts must not be published without an exact active
+            # Skills mapping snapshot. Legacy keeps the pre-Pool best-effort
+            # failure semantics so an unopened rollout cannot block existing
+            # service publication.
+            build_kwargs["active_skills_snapshot_required"] = (
+                captured_layout.active_layout is SkillLayout.POOL
+            )
+        result = self._build_service.build(
+            bot=bot,
+            version=version,
+            **build_kwargs,
+        )
 
         success = bool(result.get("success"))
         ext: dict[str, Any] = {}
