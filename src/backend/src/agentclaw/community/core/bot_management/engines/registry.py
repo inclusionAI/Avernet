@@ -6,11 +6,7 @@ from typing import Any
 
 from agentclaw.community.log import get_logger
 
-from .aicoding.strategy import (
-    AicodingProvisioningStrategy,
-    CODING_TEMPLATE_TYPES,
-    ThetaKeyExtraPropertiesContributor,
-)
+from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
 from .default import DefaultProvisioningStrategy
 from .provisioning import (
     EngineExtraProperties,
@@ -103,9 +99,10 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     registry = EngineProvisioningRegistry()
     registry.register(AicodingProvisioningStrategy("aicoding"))
     registry.register(AicodingProvisioningStrategy("claude_code"))
-    registry.register_extra_properties_contributor(
-        ThetaKeyExtraPropertiesContributor()
-    )
+    # Cross-engine platform extensions (auditing/billing/...) may register an
+    # ExtraPropertiesContributor here. AICoding single-domain fields are NOT
+    # registered this way — they live in AicodingProvisioningStrategy so one
+    # engine class owns every AICoding template field.
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry

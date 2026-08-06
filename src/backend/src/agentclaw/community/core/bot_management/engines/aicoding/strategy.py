@@ -15,7 +15,6 @@ from agentclaw.community.core.bot_management.capabilities import (
 
 from ..provisioning import (
     EngineExtraProperties,
-    ExtraPropertiesContributor,
     BotProvisioningContext,
     EngineProvisioningStrategy,
 )
@@ -164,21 +163,30 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     ) -> None:
         return None
 
-
-class ThetaKeyExtraPropertiesContributor(ExtraPropertiesContributor):
-    """Contribute theta credentials solely from the persisted template snapshot.
-
-    Applicability stays inside the extension: only AICoding-compatible engines
-    may consume the field, while generic lifecycle services remain unaware of
-    both the engine gate and ``ext_config.thetaKey``.
-    """
-
-    def contribute(
+    def build_extra_properties(
         self, ctx: BotProvisioningContext
     ) -> EngineExtraProperties | None:
+        """Build the engine-owned extra-properties envelope.
+
+        thetaKey applies whenever the running engine is AICoding-compatible,
+        independent of whether the carried snapshot is a fully identified coding
+        template. The engine check here is therefore the whole gate; field
+        validity is delegated to ``_build_aicoding_properties`` which returns
+        ``None`` for any missing/empty/illegal value so the generic pipeline
+        keeps its legacy fixed-credential path.
+        """
         if ctx.active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES:
             return None
-        template_config = ctx.template_config
+        properties = self._build_aicoding_properties(ctx.template_config)
+        if not properties:
+            return None
+        return EngineExtraProperties(values={"aicoding": properties})
+
+    @staticmethod
+    def _extract_ext_config(
+        template_config: Dict[str, Any] | None,
+    ) -> Dict[str, Any] | None:
+        """Return ``bot_template_config.ext_config`` when it is a mapping."""
         if not isinstance(template_config, dict):
             return None
         bot_template_config = template_config.get("bot_template_config")
@@ -187,9 +195,32 @@ class ThetaKeyExtraPropertiesContributor(ExtraPropertiesContributor):
         ext_config = bot_template_config.get("ext_config")
         if not isinstance(ext_config, dict):
             return None
+        return ext_config
+
+    @staticmethod
+    def _extract_theta_key(ext_config: Dict[str, Any]) -> str | None:
+        """Return a trimmed thetaKey string, or ``None`` when absent/invalid."""
         theta_key = ext_config.get("thetaKey")
-        if not isinstance(theta_key, str) or not theta_key.strip():
+        if isinstance(theta_key, str) and theta_key.strip():
+            return theta_key.strip()
+        return None
+
+    def _build_aicoding_properties(
+        self, template_config: Dict[str, Any] | None
+    ) -> Dict[str, Any] | None:
+        """Collect AICoding-owned extra properties from the template snapshot.
+
+        Centralising the field bag here keeps every AICoding credential/config
+        field behind one extension seam. Add future fields as additional
+        ``_extract_*`` helpers and merge them into ``properties`` below; the
+        generic pipeline and DTO stay untouched.
+        """
+        ext_config = self._extract_ext_config(template_config)
+        if not ext_config:
             return None
-        return EngineExtraProperties(
-            values={"aicoding": {"theta_key": theta_key.strip()}}
-        )
+        properties: Dict[str, Any] = {}
+        theta_key = self._extract_theta_key(ext_config)
+        if theta_key:
+            properties["theta_key"] = theta_key
+        # Future AICoding fields (runtime_options/repository_options/...) go here.
+        return properties or None

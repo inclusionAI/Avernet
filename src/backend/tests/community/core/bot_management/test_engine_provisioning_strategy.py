@@ -494,3 +494,42 @@ def test_extra_properties_guard_falls_back_without_logging_exception_message():
     logged = " ".join(str(call) for call in warning.call_args_list)
     assert "must-not-log-encrypted-theta" not in logged
     assert "RuntimeError" in logged
+
+
+def test_aicoding_strategy_collects_theta_key_directly():
+    """strategy.build_extra_properties is the single AICoding field seam.
+
+    AICoding credential/config fields are owned by AicodingProvisioningStrategy
+    rather than an ExtraPropertiesContributor; the engine string is the only
+    gate and a present/valid field yields the aicoding namespace envelope.
+    """
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        active_engine="aicoding",
+        template_config={
+            "bot_template_config": {
+                "ext_config": {"thetaKey": "  enc:v1:cipher  "},
+            },
+        },
+    )
+
+    props = strategy.build_extra_properties(ctx)
+    assert props is not None
+    assert props.to_dict() == {"aicoding": {"theta_key": "enc:v1:cipher"}}
+
+
+def test_aicoding_strategy_extra_properties_none_without_template_config():
+    """AICoding engine with no payload must surface nothing (legacy path)."""
+    for template_config in (None, {}):
+        strategy = AicodingProvisioningStrategy("claude_code")
+        ctx = BotProvisioningContext(
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            active_engine="claude_code",
+            template_config=template_config,
+        )
+        assert strategy.build_extra_properties(ctx) is None
