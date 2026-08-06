@@ -159,6 +159,8 @@ URL is assembled.
       proxy already accepts, and is percent-encoded.
 - [ ] The published URL addresses the active engine's own socket path.
 - [ ] The published expiry bounds the credential the response actually carries.
+- [ ] Where a provider supplies a URL of its own, that URL is used — composing
+      happens only where none was supplied.
 - [ ] A provider shape the endpoint still cannot serve fails with a named error
       that says the provider's connection kind was not recognised, rather than
       describing a missing URL.
@@ -197,16 +199,37 @@ URL is assembled.
 
 ## Resolved Questions
 
-1. **Should the fix live in the ARCA provider instead — make it issue a finished
-   URL like BaaS does?** *Resolved 2026-08-06: no.* Three reasons. The provider is
-   in a separate repository, so the fix would land where this endpoint's tests
-   cannot see it. The URL it produced would name the engine proxy, whose origin
-   this endpoint discards and replaces with the gateway's — so the provider would
-   be doing work purely to have it thrown away. And the in-device path, which the
-   URL has to embed, is not something the provider is given: it would need a new
-   parameter threaded through a shared base method that currently drops it.
-   Assembling at the point of publication is both smaller and closer to where the
-   knowledge already is.
+1. **Should the fix live in the ARCA provider instead — give it a relay mode that
+   issues a finished URL like BaaS does?** *Resolved 2026-08-06: no.* Three
+   reasons.
+
+   *A relay mode is not one contract.* BaaS already issues two different relay
+   shapes — a routing-target URL for a sandbox-backed device, and a
+   session-keyed one for its LOCAL platform, which cannot be re-addressed onto
+   the gateway at all. Teaching a second provider to issue relay URLs adds a
+   third producer of a shape this endpoint has to guard anyway. It moves the
+   branching rather than removing it.
+
+   *The information would travel backwards.* The provider would look up the
+   engine proxy's address and format a URL around it; this endpoint would then
+   discard that origin, strip the proxy's routing prefix, and recover the
+   routing target and in-device path it already held. Formatting a string purely
+   so the other side can take it apart again is not a contract, it is a round
+   trip.
+
+   *It would land where this endpoint cannot be tested.* The provider is in a
+   separate repository. The fix would be verified by hand in a deployed
+   environment rather than by the tests that cover this endpoint, and bots stay
+   unserved until a second repository ships.
+
+   *Withdrawn from this reasoning:* an earlier draft argued the provider could
+   not receive the in-device path without a change to a shared base method's
+   signature. That is avoidable — the provider could override the connection
+   method outright, as the BaaS provider already does, and receive the path
+   directly. The objection does not hold and is not part of this decision.
+
+   *Not mutually exclusive.* See Resolved Question 4: the ordering chosen means a
+   relay mode added later needs no change here.
 
 2. **Should the endpoint identify the ARCA shape by the connection kind the
    provider declares, or by noticing that no URL was returned?** *Resolved
@@ -222,6 +245,15 @@ URL is assembled.
    feature covers a case that question did not consider: a provider that returns
    **no URL at all**, by design, because assembling one was never its job. The
    guard on wrong-shaped URLs is unchanged.
+
+4. **If a provider of the bare-target kind ever does supply a URL, which wins?**
+   *Resolved 2026-08-06: the provider's URL.* A URL the provider took the trouble
+   to issue describes a routing decision it made and we did not; composing our own
+   over the top would override that decision silently. Deciding it now, rather
+   than when it happens, is what makes Resolved Question 1 reversible at no cost:
+   should the ARCA provider grow a relay mode later, its URL is preferred
+   automatically and the composed path simply stops being reached — no change to
+   this endpoint, and no window in which both could apply.
 
 ## Open Questions
 

@@ -68,15 +68,23 @@ lossless.
   byte-identical to what `_readdress_onto_gateway` produces for the same target
   and path, because the origin is discarded there either way.
 - In `_socket_url` (`connection.py:341-358`): read the connection kind once into
-  `conn_type`, keep the `local` branch exactly as it is, and add
-  `if conn_type in _PROXY_TARGET_TYPES: return self._compose_onto_gateway(target, socket_path, token)`
-  before the fall-through to `_readdress_onto_gateway`.
-- Extend the method's docstring from two shapes to three, naming which provider
-  produces each.
+  `conn_type`, keep the `local` branch exactly as it is, then order the remaining
+  cases as `plan.md` "Step 4" specifies —
+  **(2)** a non-empty `info.url` → `_readdress_onto_gateway`;
+  **(3)** `conn_type in _PROXY_TARGET_TYPES` → `_compose_onto_gateway`;
+  **(4)** anything else → the named error (Task 4).
+- Record in a comment why case 2 precedes case 3: a URL the provider issued
+  records a routing decision it made, and this ordering is what lets a
+  provider-side relay mode added later take over with no change here.
+- Extend the method's docstring from two shapes to four cases, naming which
+  provider takes each.
 
 **Worked check.** `_Devices(type="proxy", target="ARCA_ARCA-SANDBOX-abc123@0:20003", token="eyJ…")`
 on an `openclaw` bot yields the expected URL above. The same fake on a
-`claude_code` bot yields the same URL with `/api/claude_code/ws`.
+`claude_code` bot yields the same URL with `/api/claude_code/ws`. The same fake
+with `url="wss://agentclawproxy-prod.example.com/proxypass/ARCA_OTHER@0:20099/api/openclaw/ws"`
+yields the **provider's** target (`ARCA_OTHER@0:20099`), not the composed one —
+that is case 2 winning.
 
 **Verify.** `pytest tests/community/core/engine_runtime/test_connection.py` still
 green (no existing case uses `type="proxy"`).
@@ -85,14 +93,16 @@ green (no existing case uses `type="proxy"`).
 
 ## Task 4: Name the unrecognised connection kind  `[ ]`
 
-- At the top of `_readdress_onto_gateway`, after reading `url` and before parsing
-  it, refuse an empty `url` with a message naming the kind:
-  `f"device connection of kind {conn_type!r} carries no relay url and is not a kind this endpoint can compose one for"`.
-  Pass the kind in, or re-read it from `info` — whichever keeps the method's
-  signature honest about what it needs.
-- Leave the wrong-shape message (`"…no relay url this endpoint can re-address…"`)
-  for a URL that is present but not `/proxypass/`-shaped, e.g. BaaS LOCAL's
-  `wss://host/wsrelay/6f2a…`. The two situations now read differently in a log.
+- Add case 4 of `_socket_url` as the method's final statement: raise
+  `EngineUpstreamError(f"device connection of kind {conn_type!r} carries no relay url and is not a kind this endpoint can compose one for")`.
+  It is reached only when the kind is not `local`, not a bare-target kind, and no
+  URL was supplied.
+- Leave `_readdress_onto_gateway` and its guards alone. Its wrong-shape message
+  (`"…no relay url this endpoint can re-address…"`) now describes only URLs that
+  are *present and unmappable* — e.g. BaaS LOCAL's `wss://host/wsrelay/6f2a…` —
+  which is what it always meant. Its own empty-`url` path stays reachable in
+  principle, so do not delete that guard; the two situations simply read
+  differently in a log now.
 - Do not touch the `responses.py` mapping: the published body stays
   `502 "Engine service error"`, and the kind reaches logs only.
 
@@ -136,6 +146,12 @@ existing local-branch cases, using the reference values above.
       publish the identical string.
 - [ ] An unrecognised kind with `url=""` raises the new named error; the message
       carries the kind and not the credential.
+- [ ] **Ordering:** a `proxy` device that *also* carries a `/proxypass/…` URL is
+      re-addressed, not composed. Give the URL a tail that differs from
+      `target + socket_path` (a different port, say `ARCA_OTHER@0:20099`) so the
+      assertion can tell the two branches apart.
+- [ ] **Ordering:** a `proxy` device carrying `wss://host/wsrelay/6f2a…` is
+      refused with the wrong-shape message rather than quietly composed around.
 - [ ] `expires_at` on a `proxy` device (which reports none) is `now + 7200s`.
 - [ ] A `proxy` device with an empty target still raises
       `"device connection carries no routing target"`.

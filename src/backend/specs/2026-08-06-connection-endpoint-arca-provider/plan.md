@@ -138,17 +138,32 @@ value used is `ARCA_ARCA-SANDBOX-abc123@0:20003`.
 
 ### Step 4 — the branch (this is the change)
 
-| `info.type` | branch | tail fed to the builder |
-| --- | --- | --- |
-| `local` | compose direct, no gateway, no credential | — |
-| `proxy` | **new** — compose onto gateway | `ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws` |
-| `baas`, `desktop` | re-address the provider's URL | `ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws` |
-| anything else, `url` empty | **new** — named error | — |
-| anything else, `url` present | re-address, or refuse the shape | — |
+Four cases, **tested in this order**:
 
-The two tails are identical, which is the whole point. On the BaaS path the tail
-is what remains after cutting `/proxypass/` off `parts.path`; on the ARCA path it
-is `quote(target) + quote(socket_path)`.
+| # | condition | branch | tail fed to the builder |
+| --- | --- | --- | --- |
+| 1 | `type == "local"` | compose direct — no gateway, no credential | — |
+| 2 | `url` non-empty | re-address the provider's URL (existing guards) | `ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws` |
+| 3 | `type in _PROXY_TARGET_TYPES` | **new** — compose onto gateway | `ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws` |
+| 4 | otherwise | **new** — named error | — |
+
+Worked through the three providers: `baas` takes case 2, `proxy` takes case 3,
+`local` takes case 1. The tails in cases 2 and 3 are identical — that is the
+whole point. On the BaaS path the tail is what remains after cutting
+`/proxypass/` off `parts.path`; on the ARCA path it is
+`quote(target) + quote(socket_path)`.
+
+**Why the URL is tested before the kind.** A URL the provider issued describes a
+routing decision it made; composing over the top would override that decision
+silently. Concretely, this is what makes spec Resolved Question 1 reversible: if
+the ARCA provider ever grows a relay mode, it starts taking case 2 and case 3
+stops being reached, with no change here and no window in which both could apply.
+Ordering it the other way would pin `proxy` to the composed path forever.
+
+This is not the rejected "infer the shape from an absent URL" (spec Resolved
+Question 2). That would have made case 3 the *fallback for everything*, so a
+provider which was supposed to fill `url` and failed would get a plausible URL
+composed for it. Here an unrecognised kind with no URL still falls to case 4.
 
 ### Step 5 — the shared builder
 
@@ -257,26 +272,31 @@ conn_type = str(getattr(info, "type", "") or "")
 if conn_type == "local":
     ...unchanged...
 
+# Preferred over composing whenever the provider issued one: the URL records a
+# routing decision the provider made and we did not.
+if str(getattr(info, "url", "") or ""):
+    return self._readdress_onto_gateway(info, token)
+
 if conn_type in _PROXY_TARGET_TYPES:
     return self._compose_onto_gateway(target, socket_path, token)
 
-return self._readdress_onto_gateway(info, token)
+raise EngineUpstreamError(
+    f"device connection of kind {conn_type!r} carries no relay url and is not a "
+    f"kind this endpoint can compose one for"
+)
 ```
 
-`_readdress_onto_gateway` gains one guard at its top, before the URL is parsed, so
-that an unrecognised kind carrying no URL is named as such instead of borrowing
-the wrong-shape message:
+Reading `url` in `_socket_url` to decide, and again inside
+`_readdress_onto_gateway` to parse, is deliberate: the second read is that
+method's own precondition, and it keeps the method callable on its own terms
+rather than depending on its one caller having checked first. Its existing
+`not parts.path.startswith(_PROXYPASS_PREFIX)` guard therefore now covers only
+URLs that are *present and wrong-shaped* — `wss://host/wsrelay/6f2a…` — which is
+what its message has always described.
 
-```python
-if not url:
-    raise EngineUpstreamError(
-        f"device connection of kind {conn_type!r} carries no relay url and is "
-        f"not a kind this endpoint can compose one for"
-    )
-```
-
-The kind is safe to name here: `@envelope_errors` publishes the fixed string
-`"Engine service error"` and the exception's own message reaches logs only.
+The kind is safe to name in the error: `@envelope_errors` publishes the fixed
+string `"Engine service error"` (`responses.py:260`) and the exception's own
+message reaches logs only.
 
 ### Encoding
 
@@ -305,14 +325,26 @@ asymmetry is deliberate and already present for the local branch.
 
 ## Alternatives Considered
 
-**Make the ARCA provider fill `url` in relay mode.** Rejected — see spec Resolved
-Question 1. Corp-side, and it would need `path` threaded through
-`_compose_device_conn_info`, whose signature does not carry it, to build a URL
-whose origin this endpoint discards anyway.
+**Give the ARCA provider a relay mode, so it returns a finished URL like BaaS.**
+Rejected — see spec Resolved Question 1 for the full reasoning. In short: a relay
+mode is not one contract (BaaS itself issues two incompatible relay shapes, so
+the guard stays either way); the provider would format a URL whose origin and
+routing prefix this endpoint immediately strips to recover values it already
+held; and it lands in a repository where this endpoint's tests cannot verify it,
+leaving bots unserved until a second repo ships. Not permanently excluded — the
+branch ordering above means a relay mode added later is preferred automatically.
 
-**Infer the shape from `url == ""`.** Rejected — see spec Resolved Question 2. It
-would compose a plausible-looking URL for a provider that failed to fill a field
-it was supposed to fill.
+*Correction to an earlier draft of this plan:* this alternative was also argued
+against on the grounds that `path` could not reach the provider without changing
+`_compose_device_conn_info`'s signature. It can — the provider could override
+`get_device_connection` outright, as `BaasDeviceService` does. That argument is
+withdrawn; the three above stand on their own.
+
+**Infer the shape from `url == ""` alone.** Rejected — see spec Resolved
+Question 2. Note this is *not* what the ordering above does: an absent URL sends
+a recognised bare-target kind to the composer, but an unrecognised kind still
+raises. Inferring would have made composition the fallback for everything,
+including a provider that was supposed to fill `url` and failed.
 
 **Inject `SandboxRuntimeClient` and build `{proxy_base}/proxypass/{target}{path}`,
 then re-address it.** Rejected: a new dependency on this service, a network-facing
@@ -338,6 +370,8 @@ existing `_Devices` fake, which already takes `type`/`target`/`token`.
 8. An unrecognised kind with `url=""` raises the new named error, and the message does not carry the credential.
 9. `expires_at` for a `proxy` device falls back to `now + CONNECTION_TTL_SECONDS`.
 10. A `proxy` device with an empty target still raises `"carries no routing target"`.
+11. **Ordering:** a `proxy` device that *does* carry a `/proxypass/…` URL is re-addressed, not composed — the provider's URL wins. Pinned with a URL whose tail differs from `target + path` (e.g. a different port) so the two branches are distinguishable in the assertion.
+12. **Ordering:** a `proxy` device carrying a wrong-shaped URL (`wss://host/wsrelay/6f2a…`) is refused with the wrong-shape message, not quietly composed around.
 
 **Unchanged and must stay green:** the whole existing file, in particular the
 local-branch cases, the `/wsrelay/` wrong-shape refusal, the fragment refusal, the
@@ -353,7 +387,9 @@ to roll back beyond reverting the commit.
 ## Decisions Taken
 
 1. Compose at the point of publication, not in the provider.
-2. Branch on the declared connection kind, not on an absent URL.
+2. Branch on the declared connection kind, not on an absent URL — but test for a
+   provider-supplied URL *first*, so a provider that later starts issuing one is
+   preferred without a change here.
 3. One builder shared by both gateway branches, so they cannot drift.
 4. Accept both `"proxy"` and `"arca"` as the bare-target kind.
 5. Name the unrecognised kind in the error; the HTTP body stays the fixed
