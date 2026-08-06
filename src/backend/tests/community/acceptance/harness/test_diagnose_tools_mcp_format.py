@@ -78,7 +78,8 @@ def test_diagnose_tools_mcp_format_runs_prompt_helpers(
             client.post(
                 "/api/skillsets",
                 json={
-                    "name": fresh_id("toolsdiag_set"),
+                    # No fresh_id here: skill-set names reject '_'.
+                    "name": "ToolsDiag Acceptance Set",
                     "user_id": user_id,
                     "bot_id": bot_id,
                 },
