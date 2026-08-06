@@ -850,3 +850,13 @@ def test_a_composed_expiry_falls_back_to_the_requested_ttl():
     expires = datetime.fromisoformat(result.expires_at)
     expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
     assert abs((expires - expected).total_seconds()) < 60
+
+
+def test_a_bare_target_provider_reporting_unavailable_is_not_ready():
+    """The availability gate sits in ``build``, before any URL is composed, so it
+    covers this branch by construction rather than by repetition. Pinned because
+    "refused exactly as today, on every provider" is a spec criterion, and a
+    future reordering could quietly compose a URL for a stopped sandbox."""
+    devices = _arca(available=False, message="sandbox stopped")
+    with pytest.raises(EngineDeviceNotReadyError):
+        _build(_svc(devices=devices))
