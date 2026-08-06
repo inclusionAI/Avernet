@@ -28,6 +28,7 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     apply_image_pin_to_ext,
+    clear_image_policy_from_ext,
     copy_image_policy_to_ext,
     has_explicit_image_policy,
     resolve_current_arca_image,
@@ -237,6 +238,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
         ext = copy_image_policy_to_ext(source_bot_ext, ext)
+        image_policy_image: str | None = None
         if isinstance(source_bot, dict) and source_bot.get("bot_type") == "service":
             runtime_kind = None
             binding_id = source_bot.get("binding_id")
@@ -252,6 +254,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                     else RUNTIME_KIND_ARCA
                 )
             ext = apply_runtime_kind_to_ext(ext, runtime_kind)
+            if runtime_kind == RUNTIME_KIND_ARCA:
+                image_policy_image = resolve_current_arca_image(
+                    self._common_config_service, env=self._env
+                )
+            if image_policy_image is None:
+                ext = clear_image_policy_from_ext(ext)
 
         # A new/default Bot carries an explicit marker and never consumes the
         # legacy Pin switch. A pre-feature ARCA Bot has no policy marker; when
@@ -263,12 +271,8 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
             and not has_explicit_image_policy(source_bot_ext)
         )
-        if is_legacy_arca_service:
-            legacy_image = resolve_current_arca_image(
-                self._common_config_service, env=self._env
-            )
-            if legacy_image:
-                ext = apply_image_pin_to_ext(ext, legacy_image)
+        if is_legacy_arca_service and image_policy_image:
+            ext = apply_image_pin_to_ext(ext, image_policy_image)
 
         record = self._repo.insert({
             "source_bot_pk": source_bot_pk,

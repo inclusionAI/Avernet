@@ -14,6 +14,7 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
     RUNTIME_KIND_TECLAW,
     apply_default_image_to_ext,
     apply_image_pin_to_ext,
+    clear_image_policy_from_ext,
     apply_runtime_kind_to_ext,
     copy_image_policy_to_ext,
     overlay_image_pin_on_template_config,
@@ -65,12 +66,11 @@ def test_resolve_current_image_returns_none_for_disabled_or_missing_config():
 
 
 @pytest.mark.parametrize("value", [{}, {"image": ""}, "registry/arca:v2"])
-def test_resolve_current_image_rejects_enabled_malformed_config(value):
+def test_resolve_current_image_returns_none_without_valid_image(value):
     service = MagicMock()
     service.get_value.return_value = value
 
-    with pytest.raises(ImagePinConfigError, match="has no valid image"):
-        resolve_current_arca_image(service, env="pre")
+    assert resolve_current_arca_image(service, env="pre") is None
 
 
 def test_apply_pin_preserves_service_bot_config_and_clears_stale_pin():
@@ -101,6 +101,17 @@ def test_apply_default_preserves_unrelated_fields_and_clears_stale_pin():
         "service_bot_config": {"device_count": 3},
         "sbot_use_default_image": True,
     }
+
+
+def test_clear_policy_preserves_unrelated_fields_and_removes_all_markers():
+    assert clear_image_policy_from_ext(
+        {
+            "service_bot_config": {"device_count": 3},
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "old:v1",
+        }
+    ) == {"service_bot_config": {"device_count": 3}}
 
 
 def test_publish_copy_is_whitelisted_and_template_overlay_is_non_mutating():
@@ -389,12 +400,16 @@ def test_default_policy_retries_bot_cas_without_losing_concurrent_ext():
     publish_repo = MagicMock()
     publish_repo.get_draft_by_publish_bot_id.return_value = None
 
+    common_config = MagicMock()
+    common_config.get_value.return_value = {"image": "registry/arca:default"}
+
     persist_default_image_policy(
         bot_repository=bot_repo,
         publish_repository=publish_repo,
         bot_id="bot-1",
         owner_id="u1",
         env="pre",
+        common_config_service=common_config,
     )
 
     assert bot_repo.compare_and_set_ext.call_count == 2
@@ -405,3 +420,43 @@ def test_default_policy_retries_bot_cas_without_losing_concurrent_ext():
         "concurrent": True,
         "sbot_use_default_image": True,
     }
+
+
+@pytest.mark.parametrize("config_value", [None, {}, {"image": ""}])
+def test_default_policy_persistence_ignores_markers_when_policy_inactive(config_value):
+    bot_repo = MagicMock()
+    bot_repo.get_by_id_and_owner.return_value = {
+        "ext": {
+            "keep": "bot",
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        }
+    }
+    bot_repo.compare_and_set_ext.return_value = {"ext": {"keep": "bot"}}
+    publish_repo = MagicMock()
+    publish_repo.get_draft_by_publish_bot_id.return_value = SimpleNamespace(
+        id=9,
+        ext={
+            "keep": "draft",
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        },
+    )
+    publish_repo.compare_and_set_ext.return_value = SimpleNamespace(id=9)
+    common_config = MagicMock()
+    common_config.get_value.return_value = config_value
+
+    persisted = persist_default_image_policy(
+        bot_repository=bot_repo,
+        publish_repository=publish_repo,
+        bot_id="bot-1",
+        owner_id="u1",
+        env="pre",
+        common_config_service=common_config,
+    )
+
+    assert persisted is False
+    bot_repo.compare_and_set_ext.assert_not_called()
+    publish_repo.compare_and_set_ext.assert_not_called()

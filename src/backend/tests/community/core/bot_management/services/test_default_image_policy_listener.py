@@ -30,7 +30,17 @@ def _listener(*, marker=DEFAULT_IMAGE_POLICY_VALUE, active_engine="openclaw"):
         "bot_type": "service",
         "active_engine": active_engine,
     }
+    bot_repo.get_by_id_and_owner.return_value = {
+        "ext": {
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        }
+    }
     publish_repo = MagicMock()
+    publish_repo.get_draft_by_publish_bot_id.return_value = None
+    common_config = MagicMock()
+    common_config.get_value.return_value = {"image": "registry/arca:default"}
     binding_repo = MagicMock()
     binding_repo.get_by_id.return_value = SimpleNamespace(
         id=7,
@@ -42,6 +52,7 @@ def _listener(*, marker=DEFAULT_IMAGE_POLICY_VALUE, active_engine="openclaw"):
             bot_repository=bot_repo,
             publish_repository=publish_repo,
             binding_repository=binding_repo,
+            common_config_service=common_config,
         ),
         bot_repo,
         publish_repo,
@@ -78,7 +89,23 @@ def test_activation_persists_default_then_clears_intent():
         bot_id="bot-1",
         owner_id="u1",
         env="pre",
+        common_config_service=listener._common_config_service,
     )
+    binding_repo.update_device_props.assert_called_once_with(
+        binding_id=7,
+        props={IMAGE_POLICY_ON_ACTIVE_KEY: None},
+    )
+
+
+@pytest.mark.parametrize("config_value", [None, {}, {"image": ""}])
+def test_activation_ignores_existing_markers_when_policy_inactive(config_value):
+    listener, bot_repo, publish_repo, binding_repo = _listener()
+    listener._common_config_service.get_value.return_value = config_value
+
+    listener.handle(_event())
+
+    bot_repo.compare_and_set_ext.assert_not_called()
+    publish_repo.compare_and_set_ext.assert_not_called()
     binding_repo.update_device_props.assert_called_once_with(
         binding_id=7,
         props={IMAGE_POLICY_ON_ACTIVE_KEY: None},
