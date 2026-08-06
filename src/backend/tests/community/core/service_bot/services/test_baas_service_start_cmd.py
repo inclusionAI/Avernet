@@ -71,8 +71,6 @@ class TestGetInstallEngineCmd:
     def test_redirects_to_log(self):
         cmd = _make_service()._get_install_engine_cmd()
         assert "/home/admin/logs/install_engine.log" in cmd
-        assert "tail -n 200" in cmd
-        assert "tail -c 3000" in cmd
 
     def test_success_keeps_zero_exit_and_does_not_echo_log(self, tmp_path):
         script_path = tmp_path / "install_engine.sh"

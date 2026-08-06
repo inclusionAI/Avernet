@@ -2270,7 +2270,7 @@ class BaasService:  # pragma: no cover
             f"if bash {script_path} >> {log_path} 2>&1; then :; "
             f"else rc=$?; "
             f"echo '[install_engine] failed; last log lines:' >&2; "
-            f"tail -n 200 {log_path} | tail -c 3000 >&2 || true; "
+            f"tail -n 200 {log_path} >&2 || true; "
             f"exit $rc; fi; "
             f"else echo '[install_engine] {script_path} not found, skip'; fi"
         )
