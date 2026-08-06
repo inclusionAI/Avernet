@@ -69,6 +69,11 @@ dev = [
   "ruff>=0.14.13",
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
+  # pytest-xdist: the suite is ~10.6k tests and runs ~10min serially. Workers are
+  # separate processes, so the in-memory SQLite engine and every module-level
+  # singleton are already isolated per worker; `--dist loadfile` additionally
+  # keeps a file's tests together. See scripts/ci_test.sh.
+  "pytest-xdist>=3.6",
   "fakeredis>=2.20",
   "moto[s3]>=5.0",
   "socksio>=1.0.0",

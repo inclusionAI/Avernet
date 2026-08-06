@@ -1,12 +1,26 @@
 """Tests for core.bot_management.services.sync_to_downstream."""
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from agentclaw.community.core.bot_management.services import sync_to_downstream
 from agentclaw.community.core.bot_management.services.sync_to_downstream import (
     _LINK_TYPE_TO_MCP_CODE,
     sync_to_ecb,
     sync_to_bcsfuse,
     sync_all,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_backoff(monkeypatch):
+    """Neutralise the exponential ``time.sleep`` between sync retries.
+
+    ``sync_to_ecb`` / ``sync_to_bcsfuse`` sleep 1s then 2s before giving up after
+    ``MAX_RETRIES``. The exhaustion tests assert the *call count*, never the
+    spacing, so the sleeps were 6s of dead wall-clock.
+    """
+    monkeypatch.setattr(sync_to_downstream, "RETRY_BACKOFF_BASE_SECONDS", 0.0)
 
 
 class TestLinkTypeMappings:
