@@ -2052,6 +2052,49 @@ def test_restart_codefuse_failure_clears_recovery_intent():
     )
 
 
+def test_restart_failed_replay_retries_recovery_intent_cleanup():
+    request_id = "restart-request-1"
+    repo = MagicMock()
+    repo.get_by_id.return_value = _make_binding(
+        status=DeviceBindingStatus.FAILED.value,
+        device_props={
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 1000,
+            "restart_publish_id": 1002,
+        },
+    )
+    baas_device_service = MagicMock()
+    handler, _ = _make_restart_handler(
+        repo=repo,
+        bot_repository=MagicMock(),
+        baas_device_service=baas_device_service,
+    )
+
+    outcome = handler.handle(
+        build_restart_publish_poll_payload(
+            binding_id=42,
+            bot_id="bot-001",
+            owner_id="owner-001",
+            publish_id=1002,
+            started_at_epoch_s=190.0,
+            bot_uuid="baas-bot-1",
+            request_id=request_id,
+            workflow_baseline=1000,
+        )
+    )
+
+    assert outcome == Complete()
+    repo.update_device_props.assert_called_once_with(
+        binding_id=42,
+        props={
+            "restart_request_id": None,
+            "restart_workflow_baseline": None,
+            "restart_image_policy_on_success": None,
+        },
+    )
+    baas_device_service.poll_publish_once.assert_not_called()
+
+
 def test_restart_default_policy_persistence_failure_retries_without_completion():
     reset_event_bus()
     received: list[BaasPublishCompletedEvent] = []
