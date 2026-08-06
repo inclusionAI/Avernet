@@ -326,7 +326,9 @@ class TestToolsMcpFormatDiagnostic:
 
     @pytest.mark.asyncio
     async def test_no_verified_guide_for_unknown_mcp(self, monkeypatch):
-        """MCPs NOT in _VERIFIED_MCP_GUIDES should have verified_guide as null."""
+        """MCPs NOT in _VERIFIED_MCP_GUIDES (and without inputSchema) land in the
+        unreachable bucket: rendered as a mapping-table-only text block carrying
+        the 平台补全中 note, with no verified_guide content."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "some-unknown-mcp", "name": "Unknown"}]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
@@ -349,7 +351,12 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"verified_guide": null' in captured_user
+        # No verified_guide anywhere (the MCP is unknown), and it lands in the
+        # unreachable (no-schema) bucket as a text block, not a JSON dump.
+        assert "verified_guide:" not in captured_user
+        assert "无 schema MCP" in captured_user
+        assert "some-unknown-mcp" in captured_user
+        assert "平台补全中" in captured_user
 
     @pytest.mark.asyncio
     async def test_no_activated_mcps_still_works(self):
@@ -717,13 +724,12 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].severity == Severity.WARNING
         assert findings[0].score == 55
         assert findings[0].result != "pass"
-        # inputSchema is flattened to a compact params table for transcription;
-        # the full nested JSON is NOT forwarded (that's what used to bloat the
-        # prompt past antchat's ~90s gateway window).
+        # inputSchema is rendered as a compact one-line tool signature for
+        # transcription; the full nested JSON is NOT forwarded (that's what used
+        # to bloat the prompt past antchat's ~90s gateway window). The one-liner
+        # keeps param name/type/required (star) so the LLM can transcribe it.
         assert "inputSchema" not in captured_user
-        assert '"params"' in captured_user
-        assert "generateWorkSummary" in captured_user
-        assert "startDate" in captured_user
+        assert "generateWorkSummary(startDate:string*, endDate:string*)" in captured_user
         assert "可据参数表转录" in captured_user
 
     @pytest.mark.asyncio
@@ -782,9 +788,10 @@ class TestToolsMcpFormatDiagnostic:
         assert findings[0].severity == Severity.WARNING
 
     def test_compact_tool_flattens_input_schema(self):
-        """_compact_tool_for_prompt flattens a nested inputSchema into a flat
-        param table (name/type/required/one-line desc) and drops the nested
-        JSON — the slimmed payload that goes into the diagnostic prompt."""
+        """_compact_tool_for_prompt flattens a nested inputSchema into a single
+        prompt line (name + param:type*=required sig + one-line desc) and drops
+        the nested JSON — the slimmed payload that goes into the diagnostic
+        prompt."""
         tool = {
             "name": "create_doc",
             "description": "创建语雀文档\n第二行不该进入 prompt",
@@ -799,21 +806,13 @@ class TestToolsMcpFormatDiagnostic:
             },
         }
         compact = _compact_tool_for_prompt(tool)
-        assert compact == {
-            "name": "create_doc",
-            "desc": "创建语雀文档",
-            "params": [
-                {"name": "title", "type": "string", "required": True, "desc": "文档标题"},
-                {"name": "tags", "type": "array", "required": False, "desc": "标签列表"},
-                {"name": "private", "type": "boolean", "required": False, "desc": "是否私有"},
-            ],
-        }
+        assert compact == "create_doc(title:string*, tags:array, private:boolean) — 创建语雀文档"
 
     def test_compact_tool_without_schema_returns_empty_params(self):
-        """A tool with no inputSchema yields an empty params list (it still
-        has a name/desc so the LLM can list it in the mapping table)."""
+        """A tool with no inputSchema renders as `name — desc` (no param sig) so
+        the LLM can still list it in the mapping table."""
         compact = _compact_tool_for_prompt({"name": "bare_tool", "description": "no schema"})
-        assert compact == {"name": "bare_tool", "desc": "no schema", "params": []}
+        assert compact == "bare_tool — no schema"
 
     def test_compact_tool_skips_malformed_param_defs(self):
         """A schema property whose value is not a dict is skipped (the
@@ -832,9 +831,7 @@ class TestToolsMcpFormatDiagnostic:
             },
         }
         compact = _compact_tool_for_prompt(tool)
-        assert compact["params"] == [
-            {"name": "good", "type": "string", "required": True, "desc": "ok"},
-        ]
+        assert compact == "weird(good:string*)"
 
     def test_compact_mcp_tools_non_list_returns_empty(self):
         """A non-list `tools` value (None, a string, a dict) hits the early
@@ -848,9 +845,9 @@ class TestToolsMcpFormatDiagnostic:
 
     @pytest.mark.asyncio
     async def test_verified_guide_tools_also_capped_with_omitted(self):
-        """The verified bucket also caps tools and surfaces tools_omitted
-        (the verified-guide path shares _compact_mcp_tools_for_prompt); this
-        covers the `if omitted` branch in the verified_mcps append."""
+        """The verified bucket also caps tools and surfaces the `…另N个未列出`
+        note (the verified-guide path shares _compact_mcp_tools_for_prompt);
+        this covers the `if omitted` branch of the verified block."""
         diag = ToolsMcpFormatDiagnostic()
         code = "mcp.ant.faas.skylarkmcpserver.skylarkmcpserver"
         mcps = [{"server_code": code, "name": "skylark"}]
@@ -877,16 +874,16 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"tools_omitted": 3' in captured_user
+        assert "另3个未列出" in captured_user
         assert "t0" in captured_user
         assert f"t{total - 1}" not in captured_user
 
     @pytest.mark.asyncio
     async def test_tools_capped_per_mcp_with_omitted(self):
         """An MCP exposing more tools than the per-MCP cap only forwards the
-        first N (compacted); the remainder is summarised as ``tools_omitted``
-        so a 27-tool MCP doesn't dominate the prompt and blow the gateway
-        window."""
+        first N (compacted one-liners); the remainder is summarised as
+        ``…另N个未列出`` so a 27-tool MCP doesn't dominate the prompt and blow
+        the gateway window."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "big", "name": "big"}]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some"}, activated_mcps=mcps)
@@ -916,7 +913,7 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"tools_omitted": 5' in captured_user
+        assert "另5个未列出" in captured_user
         # First capped tool and the boundary tool are present …
         assert "tool_0" in captured_user
         assert f"tool_{_MAX_TOOLS_PER_MCP_IN_PROMPT - 1}" in captured_user
