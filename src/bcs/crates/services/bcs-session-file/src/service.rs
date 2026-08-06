@@ -576,53 +576,27 @@ impl SessionFileService for SessionFileServiceImpl {
         &self,
         cmd: ShareMintCommand,
     ) -> Result<ShareMintResult, SessionFileUseCaseError> {
-        let row = self
-            .cfg
-            .repo
-            .get(&cmd.session_id, &cmd.file_id)
-            .await
-            .map_err(SessionFileUseCaseError::Internal)?
-            .ok_or_else(|| SessionFileUseCaseError::NotFound(format!("file {}", cmd.file_id)))?;
-        if row.status != FileStatus::Ready {
-            return Err(SessionFileUseCaseError::InvalidState(format!(
-                "file status {:?} not Ready — cannot share",
-                row.status,
-            )));
-        }
+        // can_share is the membership gate specific to the public share API;
+        // ownership + Ready are checked inside mint_share_link via repo.get.
+        // (Original order did repo.get before can_share; reordering is
+        // behavior-equivalent — both rejections still reject.)
         if !can_share(&cmd.caller_identities, &cmd.session_participants) {
             return Err(SessionFileUseCaseError::Forbidden(format!(
                 "caller not a session member, cannot share file {}",
                 cmd.file_id,
             )));
         }
-        let ttl = cmd
-            .ttl_seconds
-            .unwrap_or(self.cfg.share_default_ttl)
-            .clamp(SHARE_TTL_MIN, SHARE_TTL_MAX);
-        let exp = now_secs() + ttl;
-        let token = share_token_encode(
-            &ShareTokenPayload {
-                v: 1,
-                file_id: cmd.file_id.clone(),
-                exp,
-            },
-            &self.cfg.share_secret,
-        );
-        let base = self
-            .cfg
-            .share_base_url
-            .clone()
-            .unwrap_or_else(|| self.cfg.bcs_base_url.clone());
-        let share_url = format!(
-            "{}/sessions/shared-file/content?token={}",
-            base,
-            token,
-        );
-        Ok(ShareMintResult {
-            share_url,
-            share_token: token,
-            expires_at: exp,
-        })
+        let ttl = cmd.ttl_seconds.unwrap_or(self.cfg.share_default_ttl);
+        self.mint_share_link(&cmd.session_id, &cmd.file_id, ttl).await
+    }
+
+    async fn share_mint_for_history(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        ttl_seconds: u64,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError> {
+        self.mint_share_link(session_id, file_id, ttl_seconds).await
     }
 
     async fn share_consume(
@@ -790,6 +764,56 @@ impl SessionFileService for SessionFileServiceImpl {
 }
 
 impl SessionFileServiceImpl {
+    /// Mint a share link with NO authz check. Only the ownership/Ready check
+    /// (`repo.get(session_id, file_id)`) gates this. Used by `share_mint`
+    /// (after `can_share`) and `share_mint_for_history` (caller-authz done by
+    /// the history HTTP entry).
+    async fn mint_share_link(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        ttl_seconds: u64,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError> {
+        let row = self
+            .cfg
+            .repo
+            .get(session_id, file_id)
+            .await
+            .map_err(SessionFileUseCaseError::Internal)?
+            .ok_or_else(|| SessionFileUseCaseError::NotFound(format!("file {}", file_id)))?;
+        if row.status != FileStatus::Ready {
+            return Err(SessionFileUseCaseError::InvalidState(format!(
+                "file status {:?} not Ready — cannot share",
+                row.status,
+            )));
+        }
+        let ttl = ttl_seconds.clamp(SHARE_TTL_MIN, SHARE_TTL_MAX);
+        let exp = now_secs() + ttl;
+        let token = share_token_encode(
+            &ShareTokenPayload {
+                v: 1,
+                file_id: file_id.to_string(),
+                exp,
+            },
+            &self.cfg.share_secret,
+        );
+        let base = self
+            .cfg
+            .share_base_url
+            .clone()
+            .unwrap_or_else(|| self.cfg.bcs_base_url.clone());
+        let share_url = format!(
+            "{}/sessions/shared-file/content?token={}",
+            base,
+            token,
+        );
+        Ok(ShareMintResult {
+            share_url,
+            share_token: token,
+            expires_at: exp,
+        })
+    }
+
     /// Attempt backend cleanup for one row during session-delete.
     ///
     /// Returns `true` when the backend holds no remaining object for the row
@@ -1529,6 +1553,61 @@ mod tests {
         // Tampered token → InvalidInput (per `From<ShareTokenError>` mapping)
         // or InvalidSignature → InvalidInput.
         assert!(matches!(err, SessionFileUseCaseError::InvalidInput(_)));
+    }
+
+    #[tokio::test]
+    async fn mint_share_link_and_share_mint_produce_same_token_shape() {
+        // Parity: identical (session_id, file_id, ttl) via the internal helper
+        // and the public share_mint (after can_share) must yield the same
+        // share_url / share_token / expires_at. Regression guard for the
+        // mint_share_link extraction.
+        let (svc, _, _) = build_svc(local_caps());
+        let file_id = prepare_complete(&svc).await;
+
+        // share_mint uses ttl_seconds=None → defaults to share_default_ttl (3600).
+        // Pass the same 3600 to mint_share_link so the token shape matches.
+        let via_internal = svc
+            .mint_share_link("g1:abcd1234", &file_id, 3600)
+            .await
+            .expect("internal mint");
+        let via_public = svc
+            .share_mint(share_cmd(&file_id, &["human_1"], &["human_1"]))
+            .await
+            .expect("public mint");
+
+        assert_eq!(via_internal.share_url, via_public.share_url);
+        assert_eq!(via_internal.share_token, via_public.share_token);
+        assert_eq!(via_internal.expires_at, via_public.expires_at);
+    }
+
+    #[tokio::test]
+    async fn share_mint_for_history_mints_for_owned_file() {
+        // History echo path: server-authoritative mint with NO `can_share` —
+        // ownership is verified via `repo.get(session_id, file_id)`.
+        let (svc, _, _) = build_svc(local_caps());
+        let file_id = prepare_complete(&svc).await; // seeded under g1:abcd1234
+        let minted = svc
+            .share_mint_for_history("g1:abcd1234", &file_id, 3600)
+            .await
+            .expect("history mint");
+        assert!(minted.share_url.contains("/sessions/shared-file/content?token="));
+        // token actually verifies + resolves to the same file
+        let resolved = svc.share_consume(&minted.share_token).await.expect("consume");
+        assert_eq!(resolved.file.file_id, file_id);
+    }
+
+    #[tokio::test]
+    async fn share_mint_for_history_rejects_cross_session_file() {
+        // file belongs to g1:abcd1234, ask as g1:other -> NotFound (ownership
+        // check via `repo.get(session_id, file_id)` returns None for wrong
+        // session).
+        let (svc, _, _) = build_svc(local_caps());
+        let file_id = prepare_complete(&svc).await; // under g1:abcd1234
+        let err = svc
+            .share_mint_for_history("g1:other", &file_id, 3600)
+            .await
+            .expect_err("must reject cross-session");
+        assert!(matches!(err, SessionFileUseCaseError::NotFound(_)), "got: {:?}", err);
     }
 
     #[tokio::test]

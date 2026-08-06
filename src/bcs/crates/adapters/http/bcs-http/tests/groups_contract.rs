@@ -2179,6 +2179,7 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
         history_meta: None,
         metadata: None,
         run_id: String::new(),
+        attachments: None,
     }];
     group.workspace = Workspace {
         decisions: vec!["real decision".to_string()],

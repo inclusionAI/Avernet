@@ -572,6 +572,7 @@ impl A2aChatService for A2aChat {
                     run_id: String::new(),
                     history_meta: None,
                     metadata: None,
+                    attachments: None,
                 };
                 let mut outbound = OutboundMessage {
                     group_id: run_id.clone(),

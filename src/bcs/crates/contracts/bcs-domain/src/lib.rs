@@ -69,8 +69,8 @@ pub use group_id::{
 };
 pub use message::{
     AuditEntry, BCS_STATE_MACHINE_MESSAGE_SENDER, BCS_STATE_MACHINE_MESSAGE_SENDER_NAME,
-    DeliveryType, GroupMessage, GroupMessageType, MessageOwnerFilter, MessagePage, MessageQuery,
-    MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
+    DeliveryType, GroupMessage, GroupMessageType, MessageAttachment, MessageOwnerFilter,
+    MessagePage, MessageQuery, MessageRole, NewMessage, PersistedMessage, PersistedMessageStatus,
     STATE_MACHINE_PANEL_MESSAGE_TYPE, SenderType, Task, TaskStatus,
 };
 pub use organization::{Organization, OrganizationMember};

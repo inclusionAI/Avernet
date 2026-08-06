@@ -610,6 +610,7 @@ async fn relay_final_chat_event(
             run_id: String::new(),
             history_meta: None,
             metadata: None,
+            attachments: None,
         };
         let outbound_message = match crate::group_flow::apply_outbound_interceptors(
             flow,

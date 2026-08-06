@@ -1084,6 +1084,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await
@@ -1103,6 +1104,7 @@ async fn group_history_falls_back_to_store_when_bot_window_has_no_older_messages
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             },
         )
         .await

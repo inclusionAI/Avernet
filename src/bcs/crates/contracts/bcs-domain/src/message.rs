@@ -1,5 +1,6 @@
 //! Message / task / audit pure domain types.
 
+use crate::AttachmentType;
 use serde::{Deserialize, Serialize};
 
 pub const BCS_STATE_MACHINE_MESSAGE_SENDER: &str = "bcs_state_machine";
@@ -45,6 +46,32 @@ pub struct AuditEntry {
     pub details: String,
 }
 
+/// Attachment view for history echo: stable_metadata + a short-lived download
+/// `url` minted at read time.
+///
+/// `expires_at` is unix **seconds** (matches share-token `exp` and
+/// `share_consume`'s `as_secs()` check), NOT milliseconds.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageAttachment {
+    pub attachment_id: String,
+    #[serde(rename = "type")]
+    pub attachment_type: AttachmentType,
+    pub file_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// Short-lived share_url minted at history-read time; `<img src>` ready.
+    /// `None` when the file was deleted / doesn't belong to the session / storage error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// share_url expiry, unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+}
+
 /// A message in a group session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupMessage {
@@ -77,6 +104,10 @@ pub struct GroupMessage {
     /// Optional metadata (tool execution info, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
+    /// Attachments carried by the message (images etc.). Omitted when `None`
+    /// so older frontends that only read `content` are unaffected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<MessageAttachment>>,
 }
 
 /// Role of a message sender.
@@ -220,4 +251,48 @@ pub struct MessagePage {
     pub messages: Vec<PersistedMessage>,
     pub next_cursor: Option<(u64, i64)>,
     pub has_more: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_message_omits_attachments_when_none() {
+        let msg = GroupMessage {
+            id: "m1".into(),
+            timestamp: 1,
+            sender: "s".into(),
+            content: "hi".into(),
+            message_type: GroupMessageType::Bot,
+            bot_name: None,
+            role: MessageRole::User,
+            run_id: String::new(),
+            history_meta: None,
+            metadata: None,
+            attachments: None,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(!json.contains("attachments"), "attachments must be omitted when None: {json}");
+    }
+
+    #[test]
+    fn message_attachment_serializes_type_rename_and_optional_fields() {
+        let att = MessageAttachment {
+            attachment_id: "att_1".into(),
+            attachment_type: AttachmentType::Image,
+            file_name: "pic.png".into(),
+            mime_type: None,
+            size: None,
+            sha256: None,
+            url: None,
+            expires_at: None,
+        };
+        let json = serde_json::to_string(&att).unwrap();
+        assert!(json.contains("\"type\":\"image\""), "type must rename: {json}");
+        assert!(
+            !json.contains("mime_type") && !json.contains("url") && !json.contains("expires_at"),
+            "None optionals must be omitted: {json}"
+        );
+    }
 }
