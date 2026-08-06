@@ -86,6 +86,42 @@ class MockProviderStateTest(unittest.TestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"], "provider_id_mismatch")
 
+    def test_records_only_configured_capture_headers(self):
+        state = mock_provider.MockProviderState(
+            provider_id="provider-local",
+            final_text="mock final",
+            auto_callback=False,
+            capture_headers=["X-Sandbox-Trace", "X-Sandbox-Bypass"],
+        )
+        headers = {
+            "X-Sandbox-Trace": "trace-123",
+            "x-sandbox-bypass": "bypass-456",
+            "X-Not-Captured": "hidden",
+        }
+
+        status, _ = state.handle_webhook(headers, request("chat.inject", "inject-1"))
+
+        self.assertEqual(status, 200)
+        recorded = state.snapshot_requests()[0]
+        self.assertEqual(
+            recorded["captured_headers"],
+            {
+                "X-Sandbox-Trace": "trace-123",
+                "X-Sandbox-Bypass": "bypass-456",
+            },
+        )
+        self.assertNotIn("X-Not-Captured", recorded["captured_headers"])
+
+    def test_parse_args_accepts_repeated_capture_headers(self):
+        args = mock_provider.parse_args([
+            "--capture-header",
+            "X-Sandbox-Trace",
+            "--capture-header",
+            "X-Sandbox-Bypass",
+        ])
+
+        self.assertEqual(args.capture_header, ["X-Sandbox-Trace", "X-Sandbox-Bypass"])
+
 
 if __name__ == "__main__":
     unittest.main()

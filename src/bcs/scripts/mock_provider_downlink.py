@@ -46,6 +46,15 @@ def header_value(headers: Any, name: str) -> str | None:
     return None
 
 
+def capture_header_values(headers: Any, names: list[str]) -> dict[str, str]:
+    captured: dict[str, str] = {}
+    for name in names:
+        value = header_value(headers, name)
+        if value is not None:
+            captured[name] = value
+    return captured
+
+
 def message_text(message: JsonObject | None) -> str:
     if not message:
         return ""
@@ -101,6 +110,7 @@ class MockProviderState:
         strict_auth: bool = False,
         callback_delay_ms: int = 50,
         verbose: bool = False,
+        capture_headers: list[str] | None = None,
     ) -> None:
         self.provider_id = provider_id
         self.final_text = final_text
@@ -111,6 +121,7 @@ class MockProviderState:
         self.strict_auth = strict_auth
         self.callback_delay_ms = callback_delay_ms
         self.verbose = verbose
+        self.capture_headers = list(capture_headers or [])
         self.sessions: dict[tuple[str, str], list[JsonObject]] = defaultdict(list)
         self.requests: list[JsonObject] = []
         self.callback_results: list[JsonObject] = []
@@ -166,6 +177,7 @@ class MockProviderState:
                     "duplicate": duplicate,
                     "authorization": header_value(headers, "Authorization"),
                     "protocol_version": header_value(headers, "X-BCN-Protocol-Version"),
+                    "captured_headers": capture_header_values(headers, self.capture_headers),
                     "body": body,
                 }
             )
@@ -428,6 +440,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--strict-auth", action="store_true")
     parser.add_argument("--auto-callback", action="store_true")
     parser.add_argument("--callback-delay-ms", type=int, default=50)
+    parser.add_argument(
+        "--capture-header",
+        action="append",
+        default=[],
+        help="Header name to expose in /requests for debugging; can be repeated.",
+    )
     parser.add_argument("--final-text", default="mock provider final")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
@@ -445,6 +463,7 @@ def main(argv: list[str]) -> int:
         strict_auth=args.strict_auth,
         callback_delay_ms=args.callback_delay_ms,
         verbose=args.verbose,
+        capture_headers=args.capture_header,
     )
     server = MockProviderServer((args.host, args.port), state)
     host, port = server.server_address
