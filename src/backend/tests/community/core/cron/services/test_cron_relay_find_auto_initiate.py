@@ -19,6 +19,18 @@ from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.core.devices.services.device_context import DeviceContext
 
 
+@pytest.fixture(autouse=True)
+def _assistant_url_env(monkeypatch):
+    monkeypatch.setenv(
+        "TEAMCLAW_ASSISTANT_URL_BASE",
+        "https://teamclaw.alipay.com/assistant",
+    )
+    monkeypatch.setenv(
+        "TEAMCLAW_ASSISTANT_URL_BASE_PRE",
+        "https://teamclaw-pre.alipay.com/assistant",
+    )
+
+
 def _make_service(
     *,
     bot_provider=None,
@@ -93,7 +105,13 @@ class TestFindAutoInitiateAndRun:
                 {"id": "task-auto", "payload": {"kind": "autoInitiate", "message": "|kind:autoInitiate| 查询dima空间..."}},
             ]},
             # 第二次 invoke: forward_request 内部的 POST
-            {"success": True, "data": {"job_id": "task-auto"}},
+            {"success": True, "data": {
+                "job_id": "task-auto",
+                "message": "本次发起 1 个新任务",
+                "sessions": [
+                    {"session_id": "user:382716:session:s-1:agent:bot-1"},
+                ],
+            }},
         ])
 
         # get_device_connection_v2 也要 mock (forward_request 内部调用)
@@ -119,8 +137,17 @@ class TestFindAutoInitiateAndRun:
         first_call = transport.invoke.call_args_list[0]
         assert first_call[0][1] == "GET"
         assert first_call[0][2] == "/api/cron"
-        # 验证最终结果
+        # 验证最终结果，并为发起的会话补充 TeamClaw assistant 链接
         assert result["success"] is True
+        expected_url = (
+            "https://teamclaw.alipay.com/assistant?botId=bot-1"
+            "&sessionId=user:382716:session:s-1:agent:bot-1"
+        )
+        assert "sessions" not in result["data"]
+        assert result["data"]["message"] == (
+            "本次发起 1 个新任务\n\n会话链接：\n"
+            f"- {expected_url}"
+        )
 
     @pytest.mark.asyncio
     async def test_no_binding_raises(self):
@@ -296,6 +323,54 @@ class TestFindAutoInitiateAndRun:
             )
 
 
+def test_assistant_session_url_uses_pre_domain(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.cron.services.cron_relay.get_current_env",
+        lambda: "pre",
+    )
+
+    assert CronRelayService._assistant_session_url("bot-x", "session-x") == (
+        "https://teamclaw-pre.alipay.com/assistant?botId=bot-x"
+        "&sessionId=session-x"
+    )
+
+
+def test_append_auto_initiate_session_links_to_message():
+    payload = {
+        "message": "本次发起 2 个新任务",
+        "sessions": [
+            {"session_id": "user:u:session:s1:agent:bot-x"},
+            {"session_id": "user:u:session:s2:agent:bot-x"},
+        ],
+    }
+
+    CronRelayService._append_auto_initiate_session_links_to_message(payload, "bot-x")
+
+    assert payload["message"] == (
+        "本次发起 2 个新任务\n\n会话链接：\n"
+        "- https://teamclaw.alipay.com/assistant?botId=bot-x&sessionId=user:u:session:s1:agent:bot-x\n"
+        "- https://teamclaw.alipay.com/assistant?botId=bot-x&sessionId=user:u:session:s2:agent:bot-x"
+    )
+    assert "sessions" not in payload
+
+
+def test_collect_auto_initiate_session_links_handles_nested_shapes():
+    payload = {
+        "sessions": [
+            {"session_id": "user:u:session:s1:agent:bot-x"},
+            {"sessionId": "user:u:session:s2:agent:bot-x"},
+        ],
+        "ignored": {"session_id": ""},
+    }
+
+    urls = CronRelayService._collect_auto_initiate_session_links(payload, "bot-x")
+
+    assert urls == [
+        "https://teamclaw.alipay.com/assistant?botId=bot-x&sessionId=user:u:session:s1:agent:bot-x",
+        "https://teamclaw.alipay.com/assistant?botId=bot-x&sessionId=user:u:session:s2:agent:bot-x",
+    ]
+
+
 class TestRunSingleAutoInitiate:
     """CronRelayService.run_single_auto_initiate"""
 
@@ -312,7 +387,13 @@ class TestRunSingleAutoInitiate:
         transport = MagicMock()
         transport.invoke = AsyncMock(return_value={
             "success": True,
-            "data": {"total": 1, "created": 1, "errors": []},
+            "data": {
+                "total": 1,
+                "created": 1,
+                "message": "本次发起 1 个新任务",
+                "sessions": [{"session_id": "user:u1:session:s-2:agent:bot-1"}],
+                "errors": [],
+            },
         })
 
         template_repo = MagicMock()
@@ -332,6 +413,15 @@ class TestRunSingleAutoInitiate:
             dima_url="https://project.teamclaw.com/space/W1/requirement?openWorkItemId=123",
         )
         assert result["success"] is True
+        expected_url = (
+            "https://teamclaw.alipay.com/assistant?botId=bot-1"
+            "&sessionId=user:u1:session:s-2:agent:bot-1"
+        )
+        assert "sessions" not in result["data"]
+        assert result["data"]["message"] == (
+            "本次发起 1 个新任务\n\n会话链接：\n"
+            f"- {expected_url}"
+        )
         body = transport.invoke.call_args[0][3]
         assert body["workflow"] == "my-flow"
 

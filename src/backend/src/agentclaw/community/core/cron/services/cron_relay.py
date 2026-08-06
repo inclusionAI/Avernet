@@ -14,6 +14,7 @@ Architecture compliance:
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any, Optional
 
 from injector import inject
@@ -55,6 +56,9 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 _CRON_UNSUPPORTED_ENGINES = frozenset({"hermes"})
+_ASSISTANT_SESSION_URL_BASE_ENV = "TEAMCLAW_ASSISTANT_URL_BASE"
+_ASSISTANT_SESSION_URL_BASE_PRE_ENV = "TEAMCLAW_ASSISTANT_URL_BASE_PRE"
+_ASSISTANT_SESSION_URL_BASE_DEFAULT = "https://teamclaw.example.com/assistant"
 
 
 class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
@@ -397,8 +401,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         task_id = auto_initiate_job.get("id") or auto_initiate_job.get("task_id")
         logger.info(f"[find_auto_initiate_and_run] Found autoInitiate job {task_id} for bot {bot_id}")
 
-        # 5. 复用 forward_request 触发执行
-        return await self.forward_request(
+        # 5. 复用 forward_request 触发执行，并为创建出的每个会话补充可点击链接
+        result = await self.forward_request(
             bot_id=bot_id,
             user_id=user_id,
             nick_name=nick_name,
@@ -406,6 +410,10 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             path=f"/api/cron/{task_id}/run",
             params={"force": force},
         )
+        self._append_auto_initiate_session_links_to_message(
+            result.get("data"), str(bot.get("bot_id") or bot_id)
+        )
+        return result
 
     async def run_single_auto_initiate(
         self,
@@ -479,7 +487,7 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         if model:
             body["model"] = model
 
-        return await self.forward_request(
+        result = await self.forward_request(
             bot_id=bot_id,
             user_id=user_id,
             nick_name=nick_name,
@@ -487,6 +495,84 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             path="/api/cron/auto-initiate/run-single",
             body=body,
         )
+        self._append_auto_initiate_session_links_to_message(
+            result.get("data"), str(body["agent_id"])
+        )
+        return result
+
+    @staticmethod
+    def _assistant_session_url(bot_id: str, session_id: str) -> str:
+        """Build the TeamClaw assistant deep link for a bot session."""
+        if get_current_env() == "pre":
+            base_url = os.getenv(_ASSISTANT_SESSION_URL_BASE_PRE_ENV) or os.getenv(
+                _ASSISTANT_SESSION_URL_BASE_ENV,
+                _ASSISTANT_SESSION_URL_BASE_DEFAULT,
+            )
+        else:
+            base_url = os.getenv(
+                _ASSISTANT_SESSION_URL_BASE_ENV,
+                _ASSISTANT_SESSION_URL_BASE_DEFAULT,
+            )
+        return f"{base_url}?botId={bot_id}&sessionId={session_id}"
+
+    @classmethod
+    def _append_auto_initiate_session_links_to_message(
+        cls,
+        payload: Any,
+        bot_id: str,
+    ) -> None:
+        """Append created session links to the top-level message only.
+
+        The public response should keep the engine summary fields but should not
+        expose the verbose ``sessions`` list; links are presented in ``message``.
+        """
+        if not isinstance(payload, dict):
+            return
+
+        session_urls = cls._collect_auto_initiate_session_links(payload, bot_id)
+        payload.pop("sessions", None)
+        if not session_urls:
+            return
+
+        message = payload.get("message")
+        message_prefix = message if isinstance(message, str) and message else ""
+        links_message = "会话链接：\n" + "\n".join(
+            f"- {url}" for url in session_urls
+        )
+        payload["message"] = (
+            f"{message_prefix}\n\n{links_message}"
+            if message_prefix
+            else links_message
+        )
+
+    @classmethod
+    def _collect_auto_initiate_session_links(
+        cls,
+        payload: Any,
+        bot_id: str,
+    ) -> list[str]:
+        """Return assistant links for every session-like dict in the payload."""
+        session_urls: list[str] = []
+        if isinstance(payload, list):
+            for item in payload:
+                session_urls.extend(
+                    cls._collect_auto_initiate_session_links(item, bot_id)
+                )
+            return session_urls
+
+        if not isinstance(payload, dict):
+            return session_urls
+
+        session_id = payload.get("session_id") or payload.get("sessionId")
+        if isinstance(session_id, str) and session_id:
+            session_urls.append(cls._assistant_session_url(bot_id, session_id))
+
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                session_urls.extend(
+                    cls._collect_auto_initiate_session_links(value, bot_id)
+                )
+        return session_urls
 
     async def _fetch_bot_crons(
         self,
