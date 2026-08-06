@@ -3,10 +3,8 @@
 Tests the following endpoint from ``adapters/http/service_bot/router_build.py``:
 - POST /api/service-bot/build
 
-This endpoint exercises the post-R14 sandbox provider through
-``BotBuildService._sync_skill_links`` → ``provider.get_base_path()``.
-The provider's ``base_path`` now comes from ``WorkspaceConfig`` (typed,
-YAML-driven) instead of an ``is_local_mode`` flag.
+This endpoint exercises the engine-aware build plan selected by the sandbox
+provider. The provider's workspace configuration is typed and YAML-driven.
 
 In the test environment the rsync subprocess does not actually run:
 ``_migrate_bot_instance`` early-returns ``False`` when the source

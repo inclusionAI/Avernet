@@ -196,8 +196,6 @@ class BotBuildService:
         self,
         bot: Dict[str, Any],
         version: int = 1,
-        *,
-        active_skills_snapshot_required: bool = False,
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -208,9 +206,6 @@ class BotBuildService:
         Args:
             bot: Bot 信息字典，包含: bot_id, entity_id, entity_type, device_id, bot_name, bot_desc
             version: 迁移版本号（整数），默认 1
-            active_skills_snapshot_required: active Skills 快照失败时是否阻断构建；
-                Pool 发布传 True，Legacy 和历史直接构建保持 best-effort
-
         Returns:
             dict: 构建结果信息
                 - success: 构建是否成功
@@ -292,14 +287,12 @@ class BotBuildService:
                 provider=provider,
             )
 
-            if migration_success:
-                self._sync_skill_links(
-                    device_id=device_id,
-                    runtime_artifact_root=runtime_artifact_root,
-                    build_plan=build_plan,
-                    provider=provider,
-                    required=active_skills_snapshot_required,
-                )
+            # The host-side engine-root rsync is the sole writer of the
+            # versioned artifact. It preserves active symlinks and local Skill
+            # payloads while each engine build plan excludes mounted repo
+            # corpora. Do not make the Draft runtime write this target again:
+            # published NFS paths are not writable from every sandbox, and the
+            # Claude Code active root is already covered by extra_sync.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -643,83 +636,6 @@ class BotBuildService:
             runtime_kind=runtime_kind,
         )
 
-    def _sync_skill_links(
-        self,
-        device_id: str,
-        runtime_artifact_root: str,
-        build_plan: EngineBuildPlan,
-        provider: EngineSandboxProvider,
-        required: bool,
-    ) -> None:
-        """同步 skill 软链到目标目录。
-
-        Args:
-            device_id: 设备 ID，用于执行远程命令
-            runtime_artifact_root: 当前容器视角下的版本化发布制品根目录
-            build_plan: 引擎构建计划
-            provider: 当前引擎 provider
-            required: 失败时是否阻断构建
-
-        Raises:
-            BotBuildMigrationError: 同步失败
-        """
-        try:
-            source_base_path = provider.get_base_path().rstrip('/')
-            source_skill_path = f"{source_base_path}/{build_plan.skill_source_relpath.strip('/')}"
-            target_skill_path = (
-                f"{runtime_artifact_root.rstrip('/')}/"
-                f"{build_plan.skill_target_relpath.strip('/')}"
-            )
-            skill_cmd = (
-                "rsync -av --delete --delete-excluded "
-                "--exclude='skills-repo' --exclude='.skills-repo*' "
-                f"{source_skill_path}/ {target_skill_path}/"
-            )
-
-            logger.info(
-                f"[BotBuildService._sync_skill_links] "
-                f"Running rsync skill command:{skill_cmd}"
-            )
-
-            result = self._device_service.exec_shell_new(
-                device_id=device_id,
-                shell_cmd=skill_cmd,
-            )
-
-            if result.exit_code != 0:
-                message = (
-                    "active Skills mapping snapshot failed: "
-                    f"exit_code={result.exit_code}, stderr={result.stderr}"
-                )
-                log = logger.error if required else logger.warning
-                log(
-                    "[BotBuildService._sync_skill_links] "
-                    f"Active Skills mapping snapshot failed: device_id={device_id}, "
-                    f"required={required}, exit_code={result.exit_code}, "
-                    f"stderr={result.stderr}"
-                )
-                if required:
-                    raise BotBuildMigrationError(message)
-                return
-
-            logger.info(
-                "[BotBuildService._sync_skill_links] "
-                "Skill links synced successfully"
-            )
-        except BotBuildMigrationError:
-            raise
-        except Exception as e:
-            log = logger.error if required else logger.warning
-            log(
-                f"[BotBuildService._sync_skill_links] "
-                f"Active Skills mapping snapshot failed: device_id={device_id}, "
-                f"required={required}, error={e}"
-            )
-            if required:
-                raise BotBuildMigrationError(
-                    f"active Skills mapping snapshot failed: {e}"
-                ) from e
-
     def _run_local_command(
         self,
         cmd: list[str],
@@ -860,6 +776,11 @@ class BotBuildService:
                 "rsync",
                 "-av",           # 归档模式 + 详细输出
                 "--delete",       # 删除目标目录中不存在于源目录的文件
+                # The versioned target is reused when the same publish version
+                # retries. Excluded mount/corpus paths must not survive from an
+                # earlier partial artifact, otherwise Pool active roots can
+                # expose the full repository through a stale bridge.
+                "--delete-excluded",
                 *excludes,
                 f"{source_dir}/",
                 f"{target_dir}/",
@@ -890,6 +811,7 @@ class BotBuildService:
                     "rsync",
                     "-av",
                     "--delete",
+                    "--delete-excluded",
                     *excludes,
                     f"{extra_source}/",
                     f"{extra_target}/",
