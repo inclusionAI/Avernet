@@ -216,6 +216,7 @@ run_real_singlebox() {
     BACKEND_READY_ATTEMPTS="${BACKEND_READY_ATTEMPTS:-120}" \
     STANDALONE_OPENCLAW_ROOT="$coverage_standalone_root" \
     STANDALONE_RUNTIME_DIR="$coverage_standalone_runtime" \
+    SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE="$repo_root/src/backend/tests/community/acceptance/mcp/fixture_mcp_center.json" \
     bash "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start all
   local acceptance_status=0
   local bcs_e2e_status=0
