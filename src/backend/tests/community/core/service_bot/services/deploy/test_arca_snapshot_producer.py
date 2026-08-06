@@ -30,17 +30,13 @@ class _RecordingBuild:
     def __init__(self, result: dict[str, Any]) -> None:
         self.result = result
         self.calls: list[tuple[dict[str, Any], int]] = []
-        self.snapshot_requirements: list[bool] = []
 
     def build(
         self,
         bot: dict[str, Any],
         version: int = 1,
-        *,
-        active_skills_snapshot_required: bool = False,
     ) -> dict[str, Any]:
         self.calls.append((bot, version))
-        self.snapshot_requirements.append(active_skills_snapshot_required)
         return self.result
 
 
@@ -152,7 +148,6 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
         "active_layout": "pool",
         "layout_contract_version": "skills-pool-p3-v1",
     }
-    assert stub.snapshot_requirements == [True]
     assert layout_repository.scopes == [
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
         BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
@@ -187,19 +182,9 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
     )
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(
-            self,
-            bot,
-            version=1,
-            *,
-            active_skills_snapshot_required=False,
-        ):
+        def build(self, bot, version=1):
             repository.state = pool_state
-            return super().build(
-                bot,
-                version,
-                active_skills_snapshot_required=active_skills_snapshot_required,
-            )
+            return super().build(bot, version)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -295,23 +280,13 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(
-            self,
-            bot,
-            version=1,
-            *,
-            active_skills_snapshot_required=False,
-        ):
+        def build(self, bot, version=1):
             repository.state = replace(
                 initial,
                 phase=SkillLayoutPhase.NEEDS_MANUAL_REPAIR,
                 migration_generation="generation-2",
             )
-            return super().build(
-                bot,
-                version,
-                active_skills_snapshot_required=active_skills_snapshot_required,
-            )
+            return super().build(bot, version)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -357,22 +332,12 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
     repository = _LayoutRepository(initial)
 
     class _StateChangingBuild(_RecordingBuild):
-        def build(
-            self,
-            bot,
-            version=1,
-            *,
-            active_skills_snapshot_required=False,
-        ):
+        def build(self, bot, version=1):
             repository.state = replace(
                 initial,
                 layout_contract_version="skills-pool-p3-v1",
             )
-            return super().build(
-                bot,
-                version,
-                active_skills_snapshot_required=active_skills_snapshot_required,
-            )
+            return super().build(bot, version)
 
     producer = ArcaSnapshotProducer(
         _StateChangingBuild(
@@ -489,9 +454,6 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
         "active_layout": "legacy",
         "layout_contract_version": None,
     }
-    assert build.snapshot_requirements == [False]
-
-
 @pytest.mark.unit
 def test_historical_publish_without_manifest_is_explicitly_legacy() -> None:
     assert service_skills_env_from_ext(

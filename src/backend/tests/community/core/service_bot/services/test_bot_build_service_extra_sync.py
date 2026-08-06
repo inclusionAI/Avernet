@@ -73,7 +73,6 @@ class TestMigrateBotInstanceExtraSync:
         # rsync（command_name="rsync"），不应出现 "rsync (extra)"。
         service = _make_service()
         service._run_local_command = MagicMock(return_value=None)
-        service._sync_skill_links = MagicMock(return_value=None)
 
         source_dir, target_dir = _seed_dirs(tmp_path)
         plan = _make_plan()  # extra_sync_* 默认空
@@ -106,7 +105,6 @@ class TestMigrateBotInstanceExtraSync:
         # 命令使用与主 rsync 一致的 -av --delete + excludes 模板。
         service = _make_service()
         service._run_local_command = MagicMock(return_value=None)
-        service._sync_skill_links = MagicMock(return_value=None)
 
         source_dir, target_dir = _seed_dirs(tmp_path, with_extra_source=True)
         plan = _make_plan(
@@ -156,7 +154,6 @@ class TestMigrateBotInstanceExtraSync:
         # 成功后才意外丢失配置（claude_code 的 .claude 是必备产物）。
         service = _make_service()
         service._run_local_command = MagicMock(return_value=None)
-        service._sync_skill_links = MagicMock(return_value=None)
 
         source_dir, target_dir = _seed_dirs(tmp_path, with_extra_source=False)
         plan = _make_plan(extra_src=".claude", extra_tgt="claude")
