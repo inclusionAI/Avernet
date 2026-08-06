@@ -2,10 +2,12 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import DomainMap, Forwarding
+from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
+from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.spi.forwarder import Forwarder
 from gateway.community.spi.schema_catalog import SchemaCatalog
 from gateway.community.spi.ws_forwarder import WebSocketForwarder
@@ -349,3 +351,44 @@ class TestTagsPreservedFromCombinedCatalogs:
         assert result["tags"] == [
             {"name": "Shared", "description": "From first domain."}
         ]
+
+
+class TestBuildForwardingWithMixedSources:
+    def test_routes_http_domain_to_http_catalog(self) -> None:
+        from gateway.community.bootstrap._forwarding import build_forwarding
+
+        config_data = {
+            "base_path": "/openapi/v1",
+            "domains": {
+                "chat": {
+                    "server": "baas",
+                    "schema": {
+                        "source": "http",
+                        "url": "https://example.com/openapi.json",
+                        "refresh_seconds": 60,
+                    },
+                }
+            },
+            "servers": {"baas": {"base_url": "http://baas:9090"}},
+        }
+
+        with patch(
+            "gateway.community.bootstrap._forwarding._load_domain_map"
+        ) as mock_dm:
+            mock_dm.return_value = DomainMap.from_config(config_data, variables={})
+
+            http_cat = HttpSchemaCatalog()
+            file_cat = FileSchemaCatalog()
+            forwarder = MagicMock(spec=Forwarder)
+            ws_forwarder = MagicMock(spec=WebSocketForwarder)
+
+            result = build_forwarding(
+                schema_catalogs={"file": file_cat, "http": http_cat},
+                forwarder=forwarder,
+                ws_forwarder=ws_forwarder,
+            )
+
+        assert "chat" in http_cat._sources
+        assert http_cat._sources["chat"] == "https://example.com/openapi.json"
+        assert isinstance(result, Forwarding)
+        assert result.schema_catalogs is not None

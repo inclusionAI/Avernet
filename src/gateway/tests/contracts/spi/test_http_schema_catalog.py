@@ -9,6 +9,10 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
+from gateway.community.plugins.schema_catalog.http._plugin import (
+    _build_conditional_headers,
+    _store_conditional_headers,
+)
 from gateway.community.spi.schema_catalog import SchemaCatalog
 
 
@@ -157,3 +161,139 @@ async def test_refresh_loop_updates_cache_and_stops():
         await task
 
     assert catalog.current("bots")["version"] == 1
+
+
+def test_set_sources_replaces_existing() -> None:
+    catalog = _new_catalog({"old": "http://example.com/old.json"})
+    assert "old" in catalog._sources
+
+    catalog.set_sources({"new": "http://example.com/new.json"})
+    assert "old" not in catalog._sources
+    assert catalog._sources == {"new": "http://example.com/new.json"}
+
+
+def test_refresh_all_calls_refresh_for_each_domain() -> None:
+    catalog = _new_catalog(
+        {"a": "http://example.com/a.json", "b": "http://example.com/b.json"}
+    )
+    catalog._client = _mock_client(_make_response(200, {"version": 1}))
+
+    catalog.refresh_all()
+    assert catalog.current("a") == {"version": 1}
+    assert catalog.current("b") == {"version": 1}
+
+
+def test_set_sources_does_not_mutate_input() -> None:
+    sources = {"x": "http://example.com/x.json"}
+    catalog = _new_catalog(sources)
+    sources["y"] = "http://example.com/y.json"
+    assert "y" not in catalog._sources
+    assert catalog._sources == {"x": "http://example.com/x.json"}
+
+
+def test_httpx_error_on_refresh_returns_false() -> None:
+    catalog = _new_catalog({"bots": "http://example.com/bots.json"})
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
+    catalog._client = client
+
+    assert catalog.refresh("bots") is False
+    assert catalog.current("bots") == {}
+
+
+async def test_refresh_all_async_catches_per_domain_exception() -> None:
+    catalog = _new_catalog(
+        {"good": "http://example.com/good.json", "bad": "http://example.com/bad.json"}
+    )
+    client = AsyncMock()
+    client.get = AsyncMock(
+        side_effect=[
+            _make_response(200, {"version": 1}),
+            httpx.ConnectError("refused"),
+        ]
+    )
+    catalog._client = client
+
+    await catalog._refresh_all_async()
+    assert catalog.current("good") == {"version": 1}
+    assert catalog.current("bad") == {}
+
+
+async def test_refresh_all_async_bare_exception_is_caught() -> None:
+    catalog = _new_catalog({"x": "http://example.com/x.json"})
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=ValueError("unexpected"))
+    catalog._client = client
+
+    await catalog._refresh_all_async()
+    assert catalog.current("x") == {}
+
+
+def test_get_client_creates_new_when_none_set() -> None:
+    catalog = _new_catalog({})
+    assert catalog._client is None
+
+    client = catalog._get_client()
+    assert isinstance(client, httpx.AsyncClient)
+    assert client.timeout == httpx.Timeout(30.0)
+
+
+def test_build_conditional_headers_with_both() -> None:
+    headers = _build_conditional_headers('"abc"', "Thu, 01 Jan 2026 00:00:00 GMT")
+    assert headers == {
+        "Accept": "application/json, application/yaml",
+        "If-None-Match": '"abc"',
+        "If-Modified-Since": "Thu, 01 Jan 2026 00:00:00 GMT",
+    }
+
+
+def test_build_conditional_headers_with_neither() -> None:
+    headers = _build_conditional_headers(None, None)
+    assert headers == {"Accept": "application/json, application/yaml"}
+
+
+def test_store_conditional_headers_stores_etag_and_last_modified() -> None:
+    etags: dict[str, str] = {}
+    last_modified: dict[str, str] = {}
+    response = _make_response(
+        200,
+        {"version": 1},
+        {"etag": '"xyz"', "last-modified": "Wed, 02 Jan 2026 00:00:00 GMT"},
+    )
+
+    _store_conditional_headers(response, "bots", etags, last_modified)
+    assert etags == {"bots": '"xyz"'}
+    assert last_modified == {"bots": "Wed, 02 Jan 2026 00:00:00 GMT"}
+
+
+def test_store_conditional_headers_skips_missing() -> None:
+    etags: dict[str, str] = {}
+    last_modified: dict[str, str] = {}
+    response = _make_response(200, {"version": 1})
+
+    _store_conditional_headers(response, "bots", etags, last_modified)
+    assert etags == {}
+    assert last_modified == {}
+
+
+def test_store_conditional_headers_only_etag() -> None:
+    etags: dict[str, str] = {}
+    last_modified: dict[str, str] = {}
+    response = _make_response(200, {"version": 1}, {"etag": '"abc"'})
+
+    _store_conditional_headers(response, "bots", etags, last_modified)
+    assert etags == {"bots": '"abc"'}
+    assert last_modified == {}
+
+
+async def test_httpx_error_on_async_refresh_returns_false() -> None:
+    """httpx.HTTPError during _refresh_async returns False, keeps old cache."""
+    catalog = _new_catalog({"bots": "http://example.com/bots.json"})
+    catalog._cache["bots"] = {"version": 1}
+    client = AsyncMock()
+    client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
+    catalog._client = client
+
+    result = await catalog._refresh_async("bots", "http://example.com/bots.json")
+    assert result is False
+    assert catalog.current("bots") == {"version": 1}
