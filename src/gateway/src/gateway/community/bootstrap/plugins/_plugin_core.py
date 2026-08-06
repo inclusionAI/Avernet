@@ -33,8 +33,7 @@ class PluginContainer(containers.DeclarativeContainer):
         httpx=providers.Singleton(HttpxForwarder),
     )
 
-    schema_catalog = providers.Selector(
-        config.plugins.schema_catalog,
+    schema_catalogs = providers.Dict(
         file=providers.Singleton(FileSchemaCatalog),
         http=providers.Singleton(HttpSchemaCatalog),
     )
