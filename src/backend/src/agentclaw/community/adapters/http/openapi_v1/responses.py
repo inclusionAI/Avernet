@@ -97,12 +97,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
-from agentclaw.community.core.service_bot.services.publish_exceptions import (
-    BotNotFoundError as PublishBotNotFoundError,
-    BotPublishServiceError,
-    PublishNotDeletableError,
-    PublishNotFoundError,
-)
 from agentclaw.community.core.services.identity import (
     InvalidIdentityEntityTypeError,
     InvalidIdentityFileTypeError,
@@ -287,32 +281,6 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     McpConfigValueError: (400, "Invalid MCP configuration"),
     McpSyncFailedError: (502, "Device sync failed"),
     McpMarketUnavailableError: (502, "MCP service error"),
-    # Service-bot publish domain, reached when a ``service`` bot is deleted
-    # through its publish lifecycle. Its own hierarchy — ``BotPublishServiceError``
-    # derives from ``Exception``, NOT from ``BotServiceError`` — so the base
-    # fallback below does not cover it, and without these entries every one of
-    # them would escape the envelope as a 500.
-    #
-    # Order inside this block is load-bearing for the same reason as the
-    # engine-runtime block: the three leaves subclass ``BotPublishServiceError``,
-    # which is therefore listed last of the four.
-    #
-    # Both 404s are byte-identical to the bots not-found above: "this bot has no
-    # publication" and "it is not yours" must not be distinguishable, or the
-    # response probes for existence across owners.
-    PublishNotFoundError: (404, "Not found"),
-    PublishBotNotFoundError: (404, "Not found"),
-    # Not 500 and not 404: the publication exists and is the caller's, but it is
-    # past the point where deletion is allowed (published, or already released).
-    # That is the same "your bot is not in a state for this" answer 409 carries
-    # everywhere else on this surface.
-    PublishNotDeletableError: (
-        409,
-        "Bot is not in a valid state for this operation",
-    ),
-    # Base of the three above — LAST of its group. Raised for missing
-    # dependencies and persistence failures, which are ours, not the caller's.
-    BotPublishServiceError: (500, "Internal error"),
     # Base class LAST: the bot mappings above subclass BotServiceError (the
     # resources, identity, MCP, and engine-runtime entries are separate
     # hierarchies that never match a bot error), and

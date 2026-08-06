@@ -22,7 +22,6 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     BotPublishServiceError,
     BotTypeNotSupportedError,
     PublishAlreadyExistsError,
-    PublishNotDeletableError,
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
@@ -916,8 +915,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             True 如果删除成功
 
         Raises:
-            BotPublishServiceError: BotService/PublishFlowService 未配置
-            PublishNotDeletableError: 不满足删除条件（非草稿 / 已有成功发布）
+            BotPublishServiceError: BotService/PublishFlowService 未配置或不满足删除条件
             PublishNotFoundError: 发布单不存在
         """
         # 1. 查询发布单
@@ -925,11 +923,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         if not publish_record:
             raise PublishNotFoundError(f"Publish record not found: {publish_id}")
 
-        # 2. 检查是否可删除。抛具体子类而非基类:调用方(尤其是公开 API)
-        # 需要把"当前还不能删"与"内部故障"映射到不同的状态码;基类同时承载
-        # 两者。子类仍是 BotPublishServiceError,既有 except 分支不受影响。
+        # 2. 检查是否可删除
         if not self.can_delete_bot(publish_id):
-            raise PublishNotDeletableError(
+            raise BotPublishServiceError(
                 f"Cannot delete service bot: publish_id={publish_id}, "
                 f"status={publish_record.status}, check can_delete_bot conditions"
             )
@@ -970,38 +966,6 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
 
         return result
-
-    def delete_service_bot_by_bot_id(self, bot_id: str, owner_id: str) -> bool:
-        """按 bot_id 删除服务 Bot(发布单 ID 由 owner 作用域内的记录解析)。
-
-        与 :meth:`delete_service_bot` 相同的删除条件与流程,只是入口是 bot_id:
-        调用方持有的是 Bot 标识而非发布单 ID(公开 API ``/openapi/v1/bots``
-        按 bot 寻址,不暴露发布单 ID)。
-
-        owner 作用域由查询本身保证 —— ``get_by_publish_bot_id`` 带 owner_id
-        过滤,因此他人的发布单在这里表现为"不存在",不会被删除。
-
-        草稿期 ``publish_bot_id == bot_id``,所以刚创建、尚未发布的服务 Bot
-        正是这里能定位并删除的那一类;其余状态由 ``can_delete_bot`` 照常拒绝。
-
-        Args:
-            bot_id: Bot ID(草稿期即 publish_bot_id)
-            owner_id: Owner ID
-
-        Returns:
-            True 如果删除成功
-
-        Raises:
-            BotPublishServiceError: BotService/PublishFlowService 未配置
-            PublishNotDeletableError: 不满足删除条件（非草稿 / 已有成功发布）
-            PublishNotFoundError: 该 Bot 没有当前 owner 名下的发布单
-        """
-        publish_record = self._repo.get_by_publish_bot_id(bot_id, owner_id, self._env)
-        if not publish_record:
-            raise PublishNotFoundError(
-                f"Publish record not found: bot_id={bot_id}, owner_id={owner_id}"
-            )
-        return self.delete_service_bot(publish_id=publish_record.id)
 
     def can_delete_bot(self, publish_id: int) -> bool:
         """检查发布单是否可以删除。

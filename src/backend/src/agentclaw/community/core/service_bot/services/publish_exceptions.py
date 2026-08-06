@@ -30,17 +30,6 @@ class PublishStatusInvalidError(BotPublishServiceError):
     """发布单状态无效错误。"""
 
 
-class PublishNotDeletableError(BotPublishServiceError):
-    """发布单不满足删除条件错误（非草稿，或已有发布成功的版本）。
-
-    A distinct type rather than the bare base: "you may not delete this yet" is
-    a caller-visible refusal, while the base is also raised for genuine internal
-    failures (missing dependency, persistence error). A surface that maps the
-    two onto one status would report either an internal fault as the caller's
-    mistake, or the caller's mistake as an internal fault.
-    """
-
-
 class BotAlreadyServiceTypeError(BotPublishServiceError):
     """Bot 已经是服务型错误。"""
 

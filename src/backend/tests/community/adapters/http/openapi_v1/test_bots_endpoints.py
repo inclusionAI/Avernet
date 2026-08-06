@@ -20,7 +20,6 @@ import importlib
 
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
@@ -101,17 +100,7 @@ def passport():
 
 
 @pytest.fixture
-def publish():
-    """The service-bot publish service — the delete path for ``service`` bots."""
-    m = MagicMock()
-    m.delete_service_bot_by_bot_id.return_value = True
-    return m
-
-
-@pytest.fixture
-def client(
-    svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel, publish
-):
+def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, auth_rel):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
@@ -121,7 +110,6 @@ def client(
             binder.bind(BotRepository, to=bot_repo)
             binder.bind(SkillSetServiceFactoryProtocol, to=skill_set_factory)
             binder.bind(AuthRelationshipPlugin, to=auth_rel)
-            binder.bind(BotPublishServiceProtocol, to=publish)
 
     app = FastAPI()
     app.include_router(router)
@@ -853,96 +841,30 @@ def test_update_still_carries_the_bearer_token(client, svc):
 # ----- round-16 review regressions ------------------------------------------
 
 
-def test_delete_service_bot_runs_the_publish_lifecycle(client, svc, publish):
-    """R16/F53: service bots are deleted *through* their publish lifecycle.
+def test_delete_service_bot_is_rejected(client, svc):
+    """R16/F53: service bots are deleted through their publish lifecycle.
 
-    This surface can create a service bot (``bot_type: "service"``), so refusing
-    to delete one left the caller unable to remove the draft it had just made.
-    The refusal is replaced by delegation, not by the generic delete: that one
-    would remove the source bot, Passport and device while successful
-    publication records and verification resources survived.
+    ``BotPublishService.delete_service_bot`` refuses unless the publication is a
+    deletable draft with no successful publish, and destroys the verification
+    histories first. Generic ``delete_bot`` does none of that, so it would
+    remove the source bot, Passport and device while successful publication
+    records and verification resources survive.
     """
     svc.get_bot.return_value = {**BOT, "bot_type": "service"}
-    _ok(client.delete("/openapi/v1/bots/b1"))
-    publish.delete_service_bot_by_bot_id.assert_called_once_with(
-        bot_id="b1", owner_id="u1"
-    )
-    # The generic path must stay out of it — the publish service owns the
-    # teardown order and calls BotService.delete_bot itself, at the end.
-    svc.delete_bot.assert_not_called()
-
-
-def test_delete_service_bot_without_publication_is_404(client, svc, publish):
-    """A service bot with no publication of the caller's is "not found".
-
-    Byte-identical to every other 404 on this surface: "no publication" and
-    "not yours" must not be distinguishable.
-    """
-    from agentclaw.community.core.service_bot.services.publish_exceptions import (
-        PublishNotFoundError,
-    )
-
-    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
-    publish.delete_service_bot_by_bot_id.side_effect = PublishNotFoundError("no pub")
-    resp = client.delete("/openapi/v1/bots/b1")
-    assert resp.status_code == 404
-    assert resp.json()["message"] == "Not found"
-
-
-def test_delete_service_bot_past_draft_is_409(client, svc, publish):
-    """Delegation loosens no rule: an undeletable publication is still refused.
-
-    409 rather than 500 — the publication is the caller's and exists, it is just
-    past the point where deletion is allowed.
-    """
-    from agentclaw.community.core.service_bot.services.publish_exceptions import (
-        PublishNotDeletableError,
-    )
-
-    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
-    publish.delete_service_bot_by_bot_id.side_effect = PublishNotDeletableError("no")
     resp = client.delete("/openapi/v1/bots/b1")
     assert resp.status_code == 409
     assert resp.json()["code"] == 409000
     svc.delete_bot.assert_not_called()
 
 
-def test_delete_service_bot_internal_failure_is_500_enveloped(client, svc, publish):
-    """The base publish error is ours, not the caller's — and must stay enveloped.
-
-    ``BotPublishServiceError`` is not a ``BotServiceError``, so without its own
-    entry in the mapping table it would escape as ``{"detail": ...}``.
-    """
-    from agentclaw.community.core.service_bot.services.publish_exceptions import (
-        BotPublishServiceError,
-    )
-
-    svc.get_bot.return_value = {**BOT, "bot_type": "service"}
-    publish.delete_service_bot_by_bot_id.side_effect = BotPublishServiceError("boom")
-    resp = client.delete("/openapi/v1/bots/b1")
-    assert resp.status_code == 500
-    assert resp.json()["code"] == 500000
-    assert resp.json()["message"] == "Internal error"
-
-
-def test_delete_desktop_bot_is_still_rejected(client, svc, publish):
-    """Relaxing the service-bot rule must not relax the desktop one beside it."""
-    svc.get_bot.return_value = {**BOT, "bot_type": "desktop"}
-    resp = client.delete("/openapi/v1/bots/b1")
-    assert resp.status_code == 409
-    svc.delete_bot.assert_not_called()
-    publish.delete_service_bot_by_bot_id.assert_not_called()
-
-
 def test_service_bot_restart_is_still_allowed(client, svc):
-    """Restart does not touch the publication, so it stays on the generic path."""
+    """Only deletion is refused — restart does not touch the publication."""
     svc.get_bot.return_value = {**BOT, "bot_type": "service"}
     _ok(client.post("/openapi/v1/bots/b1/restart"))
     svc.restart_bot.assert_called_once()
 
 
-def test_personal_bot_delete_is_unaffected(client, svc, publish):
+def test_personal_bot_delete_is_unaffected(client, svc):
     """The guard must not widen to the type this surface does manage."""
     _ok(client.delete("/openapi/v1/bots/b1"))
     svc.delete_bot.assert_called_once_with("b1", "u1")
-    publish.delete_service_bot_by_bot_id.assert_not_called()

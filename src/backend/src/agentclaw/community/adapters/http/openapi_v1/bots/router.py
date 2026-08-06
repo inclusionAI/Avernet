@@ -42,7 +42,6 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
-from agentclaw.community.api.bot_publish_service import BotPublishServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
@@ -122,7 +121,7 @@ def _auth_status_error(status: str, request: Request) -> JSONResponse:
     return JSONResponse(status_code=400, content=body.model_dump())
 
 
-def _reject_unowned_lifecycle(bot: dict[str, Any]) -> None:
+def _reject_unowned_lifecycle(bot: dict[str, Any], *, deleting: bool = False) -> None:
     """Refuse lifecycle operations this surface does not own (→ 409).
 
     Desktop bots have a dedicated service and their own internal namespace
@@ -137,14 +136,23 @@ def _reject_unowned_lifecycle(bot: dict[str, Any]) -> None:
     handle desktop bots at all. Delegating instead would mean taking on the
     desktop service as a public dependency — a wider change than this surface
     should make on its own.
-
-    Service bots are **not** refused here. They were, on deletion, for as long
-    as this surface had no way to run their publish lifecycle; ``delete_bot``
-    now delegates to it, so the refusal is gone. See :func:`delete_bot`.
     """
-    if (bot.get("bot_type") or "") == "desktop":
+    bot_type = bot.get("bot_type") or ""
+    if bot_type == "desktop":
         raise BotOperationNotAllowedError(
             "desktop bots are managed by the desktop service"
+        )
+    # Service bots additionally have a publish lifecycle. Deleting one goes
+    # through BotPublishService.delete_service_bot, which refuses unless the
+    # publication is a deletable draft with no successful publish, and destroys
+    # the verification histories first. Generic delete_bot does none of that, so
+    # it would remove the source bot, Passport and device while successful
+    # publication records and verification resources survive.
+    #
+    # Only deletion: reads and restart do not touch the publication.
+    if deleting and bot_type == "service":
+        raise BotOperationNotAllowedError(
+            "service bots are deleted through their publish lifecycle"
         )
 
 
@@ -413,37 +421,11 @@ async def delete_bot(
     request: Request,
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    publish_service: BotPublishServiceProtocol = Injected(BotPublishServiceProtocol),
 ) -> Envelope[Deleted]:
-    """Delete a bot. See :func:`_reject_unowned_lifecycle` for what is refused.
-
-    A ``service`` bot goes through its publish lifecycle rather than the generic
-    delete: ``delete_service_bot_by_bot_id`` refuses unless the publication is a
-    deletable draft with no successful publish, destroys the verification
-    histories, and only then removes the bot. Generic ``delete_bot`` does none of
-    that — it would take the source bot, Passport and device while successful
-    publication records and verification resources survived, which is why this
-    surface used to refuse the whole operation (409) instead.
-
-    Refusing was defensible only while nothing here could run that lifecycle,
-    and it left a hole this surface opened itself: it *can* create a service bot
-    (``bot_type: "service"``), and the caller then had no public way to remove
-    the draft it had just created. Delegating closes it without loosening a
-    single rule — every condition ``delete_service_bot`` enforces still applies,
-    and a publication that is not deletable is still refused (409), now for the
-    accurate reason.
-
-    Owner scoping is not weakened by the second call: the publish lookup filters
-    on ``owner_id``, so another owner's publication reads as "not found" here
-    exactly as ``get_bot`` above already answers for another owner's bot.
-    """
+    """Delete a bot. See :func:`_reject_unowned_lifecycle` for what is refused."""
     owner_id = caller_owner_id(principal)
-    bot = bot_service.get_bot(bot_id, owner_id)
-    _reject_unowned_lifecycle(bot)
-    if (bot.get("bot_type") or "") == "service":
-        publish_service.delete_service_bot_by_bot_id(bot_id=bot_id, owner_id=owner_id)
-    else:
-        bot_service.delete_bot(bot_id, owner_id)
+    _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id), deleting=True)
+    bot_service.delete_bot(bot_id, owner_id)
     return deleted_envelope(request)
 
 

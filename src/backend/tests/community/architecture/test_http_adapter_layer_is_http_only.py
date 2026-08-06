@@ -186,7 +186,6 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "BotPublishServiceError", "PublishFlowServiceError",
     "BotAlreadyServiceTypeError", "BotTypeNotSupportedError",
     "PublishAlreadyExistsError", "PublishNotFoundError",
-    "PublishNotDeletableError",
     "PublishStatusInvalidError", "InvalidTransitionError",
     "BotPublicServiceError", "BotNotPublicError",
     "DesktopBotServiceError",
