@@ -89,19 +89,6 @@ class ArcaSandbox(Protocol):
         ...
 
 
-class ArcaRequestApiKeyResolver(Protocol):
-    """Resolve an optional request-scoped Arca API key from opaque properties.
-
-    Generic PaaS services forward ``extra_properties`` without inspecting their
-    engine-owned content. Concrete extensions own the interpretation and secret
-    resolution rules.
-    """
-
-    def resolve(self, extra_properties: dict[str, Any] | None) -> str | None:
-        """Return a request-scoped API key, or None to keep fixed credentials."""
-        ...
-
-
 class ArcaSandboxPlugin(Protocol):
     """Factory protocol for creating and connecting to Arca sandbox devices.
 

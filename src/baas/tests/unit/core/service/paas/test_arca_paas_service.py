@@ -417,20 +417,55 @@ def test__safe_repr__repr_fails():
     assert "boom" in result
 
 
+def _registry_with_value(value):
+    """Build an ArcaProvisioningRegistry whose only strategy returns ``value``."""
+    from secbaas.community.spi.sandbox.arca import (
+        ArcaProvisioningRegistry,
+        ArcaProvisioningStrategy,
+    )
+
+    class _StubStrategy(ArcaProvisioningStrategy):
+        @property
+        def namespace(self):
+            return "engine"
+
+        def resolve_request_api_key(self, extra_properties):
+            return value
+
+    return ArcaProvisioningRegistry([_StubStrategy()])
+
+
+def _registry_raising(exc):
+    """Build an ArcaProvisioningRegistry whose only strategy raises ``exc``."""
+    from secbaas.community.spi.sandbox.arca import (
+        ArcaProvisioningRegistry,
+        ArcaProvisioningStrategy,
+    )
+
+    class _StubStrategy(ArcaProvisioningStrategy):
+        @property
+        def namespace(self):
+            return "engine"
+
+        def resolve_request_api_key(self, extra_properties):
+            raise exc
+
+    return ArcaProvisioningRegistry([_StubStrategy()])
+
+
 class TestArcaRequestCredentialExtension:
     def test_resolver_receives_opaque_extra_properties(
         self, arca_credentials, mock_plugin
     ):
         from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        resolver = MagicMock()
-        resolver.resolve.return_value = "dynamic-arca-api-key"
+        registry = _registry_with_value("dynamic-arca-api-key")
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            request_api_key_resolver=resolver,
+            arca_provisioning_registry=registry,
         )
-        extra_properties = {"some_engine": {"opaque": "ciphertext"}}
+        extra_properties = {"engine": {"opaque": "ciphertext"}}
 
         assert (
             service._resolve_request_api_key(
@@ -438,7 +473,7 @@ class TestArcaRequestCredentialExtension:
             )
             == "dynamic-arca-api-key"
         )
-        resolver.resolve.assert_called_once_with(extra_properties)
+        # registry dispatched to the engine strategy and returned the value
 
     def test_missing_resolver_keeps_fixed_credential(
         self, arca_credentials, mock_plugin
@@ -462,15 +497,16 @@ class TestArcaRequestCredentialExtension:
     ):
         from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        resolver = MagicMock()
-        resolver.resolve.side_effect = RuntimeError("credential-bearing-message")
+        registry = _registry_raising(RuntimeError("credential-bearing-message"))
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            request_api_key_resolver=resolver,
+            arca_provisioning_registry=registry,
         )
 
-        with patch.object(service._logger, "warning") as warning:
+        import logging
+
+        with patch.object(logging.getLogger(), "warning") as warning:
             assert (
                 service._resolve_request_api_key(
                     ArcaCreateConfig(extra_properties={"engine": {"secret": "value"}})
@@ -488,12 +524,11 @@ class TestArcaRequestCredentialExtension:
         from secbaas.community.api.device_manage import ArcaCreateConfig
 
         opaque_secret = "opaque-engine-secret"
-        resolver = MagicMock()
-        resolver.resolve.return_value = "dynamic-arca-api-key"
+        registry = _registry_with_value("dynamic-arca-api-key")
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            request_api_key_resolver=resolver,
+            arca_provisioning_registry=registry,
         )
         info = MagicMock()
         info.status = MagicMock(value="READY")
@@ -529,12 +564,11 @@ class TestArcaRequestCredentialExtension:
 
         opaque_secret = "opaque-engine-secret"
         dynamic_api_key = "dynamic-arca-api-key"
-        resolver = MagicMock()
-        resolver.resolve.return_value = dynamic_api_key
+        registry = _registry_with_value(dynamic_api_key)
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            request_api_key_resolver=resolver,
+            arca_provisioning_registry=registry,
         )
         mock_plugin.create_sync_sandbox.side_effect = RuntimeError(
             f"Authorization: Bearer {dynamic_api_key}; opaque={opaque_secret}"

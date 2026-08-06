@@ -27,7 +27,7 @@ from secbaas.community.api.device_manage import (
 from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
-    ArcaRequestApiKeyResolver,
+    ArcaProvisioningRegistry,
     ArcaSandboxError,
     ArcaSandboxNotFoundError,
     ArcaSandboxPlugin,
@@ -116,7 +116,7 @@ class ArcaPaasService(PaasService):
         self,
         credentials: ArcaCredentials,
         arca_sandbox_plugin: ArcaSandboxPlugin,
-        request_api_key_resolver: ArcaRequestApiKeyResolver | None = None,
+        arca_provisioning_registry: ArcaProvisioningRegistry | None = None,
     ):
         """Initialize ArcaPaasService with pre-resolved credentials and plugin.
 
@@ -137,7 +137,7 @@ class ArcaPaasService(PaasService):
 
         self._credentials = credentials
         self._arca_sandbox_plugin = arca_sandbox_plugin
-        self._request_api_key_resolver = request_api_key_resolver
+        self._arca_provisioning_registry = arca_provisioning_registry
         self._logger = get_logger("core-service")
 
     async def get_credentials(self) -> ArcaCredentials:
@@ -311,19 +311,16 @@ class ArcaPaasService(PaasService):
         return mount_points
 
     def _resolve_request_api_key(self, config: ArcaCreateConfig) -> str | None:
-        """Resolve an optional request credential through the extension seam."""
-        resolver = self._request_api_key_resolver
-        if resolver is None:
+        """Resolve an optional request credential through the registry seam.
+
+        Fail-open is owned by the registry: a missing/illegal payload or an
+        extension exception both yield ``None`` so the legacy fixed credential
+        path is preserved. This service stays engine-agnostic.
+        """
+        registry = self._arca_provisioning_registry
+        if registry is None:
             return None
-        try:
-            return resolver.resolve(config.extra_properties)
-        except Exception as exc:
-            self._logger.warning(
-                "[arca_credential] fallback=fixed reason=extension_failed "
-                "error_type=%s",
-                type(exc).__name__,
-            )
-            return None
+        return registry.resolve_request_api_key(config.extra_properties)
 
     async def create_device(  # type: ignore[override]
         self,

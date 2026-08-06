@@ -87,10 +87,11 @@ from secbaas.community.core.service.sse import (
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
-from secbaas.community.plugins.sandbox.arca.request_api_key import (
-    AicodingArcaRequestApiKeyResolver,
+from secbaas.community.plugins.sandbox.arca.provisioning import (
+    AicodingArcaProvisioningStrategy,
 )
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
+from secbaas.community.spi.sandbox.arca import ArcaProvisioningRegistry
 
 
 def _real_bot_service_plugin(base_url: str = "", timeout: float = 10.0):
@@ -264,9 +265,14 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     # ── Device plugins ────────────────────────────────────────────────────────
 
-    arca_request_api_key_resolver = providers.Singleton(
-        AicodingArcaRequestApiKeyResolver,
-        secret_plugin=secret_plugin,
+    arca_provisioning_registry = providers.Singleton(
+        ArcaProvisioningRegistry,
+        strategies=providers.List(
+            providers.Singleton(
+                AicodingArcaProvisioningStrategy,
+                secret_plugin=secret_plugin,
+            )
+        ),
     )
 
     paas_sandbox_plugins = providers.Singleton(
@@ -277,7 +283,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         teclaw_bot_plugin_factory=teclaw_bot_plugin_factory,
         k8s_sandbox_plugin_factory=k8s_sandbox_plugin_factory,
         docker_sandbox_plugin=docker_sandbox_plugin,
-        arca_request_api_key_resolver=arca_request_api_key_resolver,
+        arca_provisioning_registry=arca_provisioning_registry,
     )
 
     paas_service_factory = providers.Singleton(

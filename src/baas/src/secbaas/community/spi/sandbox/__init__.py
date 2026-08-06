@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from secbaas.community.spi.sandbox.arca import (
-    ArcaRequestApiKeyResolver,
+    ArcaProvisioningRegistry,
     ArcaSandbox,
     ArcaSandboxPlugin,
 )
@@ -45,7 +45,7 @@ class PaasSandboxPlugins:
         poolab_sandbox_plugin_factory: (
             Callable[[PoolabCredentials], PoolabSandboxPlugin] | None
         ) = None,
-        arca_request_api_key_resolver: ArcaRequestApiKeyResolver | None = None,
+        arca_provisioning_registry: ArcaProvisioningRegistry | None = None,
     ) -> None:
         self.arca_sandbox_plugin_factory = arca_sandbox_plugin_factory
         self.desktop_sandbox_plugin = desktop_sandbox_plugin
@@ -53,7 +53,7 @@ class PaasSandboxPlugins:
         self.teclaw_bot_plugin_factory = teclaw_bot_plugin_factory
         self.k8s_sandbox_plugin_factory = k8s_sandbox_plugin_factory
         self.docker_sandbox_plugin = docker_sandbox_plugin
-        self.arca_request_api_key_resolver = arca_request_api_key_resolver
+        self.arca_provisioning_registry = arca_provisioning_registry
 
 
 __all__ = [

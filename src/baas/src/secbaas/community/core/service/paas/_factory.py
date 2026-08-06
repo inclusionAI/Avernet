@@ -206,8 +206,8 @@ class PaasServiceFactory(PaasServiceFactoryProtocol):
             return ArcaPaasService(
                 credentials=arca_creds,
                 arca_sandbox_plugin=arca_sandbox_plugin,
-                request_api_key_resolver=(
-                    self._paas_sandbox_plugins.arca_request_api_key_resolver
+                arca_provisioning_registry=(
+                    self._paas_sandbox_plugins.arca_provisioning_registry
                 ),
             )
 
