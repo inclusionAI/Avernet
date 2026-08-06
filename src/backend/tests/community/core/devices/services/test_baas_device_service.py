@@ -358,7 +358,23 @@ class TestGetDeviceConnection:
             binding_id=7, operator=_operator("u001"), path="/api/claude_code/ws"
         )
 
-        assert baas.get_ws_info.call_args.kwargs["path"] == "api/claude_code/ws"
+        assert baas.get_ws_info.call_args.kwargs["path"] == "/api/claude_code/ws"
+
+    def test_the_socket_paths_leading_slash_is_not_stripped(self):
+        """BaaS joins target and path with no separator of its own
+        (``build_proxypass_url`` → ``…/proxypass/{target}{path}``), so a path
+        sent without its slash comes back as ``…@0:20003api/openclaw/ws`` — a
+        URL that reaches no engine. Pinned separately from the path-forwarding
+        test above because the shape, not the forwarding, is what broke."""
+        baas = MagicMock()
+        baas.get_ws_info.return_value = self._ws_info()
+        svc = _make_service(baas_service=baas)
+
+        svc.get_device_connection(
+            binding_id=7, operator=_operator("u001"), path="/api/openclaw/ws"
+        )
+
+        assert baas.get_ws_info.call_args.kwargs["path"].startswith("/")
 
     def test_no_path_leaves_the_provider_default_alone(self):
         """Passing None would blank the default rather than keep it."""
