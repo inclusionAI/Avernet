@@ -107,7 +107,7 @@ fn default_session_files_share_link_ttl() -> u64 {
     3600
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFilesShareConfig {
     /// HMAC secret for share-token mint/consume. If unset, bootstrap logs a
     /// warning and generates a random 32-byte secret that does NOT survive
@@ -123,10 +123,31 @@ pub struct SessionFilesShareConfig {
     /// to `bcs_endpoint` or `http://{bind}:{port}` in the service layer.
     #[serde(default)]
     pub share_base_url: Option<String>,
+
+    /// TTL (seconds) for share URLs minted at history-read time for image
+    /// echo. Clamped to [60, 604800]. Independent from `default_ttl_seconds`
+    /// (the share-API default) so history echo can be tuned separately.
+    #[serde(default = "default_history_attachment_ttl")]
+    pub history_attachment_ttl_seconds: u64,
+}
+
+impl Default for SessionFilesShareConfig {
+    fn default() -> Self {
+        Self {
+            token_secret: None,
+            default_ttl_seconds: default_session_files_share_ttl(),
+            share_base_url: None,
+            history_attachment_ttl_seconds: default_history_attachment_ttl(),
+        }
+    }
 }
 
 fn default_session_files_share_ttl() -> u64 {
     86400
+}
+
+fn default_history_attachment_ttl() -> u64 {
+    3600
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
