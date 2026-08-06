@@ -171,12 +171,6 @@ impl BcsChannelService {
             .get(&group_id)
             .await
             .ok_or_else(|| ChannelUseCaseError::NotFound(group_id.clone()))?;
-        if !is_bot_target && group.group_strategy == GroupStrategy::Chat {
-            return Err(ChannelUseCaseError::InvalidParams(
-                "free-chat groups are not exposed as channel Group targets".to_string(),
-            ));
-        }
-
         let per_sender = msg.conversation_type == "2"
             && match binding.group_chat_scope {
                 Some(GroupChatScope::PerSender) => true,
@@ -1924,11 +1918,6 @@ async fn validate_target(
                 .get(group_id)
                 .await
                 .ok_or_else(|| ChannelUseCaseError::NotFound(group_id.to_string()))?;
-            if group.group_strategy == GroupStrategy::Chat {
-                return Err(ChannelUseCaseError::InvalidParams(
-                    "free-chat groups are not exposed as channel Group targets".to_string(),
-                ));
-            }
             if group.group_strategy == GroupStrategy::StateMachine
                 && cmd.outbound_visibility == Visibility::LeadOnly
             {
@@ -2691,6 +2680,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_binding_allows_free_chat_group_visibility_modes() -> TestResult {
+        let harness = TestHarness::new(chat_group("group_chat")).await?;
+
+        for (id, visibility) in [
+            ("robot_full", Visibility::FullTranscript),
+            ("robot_lead", Visibility::LeadOnly),
+        ] {
+            let binding = harness
+                .service
+                .create_binding(CreateBindingCommand {
+                    channel_type: channel_type(),
+                    account_ref: id.to_string(),
+                    target: BindingTarget::Group {
+                        group_id: "group_chat".to_string(),
+                    },
+                    group_chat_scope: Some(GroupChatScope::ConversationShared),
+                    outbound_visibility: visibility,
+                    env: "dev".to_string(),
+                    created_by: Some("creator".to_string()),
+                    config: dingtalk_config(id),
+                })
+                .await?;
+            assert_eq!(binding.outbound_visibility, visibility);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn group_binding_cleanup_removes_only_bindings_for_requested_group() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
         let group_1 = BindingTarget::Group {
@@ -3231,6 +3249,42 @@ mod tests {
         assert_eq!(added.len(), 2);
         assert_eq!(added[0].1.bot_uuid, "human_u1");
         assert_eq!(added[0].1.mode, Some(ParticipantMode::Present));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn inbound_free_chat_group_binding_dispatches_to_group_session() -> TestResult {
+        let harness = TestHarness::new(chat_group("group_chat")).await?;
+        harness
+            .service
+            .create_binding(CreateBindingCommand {
+                channel_type: channel_type(),
+                account_ref: "robot_1".to_string(),
+                target: BindingTarget::Group {
+                    group_id: "group_chat".to_string(),
+                },
+                group_chat_scope: Some(GroupChatScope::ConversationShared),
+                outbound_visibility: Visibility::FullTranscript,
+                env: "dev".to_string(),
+                created_by: Some("creator".to_string()),
+                config: dingtalk_config("robot_1"),
+            })
+            .await?;
+
+        harness
+            .service
+            .handle_inbound(inbound("conv_chat", "u1", Some("张三"), "msg_chat"))
+            .await?;
+
+        let web_sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(web_sends.len(), 1);
+        assert_eq!(web_sends[0].group_id, "group_chat");
+        assert_eq!(web_sends[0].from_actor_id, "human_u1");
+        assert_eq!(
+            web_sends[0].idempotency_key.as_deref(),
+            Some("msg_chat")
+        );
 
         Ok(())
     }
@@ -4823,6 +4877,63 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn try_outbound_free_chat_lead_only_delivers_driver_only() -> TestResult {
+        let harness = TestHarness::new(chat_group("group_chat")).await?;
+        harness
+            .binding_repo
+            .create(active_binding(
+                "binding_1",
+                "robot_1",
+                BindingTarget::Group {
+                    group_id: "group_chat".to_string(),
+                },
+                Visibility::LeadOnly,
+            ))
+            .await?;
+        harness
+            .session_repo
+            .create(
+                "group_chat",
+                NewSessionParams {
+                    id: Some("group_chat:00000001".to_string()),
+                    session_kind: SessionKind::Chat,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        harness
+            .conversation_repo
+            .upsert(bcs_domain::ConversationSessionMap {
+                binding_id: "binding_1".to_string(),
+                im_conversation_id: "conv_chat".to_string(),
+                im_conversation_type: "2".to_string(),
+                session_scope: SessionScope::Conversation,
+                im_user_id: None,
+                bcs_session_id: "group_chat:00000001".to_string(),
+                last_active_at: 1,
+            })
+            .await?;
+
+        let mut consultant_msg = outbound(
+            "group_chat:00000001",
+            ParticipantRole::Consultant,
+            false,
+        );
+        consultant_msg.group_id = "group_chat".to_string();
+        harness.service.try_outbound(consultant_msg).await?;
+        assert!(harness.delivery.events.lock().await.is_empty());
+
+        let mut driver_msg = outbound("group_chat:00000001", ParticipantRole::Driver, false);
+        driver_msg.group_id = "group_chat".to_string();
+        harness.service.try_outbound(driver_msg).await?;
+        let events = harness.delivery.events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].sender_role, ParticipantRole::Driver);
+
+        Ok(())
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn try_outbound_logs_selected_binding_and_delivery_result() -> TestResult {
         let harness = TestHarness::new(manager_group("group_1")).await?;
@@ -5129,6 +5240,17 @@ mod tests {
         );
         group.group_strategy = bcs_domain::GroupStrategy::ManagerWorker;
         group
+    }
+
+    fn chat_group(id: &str) -> Group {
+        Group::new(
+            id,
+            "driver_bot",
+            vec![
+                Participant::bot("driver_bot", ParticipantRole::Driver),
+                Participant::bot("consultant_bot", ParticipantRole::Consultant),
+            ],
+        )
     }
 
     fn state_machine_group(id: &str) -> Group {
