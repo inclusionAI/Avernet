@@ -1909,6 +1909,109 @@ class TestAsyncReleasesLock:
 
 
 class TestRestartBaasPendingAndQueue:
+    @pytest.mark.parametrize("bot_type", ["personal", "service"])
+    def test_baas_restart_ignores_legacy_request_id_without_baseline(
+        self,
+        bot_type,
+    ):
+        """旧协议只留下 request_id 时，不得把历史记录当作进行中重启。"""
+        baas = MagicMock()
+        baas.list_bot_publishes.return_value = [
+            {"id": 32272, "publish_type": "UPDATE"}
+        ]
+        baas.upgrade_bot.return_value = {
+            "publish_id": 32273,
+            "bot_uuid": "BOT-x",
+        }
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = {
+            "device_id": "BOT-x",
+            "status": DeviceBindingStatus.ACTIVE.value,
+            "device_props": {
+                "restart_request_id": "legacy-request-id",
+                "restart_publish_id": "32272",
+            },
+        }
+        bot = {
+            "bot_id": "bot-1",
+            "owner_id": "u1",
+            "binding_id": 42,
+            "bot_type": bot_type,
+            "entity_id": "u1",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bind_repo = MagicMock()
+        task_queue_service = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            device_binding_repo=bind_repo,
+            device_provider=device_provider,
+            baas_service_provider=lambda: baas,
+            task_queue_service=task_queue_service,
+        )
+        svc._template_service.get_template_config.return_value = None
+
+        svc._restart_bot_baas(
+            bot_id="bot-1",
+            user_id="u1",
+            binding_id=42,
+            bot=bot,
+        )
+
+        baas.upgrade_bot.assert_called_once()
+        new_request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
+        assert new_request_id != "legacy-request-id"
+        assert bind_repo.update_device_props.call_args_list[0].kwargs["props"] == {
+            "restart_request_id": new_request_id,
+            "restart_workflow_baseline": 32272,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+
+    @pytest.mark.parametrize("baseline", [0, 32272])
+    def test_baas_restart_suppresses_complete_durable_intent(self, baseline):
+        """只有 request_id 与合法 baseline 同时存在时才抑制重复重启。"""
+        baas = MagicMock()
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = {
+            "device_id": "BOT-x",
+            "status": DeviceBindingStatus.PENDING.value,
+            "device_props": {
+                "restart_request_id": "current-request-id",
+                "restart_workflow_baseline": baseline,
+                "restart_publish_id": None,
+            },
+        }
+        bot = {
+            "bot_id": "bot-1",
+            "owner_id": "u1",
+            "binding_id": 42,
+            "bot_type": "personal",
+            "entity_id": "u1",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = bot
+        task_queue_service = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            device_provider=device_provider,
+            baas_service_provider=lambda: baas,
+            task_queue_service=task_queue_service,
+        )
+
+        result = svc._restart_bot_baas(
+            bot_id="bot-1",
+            user_id="u1",
+            binding_id=42,
+            bot=bot,
+        )
+
+        assert result == bot
+        baas.list_bot_publishes.assert_not_called()
+        baas.upgrade_bot.assert_not_called()
+        task_queue_service.enqueue.assert_not_called()
+
     def test_personal_baas_restart_marks_pending_and_enqueues_task(self):
         """personal baas 重启 → upgrade_bot 取 publish_id；bot/binding 双置 PENDING；
         持久化 restart poll task。"""

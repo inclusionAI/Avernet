@@ -669,6 +669,7 @@ class BaasRestartPublishPollHandler:
                     binding_id=binding_id,
                     publish_id=publish_id,
                 )
+                self._clear_restart_recovery_intent(binding_id=binding_id)
                 return Complete()
             self._persist_restart_status(
                 bot_id=bot_id,
