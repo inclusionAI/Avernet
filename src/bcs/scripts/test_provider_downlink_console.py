@@ -162,6 +162,49 @@ class ProviderConsoleStateTest(unittest.TestCase):
             self.assertTrue(body["has_more"])
             self.assertEqual(body["next_before"], 2001)
 
+    def test_records_only_configured_capture_headers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = provider_console.ProviderState.load(Path(tmp) / "provider-state.json")
+            state.provider_id = "provider-local"
+            runtime = provider_console.ProviderRuntime(
+                state=state,
+                bcs_url="http://127.0.0.1:21000",
+                strict_auth=False,
+                auto_callback=False,
+                capture_headers=["x-agent-lane", "X-Sandbox-Trace"],
+            )
+            headers = {
+                "X-Agent-Lane": "gray-test",
+                "x-sandbox-trace": "trace-123",
+                "X-Not-Captured": "hidden",
+            }
+
+            status, _ = runtime.handle_webhook(
+                headers,
+                webhook_request("chat.inject", "inject-headers"),
+            )
+
+            self.assertEqual(status, 200)
+            recorded = state.snapshot_requests()[0]
+            self.assertEqual(
+                recorded["captured_headers"],
+                {
+                    "x-agent-lane": "gray-test",
+                    "X-Sandbox-Trace": "trace-123",
+                },
+            )
+            self.assertNotIn("X-Not-Captured", recorded["captured_headers"])
+
+    def test_parse_args_accepts_repeated_capture_headers(self):
+        args = provider_console.parse_args([
+            "--capture-header",
+            "x-agent-lane",
+            "--capture-header",
+            "X-Sandbox-Trace",
+        ])
+
+        self.assertEqual(args.capture_header, ["x-agent-lane", "X-Sandbox-Trace"])
+
     def test_strict_auth_rejects_wrong_downlink_token(self):
         with tempfile.TemporaryDirectory() as tmp:
             state = provider_console.ProviderState.load(Path(tmp) / "provider-state.json")

@@ -56,6 +56,15 @@ def header_value(headers: Any, name: str) -> str | None:
     return None
 
 
+def capture_header_values(headers: Any, names: list[str]) -> dict[str, str]:
+    captured: dict[str, str] = {}
+    for name in names:
+        value = header_value(headers, name)
+        if value is not None:
+            captured[name] = value
+    return captured
+
+
 def redact_token(value: str | None) -> str | None:
     if not value:
         return value
@@ -336,7 +345,13 @@ class ProviderState:
                 self.save()
             return duplicate
 
-    def record_request(self, headers: Any, body: JsonObject, duplicate: bool) -> None:
+    def record_request(
+        self,
+        headers: Any,
+        body: JsonObject,
+        duplicate: bool,
+        capture_headers: list[str] | None = None,
+    ) -> None:
         with self.lock:
             self.data.setdefault("requests", []).append(
                 {
@@ -344,6 +359,7 @@ class ProviderState:
                     "duplicate": duplicate,
                     "authorization": redact_token(header_value(headers, "Authorization")),
                     "protocol_version": header_value(headers, "X-BCN-Protocol-Version"),
+                    "captured_headers": capture_header_values(headers, capture_headers or []),
                     "body": body,
                 }
             )
@@ -418,12 +434,14 @@ class ProviderRuntime:
         strict_auth: bool = False,
         auto_callback: bool = False,
         callback_delay_ms: int = 50,
+        capture_headers: list[str] | None = None,
     ) -> None:
         self.state = state
         self.bcs_url = bcs_url.rstrip("/")
         self.strict_auth = strict_auth
         self.auto_callback = auto_callback
         self.callback_delay_ms = callback_delay_ms
+        self.capture_headers = list(capture_headers or [])
 
     def handle_webhook(self, headers: Any, body: JsonObject) -> tuple[int, JsonObject]:
         LOGGER.info("webhook received method=%s id=%s", body.get("method"), body.get("id"))
@@ -440,7 +458,7 @@ class ProviderRuntime:
         method = body.get("method")
         request_id = str(body.get("id") or "")
         duplicate = self.state.mark_processed(request_id)
-        self.state.record_request(headers, body, duplicate)
+        self.state.record_request(headers, body, duplicate, self.capture_headers)
 
         if method == "chat.send":
             return self.handle_chat_send(body, duplicate)
@@ -1170,6 +1188,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--strict-auth", action="store_true")
     parser.add_argument("--auto-callback", action="store_true")
     parser.add_argument("--callback-delay-ms", type=int, default=50)
+    parser.add_argument(
+        "--capture-header",
+        action="append",
+        default=[],
+        help="Header name to expose in /requests for debugging; can be repeated.",
+    )
     parser.add_argument("--mock-user-id")
     parser.add_argument("--cookie")
     parser.add_argument("--user-bearer-token")
@@ -1209,6 +1233,7 @@ def main(argv: list[str]) -> int:
         strict_auth=args.strict_auth,
         auto_callback=args.auto_callback,
         callback_delay_ms=args.callback_delay_ms,
+        capture_headers=args.capture_header,
     )
     server = ProviderConsoleServer((args.host, args.port), state, runtime)
     host, port = server.server_address
