@@ -1,18 +1,19 @@
 """Generate the served OpenAPI doc from a backend's published description.
 
 The doc is the backend's own description, narrowed to the public namespace and
-annotated with each operation's auth requirement. Because paths forward
-verbatim, no path rewriting is needed: the description's paths are the
-client-facing paths. Pure logic (Rule 7) — no web framework.
+annotated with each operation's auth requirement. Path rewrites are
+reverse-applied so the served doc shows gateway-facing paths that clients
+actually use. Pure logic (Rule 7) — no web framework.
 """
 
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
+from gateway.community.core.forwarding._domains import PathRewrite
 
 _HTTP_METHODS = frozenset(
     {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
@@ -29,6 +30,7 @@ def build_served_openapi(
     version: str,
     description: str = "",
     base_path: str = _DEFAULT_BASE_PATH,
+    rewrites: Mapping[str, PathRewrite | None] | None = None,
 ) -> dict[str, Any]:
     """Merge every domain's generated doc into the single served document.
 
@@ -36,7 +38,8 @@ def build_served_openapi(
     the schema catalog). Domains with no description yet contribute nothing.
 
     Each domain filters paths using ``{base_path}/{domain_name}``, so only paths
-    beneath that domain's prefix are included.
+    beneath that domain's prefix are included. When a domain has a path rewrite,
+    upstream paths are reverse-mapped to gateway-facing paths.
     """
     paths: dict[str, Any] = {}
     components: dict[str, Any] = {}
@@ -44,7 +47,8 @@ def build_served_openapi(
     tag_names: set[str] = set()
     for domain in domains:
         domain_prefix = f"{base_path.rstrip('/')}/{domain}"
-        doc = generate_openapi(describe(domain), rules, domain_prefix)
+        rewrite = (rewrites or {}).get(domain)
+        doc = generate_openapi(describe(domain), rules, domain_prefix, rewrite=rewrite)
         paths.update(doc.get("paths", {}))
         for section, items in doc.get("components", {}).items():
             components.setdefault(section, {}).update(items)
@@ -71,15 +75,26 @@ def generate_openapi(
     description: dict[str, Any],
     rules: RouteSecurity,
     base_path: str = _DEFAULT_BASE_PATH,
+    *,
+    rewrite: PathRewrite | None = None,
 ) -> dict[str, Any]:
-    """Return the served doc: public-namespace paths + auth metadata + used schemas."""
+    """Return the served doc: public-namespace paths + auth metadata + used schemas.
+
+    When *rewrite* is given, upstream-internal paths are reverse-mapped to
+    gateway-facing paths before filtering and emission.
+    """
     doc = {k: v for k, v in description.items() if k not in ("paths", "components")}
     raw_paths = description.get("paths") or {}
-    kept = {
-        path: _with_security(path, item, rules)
-        for path, item in raw_paths.items()
-        if _in_namespace(path, base_path)
-    }
+    kept: dict[str, Any] = {}
+    for path, item in raw_paths.items():
+        lookup_path = path
+        if rewrite is not None:
+            # The upstream publishes its own internal paths; filter against the
+            # reversed (gateway-facing) path, but resolve security against the
+            # original path since RouteSecurity is keyed by gateway paths.
+            lookup_path = rewrite.reverse(path)
+        if _in_namespace(lookup_path, base_path):
+            kept[lookup_path] = _with_security(path, item, rules)
     doc["paths"] = kept
     components = _prune_components(description.get("components") or {}, kept)
     if components:

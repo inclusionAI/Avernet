@@ -8,7 +8,7 @@ import subprocess
 import venv
 from pathlib import Path
 
-_GATEWAY_DIR = Path(__file__).resolve().parents[1]
+_GATEWAY_DIR = Path(__file__).resolve().parents[3]
 _SCRIPT = _GATEWAY_DIR / "scripts" / "dump_and_publish.sh"
 
 

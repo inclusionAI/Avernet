@@ -10,7 +10,7 @@ from gateway.community.core.forwarding import DomainMap, Server
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
 from gateway.community.spi.authn import Presence, PrincipalType
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
+_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 _VARS = {
     "backend_server_url": "http://backend:8080",
@@ -915,3 +915,75 @@ def test_a_rewrite_anchored_off_the_declared_pattern_is_refused() -> None:
             "/openapi/v1/bots/messages/**",
             rewrite={"from": "/openapi/v1/x", "to": "/proxypass"},
         )
+
+
+# ── PathRewrite.reverse ──────────────────────────────────────────────
+
+
+def test_path_rewrite_reverse_exact_prefix() -> None:
+    """reverse() maps to_prefix → from_prefix when path equals to_prefix."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/proxypass") == "/openapi/v1/chat"
+
+
+def test_path_rewrite_reverse_prefix_with_slash() -> None:
+    """reverse() replaces to_prefix/ → from_prefix/ for sub-paths."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/proxypass/sessions") == "/openapi/v1/chat/sessions"
+
+
+def test_path_rewrite_reverse_non_matching_path_passed_through() -> None:
+    """A path not under to_prefix is returned unchanged (defensive branch)."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/other/upstream/path") == "/other/upstream/path"
+
+
+# ── Domain.gateway_path ──────────────────────────────────────────────
+
+
+def test_gateway_path_with_rewrite() -> None:
+    """gateway_path() reverse-rewrites upstream paths to gateway-facing form."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "chat": {
+                    "match": "/openapi/v1/chat/**",
+                    "server": "baas",
+                    "rewrite": {
+                        "from": "/openapi/v1/chat",
+                        "to": "/proxypass",
+                    },
+                }
+            },
+            "servers": {"baas": {"base_url": "http://baas:9090"}},
+        },
+        variables={},
+    )
+    domain = dm.http_domain_for("/openapi/v1/chat/sessions")
+    assert domain is not None
+    assert domain.gateway_path("/proxypass/sessions") == "/openapi/v1/chat/sessions"
+
+
+def test_gateway_path_without_rewrite_is_identity() -> None:
+    """gateway_path() returns the path unchanged when no rewrite is configured."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {
+                    "match": "/openapi/v1/bots/**",
+                    "server": "backend",
+                }
+            },
+            "servers": {"backend": {"base_url": "http://backend:8080"}},
+        },
+        variables={},
+    )
+    domain = dm.http_domain_for("/openapi/v1/bots")
+    assert domain is not None
+    assert domain.gateway_path("/openapi/v1/bots") == "/openapi/v1/bots"
