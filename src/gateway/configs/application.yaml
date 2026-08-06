@@ -125,6 +125,7 @@ user_config:
 
     "/openapi/v1/collaboration/**":
       user: required
+      app: required
 
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including

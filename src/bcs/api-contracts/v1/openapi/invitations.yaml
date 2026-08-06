@@ -23,6 +23,7 @@ CreateGroupInvitationPath:
     summary: Create an Invitation for a Group target.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -88,6 +89,7 @@ CreateSessionInvitationPath:
     summary: Create an Invitation for a Session target.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -154,6 +156,7 @@ AcceptInvitationPath:
     summary: Accept an invitation and join its target resource.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/InvitationTokenPath
     requestBody:
