@@ -44,8 +44,8 @@ class TestDIContainerBootstrap:
             forwarder = plugins.forwarder()
             assert forwarder is not None
 
-            catalog = plugins.schema_catalog()
-            assert catalog is not None
+            catalogs = plugins.schema_catalogs()
+            assert catalogs is not None
 
             cache = plugins.cache_plugin()
             assert cache is not None
