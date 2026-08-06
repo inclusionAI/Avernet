@@ -713,7 +713,13 @@ fn is_safe_provider_bypass_header(name: &str) -> bool {
     let lower = trimmed.to_ascii_lowercase();
     !matches!(
         lower.as_str(),
-        "authorization" | "cookie" | "host" | "content-length" | "content-type"
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
     ) && lower != "bcn"
         && !lower.starts_with("bcn-")
         && !lower.starts_with("x-bcn-")

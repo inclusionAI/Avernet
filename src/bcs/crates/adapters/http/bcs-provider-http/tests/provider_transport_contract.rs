@@ -43,6 +43,8 @@ struct CapturedRequest {
     timestamp: Option<String>,
     legacy_protocol_version: Option<String>,
     sandbox_bypass: Option<String>,
+    bcs_bot_token: Option<String>,
+    bcs_service_key: Option<String>,
     body: Value,
 }
 
@@ -169,6 +171,8 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
             provider_bypass_headers: vec![
                 ("authorization".to_string(), "Bearer attacker".to_string()),
                 ("bcn-message-id".to_string(), "attacker-message-id".to_string()),
+                ("x-bcs-bot-token".to_string(), "bot-token-secret".to_string()),
+                ("x-bcs-service-key".to_string(), "service-key-secret".to_string()),
             ],
         })
         .await
@@ -178,6 +182,8 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
     let request = captured.lock().await.clone().unwrap();
     assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
     assert_ne!(request.message_id.as_deref(), Some("attacker-message-id"));
+    assert_eq!(request.bcs_bot_token, None);
+    assert_eq!(request.bcs_service_key, None);
 
     server.abort();
 }
@@ -1002,6 +1008,14 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
         .get("x-sandbox-bypass")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let bcs_bot_token = headers
+        .get("x-bcs-bot-token")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let bcs_service_key = headers
+        .get("x-bcs-service-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
     *captured.lock().await = Some(CapturedRequest {
         traceparent,
         authorization,
@@ -1012,6 +1026,8 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
         timestamp,
         legacy_protocol_version,
         sandbox_bypass,
+        bcs_bot_token,
+        bcs_service_key,
         body,
     });
 }
