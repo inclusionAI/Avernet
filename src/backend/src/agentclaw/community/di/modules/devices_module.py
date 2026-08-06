@@ -43,6 +43,7 @@ from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServ
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DefaultImagePolicyActivationListener,
 )
@@ -272,6 +273,7 @@ class DevicesModule(Module):
         baas_device_service: BaasDeviceService,
         bot_repository: BotRepository,
         publish_repository: BotPublishRepositoryProtocol,
+        common_config_service: CommonConfigService,
         template_service: TemplateService,
     ) -> BaasPublishTaskLifecycle:
         return BaasPublishTaskLifecycle(
@@ -282,6 +284,7 @@ class DevicesModule(Module):
             baas_device_service=baas_device_service,
             bot_repository=bot_repository,
             publish_repository=publish_repository,
+            common_config_service=common_config_service,
             template_service=template_service,
         )
 
