@@ -308,6 +308,47 @@ class TestRecordToResponse:
         result = bot_record_to_response(record)
         assert result.config == BotConfig()
 
+    def test_record_to_response_redacts_extra_properties_credentials(self):
+        """credential-bearing extra_properties must never reach the API response."""
+        from secbaas.community.core.service.bot_manage._bot_service import (
+            bot_record_to_response,
+        )
+
+        record = MagicMock(spec=BotRecord)
+        record.id = 42
+        record.bot_uuid = "BOT-redact"
+        record.tenant = "t"
+        record.env = "e"
+        record.domain = "d"
+        record.is_deleted = 0
+        record.creator = "c"
+        record.modifier = "m"
+        record.status = "ACTIVE"
+        record.name = "n"
+        record.description = "desc"
+        record.template_uuid = "TPL-001"
+        record.replica_desired = 1
+        record.replica_minimum = 1
+        record.replica_maximum = 10
+        record.auto_scaling_enabled = 0
+        record.sla_grade = "standard"
+        record.gmt_create = datetime(2025, 1, 1)
+        record.gmt_modified = datetime(2025, 1, 2)
+        # credential-bearing ciphertext stored in extra_config (deploy_config)
+        record.extra_config = {
+            "sla_grade": "standard",
+            "deploy_config": {
+                "extra_properties": {"aicoding": {"theta_key": "enc:v1:SENTINEL_CIPHERTEXT"}},
+            },
+        }
+
+        result = bot_record_to_response(record)
+        # response must NOT carry the ciphertext
+        dumped = result.model_dump()
+        deploy_cfg = dumped.get("config", {}).get("deploy_config") or {}
+        assert deploy_cfg.get("extra_properties") == {"<redacted>": True}
+        assert "SENTINEL_CIPHERTEXT" not in str(dumped)
+
     def test_device_record_to_response_complete(self):
         from secbaas.community.core.service.device_manage import (
             device_record_to_response,

@@ -59,6 +59,7 @@ from secbaas.community.core.repository.system_config import (
 from secbaas.community.core.service.config import SystemConfigKey
 from secbaas.community.core.service.device_manage import device_record_to_response
 from secbaas.community.core.utils.env_utils import get_current_env
+from secbaas.community.core.utils.redact_utils import log_safe_model
 from secbaas.community.logger import get_logger
 
 from ._bot_service import bot_record_to_response
@@ -301,7 +302,7 @@ class DefaultBotManagementService(BotManageService):
         )
         logger.info(
             f"[create_bot] publish created: publish_id={publish.id} "
-            f"publish_type={PublishType.CREATE.value} publish_config={publish_config}"
+            f"publish_type={PublishType.CREATE.value} publish_config={log_safe_model(publish_config)}"
         )
 
         # Auto-approve publish stage gates when requested
@@ -848,7 +849,7 @@ class DefaultBotManagementService(BotManageService):
 
         logger.info(
             f"[scale_bot] publish created: publish_id={publish.id} "
-            f"type={publish_type.value} target={target_count} current={current_count} config={scale_config}"
+            f"type={publish_type.value} target={target_count} current={current_count} config={log_safe_model(scale_config)}"
         )
 
         # Auto-approve publish stage gates when requested
@@ -1024,7 +1025,7 @@ class DefaultBotManagementService(BotManageService):
             logger.info(
                 f"[update_bot] publish created: publish_id={publish_id} "
                 f"publish_type={PublishType.UPDATE.value} bot_id={bot_id} "
-                f"publish_config={publish_config} "
+                f"publish_config={log_safe_model(publish_config)} "
             )
 
             # Auto-approve publish stage gates when requested

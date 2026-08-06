@@ -5,6 +5,7 @@ Requirements: API-01, API-05
 """
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -204,6 +205,94 @@ class TestCreateBot:
 
         assert result is not None
         assert result.publish_id == 456
+
+
+    @pytest.mark.asyncio
+    async def test_create_bot_publish_log_redacts_extra_properties(self, caplog):
+        """credential-bearing extra_properties must never reach create_bot publish logs.
+
+        Sentinel ciphertext is placed in deploy_config.extra_properties (the
+        thetaKey envelope). The publish created log must carry a redacted form
+        and never the raw ciphertext.
+        """
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        mock_bot = MagicMock()
+        mock_bot.id = 1
+        mock_bot.bot_uuid = "BOT-REDACT-LOG"
+        mock_bot.model_dump = MagicMock(
+            return_value={
+                "id": 1,
+                "bot_uuid": "BOT-REDACT-LOG",
+                "tenant": "test_tenant",
+                "env": "dev",
+                "domain": "default",
+                "is_deleted": 0,
+                "creator": "user1",
+                "modifier": "user1",
+                "status": "PENDING",
+                "name": "Redact Bot",
+                "description": None,
+                "template_uuid": None,
+                "replica_desired": 1,
+                "replica_minimum": 1,
+                "replica_maximum": 10,
+                "auto_scaling_enabled": 0,
+                "sla_grade": "standard",
+                "gmt_create": "2024-01-01T00:00:00",
+                "gmt_modified": "2024-01-01T00:00:00",
+                "config": None,
+            }
+        )
+
+        mock_publish = MagicMock()
+        mock_publish.id = 999
+
+        mock_sys_config = MagicMock()
+        mock_sys_config.conf_key = "publish.callback_timeout_seconds"
+        mock_sys_config.conf_value = "60"
+        mock_sys_config.env = "dev"
+
+        mock_bot_service = MagicMock()
+        mock_bot_service.create_bot = AsyncMock(return_value=mock_bot)
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        mock_system_config_repo = MagicMock()
+        mock_system_config_repo.get_by_env_and_key.return_value = mock_sys_config
+
+        service = _make_service(
+            bot_service=mock_bot_service,
+            publish_service=mock_publish_service,
+            system_config_repo=mock_system_config_repo,
+        )
+        config = BotConfig(
+            deploy_config=DeployConfig(
+                extra_properties={"aicoding": {"theta_key": sentinel}}
+            )
+        )
+
+        target = logging.getLogger("core-service")
+        old_propagate = target.propagate
+        target.propagate = True
+        caplog.set_level(logging.INFO)
+        try:
+            await service.create_bot(
+                tenant="test_tenant",
+                name="Redact Bot",
+                template_uuid="TPL-REDACT",
+                device_count=2,
+                operator="user1",
+                request_id="redact-request-id-12345678901234567890",
+                config=config,
+            )
+        finally:
+            target.propagate = old_propagate
+
+        assert sentinel not in caplog.text
+        publish_logs = [
+            r for r in caplog.records if "publish created" in r.getMessage()
+        ]
+        assert publish_logs, "expected a 'publish created' log line"
+        assert "<redacted>" in publish_logs[0].getMessage()
 
 
 class TestDestroyBot:
@@ -3258,6 +3347,103 @@ class TestUpdateBotConfigUpdate:
             assert result.publish_id == 777
             call_kwargs = mock_publish_service.create_publish.call_args.kwargs
             assert call_kwargs["publish_type"] == PublishType.UPDATE
+
+    @pytest.mark.asyncio
+    async def test_update_bot_publish_log_redacts_extra_properties(self, caplog):
+        """credential-bearing extra_properties must never reach update_bot publish logs.
+
+        The stored config read from the DB record carries the thetaKey envelope in
+        deploy_config.extra_properties; the update publish log must redact it.
+        """
+        sentinel = "enc:v1:SENTINEL_CIPHERTEXT"
+        mock_record = MagicMock()
+        mock_record.id = 1
+        mock_record.bot_uuid = "BOT-001"
+        mock_record.status = "ACTIVE"
+        mock_record.name = "Test Bot"
+        mock_record.extra_config = {
+            "deploy_config": {
+                "extra_properties": {"aicoding": {"theta_key": sentinel}},
+            },
+        }
+
+        mock_publish = MagicMock()
+        mock_publish.id = 778
+
+        mock_updated_bot = MagicMock()
+        mock_updated_bot.model_dump.return_value = {
+            "id": 1,
+            "bot_uuid": "BOT-001",
+            "tenant": "test_tenant",
+            "env": "dev",
+            "domain": "default",
+            "is_deleted": 0,
+            "creator": "user1",
+            "modifier": "user1",
+            "status": "ACTIVE",
+            "name": "Updated Bot",
+            "description": None,
+            "template_uuid": None,
+            "replica_desired": 1,
+            "replica_minimum": 1,
+            "replica_maximum": 10,
+            "auto_scaling_enabled": 0,
+            "sla_grade": "standard",
+            "gmt_create": "2024-01-01T00:00:00",
+            "gmt_modified": "2024-01-01T00:00:00",
+            "config": None,
+        }
+
+        mock_bot_repo = MagicMock()
+        mock_bot_repo.get_by_bot_uuid.return_value = mock_record
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_by_bot_id.return_value = [MagicMock()]
+        mock_publish_service = MagicMock()
+        mock_publish_service.create_publish = AsyncMock(return_value=mock_publish)
+        mock_bot_service = MagicMock()
+        mock_bot_service.get_bot = AsyncMock(return_value=mock_updated_bot)
+        service = _make_service(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            publish_service=mock_publish_service,
+            bot_service=mock_bot_service,
+        )
+
+        target = logging.getLogger("core-service")
+        old_propagate = target.propagate
+        target.propagate = True
+        caplog.set_level(logging.INFO)
+        try:
+            with patch.object(
+                service,
+                "_get_operational_bot_record_by_uuid_for_update",
+                return_value=mock_record,
+            ):
+                bot_config = MagicMock(spec=BotConfig)
+                bot_config.share_policy = {"key": "value"}
+                bot_config.deploy_config = None
+                bot_config.entity_id = ""
+                bot_config.entity_type = ""
+                bot_config.sla_grade = ""
+                bot_config.callback_timeout_seconds = None
+                bot_config.auto_approve_publish = False
+
+                await service.update_bot(
+                    tenant="test_tenant",
+                    bot_uuid="BOT-001",
+                    operator="user1",
+                    bot_config=bot_config,
+                    request_id="redact-update-request-id-1234567890",
+                )
+        finally:
+            target.propagate = old_propagate
+
+        assert sentinel not in caplog.text
+        publish_logs = [
+            r for r in caplog.records if "publish created" in r.getMessage()
+        ]
+        assert publish_logs, "expected an update 'publish created' log line"
+        assert "<redacted>" in publish_logs[0].getMessage()
 
     @pytest.mark.asyncio
     async def test_update_bot_config_without_request_id(self):
