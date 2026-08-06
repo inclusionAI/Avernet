@@ -34,7 +34,7 @@ from ._interaction_protocol import (
     JsonObject,
 )
 from ._session_key_matcher import SessionKeyMatcher
-from ._session_state import _SessionState
+from ._session_state import SessionState
 
 logger = get_logger("core-bot-run")
 
@@ -201,7 +201,7 @@ class AsyncChatClient:
         self._condition = asyncio.Condition()
 
         # sessionKey → _SessionState 分流表
-        self._sessions: dict[str, _SessionState] = {}
+        self._sessions: dict[str, SessionState] = {}
 
         # sessionKey 模糊匹配器：服务端返回的 sessionKey 可能比客户端注册的长，
         # 通过 contains 匹配从 store 中回溯查找客户端注册的原始 key
@@ -264,7 +264,6 @@ class AsyncChatClient:
         _client.on_event("agent", self._on_agent)
         _client.on_event("interaction.requested", self._on_interaction_requested)
         _client.on_event("interaction.resolved", self._on_interaction_resolved)
-        _client.on_event("interaction.resolve", self._on_interaction_resolved)
         _client.on_event("error", self._on_error)
         _client.on_event("*", self._log_event)
         _client.on_disconnect(self._on_disconnect)
@@ -273,7 +272,12 @@ class AsyncChatClient:
             logger.info("Connecting...")
 
         # 直接 await 异步连接，不再需要 run_in_executor
-        hello = await _client.connect()
+        hello: dict[str, Any] | None = None
+        try:
+            hello = await _client.connect()
+        except Exception as e:
+            logger.error(f"Connect failed: {e}")
+            raise e
         self._client = _client
         # 启动后台重连监控（仅在 max_retries > 0 时）
         if self._max_retries > 0 and self._reconnect_monitor is None:
@@ -367,7 +371,7 @@ class AsyncChatClient:
                     state.agent_complete.clear()
                     state.trace_context = trace_ctx
                 else:
-                    state = _SessionState(trace_context=trace_ctx)
+                    state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
             try:
@@ -494,7 +498,7 @@ class AsyncChatClient:
                     state.agent_complete.clear()
                     state.trace_context = trace_ctx
                 else:
-                    state = _SessionState(trace_context=trace_ctx)
+                    state = SessionState(trace_context=trace_ctx)
                     self._sessions[session_key] = state
 
                 # 流式模式：创建 queue 并绑定到 state
@@ -569,6 +573,7 @@ class AsyncChatClient:
             message: 要注入的消息内容
             session_key: 会话 key，不传则自动生成
             auth_token: 认证令牌，为空时传 OPEN_API:NOT_PROVIDED
+            chat_metadata: 对话元数据
         """
         if session_key is None:
             session_key = f"{uuid.uuid4().hex}"
@@ -665,19 +670,19 @@ class AsyncChatClient:
 
     # ── 私有方法 ──────────────────────────────────────────────────────────
 
-    def _get_session(self, session_key: str) -> _SessionState | None:
+    def _get_session(self, session_key: str) -> SessionState | None:
         """获取指定 sessionKey 的状态（支持模糊匹配）。"""
         result = self._session_matcher.find(session_key)
         return result.state if result else None
 
     @staticmethod
-    def _emit_stream_chunk(state: _SessionState, chunk: StreamChunk) -> None:
+    def _emit_stream_chunk(state: SessionState, chunk: StreamChunk) -> None:
         if state.stream_queue is not None:
             state.stream_queue.put_nowait(chunk)
 
     @staticmethod
     def _handle_terminal_error(
-        state: _SessionState, session_key: str, error_msg: str, source: str
+        state: SessionState, session_key: str, error_msg: str, source: str
     ) -> None:
         msg = error_msg or f"{source} error"
         logger.warning("[%s] error: sessionKey=%s, errMsg=%s", source, session_key, msg)
@@ -693,7 +698,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """内部 chat 事件处理器。
 
@@ -777,7 +782,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """内部 agent 事件处理器。
 
@@ -864,22 +869,24 @@ class AsyncChatClient:
         payload: JsonObject,
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """Persist and expose a validated engine interaction request."""
+        if self._interaction_service is None:
+            logger.debug("interaction processing is disabled; skip requested event")
+            return
+
         event = EngineInteractionRequestedEvent.from_payload(
             session_key=session_key,
             payload=payload,
         )
-        created = True
-        if self._interaction_service is not None:
-            created = self._interaction_service.record_requested(
-                session_key=event.session_key,
-                interaction_id=event.interaction_id,
-                envelope=event.envelope,
-                allowed_decisions=event.allowed_decisions,
-                expires_at_ms=event.expires_at_ms,
-            )
+        created = self._interaction_service.record_requested(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+            allowed_decisions=event.allowed_decisions,
+            expires_at_ms=event.expires_at_ms,
+        )
         if created and state is not None:
             self._emit_stream_chunk(
                 state,
@@ -893,8 +900,11 @@ class AsyncChatClient:
                 ),
             )
 
-        if self._interaction_service is None or self._client is None:
+        # Engine events normally arrive only on an active client. Keep persistence
+        # and SSE delivery above, but do not start a dispatcher without an uplink.
+        if self._client is None:
             return
+
         task_key = (event.session_key, event.interaction_id)
         if task_key in self._interaction_tasks:
             return
@@ -918,20 +928,22 @@ class AsyncChatClient:
         payload: JsonObject,
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
-        """Persist one terminal event and expose it as interaction.resolve."""
+        """Persist and expose one terminal interaction.resolved event."""
+        if self._interaction_service is None:
+            logger.debug("interaction processing is disabled; skip resolved event")
+            return
+
         event = EngineInteractionResolvedEvent.from_payload(
             session_key=session_key,
             payload=payload,
         )
-        applied = True
-        if self._interaction_service is not None:
-            applied = self._interaction_service.mark_resolved(
-                session_key=event.session_key,
-                interaction_id=event.interaction_id,
-                envelope=event.envelope,
-            )
+        applied = self._interaction_service.mark_resolved(
+            session_key=event.session_key,
+            interaction_id=event.interaction_id,
+            envelope=event.envelope,
+        )
         if not applied:
             return
 
@@ -942,7 +954,7 @@ class AsyncChatClient:
                     type="interaction",
                     content="",
                     metadata={
-                        "event": "interaction.resolve",
+                        "event": "interaction.resolved",
                         "payload": event.envelope,
                     },
                 ),
@@ -1046,7 +1058,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """error 处理器
         Args:
@@ -1075,7 +1087,7 @@ class AsyncChatClient:
         payload: dict[str, Any],
         *,
         session_key: str,
-        state: _SessionState | None,
+        state: SessionState | None,
     ) -> None:
         """兜底事件处理器
 
@@ -1200,9 +1212,6 @@ class AsyncChatClient:
                     )
                     new_client.on_event(
                         "interaction.resolved", self._on_interaction_resolved
-                    )
-                    new_client.on_event(
-                        "interaction.resolve", self._on_interaction_resolved
                     )
                     new_client.on_event("error", self._on_error)
                     new_client.on_event("*", self._log_event)

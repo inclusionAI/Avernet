@@ -438,11 +438,11 @@ class TestInteractionBranch:
         assert data["event"] == "interaction.requested"
         assert data["payload"]["interactionId"] == "int-1"
 
-    def test_interaction_resolved_is_exposed_as_resolve(self):
+    def test_interaction_resolved_is_preserved(self):
         converter = DefaultStreamConverter()
         envelope = {
             "type": "event",
-            "event": "interaction.resolve",
+            "event": "interaction.resolved",
             "payload": {"sessionKey": "s", "interactionId": "int-1"},
         }
         event = converter.convert(
@@ -453,4 +453,4 @@ class TestInteractionBranch:
             run_id="run-1",
         )
         assert event is not None
-        assert event.event == "interaction.resolve"
+        assert event.event == "interaction.resolved"

@@ -18,8 +18,8 @@ from secbaas.community.core.service.bot_run._async_chat_client import (
     AsyncChatClient,
     ConcurrentSessionError,
     NotConnectedError,
+    SessionState,
     _capture_trace_context,
-    _SessionState,
 )
 from secbaas.community.core.service.bot_run._interaction_protocol import (
     EngineInteractionResolveExchange,
@@ -29,7 +29,7 @@ _TEST_SESSION_KEY = "test-session-key"
 
 
 def _setup_session_state(client, session_key=_TEST_SESSION_KEY):
-    return client._sessions.setdefault(session_key, _SessionState())
+    return client._sessions.setdefault(session_key, SessionState())
 
 
 @pytest.fixture
@@ -269,7 +269,7 @@ class TestGetSession:
 class TestEmitStreamChunk:
     def test_put_chunk_when_queue_exists(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
-        state = _SessionState()
+        state = SessionState()
         state.stream_queue = asyncio.Queue()
         chunk = StreamChunk(type="delta", content="hello")
         AsyncChatClient._emit_stream_chunk(state, chunk)
@@ -278,7 +278,7 @@ class TestEmitStreamChunk:
 
     def test_no_queue_no_error(self, mock_bot_ws):
         client = AsyncChatClient(uri="ws://host/ws")
-        state = _SessionState()
+        state = SessionState()
         state.stream_queue = None
         # Should not raise
         AsyncChatClient._emit_stream_chunk(
@@ -291,13 +291,13 @@ class TestEmitStreamChunk:
 
 class TestHandleTerminalError:
     def test_sets_error_state_and_completes(self, mock_bot_ws):
-        state = _SessionState()
+        state = SessionState()
         AsyncChatClient._handle_terminal_error(state, "sk1", "boom", "agent")
         assert state.state == "error"
         assert state.chat_complete.is_set()
 
     def test_emits_error_chunk_to_queue(self, mock_bot_ws):
-        state = _SessionState()
+        state = SessionState()
         state.stream_queue = asyncio.Queue()
         AsyncChatClient._handle_terminal_error(state, "sk1", "boom", "agent")
         chunk = state.stream_queue.get_nowait()
@@ -305,7 +305,7 @@ class TestHandleTerminalError:
         assert chunk.content == "boom"
 
     def test_empty_error_msg_uses_source(self, mock_bot_ws):
-        state = _SessionState()
+        state = SessionState()
         AsyncChatClient._handle_terminal_error(state, "sk1", "", "agent")
         assert state.state == "error"
         assert state.chat_complete.is_set()
@@ -1198,6 +1198,31 @@ class TestCloseAdditional:
 
 
 class TestInteractionEvents:
+    def test_requested_is_ignored_when_interaction_processing_is_disabled(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_interaction_requested(
+            {"sessionKey": "sk1", "interactionId": "int-1"}
+        )
+
+        assert state.stream_queue.empty()
+        assert client._interaction_tasks == {}
+
+    def test_resolved_is_ignored_when_interaction_processing_is_disabled(
+        self, mock_bot_ws
+    ):
+        client = AsyncChatClient(uri="ws://host/ws", max_retries=0)
+        state = _setup_session_state(client, "sk1")
+        state.stream_queue = asyncio.Queue()
+
+        client._on_interaction_resolved({"sessionKey": "sk1", "interactionId": "int-1"})
+
+        assert state.stream_queue.empty()
+
     @pytest.mark.asyncio
     async def test_requested_passes_validated_identity_and_emits_chunk(
         self, mock_bot_ws
@@ -1296,14 +1321,14 @@ class TestInteractionEvents:
             interaction_id="int-1",
             envelope={
                 "type": "event",
-                "event": "interaction.resolve",
+                "event": "interaction.resolved",
                 "payload": payload,
             },
         )
         chunk = state.stream_queue.get_nowait()
         assert chunk.type == "interaction"
-        assert chunk.metadata["event"] == "interaction.resolve"
-        assert chunk.metadata["payload"]["event"] == "interaction.resolve"
+        assert chunk.metadata["event"] == "interaction.resolved"
+        assert chunk.metadata["payload"]["event"] == "interaction.resolved"
 
     @pytest.mark.asyncio
     async def test_duplicate_resolved_does_not_emit_duplicate_chunk(self, mock_bot_ws):

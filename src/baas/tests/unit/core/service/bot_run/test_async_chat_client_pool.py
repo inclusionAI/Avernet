@@ -110,6 +110,57 @@ class TestParamPassthrough:
 
         await pool.close_all()
 
+    @pytest.mark.asyncio
+    async def test_enabled_interaction_service_passed_to_new_client(
+        self, mock_chat_client_class
+    ):
+        mock_cls, _ = mock_chat_client_class
+
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = [
+            MagicMock(conf_value="false"),
+            MagicMock(conf_value="true"),
+        ]
+        interaction_service = MagicMock()
+        pool = AsyncChatClientPool(
+            system_config_service=config_service,
+            interaction_service=interaction_service,
+        )
+
+        await pool.get("sandbox-1", "ws://host/ws")
+
+        assert mock_cls.call_args.kwargs["interaction_service"] is interaction_service
+        await pool.close_all()
+
+    @pytest.mark.asyncio
+    async def test_disabled_interaction_service_not_passed_to_new_client(
+        self, mock_chat_client_class
+    ):
+        mock_cls, _ = mock_chat_client_class
+
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        config_service = MagicMock()
+        config_service.get_config.side_effect = [
+            MagicMock(conf_value="false"),
+            MagicMock(conf_value="false"),
+        ]
+        pool = AsyncChatClientPool(
+            system_config_service=config_service,
+            interaction_service=MagicMock(),
+        )
+
+        await pool.get("sandbox-1", "ws://host/ws")
+
+        assert mock_cls.call_args.kwargs["interaction_service"] is None
+        await pool.close_all()
+
 
 # ==================== reconnect awareness tests ====================
 
@@ -505,3 +556,57 @@ class TestReadIgnoreCase:
         svc.get_config.side_effect = RuntimeError("db error")
         result = AsyncChatClientPool._read_ignore_case(svc)
         assert result is False
+
+
+# ==================== interaction processing flag tests ====================
+
+
+class TestEnableProcessInteraction:
+    @pytest.mark.parametrize(
+        ("conf_value", "expected"),
+        [
+            ("true", True),
+            ("  True  ", True),
+            ("false", False),
+            ("invalid", False),
+            (None, False),
+        ],
+    )
+    def test_reads_boolean_value(self, conf_value, expected):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+        from secbaas.community.core.service.config import SystemConfigKey
+
+        service = MagicMock()
+        service.get_config.return_value = MagicMock(conf_value=conf_value)
+
+        assert AsyncChatClientPool._enable_process_interaction(service) is expected
+        service.get_config.assert_called_once_with(SystemConfigKey.INTERACTION_PROCESS)
+
+    def test_none_service_returns_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        assert AsyncChatClientPool._enable_process_interaction(None) is False
+
+    def test_missing_config_returns_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        service = MagicMock()
+        service.get_config.return_value = None
+
+        assert AsyncChatClientPool._enable_process_interaction(service) is False
+
+    def test_read_failure_returns_false(self):
+        from secbaas.community.core.service.bot_run._async_chat_client_pool import (
+            AsyncChatClientPool,
+        )
+
+        service = MagicMock()
+        service.get_config.side_effect = RuntimeError("db unavailable")
+
+        assert AsyncChatClientPool._enable_process_interaction(service) is False

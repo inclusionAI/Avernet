@@ -9,7 +9,7 @@
   - chunk.type == "aborted"   → SSE event: chat (中止)
   - chunk.type == "agent"     → SSE event: agent (引擎事件)
   - chunk.type == "heartbeat" → SSE 注释帧: : heartbeat
-  - chunk.type == "interaction" → SSE event: interaction.requested / interaction.resolve
+  - chunk.type == "interaction" → SSE event: interaction.requested / interaction.resolved
   - chunk.type == "usage"     → 无独立事件（忽略）
 """
 
@@ -158,9 +158,7 @@ def _transform_chunk(chunk: StreamChunk, engine: str) -> dict[str, Any] | None:
 def _transform_interaction(chunk: StreamChunk) -> dict[str, Any] | None:
     metadata = chunk.metadata or {}
     event = metadata.get("event")
-    if event == "interaction.resolved":
-        event = "interaction.resolve"
-    if event not in {"interaction.requested", "interaction.resolve"}:
+    if event not in {"interaction.requested", "interaction.resolved"}:
         return None
     payload = metadata.get("payload")
     if not isinstance(payload, dict):
