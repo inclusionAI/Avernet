@@ -71,7 +71,7 @@ def test_resolved_event_uses_explicit_session_identity() -> None:
     assert event.interaction_id == "int-1"
     assert event.envelope == {
         "type": "event",
-        "event": "interaction.resolve",
+        "event": "interaction.resolved",
         "payload": payload,
     }
 

@@ -225,7 +225,7 @@ def test_duplicate_resolved_transition_is_suppressed() -> None:
     _record_requested(repo, service)
     envelope = {
         "type": "event",
-        "event": "interaction.resolve",
+        "event": "interaction.resolved",
         "payload": {"interactionId": "different-id"},
     }
 
@@ -258,7 +258,7 @@ def test_late_engine_exchange_does_not_modify_terminal_payload() -> None:
     assert service.mark_resolved(
         session_key="s-1",
         interaction_id="int-1",
-        envelope={"type": "event", "event": "interaction.resolve", "payload": {}},
+        envelope={"type": "event", "event": "interaction.resolved", "payload": {}},
     )
 
     updated = service.record_engine_exchange(

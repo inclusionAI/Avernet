@@ -11,7 +11,7 @@ from typing import Any
 
 
 @dataclass
-class _SessionState:
+class SessionState:
     """Per-sessionKey 状态，用于多路复用场景下隔离不同会话的消息。"""
 
     content: str = ""

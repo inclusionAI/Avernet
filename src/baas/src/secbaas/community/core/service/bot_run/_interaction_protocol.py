@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 JsonObject = dict[str, object]
-InteractionEventName = Literal["interaction.requested", "interaction.resolve"]
+InteractionEventName = Literal["interaction.requested", "interaction.resolved"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +54,7 @@ class EngineInteractionResolvedEvent:
         return cls(
             session_key=_required_identity(session_key, "sessionKey"),
             interaction_id=_interaction_id(payload),
-            envelope=_event_envelope("interaction.resolve", payload),
+            envelope=_event_envelope("interaction.resolved", payload),
         )
 
 

@@ -39,8 +39,8 @@ class BotRunInteractionModel(Base):
     interaction_id = Column(String(160), nullable=False)
     state = Column(String(32), nullable=False)
     payload = Column(Text, nullable=False)
-    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
-    updated_at = Column(
+    gmt_create = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    gmt_modified = Column(
         TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
@@ -73,6 +73,6 @@ class BotRunInteractionModel(Base):
             interaction_id=self.interaction_id,
             state=cast(InteractionState, self.state),
             payload=BotRunInteractionPayload.from_dict(decoded),
-            created_at=self.created_at,
-            updated_at=self.updated_at,
+            created_at=self.gmt_create,
+            updated_at=self.gmt_modified,
         )
