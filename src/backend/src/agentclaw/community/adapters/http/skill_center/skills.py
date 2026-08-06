@@ -2452,8 +2452,9 @@ def _resolve_parameter_bot(
     The requested Bot ID is used only as a lookup key; ownership always comes
     from the Bot row. Historical ``Skill.user_id`` values may contain a
     collaborator, so they must never participate in device-owner resolution.
-    Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
-    no Bot binding and remain usable across Bots.
+    Bot-private Skills are scoped by ``bolt_id``. Shared market Skills are
+    identified by their trusted source scheme (``git://`` or ``center://``)
+    and remain usable across Bots regardless of historical ``bolt_id`` values.
     """
 
     bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
@@ -2467,11 +2468,9 @@ def _resolve_parameter_bot(
         )
 
     skill_bot_id = str(skill.get("bolt_id") or "")
-    is_shared_git_skill = (
-        str(skill.get("git_path") or "").startswith("git://")
-        and not skill_bot_id
-    )
-    if is_shared_git_skill:
+    git_path = str(skill.get("git_path") or "")
+    is_shared_market_skill = git_path.startswith(("git://", "center://"))
+    if is_shared_market_skill:
         return bot
 
     if not skill_bot_id:
