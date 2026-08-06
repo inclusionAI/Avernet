@@ -26,7 +26,7 @@ from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
 from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
-from agentclaw.community.core.bot_management.engines import resolve_provisioning
+from agentclaw.community.core.bot_management.engines import should_encrypt_template_token_fail_open
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -107,15 +107,15 @@ class TemplateService:
         # Legacy call chain only passes template_type; pass empty identity
         # fields (required by BotProvisioningContext) — should_encrypt only
         # consults template_type/template_config.
-        ctx, strategy = resolve_provisioning(
+        if not should_encrypt_template_token_fail_open(
             bot_id="",
             owner_id="",
             bot_type="",
             active_engine=active_engine,
             template_type=template_type,
             template_config=template_config,
-        )
-        if not strategy.should_encrypt_template_token(ctx):
+            log_context="template_service",
+        ):
             return template_config
         token = template_config.get("token")
         if not isinstance(token, str) or not token or token.startswith(CIPHER_PREFIX):

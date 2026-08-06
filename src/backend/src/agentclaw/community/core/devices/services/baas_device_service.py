@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import (
     build_extra_properties_fail_open,
-    resolve_provisioning,
+    extract_runtime_token_fail_open,
+    should_encrypt_template_token_fail_open,
 )
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.core.devices.models import (
@@ -560,17 +560,17 @@ class BaasDeviceService(DeviceService):
         # ac_templates.ext.  Create-init runs from a durable task after the
         # synchronous create path, so reload template_config from TemplateService
         # just like the BaaS restart path does.
-        base_provisioning_ctx, provisioning_strategy = resolve_provisioning(
-            bot_id=resolved_bot_id,
-            owner_id=resolved_owner_id,
-            active_engine=raw_active_engine,
-            bot_type=resolved_bot_type,
-            template_type=template_type,
-            template_config=None,
-        )
         if (
             self._template_service is None
-            and provisioning_strategy.should_encrypt_template_token(base_provisioning_ctx)
+            and should_encrypt_template_token_fail_open(
+                bot_id=resolved_bot_id,
+                owner_id=resolved_owner_id,
+                active_engine=raw_active_engine,
+                bot_type=resolved_bot_type,
+                template_type=template_type,
+                template_config=None,
+                log_context="baas_device_service.create_init",
+            )
         ):
             return False, (
                 "template_service required for coding bot create init: "
@@ -591,10 +591,19 @@ class BaasDeviceService(DeviceService):
         if not isinstance(template_config, dict):
             template_config = {}
 
-        # Reuse the base ctx, swapping in the freshly loaded template_config
-        # (same bot/engine/template_type as base_provisioning_ctx above).
-        provisioning_ctx = replace(base_provisioning_ctx, template_config=template_config)
-        raw_codefuse_token = provisioning_strategy.extract_runtime_token(provisioning_ctx)
+        # Resolve the runtime token with the freshly loaded template_config.
+        # Engine-specific knowledge lives in the strategy; this caller only
+        # passes the reloaded config and gains token resolution fail-soft here
+        # (decrypt follows below; a None token means no CodeFuse token to inject).
+        raw_codefuse_token = extract_runtime_token_fail_open(
+            bot_id=resolved_bot_id,
+            owner_id=resolved_owner_id,
+            active_engine=raw_active_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=template_config,
+            log_context="baas_device_service.create_init_token",
+        )
         codefuse_token = (
             self._vault.decrypt_or_passthrough(raw_codefuse_token)
             if raw_codefuse_token

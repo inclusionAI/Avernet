@@ -190,6 +190,160 @@ def build_extra_properties_fail_open(
 build_engine_extra_properties_fail_open = build_extra_properties_fail_open
 
 
+def build_extra_envs_fail_open(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_type: str,
+    active_engine: str | None = None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
+    log_context: str = "engine_provisioning",
+) -> dict[str, str] | None:
+    """Build engine extra envs without blocking generic provisioning.
+
+    Single fail-open entry point for the ``build_extra_envs`` hook so call sites
+    stop hand-rolling ``resolve_provisioning`` + try/except. Any failure falls
+    back to ``None``.
+    """
+    try:
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        return strategy.build_extra_envs(ctx)
+    except Exception as exc:
+        logger.warning(
+            "[%s] Provisioning extra_envs fallback=none bot_id=%s error_type=%s",
+            log_context,
+            bot_id,
+            type(exc).__name__,
+        )
+        return None
+
+
+def extract_runtime_token_fail_open(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_type: str,
+    active_engine: str | None = None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
+    log_context: str = "engine_provisioning",
+) -> str | None:
+    """Resolve the engine runtime token without blocking generic provisioning.
+
+    Single fail-open entry point for the ``extract_runtime_token`` hook so the
+    token-refresh path stops hand-rolling ``resolve_provisioning`` + try/except.
+    """
+    try:
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        return strategy.extract_runtime_token(ctx)
+    except Exception as exc:
+        logger.warning(
+            "[%s] Provisioning runtime token fallback=none bot_id=%s error_type=%s",
+            log_context,
+            bot_id,
+            type(exc).__name__,
+        )
+        return None
+
+
+def should_encrypt_template_token_fail_open(
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_type: str,
+    active_engine: str | None = None,
+    template_type: str | None = None,
+    template_config: dict[str, Any] | None = None,
+    log_context: str = "engine_provisioning",
+) -> bool:
+    """Ask the engine strategy whether to encrypt the template token, fail-open.
+
+    Single fail-open entry point for the ``should_encrypt_template_token`` hook.
+    Returns ``False`` (do not encrypt → legacy path) on any extension failure.
+    """
+    try:
+        ctx, strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=active_engine,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        return strategy.should_encrypt_template_token(ctx)
+    except Exception as exc:
+        logger.warning(
+            "[%s] Provisioning encrypt check fallback=false bot_id=%s error_type=%s",
+            log_context,
+            bot_id,
+            type(exc).__name__,
+        )
+        return False
+
+
+def _coerce_template_config(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def build_extra_envs_from_bot(
+    *, bot: dict[str, Any], log_context: str = "engine_provisioning"
+) -> dict[str, str] | None:
+    """Build engine extra envs from a bot dict via the strategy seam.
+
+    Adapts a bot record to the provisioning context and delegates to
+    ``build_extra_envs_fail_open``. Generic services call this instead of
+    hand-rolling bot-dict field extraction + strategy resolution.
+    """
+    return build_extra_envs_fail_open(
+        bot_id=str(bot.get("bot_id") or ""),
+        owner_id=str(bot.get("owner_id") or ""),
+        bot_type=str(bot.get("bot_type") or ""),
+        active_engine=bot.get("active_engine"),
+        template_type=bot.get("template_type"),
+        template_config=_coerce_template_config(bot.get("template_config")),
+        log_context=log_context,
+    )
+
+
+def build_extra_properties_from_bot(
+    *, bot: dict[str, Any], log_context: str = "engine_provisioning"
+) -> dict[str, Any] | None:
+    """Build opaque provisioning properties from a bot dict via the strategy seam.
+
+    Adapts a bot record to the provisioning context and delegates to
+    ``build_extra_properties_fail_open``. Generic services call this instead of
+    hand-rolling bot-dict field extraction + fail-open + ``to_dict``.
+    """
+    params = build_extra_properties_fail_open(
+        bot_id=str(bot.get("bot_id") or ""),
+        owner_id=str(bot.get("owner_id") or ""),
+        bot_type=str(bot.get("bot_type") or ""),
+        active_engine=bot.get("active_engine"),
+        template_type=bot.get("template_type"),
+        template_config=_coerce_template_config(bot.get("template_config")),
+        log_context=log_context,
+    )
+    return params.to_dict() if params is not None else None
+
+
+
 __all__ = [
     "EngineExtraProperties",
     "BotProvisioningContext",
@@ -198,4 +352,9 @@ __all__ = [
     "build_engine_extra_properties_fail_open",
     "get_engine_provisioning_registry",
     "resolve_provisioning",
+    "build_extra_envs_fail_open",
+    "extract_runtime_token_fail_open",
+    "should_encrypt_template_token_fail_open",
+    "build_extra_envs_from_bot",
+    "build_extra_properties_from_bot",
 ]

@@ -533,3 +533,51 @@ def test_aicoding_strategy_extra_properties_none_without_template_config():
             template_config=template_config,
         )
         assert strategy.build_extra_properties(ctx) is None
+
+
+def test_fail_open_helpers_delegate_to_strategy_hooks():
+    """Engines-package fail-open entry points are the single seam for main callers."""
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_envs_fail_open,
+        extract_runtime_token_fail_open,
+        should_encrypt_template_token_fail_open,
+    )
+
+    kwargs = dict(
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        active_engine="aicoding",
+        template_type="personalCoding",
+        template_config={"model": "m1", "runtime": "codefuse-antcc", "token": "tok"},
+    )
+    assert build_extra_envs_fail_open(**kwargs) == {
+        "BOT_TYPE": "personal",
+        "RELAY_DEFAULT_MODEL": "m1",
+        "RELAY_DEFAULT_RUNTIME": "codefuse-antcc",
+    }
+    assert extract_runtime_token_fail_open(**kwargs) == "tok"
+    assert should_encrypt_template_token_fail_open(**kwargs) is True
+
+
+def test_from_bot_helpers_adapt_bot_dict():
+    """build_*_from_bot bundles bot-dict adaptation + fail-open + to_dict."""
+    from agentclaw.community.core.bot_management.engines import (
+        build_extra_properties_from_bot,
+    )
+
+    bot = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot_type": "personal",
+        "active_engine": "aicoding",
+        "template_type": "personalCoding",
+        "template_config": {
+            "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+        },
+    }
+    assert build_extra_properties_from_bot(bot=bot) == {
+        "aicoding": {"theta_key": "enc:v1:x"}
+    }
+    # no engine / no field -> None, legacy path preserved
+    assert build_extra_properties_from_bot(bot={"bot_id": "b", "bot_type": "x"}) is None

@@ -148,20 +148,22 @@ def build_aix_extra_envs(
     single source of truth for coding templates and RELAY_DEFAULT_* envs lives
     in the aicoding provisioning strategy.
     """
-    from agentclaw.community.core.bot_management.engines import resolve_provisioning
+    from agentclaw.community.core.bot_management.engines import (
+    build_extra_envs_fail_open,
+)
 
     # Legacy compat wrapper only knows template_type/template_config; pass empty
     # identity fields (required by BotProvisioningContext) — the aicoding strategy
     # only consults template_type/template_config anyway.
-    ctx, strategy = resolve_provisioning(
+    return build_extra_envs_fail_open(
         bot_id="",
         owner_id="",
         bot_type="",
         active_engine="aicoding",
         template_type=template_type,
         template_config=template_config,
+        log_context="bot_management.utils",
     )
-    return strategy.build_extra_envs(ctx)
 
 
 LEGACY_YUQUE_KNOWLEDGE_KEYS = ("yuque_kb_repos",)

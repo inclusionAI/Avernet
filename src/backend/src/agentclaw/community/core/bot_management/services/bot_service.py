@@ -416,45 +416,34 @@ class BotService:
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
     ) -> "Optional[Dict[str, Any]]":
-        """Build engine-specific extra_envs via the provisioning strategy.
+        """Build engine-specific extra_envs via the provisioning strategy seam.
 
-        Centralizes the create / restart / start provisioning so each call site
-        only supplies the metadata it actually has.  Fails soft: any strategy
-        error is logged and treated as "no extra envs" so device allocation is
-        never blocked by the engine layer.  Logging is engine-agnostic (logs the
-        whole ``extra_envs`` dict) so new engine strategies are picked up without
-        touching bot_service.
+        Thin delegate over ``build_extra_envs_fail_open`` so BotService stays a
+        pure caller — engine-specific knowledge lives in the strategy. Fails
+        soft (returns ``None``) so device allocation is never blocked by the
+        engine layer.
         """
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                resolve_provisioning,
-            )
+        from agentclaw.community.core.bot_management.engines import (
+            build_extra_envs_fail_open,
+        )
 
-            ctx, strategy = resolve_provisioning(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                active_engine=active_engine,
-                bot_type=bot_type,
-                template_type=template_type,
-                template_config=template_config,
-            )
-            extra_envs = strategy.build_extra_envs(ctx)
-            if extra_envs:
-                logger.info(
-                    "[%s] Setting engine extra_envs for bot %s: %s",
-                    log_context,
-                    bot_id,
-                    extra_envs,
-                )
-            return extra_envs
-        except Exception as e:
-            logger.warning(
-                "[%s] Failed to build engine extra_envs for bot %s: %s",
+        extra_envs = build_extra_envs_fail_open(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            active_engine=active_engine,
+            bot_type=bot_type,
+            template_type=template_type,
+            template_config=template_config,
+            log_context=log_context,
+        )
+        if extra_envs:
+            logger.info(
+                "[%s] Setting engine extra_envs for bot %s: %s",
                 log_context,
                 bot_id,
-                e,
+                extra_envs,
             )
-            return None
+        return extra_envs
 
     def _build_extra_properties(
         self,
@@ -467,7 +456,12 @@ class BotService:
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
     ) -> "Optional[Dict[str, Any]]":
-        """Build opaque provisioning properties through the provisioning strategy."""
+        """Build opaque provisioning properties via the provisioning strategy seam.
+
+        Thin delegate over ``build_extra_properties_fail_open`` + ``to_dict`` so
+        BotService stays a pure caller — engine-specific knowledge lives in the
+        strategy.
+        """
         from agentclaw.community.core.bot_management.engines import (
             build_extra_properties_fail_open,
         )
@@ -494,41 +488,32 @@ class BotService:
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
     ) -> "Optional[str]":
-        """Resolve the engine runtime token (symmetric to ``_build_engine_extra_envs``).
+        """Resolve the engine runtime token via the provisioning strategy seam.
 
-        Used by the update_bot token-refresh path so it shares the same
-        ``resolve_provisioning`` entry point instead of rebuilding context +
-        strategy inline.  Fails soft (returns None).
+        Thin delegate over ``extract_runtime_token_fail_open`` so BotService
+        stays a pure caller — engine-specific knowledge lives in the strategy.
+        Fails soft (returns ``None``).
         """
-        try:
-            from agentclaw.community.core.bot_management.engines import (
-                resolve_provisioning,
-            )
+        from agentclaw.community.core.bot_management.engines import (
+            extract_runtime_token_fail_open,
+        )
 
-            ctx, strategy = resolve_provisioning(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                active_engine=active_engine,
-                bot_type=bot_type,
-                template_type=template_type,
-                template_config=template_config,
-            )
-            token = strategy.extract_runtime_token(ctx)
-            if token:
-                logger.info(
-                    "[%s] Resolved engine runtime token for bot %s",
-                    log_context,
-                    bot_id,
-                )
-            return token
-        except Exception as e:
-            logger.warning(
-                "[%s] Failed to extract engine runtime token for bot %s: %s",
+        token = extract_runtime_token_fail_open(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            active_engine=active_engine,
+            bot_type=bot_type,
+            template_type=template_type,
+            template_config=template_config,
+            log_context=log_context,
+        )
+        if token:
+            logger.info(
+                "[%s] Resolved engine runtime token for bot %s",
                 log_context,
                 bot_id,
-                e,
             )
-            return None
+        return token
 
     @staticmethod
     def _should_trigger_memory_initialization(
