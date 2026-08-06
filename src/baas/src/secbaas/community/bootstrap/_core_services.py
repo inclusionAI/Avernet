@@ -87,6 +87,9 @@ from secbaas.community.core.service.sse import (
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
+from secbaas.community.plugins.sandbox.arca.request_api_key import (
+    AicodingArcaRequestApiKeyResolver,
+)
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
 
@@ -261,6 +264,11 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     # ── Device plugins ────────────────────────────────────────────────────────
 
+    arca_request_api_key_resolver = providers.Singleton(
+        AicodingArcaRequestApiKeyResolver,
+        secret_plugin=secret_plugin,
+    )
+
     paas_sandbox_plugins = providers.Singleton(
         PaasSandboxPlugins,
         arca_sandbox_plugin_factory=arca_sandbox_plugin_factory,
@@ -269,6 +277,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         teclaw_bot_plugin_factory=teclaw_bot_plugin_factory,
         k8s_sandbox_plugin_factory=k8s_sandbox_plugin_factory,
         docker_sandbox_plugin=docker_sandbox_plugin,
+        arca_request_api_key_resolver=arca_request_api_key_resolver,
     )
 
     paas_service_factory = providers.Singleton(

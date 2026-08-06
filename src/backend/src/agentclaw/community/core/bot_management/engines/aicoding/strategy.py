@@ -14,7 +14,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 )
 
 from ..provisioning import (
-    AgentCodingBotParams,
+    EngineExtraProperties,
     BotProvisioningContext,
     EngineProvisioningStrategy,
 )
@@ -135,10 +135,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
 
         return envs or None
 
-    def build_agent_coding_bot_params(
+    def build_extra_properties(
         self, ctx: BotProvisioningContext
-    ) -> AgentCodingBotParams | None:
-        """Extract the opaque theta key from the governed template snapshot."""
+    ) -> EngineExtraProperties | None:
+        """Build AICoding-owned properties from the governed template snapshot."""
         template_config = ctx.template_config
         if not self.consumes_template_config(
             ctx.template_type,
@@ -156,7 +156,9 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         theta_key = ext_config.get("thetaKey")
         if not isinstance(theta_key, str) or not theta_key.strip():
             return None
-        return AgentCodingBotParams(theta_key=theta_key.strip())
+        return EngineExtraProperties(
+            values={"aicoding": {"theta_key": theta_key.strip()}}
+        )
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         return self.consumes_template_config(

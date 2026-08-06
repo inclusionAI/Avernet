@@ -9,7 +9,7 @@ from agentclaw.community.log import get_logger
 from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
 from .default import DefaultProvisioningStrategy
 from .provisioning import (
-    AgentCodingBotParams,
+    EngineExtraProperties,
     BotProvisioningContext,
     EngineProvisioningStrategy,
 )
@@ -121,7 +121,7 @@ def resolve_provisioning(
     return ctx, strategy
 
 
-def build_agent_coding_bot_params_fail_open(
+def build_engine_extra_properties_fail_open(
     *,
     bot_id: str,
     owner_id: str,
@@ -130,12 +130,11 @@ def build_agent_coding_bot_params_fail_open(
     template_type: str | None = None,
     template_config: dict[str, Any] | None = None,
     log_context: str = "engine_provisioning",
-) -> AgentCodingBotParams | None:
-    """Build optional AgentCoding params without letting an extension block provisioning.
+) -> EngineExtraProperties | None:
+    """Build opaque engine properties without blocking generic provisioning.
 
-    Strategy resolution and execution are extension hooks.  Any failure therefore
-    falls back to ``None``, which preserves the historical fixed Arca credential
-    path at every create/restart/release/upgrade entrypoint.
+    Strategy resolution and execution are extension hooks. Any failure falls
+    back to ``None`` so generic lifecycle services preserve their legacy path.
     """
     try:
         ctx, strategy = resolve_provisioning(
@@ -146,10 +145,10 @@ def build_agent_coding_bot_params_fail_open(
             template_type=template_type,
             template_config=template_config,
         )
-        return strategy.build_agent_coding_bot_params(ctx)
+        return strategy.build_extra_properties(ctx)
     except Exception as exc:
         logger.warning(
-            "[%s] AgentCoding provisioning fallback=fixed bot_id=%s error_type=%s",
+            "[%s] Engine extra properties fallback=none bot_id=%s error_type=%s",
             log_context,
             bot_id,
             type(exc).__name__,
@@ -158,10 +157,10 @@ def build_agent_coding_bot_params_fail_open(
 
 
 __all__ = [
-    "AgentCodingBotParams",
+    "EngineExtraProperties",
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
-    "build_agent_coding_bot_params_fail_open",
+    "build_engine_extra_properties_fail_open",
     "get_engine_provisioning_registry",
     "resolve_provisioning",
 ]

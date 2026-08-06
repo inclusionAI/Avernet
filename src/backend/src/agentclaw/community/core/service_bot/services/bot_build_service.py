@@ -391,18 +391,18 @@ class BotBuildService:
             return False
 
     @staticmethod
-    def _build_agent_coding_bot_params(
+    def _build_extra_properties(
         *, bot: Dict[str, Any], user_id: str
     ) -> Optional[Dict[str, Any]]:
-        """Resolve optional AgentCoding parameters through the guarded extension seam."""
+        """Resolve opaque engine properties through the guarded extension seam."""
         from agentclaw.community.core.bot_management.engines import (
-            build_agent_coding_bot_params_fail_open,
+            build_engine_extra_properties_fail_open,
         )
 
         template_config = bot.get("template_config")
         if not isinstance(template_config, dict):
             template_config = None
-        params = build_agent_coding_bot_params_fail_open(
+        params = build_engine_extra_properties_fail_open(
             bot_id=str(bot.get("bot_id") or ""),
             owner_id=user_id,
             bot_type=str(bot.get("bot_type") or "service"),
@@ -586,7 +586,7 @@ class BotBuildService:
                     "version": version,
                     "ext_info": ext_info,
                     "extra_envs": extra_envs,
-                    "agent_coding_bot_params": self._build_agent_coding_bot_params(
+                    "extra_properties": self._build_extra_properties(
                         bot=bot, user_id=user_id
                     ),
                 }
@@ -1218,7 +1218,7 @@ class BotBuildService:
                     "stage": publish_stage.value,
                     "version": version,
                     "extra_envs": extra_envs,
-                    "agent_coding_bot_params": self._build_agent_coding_bot_params(
+                    "extra_properties": self._build_extra_properties(
                         bot=bot, user_id=user_id
                     ),
                 }

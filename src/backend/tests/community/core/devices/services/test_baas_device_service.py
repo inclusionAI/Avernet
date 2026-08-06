@@ -735,7 +735,7 @@ class TestDoAllocate:
 
         assert allocated.device_id == "BAAS-CTR-xxx"
         builder_kwargs = baas._build_create_bot_payload.call_args.kwargs
-        assert builder_kwargs["agent_coding_bot_params"] is None
+        assert builder_kwargs["extra_properties"] is None
 
     def test_personal_create_requires_upstream_template_uid_and_resolves_uuid(self):
         baas = self._setup_baas()

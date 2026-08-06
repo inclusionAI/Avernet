@@ -16,7 +16,6 @@ from ._credentials import (
     TeClawCredentials,
 )
 from ._deploy_config import (
-    AgentCodingBotParams,
     ArcaDeployConfig,
     DeployConfig,
     DeviceCredentials,
@@ -102,7 +101,6 @@ from ._protocols import DeviceService, LocalPaasService, PaasServiceFacade
 from ._proxy import ProxyExecRequest, ProxyHealthRequest
 
 __all__ = [
-    "AgentCodingBotParams",
     "ArcaCreateConfig",
     "ArcaCreationResult",
     "ArcaCredentials",

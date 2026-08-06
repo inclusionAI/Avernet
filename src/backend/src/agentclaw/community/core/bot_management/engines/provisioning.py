@@ -12,13 +12,13 @@ from typing import Any, Dict, Optional
 
 
 @dataclass(frozen=True)
-class AgentCodingBotParams:
-    """Opaque AgentCoding Bot parameters forwarded to the sandbox boundary."""
+class EngineExtraProperties:
+    """Opaque engine-owned properties forwarded through generic services."""
 
-    theta_key: str | None = None
+    values: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"theta_key": self.theta_key}
+        return dict(self.values)
 
 
 @dataclass(frozen=True)
@@ -70,13 +70,13 @@ class EngineProvisioningStrategy(ABC):
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
 
-    def build_agent_coding_bot_params(
+    def build_extra_properties(
         self, ctx: BotProvisioningContext
-    ) -> AgentCodingBotParams | None:
-        """Return optional AgentCoding-specific sandbox parameters.
+    ) -> EngineExtraProperties | None:
+        """Return optional opaque properties owned by this engine strategy.
 
-        The default is a no-op so non-coding engines and future strategies do
-        not need to know about AgentCoding template fields.
+        Generic lifecycle services only forward the returned mapping. They must
+        not inspect engine-specific keys or introduce per-engine branches.
         """
         return None
 

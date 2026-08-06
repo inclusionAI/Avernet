@@ -8,7 +8,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Protocol, override
 
 from agentclaw.community.core.bot_management.engines import (
-    build_agent_coding_bot_params_fail_open,
+    build_engine_extra_properties_fail_open,
     resolve_provisioning,
 )
 from agentclaw.community.core.devices.errors import DeviceServiceError
@@ -331,7 +331,7 @@ class BaasDeviceService(DeviceService):
                 "active_engine": engine,
                 "bot_type": effective_bot_type,
             }
-            agent_coding_params = build_agent_coding_bot_params_fail_open(
+            extra_properties = build_engine_extra_properties_fail_open(
                 bot_id=bolt_id,
                 owner_id=effective_owner_id,
                 active_engine=engine,
@@ -351,9 +351,9 @@ class BaasDeviceService(DeviceService):
                 "auto_approve_publish": True,
                 "extra_envs": extra_envs,
                 "template_config": template_config,
-                "agent_coding_bot_params": (
-                    agent_coding_params.to_dict()
-                    if agent_coding_params is not None
+                "extra_properties": (
+                    extra_properties.to_dict()
+                    if extra_properties is not None
                     else None
                 ),
                 # 个人 Bot / 服务 Bot 草稿没有 migration_path，但启动仍按 NAS home 目录运行。

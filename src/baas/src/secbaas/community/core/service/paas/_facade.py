@@ -221,7 +221,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         "outbound_operation_rule",
         "storage",
         "docker_image",
-        "agent_coding_bot_params",
+        "extra_properties",
     }
 
     _SIGMA_ALLOWED_OVERRIDE_FIELDS: set[str] = {

@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ._deploy_config import AgentCodingBotParams, DeviceCredentials
+from ._deploy_config import DeviceCredentials
 from ._models import MountPoint, ResourceSpecification, Storage
 from ._outbound_rule import OutBoundOperationRule
 
@@ -27,9 +27,9 @@ class DeviceCreateConfig(BaseModel):
 class ArcaCreateConfig(DeviceCreateConfig):
     """Arca platform-specific device creation configuration."""
 
-    agent_coding_bot_params: AgentCodingBotParams | None = Field(
+    extra_properties: dict[str, Any] | None = Field(
         default=None,
-        description="AgentCoding Bot parameters used at sandbox creation time",
+        description="Opaque engine-owned properties for platform extensions",
     )
     template_id: str | None = Field(
         default=None, description="Arca模板ID (不提供时从tenant extra_config获取)"

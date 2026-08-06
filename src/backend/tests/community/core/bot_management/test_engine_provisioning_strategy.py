@@ -383,7 +383,7 @@ def test_template_only_user_template_factory_config_without_active_engine_is_noo
     assert strategy.extract_runtime_token(ctx) is None
 
 
-def test_aicoding_strategy_builds_agent_coding_bot_params_from_theta_key():
+def test_aicoding_strategy_builds_extra_properties_from_theta_key():
     strategy = AicodingProvisioningStrategy("aicoding")
     ctx = BotProvisioningContext(
         active_engine="aicoding",
@@ -398,10 +398,10 @@ def test_aicoding_strategy_builds_agent_coding_bot_params_from_theta_key():
         },
     )
 
-    params = strategy.build_agent_coding_bot_params(ctx)
+    params = strategy.build_extra_properties(ctx)
 
     assert params is not None
-    assert params.to_dict() == {"theta_key": "encrypted-theta"}
+    assert params.to_dict() == {"aicoding": {"theta_key": "encrypted-theta"}}
 
 
 def test_aicoding_strategy_invalid_theta_key_keeps_legacy_behavior():
@@ -421,10 +421,10 @@ def test_aicoding_strategy_invalid_theta_key_keeps_legacy_behavior():
             bot_type="personal",
             template_config=template_config,
         )
-        assert strategy.build_agent_coding_bot_params(ctx) is None
+        assert strategy.build_extra_properties(ctx) is None
 
 
-def test_default_strategy_does_not_build_agent_coding_bot_params():
+def test_default_strategy_does_not_build_extra_properties():
     ctx = BotProvisioningContext(
         active_engine="openclaw",
         template_type="personalCoding",
@@ -439,14 +439,14 @@ def test_default_strategy_does_not_build_agent_coding_bot_params():
     )
     strategy = get_engine_provisioning_registry().resolve_for_context(ctx)
 
-    assert strategy.build_agent_coding_bot_params(ctx) is None
+    assert strategy.build_extra_properties(ctx) is None
 
 
-def test_agent_coding_params_guard_falls_back_without_logging_exception_message():
+def test_extra_properties_guard_falls_back_without_logging_exception_message():
     from unittest.mock import MagicMock, patch
 
     from agentclaw.community.core.bot_management.engines import (
-        build_agent_coding_bot_params_fail_open,
+        build_engine_extra_properties_fail_open,
     )
 
     registry = MagicMock()
@@ -462,7 +462,7 @@ def test_agent_coding_params_guard_falls_back_without_logging_exception_message(
             "agentclaw.community.core.bot_management.engines.registry.logger.warning"
         ) as warning,
     ):
-        result = build_agent_coding_bot_params_fail_open(
+        result = build_engine_extra_properties_fail_open(
             bot_id="b1",
             owner_id="u1",
             bot_type="personal",

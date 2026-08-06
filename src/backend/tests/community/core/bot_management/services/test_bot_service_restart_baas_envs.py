@@ -654,7 +654,7 @@ class TestRestartBaasCodefuseTokenPassthrough:
         assert "codefuse_token" not in payload
 
 
-def test_restart_baas_forwards_agent_coding_bot_params():
+def test_restart_baas_forwards_extra_properties():
     template_config = {
         "bot_template_config": {
             "ext_config": {"thetaKey": "encrypted-theta"},
@@ -669,6 +669,6 @@ def test_restart_baas_forwards_agent_coding_bot_params():
         bot=_make_bot(),
     )
 
-    assert baas.upgrade_bot.call_args.kwargs["agent_coding_bot_params"] == {
-        "theta_key": "encrypted-theta"
+    assert baas.upgrade_bot.call_args.kwargs["extra_properties"] == {
+        "aicoding": {"theta_key": "encrypted-theta"}
     }

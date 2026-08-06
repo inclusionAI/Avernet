@@ -456,7 +456,7 @@ class BotService:
             )
             return None
 
-    def _build_agent_coding_bot_params(
+    def _build_extra_properties(
         self,
         *,
         bot_id: str,
@@ -467,12 +467,12 @@ class BotService:
         template_config: "Optional[Dict[str, Any]]",
         log_context: str,
     ) -> "Optional[Dict[str, Any]]":
-        """Build optional AgentCoding sandbox parameters via the engine strategy."""
+        """Build opaque engine properties through the provisioning strategy."""
         from agentclaw.community.core.bot_management.engines import (
-            build_agent_coding_bot_params_fail_open,
+            build_engine_extra_properties_fail_open,
         )
 
-        params = build_agent_coding_bot_params_fail_open(
+        params = build_engine_extra_properties_fail_open(
             bot_id=bot_id,
             owner_id=owner_id,
             active_engine=active_engine,
@@ -4233,7 +4233,7 @@ class BotService:
             template_config=resolved_template_config,
             log_context="bot_service._restart_bot_baas",
         )
-        agent_coding_bot_params = self._build_agent_coding_bot_params(
+        extra_properties = self._build_extra_properties(
             bot_id=str(bot_id),
             owner_id=user_id,
             active_engine=active_engine,
@@ -4287,7 +4287,7 @@ class BotService:
             # 以保留创建 Bot 时使用的 envs / image / resource_spec 沙箱覆写。
             "extra_envs": extra_envs,
             "template_config": device_template_config,
-            "agent_coding_bot_params": agent_coding_bot_params,
+            "extra_properties": extra_properties,
         }
         if restart_stage is not None:
             upgrade_kwargs["stage"] = restart_stage

@@ -227,7 +227,7 @@ class BotDeployConfig:
     engine_type: str | None = None
     resource_spec: ResourceSpecification | None = None
     docker_image: str | None = None
-    agent_coding_bot_params: Dict[str, Any] | None = None
+    extra_properties: Dict[str, Any] | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式。"""
@@ -280,8 +280,8 @@ class BotDeployConfig:
             result["docker_image"] = self.docker_image
         if self.engine_type is not None:
             result["engine_type"] = self.engine_type
-        if self.agent_coding_bot_params is not None:
-            result["agent_coding_bot_params"] = dict(self.agent_coding_bot_params)
+        if self.extra_properties is not None:
+            result["extra_properties"] = dict(self.extra_properties)
         return result
 
 
@@ -562,17 +562,17 @@ class BaasService:  # pragma: no cover
         return ResourceSpecification(**kwargs)
 
     @staticmethod
-    def _redact_agent_coding_params(payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Return a log-safe shallow copy with opaque AgentCoding data redacted."""
+    def _redact_extra_properties(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a log-safe shallow copy with opaque extension data redacted."""
         redacted = dict(payload)
         config = payload.get("config")
         if not isinstance(config, dict):
             return redacted
         safe_config = dict(config)
         deploy_config = config.get("deploy_config")
-        if isinstance(deploy_config, dict) and "agent_coding_bot_params" in deploy_config:
+        if isinstance(deploy_config, dict) and "extra_properties" in deploy_config:
             safe_deploy = dict(deploy_config)
-            safe_deploy["agent_coding_bot_params"] = "<redacted>"
+            safe_deploy["extra_properties"] = "<redacted>"
             safe_config["deploy_config"] = safe_deploy
             redacted["config"] = safe_config
         return redacted
@@ -595,7 +595,7 @@ class BaasService:  # pragma: no cover
         template_config: Optional[Dict[str, Any]] = None,
         mount_home_dir_storage: bool | None = None,
         ext_info: Optional[Dict[str, Any]] = None,
-        agent_coding_bot_params: Optional[Dict[str, Any]] = None,
+        extra_properties: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """构建创建 Bot 的请求体。
 
@@ -730,7 +730,7 @@ class BaasService:  # pragma: no cover
             envs=envs,
             resource_spec=resource_spec,
             docker_image=docker_image,
-            agent_coding_bot_params=agent_coding_bot_params,
+            extra_properties=extra_properties,
         )
 
         # 构建配置
@@ -814,7 +814,7 @@ class BaasService:  # pragma: no cover
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
-        agent_coding_bot_params: Optional[Dict[str, Any]] = None,
+        extra_properties: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 创建 Bot。
 
@@ -885,13 +885,13 @@ class BaasService:  # pragma: no cover
             ext_info=ext_info,
             extra_envs=extra_envs,
             template_config=template_config,
-            agent_coding_bot_params=agent_coding_bot_params,
+            extra_properties=extra_properties,
         )
 
         logger.info(
             f"[BaasService.create_bot] "
             f"Upgrading bot in BaaS: operator={owner_id}, request_id={request_id}, "
-            f"payload={self._redact_agent_coding_params(payload)}"
+            f"payload={self._redact_extra_properties(payload)}"
         )
 
         try:
@@ -3090,7 +3090,7 @@ class BaasService:  # pragma: no cover
         mount_home_dir_storage: bool | None = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         template_config: Optional[Dict[str, Any]] = None,
-        agent_coding_bot_params: Optional[Dict[str, Any]] = None,
+        extra_properties: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """调用 BaaS 层 API 升级 Bot。
 
@@ -3152,13 +3152,13 @@ class BaasService:  # pragma: no cover
             mount_home_dir_storage=mount_home_dir_storage,
             extra_envs=extra_envs,
             template_config=template_config,
-            agent_coding_bot_params=agent_coding_bot_params,
+            extra_properties=extra_properties,
         )
 
         logger.info(
             f"[BaasService.upgrade_bot] "
             f"Upgrading bot in BaaS: bot_uuid={bot_uuid}, operator={owner_id}, request_id={request_id}, "
-            f"payload={self._redact_agent_coding_params(payload)}"
+            f"payload={self._redact_extra_properties(payload)}"
         )
 
         # 调用 BaaS 层 API

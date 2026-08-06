@@ -417,168 +417,85 @@ def test__safe_repr__repr_fails():
     assert "boom" in result
 
 
-class TestAgentCodingArcaCredential:
-    def test_resolves_theta_key_for_single_create_request(
+class TestArcaRequestCredentialExtension:
+    def test_resolver_receives_opaque_extra_properties(
         self, arca_credentials, mock_plugin
     ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
-        from secbaas.community.core.utils.secret_utils import symmetric_encrypt
+        from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        decrypt_key = "mist-decrypt-key"
-        encrypted = symmetric_encrypt("dynamic-arca-api-key", decrypt_key)
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.return_value = ("unused", decrypt_key)
+        resolver = MagicMock()
+        resolver.resolve.return_value = "dynamic-arca-api-key"
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
+            request_api_key_resolver=resolver,
         )
-        config = ArcaCreateConfig(
-            agent_coding_bot_params=AgentCodingBotParams(theta_key=encrypted)
-        )
+        extra_properties = {"some_engine": {"opaque": "ciphertext"}}
 
-        assert service._resolve_agent_coding_api_key(config) == "dynamic-arca-api-key"
-        secret_plugin.get_kv_secret.assert_called_once_with(
-            "other_manual_aixharness_theta_key"
+        assert (
+            service._resolve_request_api_key(
+                ArcaCreateConfig(extra_properties=extra_properties)
+            )
+            == "dynamic-arca-api-key"
         )
+        resolver.resolve.assert_called_once_with(extra_properties)
 
-    @pytest.mark.parametrize("theta_key", [None, "", "   "])
-    def test_missing_theta_key_keeps_fixed_credential(
-        self, arca_credentials, mock_plugin, theta_key
+    def test_missing_resolver_keeps_fixed_credential(
+        self, arca_credentials, mock_plugin
     ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
+        from secbaas.community.api.device_manage import ArcaCreateConfig
 
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            secret_plugin=MagicMock(),
-        )
-        params = (
-            AgentCodingBotParams(theta_key=theta_key) if theta_key is not None else None
         )
 
         assert (
-            service._resolve_agent_coding_api_key(
-                ArcaCreateConfig(agent_coding_bot_params=params)
+            service._resolve_request_api_key(
+                ArcaCreateConfig(extra_properties={"future_engine": {"x": 1}})
             )
             is None
         )
 
-    def test_mist_or_decrypt_failure_keeps_fixed_credential(
+    def test_resolver_failure_keeps_fixed_credential_without_logging_secret(
         self, arca_credentials, mock_plugin
     ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
+        from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.side_effect = RuntimeError("mist unavailable")
+        resolver = MagicMock()
+        resolver.resolve.side_effect = RuntimeError("credential-bearing-message")
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
+            request_api_key_resolver=resolver,
         )
 
-        assert (
-            service._resolve_agent_coding_api_key(
-                ArcaCreateConfig(
-                    agent_coding_bot_params=AgentCodingBotParams(
-                        theta_key="invalid-ciphertext"
-                    )
+        with patch.object(service._logger, "warning") as warning:
+            assert (
+                service._resolve_request_api_key(
+                    ArcaCreateConfig(extra_properties={"engine": {"secret": "value"}})
                 )
+                is None
             )
-            is None
-        )
 
-    def test_secret_plugin_unavailable_keeps_fixed_credential(
-        self, arca_credentials, mock_plugin
-    ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
+        logged = " ".join(str(call) for call in warning.call_args_list)
+        assert "credential-bearing-message" not in logged
+        assert "RuntimeError" in logged
 
-        service = ArcaPaasService(
-            credentials=arca_credentials,
-            arca_sandbox_plugin=mock_plugin,
-        )
-        config = ArcaCreateConfig(
-            agent_coding_bot_params=AgentCodingBotParams(theta_key="ciphertext")
-        )
-
-        assert service._resolve_agent_coding_api_key(config) is None
-
-    def test_empty_mist_secret_keeps_fixed_credential(
-        self, arca_credentials, mock_plugin
-    ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
-
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.return_value = ("unused", "")
-        service = ArcaPaasService(
-            credentials=arca_credentials,
-            arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
-        )
-        config = ArcaCreateConfig(
-            agent_coding_bot_params=AgentCodingBotParams(theta_key="ciphertext")
-        )
-
-        assert service._resolve_agent_coding_api_key(config) is None
-
-    def test_empty_decrypted_key_keeps_fixed_credential(
-        self, arca_credentials, mock_plugin
-    ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
-
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.return_value = ("unused", "decrypt-key")
-        service = ArcaPaasService(
-            credentials=arca_credentials,
-            arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
-        )
-        config = ArcaCreateConfig(
-            agent_coding_bot_params=AgentCodingBotParams(theta_key="ciphertext")
-        )
-
-        with patch(
-            "secbaas.community.core.service.paas._arca_paas_service.symmetric_decrypt",
-            return_value="   ",
-        ):
-            assert service._resolve_agent_coding_api_key(config) is None
-
-    def test_create_device_passes_dynamic_key_and_redacts_theta_key(
+    def test_create_device_passes_dynamic_key_and_redacts_extra_properties(
         self, arca_credentials, mock_plugin, mock_sandbox
     ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
+        from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        encrypted_theta_key = "encrypted-theta-key"
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.return_value = ("unused", "decrypt-key")
+        opaque_secret = "opaque-engine-secret"
+        resolver = MagicMock()
+        resolver.resolve.return_value = "dynamic-arca-api-key"
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
+            request_api_key_resolver=resolver,
         )
         info = MagicMock()
-        info.model_dump_json.return_value = "{}"
         info.status = MagicMock(value="READY")
         info.template_id = "tpl-test-001"
         info.sandbox_id = "sandbox-001"
@@ -593,63 +510,49 @@ class TestAgentCodingArcaCredential:
         config = ArcaCreateConfig(
             template_id="tpl-test-001",
             ttl_in_minutes=60,
-            agent_coding_bot_params=AgentCodingBotParams(theta_key=encrypted_theta_key),
+            extra_properties={"engine": {"opaque": opaque_secret}},
         )
 
-        with (
-            patch(
-                "secbaas.community.core.service.paas._arca_paas_service.symmetric_decrypt",
-                return_value="dynamic-arca-api-key",
-            ),
-            patch.object(service._logger, "info") as log_info,
-        ):
+        with patch.object(service._logger, "info") as log_info:
             service._create_device_sync(config)
 
         create_kwargs = mock_plugin.create_sync_sandbox.call_args.kwargs
         assert create_kwargs["api_key"] == "dynamic-arca-api-key"
         logged_text = " ".join(str(call) for call in log_info.call_args_list)
-        assert encrypted_theta_key not in logged_text
+        assert opaque_secret not in logged_text
         assert "<redacted>" in logged_text
 
-    def test_create_device_failure_log_redacts_config_and_exception_credentials(
+    def test_create_device_failure_log_redacts_extension_credentials(
         self, arca_credentials, mock_plugin
     ):
-        from secbaas.community.api.device_manage import (
-            AgentCodingBotParams,
-            ArcaCreateConfig,
-        )
+        from secbaas.community.api.device_manage import ArcaCreateConfig
 
-        encrypted_theta_key = "encrypted-theta-key"
+        opaque_secret = "opaque-engine-secret"
         dynamic_api_key = "dynamic-arca-api-key"
-        secret_plugin = MagicMock()
-        secret_plugin.get_kv_secret.return_value = ("unused", "decrypt-key")
+        resolver = MagicMock()
+        resolver.resolve.return_value = dynamic_api_key
         service = ArcaPaasService(
             credentials=arca_credentials,
             arca_sandbox_plugin=mock_plugin,
-            secret_plugin=secret_plugin,
+            request_api_key_resolver=resolver,
         )
         mock_plugin.create_sync_sandbox.side_effect = RuntimeError(
-            f"Authorization: Bearer {dynamic_api_key}; theta={encrypted_theta_key}"
+            f"Authorization: Bearer {dynamic_api_key}; opaque={opaque_secret}"
         )
         config = ArcaCreateConfig(
             template_id="tpl-test-001",
-            agent_coding_bot_params=AgentCodingBotParams(theta_key=encrypted_theta_key),
+            extra_properties={"engine": {"opaque": opaque_secret}},
         )
 
         with (
-            patch(
-                "secbaas.community.core.service.paas._arca_paas_service.symmetric_decrypt",
-                return_value=dynamic_api_key,
-            ),
             patch.object(service._logger, "error") as log_error,
             pytest.raises(PaasError),
         ):
             service._create_device_sync(config)
 
         logged_text = " ".join(str(call) for call in log_error.call_args_list)
-        assert encrypted_theta_key not in logged_text
+        assert opaque_secret not in logged_text
         assert dynamic_api_key not in logged_text
-        assert "agent_coding_bot_params': {'theta_key'" not in logged_text
         assert "<redacted>" in logged_text
         assert "RuntimeError" in logged_text
 

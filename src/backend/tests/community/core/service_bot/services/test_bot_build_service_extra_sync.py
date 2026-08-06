@@ -206,7 +206,7 @@ def test_mcp_config_skipped_when_device_returns_non_json_stdout():
     service._device_service.exec_shell_new.assert_called()
 
 
-def test_service_publish_builds_agent_coding_bot_params_from_template_snapshot():
+def test_service_publish_builds_extra_properties_from_template_snapshot():
     bot = {
         "bot_id": "service-bot-1",
         "bot_type": "service",
@@ -219,9 +219,9 @@ def test_service_publish_builds_agent_coding_bot_params_from_template_snapshot()
         },
     }
 
-    assert BotBuildService._build_agent_coding_bot_params(
-        bot=bot, user_id="owner-1"
-    ) == {"theta_key": "encrypted-service-theta"}
+    assert BotBuildService._build_extra_properties(bot=bot, user_id="owner-1") == {
+        "aicoding": {"theta_key": "encrypted-service-theta"}
+    }
 
 
 def test_service_publish_provisioning_failure_keeps_historical_fixed_key_path():
@@ -233,7 +233,7 @@ def test_service_publish_provisioning_failure_keeps_historical_fixed_key_path():
         "agentclaw.community.core.bot_management.engines.registry.get_engine_provisioning_registry",
         return_value=registry,
     ):
-        result = BotBuildService._build_agent_coding_bot_params(
+        result = BotBuildService._build_extra_properties(
             bot={
                 "bot_id": "service-bot-1",
                 "bot_type": "service",
