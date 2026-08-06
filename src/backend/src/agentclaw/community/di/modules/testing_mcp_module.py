@@ -44,10 +44,33 @@ class TestingMcpModule(Module):
     @singleton
     @provider
     def mcp_center(self) -> MCPCenterPlugin:
-        """Local Noop (MockSeam) instead of the prod MCP-Center HTTP impl.
-        The catalog is a third-party HTTP API with no fake in prod; the
-        local Noop now carries the mock seam, so tests can drive
-        ``get_mcp_detail`` etc. without network access."""
+        """Fixture-backed catalog when the singlebox acceptance fixture file is
+        provided; otherwise the local Noop.
+
+        ``SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE`` (set by the acceptance
+        conftest) points at a LocalMCPRegistry JSON/YAML catalog. When present
+        we serve a real ``CommunityMCPCenter`` from it so MCP-detail consumers
+        — notably the D-TOOLS-002 diagnostic, whose prompt-slimming helpers
+        only run when a tool exposes ``inputSchema`` — execute end-to-end under
+        singlebox acceptance instead of falling back to ``tools: []``. Absent
+        the env, fall back to the Noop (MockSeam) so other local tests degrade
+        gracefully without network access."""
+        import os
+        from pathlib import Path
+
+        fixture = os.environ.get("SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE", "").strip()
+        if fixture and Path(fixture).is_file():
+            from agentclaw.community.plugins.community.mcp_center import (
+                CommunityMCPCenter,
+            )
+
+            logger.info(
+                "[NEW-ARCH] MCPCenterPlugin: CommunityMCPCenter "
+                "(fixture-backed, path=%s)",
+                fixture,
+            )
+            return CommunityMCPCenter(registry_config_path=fixture)
+
         from agentclaw.community.plugins.local.mcp_center import NoopMCPCenterPlugin
 
         logger.info(

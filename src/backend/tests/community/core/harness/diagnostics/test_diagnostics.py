@@ -326,7 +326,9 @@ class TestToolsMcpFormatDiagnostic:
 
     @pytest.mark.asyncio
     async def test_no_verified_guide_for_unknown_mcp(self, monkeypatch):
-        """MCPs NOT in _VERIFIED_MCP_GUIDES should have verified_guide as null."""
+        """MCPs NOT in _VERIFIED_MCP_GUIDES (and without inputSchema) land in the
+        unreachable bucket: rendered as a mapping-table-only text block carrying
+        the 平台补全中 note, with no verified_guide content."""
         diag = ToolsMcpFormatDiagnostic()
         mcps = [{"server_code": "some-unknown-mcp", "name": "Unknown"}]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
@@ -349,7 +351,12 @@ class TestToolsMcpFormatDiagnostic:
         ctx.llm.chat = capture_chat
         await diag.analyze(ctx)
 
-        assert '"verified_guide": null' in captured_user
+        # No verified_guide anywhere (the MCP is unknown), and it lands in the
+        # unreachable (no-schema) bucket as a text block, not a JSON dump.
+        assert "verified_guide:" not in captured_user
+        assert "无 schema MCP" in captured_user
+        assert "some-unknown-mcp" in captured_user
+        assert "平台补全中" in captured_user
 
     @pytest.mark.asyncio
     async def test_no_activated_mcps_still_works(self):
