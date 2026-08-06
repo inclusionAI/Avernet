@@ -247,7 +247,11 @@ modules:
       # lives in tests/community/core/harness/diagnostics/test_diagnostics.py
       # (flattening, malformed-param skip, non-list early return, per-MCP cap
       # with tools_omitted) — outside the acceptance denominator by design.
-      # Revisit if singlebox gains a fixture-backed MCPCenter with schema tools.
+      # Update: singlebox now gains a fixture-backed MCPCenter — TestingMcpModule
+      # serves CommunityMCPCenter when SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE is
+      # set, and singlebox_coverage.sh passes the fixture catalog when starting
+      # the backend — so the helpers are acceptance-coverable again; the floor
+      # stays at the last measured value until CI re-measures with the fixture.
       #
       # 41.59 → 41.30: the LLM diagnostic refactor (refactor(LLM): 改进异常处理和日志记录)
       # added logging-only statements to services/llm.py that the read-only harness
