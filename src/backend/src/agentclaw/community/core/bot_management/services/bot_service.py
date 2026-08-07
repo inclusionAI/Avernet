@@ -3876,6 +3876,17 @@ class BotService:
                 "use DesktopBotService instead"
             )
 
+        # teclaw containers are provisioned only inside TeclawProvisionService
+        # during bot creation; there is no standalone "start a teclaw container"
+        # primitive. The generic stop→start restart path would destroy the
+        # container via stop_bot and then fail to recreate it, leaving the bot
+        # FAILED with a stale binding. Reject restart early so the destructive
+        # path is never reached; the recovery path is delete-and-recreate.
+        if self.is_teclaw_bot(bot.get("active_engine")):
+            raise BotOperationNotAllowedError(
+                "teclaw 类型的 Bot 不支持重启，请删除后重新创建"
+            )
+
         bot_status = str(bot.get("status") or "").upper()
         # REACTIVATING is an explicit lifecycle operation. PENDING is not:
         # failed startup reporting can strand a bot there indefinitely, so a
