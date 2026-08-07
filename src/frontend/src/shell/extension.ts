@@ -5,6 +5,8 @@
  */
 import { defineExt } from '@/capabilities';
 import * as BcnController from '@/services/backend-api/BcnController';
+import BotProfilePublicToggle from '@/pages/GroupChat/components/BotProfilePublicToggle';
+import FuseChat from '@/pages/GroupChat/components/FuseChat';
 import { Bell, Bot, Clock, Globe, User } from 'lucide-react';
 import type { ServerConfigMap } from '../../config/servers.config';
 import { SERVERS } from '../../config/servers.config';
@@ -129,15 +131,14 @@ export const AppExt = defineExt('App', {
   } as FeatureFlags,
 
   /**
-   * 组件注入插槽（差异类型「实现/组件注入」）：开源默认全 null（三个内部专属功能不渲染、
-   * 组件代码不进开源闭包），内部 src/internal/slots.ts extend 注入真实组件。
-   * 见 docs/重构/一期BCN开源/BCN 内部组件代码不可见隔离方案.md。
+   * 组件注入插槽（差异类型「实现/组件注入」）：仍未公开的内部能力开源默认 null。
+   * 融合模式与 Bot 画像公开已迁回 open core，但过渡期继续保留 slot，open 默认非空。
    */
   slots: {
     advancedSettings: null,
-    fuseChat: null,
+    fuseChat: FuseChat,
     groupVisibility: null,
-    botProfilePublic: null,
+    botProfilePublic: BotProfilePublicToggle,
   } as AppSlots,
 
   /** 埋点适配器（差异类型 C）：开源默认 no-op，内部 extend 注入 Tracert */
