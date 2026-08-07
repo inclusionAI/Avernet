@@ -74,11 +74,11 @@ Paths are relative to `src/backend/`.
   and raise `BaasServiceError(...) from e`. Leave the `httpx.HTTPStatusError` and
   `BaasServiceError` handlers alone.
 
-- [ ] **C3. Write `tests/community/core/service_bot/services/test_baas_service_get_http_info_retry.py`**
+- [x] **C3. Write `tests/community/core/service_bot/services/test_baas_service_get_http_info_retry.py`**
   covering the four cases in plan.md § _Test plan_. Stub `HttpClient` and
   `DeviceBindingRepository`; assert call counts, not just outcomes.
 
-- [ ] **C4. Run the new test plus the existing `baas_service` suite** → green.
+- [x] **C4. Run the new test plus the existing `baas_service` suite** → green.
 
 ---
 
