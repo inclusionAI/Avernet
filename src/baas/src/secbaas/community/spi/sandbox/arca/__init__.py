@@ -6,11 +6,8 @@ from ._errors import (
     ArcaSandboxTimeoutError,
 )
 from ._protocols import ArcaSandbox, ArcaSandboxPlugin
-from ._provisioning import ArcaProvisioningRegistry, ArcaProvisioningStrategy
 
 __all__ = [
-    "ArcaProvisioningRegistry",
-    "ArcaProvisioningStrategy",
     "ArcaSandbox",
     "ArcaSandboxError",
     "ArcaSandboxNotFoundError",

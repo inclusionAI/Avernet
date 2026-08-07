@@ -669,6 +669,7 @@ def test_restart_baas_forwards_extra_properties():
         bot=_make_bot(),
     )
 
-    assert baas.upgrade_bot.call_args.kwargs["extra_properties"] == {
-        "aicoding": {"theta_key": "encrypted-theta"}
-    }
+    # thetaKey now travels in template_config (forwarded to OutboundRuleProvider,
+    # corp), not in extra_properties; the envelope is None today.
+    assert baas.upgrade_bot.call_args.kwargs["extra_properties"] is None
+    assert baas.upgrade_bot.call_args.kwargs["template_config"] == template_config

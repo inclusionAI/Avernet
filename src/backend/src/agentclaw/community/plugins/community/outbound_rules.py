@@ -10,7 +10,7 @@ is a real impl bound directly by ``CommunityOutboundRulesModule``.
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from agentclaw.community.kernel.device_dto import OutBoundOperationRule
 from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
@@ -28,6 +28,7 @@ class CommunityOutboundRuleProvider(OutboundRuleProvider):
         agent_pass_token: str = "",
         agent_code: str = "",
         bot_type_resolver: Callable[[str, str], str | None] | None = None,
+        template_config: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
         return OutBoundOperationRule()
 

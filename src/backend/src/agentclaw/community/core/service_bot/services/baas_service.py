@@ -691,7 +691,9 @@ class BaasService:  # pragma: no cover
         )
 
         # 构建出站操作规则
-        outbound_operation_rule = self._build_outbound_operation_rule(bot_id, owner_id, agent_pass_token)
+        outbound_operation_rule = self._build_outbound_operation_rule(
+            bot_id, owner_id, agent_pass_token, template_config=template_config
+        )
 
         # 从 ac_bots.ext.service_bot_config 解析沙箱规格（cpu/memory 缺一则整组不传）
         resource_spec = self._resolve_service_bot_resource_spec(bot.get("ext"))
@@ -2746,6 +2748,7 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        template_config: Optional[Dict[str, Any]] = None,
     ) -> OutBoundOperationRule:
         """构建出站操作规则 — 委托给注入的 ``OutboundRuleProvider`` (Rule 20)。
 
@@ -2753,6 +2756,11 @@ class BaasService:  # pragma: no cover
         - community / singlebox / pytest → 空规则 (无出站 header 注入)。
 
         各 profile 的行为完全由其 provider 实现决定,core 不做任何 None 回退。
+
+        ``template_config`` is forwarded verbatim so a corp provider may derive
+        per-bot egress credentials from template fields (e.g. the AICoding
+        ``ext_config.thetaKey`` placeholder value) instead of the fixed Mist
+        secret; neutral profiles ignore it (empty rule).
         """
         return self._outbound_rule_provider.build_rule(
             bolt_id=bot_id,
@@ -2761,6 +2769,7 @@ class BaasService:  # pragma: no cover
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
             bot_type_resolver=self._resolve_bot_type,
+            template_config=template_config,
         )
 
     def _build_teclaw_outbound_operation_rule(

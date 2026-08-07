@@ -383,65 +383,6 @@ def test_template_only_user_template_factory_config_without_active_engine_is_noo
     assert strategy.extract_runtime_token(ctx) is None
 
 
-def test_theta_extra_properties_are_limited_to_supported_engines():
-    from agentclaw.community.core.bot_management.engines import (
-        build_extra_properties_fail_open,
-    )
-
-    for active_engine in ("aicoding", "claude_code"):
-        params = build_extra_properties_fail_open(
-            bot_id="b1",
-            owner_id="u1",
-            bot_type="personal",
-            active_engine=active_engine,
-            template_type="unrelated-template",
-            template_config={
-                "bot_template_config": {
-                    "ext_config": {"thetaKey": "  encrypted-theta  "},
-                },
-            },
-        )
-
-        assert params is not None
-        assert params == {"aicoding": {"theta_key": "encrypted-theta"}}
-
-    for active_engine in ("openclaw", "teclaw", "hermes", "future_engine"):
-        assert build_extra_properties_fail_open(
-            bot_id="b1",
-            owner_id="u1",
-            bot_type="personal",
-            active_engine=active_engine,
-            template_type="unrelated-template",
-            template_config={
-                "bot_template_config": {
-                    "ext_config": {"thetaKey": "encrypted-theta"},
-                },
-            },
-        ) is None
-
-
-def test_invalid_theta_key_keeps_legacy_behavior_for_supported_engine():
-    from agentclaw.community.core.bot_management.engines import (
-        build_extra_properties_fail_open,
-    )
-
-    for template_config in (
-        {},
-        {"bot_template_config": None},
-        {"bot_template_config": {"ext_config": None}},
-        {"bot_template_config": {"ext_config": {"thetaKey": ""}}},
-        {"bot_template_config": {"ext_config": {"thetaKey": 123}}},
-    ):
-        assert build_extra_properties_fail_open(
-            bot_id="b1",
-            owner_id="u1",
-            bot_type="personal",
-            active_engine="aicoding",
-            template_type="personalCoding",
-            template_config=template_config,
-        ) is None
-
-
 def test_default_strategy_does_not_build_extra_properties():
     ctx = BotProvisioningContext(
         active_engine="openclaw",
@@ -496,31 +437,6 @@ def test_extra_properties_guard_falls_back_without_logging_exception_message():
     assert "RuntimeError" in logged
 
 
-def test_aicoding_strategy_collects_theta_key_directly():
-    """strategy.build_extra_properties is the single AICoding field seam.
-
-    AICoding credential/config fields are owned by AicodingProvisioningStrategy
-    rather than an ExtraPropertiesContributor; the engine string is the only
-    gate and a present/valid field yields the aicoding namespace envelope.
-    """
-    strategy = AicodingProvisioningStrategy("aicoding")
-    ctx = BotProvisioningContext(
-        bot_id="b1",
-        owner_id="u1",
-        bot_type="personal",
-        active_engine="aicoding",
-        template_config={
-            "bot_template_config": {
-                "ext_config": {"thetaKey": "  enc:v1:cipher  "},
-            },
-        },
-    )
-
-    props = strategy.build_extra_properties(ctx)
-    assert props is not None
-    assert props.to_dict() == {"aicoding": {"theta_key": "enc:v1:cipher"}}
-
-
 def test_aicoding_strategy_extra_properties_none_without_template_config():
     """AICoding engine with no payload must surface nothing (legacy path)."""
     for template_config in (None, {}):
@@ -566,6 +482,9 @@ def test_from_bot_helpers_adapt_bot_dict():
         build_extra_properties_from_bot,
     )
 
+    # thetaKey no longer travels through extra_properties; it is forwarded in
+    # template_config to OutboundRuleProvider (corp) instead, so the envelope
+    # is always None today even for aicoding bots with a thetaKey snapshot.
     bot = {
         "bot_id": "b1",
         "owner_id": "u1",
@@ -576,8 +495,6 @@ def test_from_bot_helpers_adapt_bot_dict():
             "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
         },
     }
-    assert build_extra_properties_from_bot(bot=bot) == {
-        "aicoding": {"theta_key": "enc:v1:x"}
-    }
+    assert build_extra_properties_from_bot(bot=bot) is None
     # no engine / no field -> None, legacy path preserved
     assert build_extra_properties_from_bot(bot={"bot_id": "b", "bot_type": "x"}) is None

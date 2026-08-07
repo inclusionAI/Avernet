@@ -224,11 +224,11 @@ def test_service_publish_builds_extra_properties_from_template_snapshot():
         },
     }
 
+    # thetaKey no longer flows via extra_properties (it is forwarded in
+    # template_config to OutboundRuleProvider); the envelope is now None.
     assert build_extra_properties_from_bot(
         bot=bot, log_context="bot_build_service"
-    ) == {
-        "aicoding": {"theta_key": "encrypted-service-theta"}
-    }
+    ) is None
 
 
 def test_service_publish_provisioning_failure_keeps_historical_fixed_key_path():

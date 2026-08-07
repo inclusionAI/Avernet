@@ -18,7 +18,7 @@ Each impl carries its own policy:
 """
 from __future__ import annotations
 
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from agentclaw.community.kernel.device_dto import OutBoundOperationRule
 from agentclaw.community.plugin_api.base import Plugin
@@ -36,12 +36,20 @@ class OutboundRuleProvider(Plugin, Protocol):
         agent_pass_token: str = "",
         agent_code: str = "",
         bot_type_resolver: "Callable[[str, str], str | None] | None" = None,
+        template_config: "dict[str, Any] | None" = None,
     ) -> OutBoundOperationRule:
         """The full outbound-header rule set for a bot.
 
         ``bot_type_resolver(bolt_id, owner_id) -> bot_type | None`` lets the impl
         pick a bot-type-specific policy; impls that need no such split ignore it.
         Returns an empty rule where the runtime applies no egress mutation.
+
+        ``template_config`` is the resolved bot template snapshot forwarded
+        verbatim from the provisioning layer. It is opaque to the neutral core;
+        a provider that derives egress credentials from template fields (e.g.
+        the AICoding ``ext_config.thetaKey`` placeholder value) reads them here,
+        while providers that do not ignore it. ``None``/absent preserves the
+        legacy fixed-credential egress rule (fail-open).
         """
         ...
 

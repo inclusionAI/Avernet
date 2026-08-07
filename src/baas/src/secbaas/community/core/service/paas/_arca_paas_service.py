@@ -28,7 +28,6 @@ from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.core.utils.redact_utils import log_safe_model
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox.arca import (
-    ArcaProvisioningRegistry,
     ArcaSandboxError,
     ArcaSandboxNotFoundError,
     ArcaSandboxPlugin,
@@ -71,7 +70,6 @@ class ArcaPaasService(PaasService):
         self,
         credentials: ArcaCredentials,
         arca_sandbox_plugin: ArcaSandboxPlugin,
-        arca_provisioning_registry: ArcaProvisioningRegistry | None = None,
     ):
         """Initialize ArcaPaasService with pre-resolved credentials and plugin.
 
@@ -92,7 +90,6 @@ class ArcaPaasService(PaasService):
 
         self._credentials = credentials
         self._arca_sandbox_plugin = arca_sandbox_plugin
-        self._arca_provisioning_registry = arca_provisioning_registry
         self._logger = get_logger("core-service")
 
     async def get_credentials(self) -> ArcaCredentials:
@@ -265,18 +262,6 @@ class ArcaPaasService(PaasService):
             )
         return mount_points
 
-    def _resolve_request_api_key(self, config: ArcaCreateConfig) -> str | None:
-        """Resolve an optional request credential through the registry seam.
-
-        Fail-open is owned by the registry: a missing/illegal payload or an
-        extension exception both yield ``None`` so the legacy fixed credential
-        path is preserved. This service stays engine-agnostic.
-        """
-        registry = self._arca_provisioning_registry
-        if registry is None:
-            return None
-        return registry.resolve_request_api_key(config.extra_properties)
-
     async def create_device(  # type: ignore[override]
         self,
         config: ArcaCreateConfig,
@@ -346,14 +331,10 @@ class ArcaPaasService(PaasService):
                 "timeout_in_millis": timeout * 1000,
                 "ready_timeout_in_seconds": timeout,
             }
-            request_api_key = self._resolve_request_api_key(config)
-            if request_api_key is not None:
-                create_params["api_key"] = request_api_key
             # Build log-safe params dict with storage and image converted to dict if present
             log_params = {
                 k: (v.model_dump() if k == "storage" and v is not None else v)
                 for k, v in create_params.items()
-                if k != "api_key"
             }
             self._logger.info(
                 f"Creating sandbox with params: {json.dumps(log_params, default=str)}"
