@@ -125,10 +125,10 @@ Paths are relative to `src/backend/`.
   plus `test_api_layer_is_protocols_only.py` and
   `test_core_no_concrete_plugin_imports.py`.
 
-- [ ] **E3. Run the backend SAST/lint gate** (`scripts/ci/python_sast_local.sh`
+- [x] **E3. Run the backend SAST/lint gate** (`scripts/ci/python_sast_local.sh`
   or the pre-push lint-only path) for the changed modules.
 
-- [ ] **E4. Run the broader affected suites:** `tests/community/utils/`,
+- [x] **E4. Run the broader affected suites:** `tests/community/utils/`,
   `tests/community/plugins/`, `tests/community/core/service_bot/`,
   `tests/community/core/harness/`, `tests/community/di/`. Record what passed and
   state explicitly anything that could not run and why.
