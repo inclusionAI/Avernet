@@ -148,9 +148,19 @@ class EngineRuntimeRelay:
         return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id)
 
     def _resolve_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts
+        self, bot_id: str, owner_id: str, facts: BotFacts, draft_device: bool
     ) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
+
+        ``draft_device`` picks which of a ``service`` bot's devices this call
+        addresses. The default resolves the **published** runtime — the device
+        the bot a caller addressed actually runs on. ``True`` resolves the
+        bot's own binding (``ac_bots.binding_id``, the pre-publication draft)
+        instead; the sessions group passes it because that surface operates the
+        owner's draft workspace, and the published runtime is a multi-caller
+        device whose session collection is not scoped per caller. The draft
+        lookup is the same owner-scoped ``resolve_for_bot`` a personal bot
+        uses, so for a personal bot the flag changes nothing.
 
         ``DeviceNotBoundError`` (never provisioned, released, or — for a service
         bot — never published) and ``ConnInfoBuildError`` (the provider could not
@@ -166,7 +176,7 @@ class EngineRuntimeRelay:
         timeout — so :meth:`call` runs it in a worker thread.
         """
         try:
-            if facts.bot_type == _SERVICE_BOT_TYPE:
+            if facts.bot_type == _SERVICE_BOT_TYPE and not draft_device:
                 return self._resolve_published_device(facts, owner_id)
             return self._resolver.resolve_for_bot(bot_id, owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
@@ -266,7 +276,7 @@ class EngineRuntimeRelay:
         )
 
     def _resolve_bot_and_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts | None
+        self, bot_id: str, owner_id: str, facts: BotFacts | None, draft_device: bool
     ) -> DeviceContext:
         """Prove ownership, then resolve the device — one worker-thread hop.
 
@@ -275,7 +285,7 @@ class EngineRuntimeRelay:
         caller does not own, before any device is touched.
         """
         resolved = facts if facts is not None else self.resolve_bot(bot_id, owner_id)
-        return self._resolve_device(bot_id, owner_id, resolved)
+        return self._resolve_device(bot_id, owner_id, resolved, draft_device)
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -291,6 +301,7 @@ class EngineRuntimeRelay:
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
+        draft_device: bool = False,
     ) -> EngineResult:
         """Issue ``method path`` against the caller's bot's engine adapter.
 
@@ -307,6 +318,10 @@ class EngineRuntimeRelay:
         from outside: the only safe value is one this relay returned for the
         same ``bot_id``/``owner_id``, since it stands in for the ownership
         proof.
+
+        ``draft_device`` addresses a ``service`` bot's pre-publication draft
+        binding instead of its published runtime — see :meth:`_resolve_device`
+        for the rule and who passes it. Inert for a personal bot.
 
         Bot and device resolution share one **worker thread** hop. Both legs are
         synchronous and neither belongs on the event loop:
@@ -333,7 +348,7 @@ class EngineRuntimeRelay:
         to lack one is exactly the malformed case that must still fail.
         """
         ctx = await asyncio.to_thread(
-            self._resolve_bot_and_device, bot_id, owner_id, facts
+            self._resolve_bot_and_device, bot_id, owner_id, facts, draft_device
         )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)
