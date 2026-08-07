@@ -1,5 +1,7 @@
 from dependency_injector import containers, providers
 
+from secbaas.community.api.publish_manage import PublishService
+from secbaas.community.core.service.paas import DeviceCallbackHandler
 from secbaas.community.core.service.paas.desktop import ConnectionManager
 from secbaas.community.logger import get_logger
 
@@ -14,10 +16,25 @@ from ._lifecycle import (
     LocalProcessManagerLifecycle,
 )
 
+
+def _lazy_publish_service() -> PublishService:
+    """Resolve the publish_service from the live ApplicationContainer services.
+
+    Referenced lazily (at device-callback time) to break the
+    ``device_service ↔ publish_service`` object-graph cycle: publish service is
+    only resolved when a callback actually fires, not during container resolution.
+    Uses the live container singleton via ``get_container()`` so config/Selector
+    overrides applied at bootstrap are visible.
+    """
+    from secbaas.community.bootstrap import get_container
+
+    return get_container().services.publish_service()
+
+
 # Enterprise registers extra plugin options via plugin_registry at import
 # time. PluginContainer reads from the registry to build its Selectors, so
 # no enterprise import is needed here.
-from .plugins import PluginContainer as PluginContainer
+from .plugins import PluginContainer  # noqa: E402
 
 logger = get_logger("bootstrap")
 
@@ -133,6 +150,10 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ws_relay_session_repo=repository.ws_relay_session_repository,
         ticket_repository=repository.ticket_repository,
         session_ticket_repository=repository.session_ticket_repository,
+        device_callback_handler=providers.Singleton(
+            DeviceCallbackHandler,
+            publish_service_factory=_lazy_publish_service,
+        ),
     )
 
     tasks = providers.Container(

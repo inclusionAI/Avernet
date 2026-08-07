@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import shlex
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from jinja2 import Template
 
@@ -21,6 +21,9 @@ from secbaas.community.config import ConfigPath, get_config, get_config_by_path
 from secbaas.community.core.service.paas import PaasServiceFacade
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.logger import get_logger
+
+if TYPE_CHECKING:
+    from ._callback_handler import DeviceCallbackHandler
 
 logger = get_logger("core-service")
 
@@ -374,6 +377,7 @@ def dispatch_start_hook(
     rendered_hook: str,
     hook_timeout: int,  # noqa: ARG001 - kept for API compatibility
     facade: PaasServiceFacade,
+    callback_handler: DeviceCallbackHandler,
     publish_id: int | None = None,
 ) -> None:
     """Dispatch after_create_cmd_hook using wrapper script.
@@ -395,6 +399,7 @@ def dispatch_start_hook(
         hook_timeout: Timeout for hook execution (unused, kept for compatibility)
         publish_id: Optional publish ID for tracking
         facade: PaasServiceFacade instance
+        callback_handler: Device callback handler for failure reporting
     """
 
     def _run_hook() -> None:
@@ -439,6 +444,7 @@ def dispatch_start_hook(
                     stdout=stdout,
                     stderr=stderr,
                     tenant=tenant,
+                    callback_handler=callback_handler,
                 )
             else:
                 # Wrapper dispatched successfully
@@ -458,6 +464,7 @@ def dispatch_start_hook(
                 stdout=None,
                 stderr=str(e),
                 tenant=tenant,
+                callback_handler=callback_handler,
             )
 
     thread = threading.Thread(
@@ -476,6 +483,7 @@ def _report_failure(
     stdout: str | None,
     stderr: str | None,
     tenant: str,
+    callback_handler: DeviceCallbackHandler,
 ) -> None:
     """Report hook launch failure via internal callback.
 
@@ -489,6 +497,7 @@ def _report_failure(
         stdout: stdout from failed dispatch
         stderr: stderr from failed dispatch
         tenant: The tenant name
+        callback_handler: Device callback handler for failure reporting
     """
     import asyncio
 
@@ -506,11 +515,8 @@ def _report_failure(
                 stderr=stderr,
                 tenant=tenant,
             )
-            from secbaas.community.core.utils.callback_utils import (
-                handle_device_callback,
-            )
 
-            return await handle_device_callback(callback)
+            return await callback_handler.handle(callback)
 
         try:
             loop = asyncio.get_running_loop()

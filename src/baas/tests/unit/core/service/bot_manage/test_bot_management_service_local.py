@@ -223,6 +223,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=mock_template_service,
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             result = await service.start_device(
                 tenant="test_tenant",
@@ -334,6 +337,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=mock_template_service,
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             await service.start_device(
                 tenant="test_tenant",
@@ -444,6 +450,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=mock_template_service,
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             result = await service.start_device(
                 tenant="test_tenant",
@@ -514,6 +523,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=MagicMock(),
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             response = await service.start_device(
                 tenant="test_tenant",
@@ -573,6 +585,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=MagicMock(),
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             response = await service.start_device(
                 tenant="test_tenant",
@@ -632,6 +647,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=MagicMock(),
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             response = await service.start_device(
                 tenant="test_tenant",
@@ -691,6 +709,9 @@ class TestLocalPlatformStartDevice:
                 repository=mock_repo,
                 device_template_service=MagicMock(),
                 secret_plugin=MagicMock(),
+                callback_handler=MagicMock(
+                    handle=AsyncMock(return_value={"status": "ok"})
+                ),
             )
             response = await service.start_device(
                 tenant="test_tenant",
@@ -854,6 +875,9 @@ class TestLocalDeployConfigSerialization:
                     repository=mock_repo,
                     device_template_service=mock_template_service,
                     secret_plugin=MagicMock(),
+                    callback_handler=MagicMock(
+                        handle=AsyncMock(return_value={"status": "ok"})
+                    ),
                 )
                 response = await service.start_device(
                     tenant="test_tenant",

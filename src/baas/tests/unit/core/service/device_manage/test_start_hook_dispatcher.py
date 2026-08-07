@@ -12,11 +12,19 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from secbaas.community.config import Config
-from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+from secbaas.community.core.service.paas._start_hook_dispatcher import (
     _generate_wrapper_script,
     _get_callback_server,
     dispatch_start_hook,
 )
+
+
+def _test_callback_handler():
+    """Build a fresh mock DeviceCallbackHandler."""
+    handler = MagicMock()
+    handler.handle = AsyncMock(return_value={"status": "ok"})
+    return handler
+
 
 _CONFIG_WITH_CALLBACK_URLS = Config(
     user_config={
@@ -41,11 +49,11 @@ class TestGetCallbackServer:
     def test_prod_returns_prod_url(self):
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_current_env",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
                 return_value="prod",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_config",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_config",
                 return_value=_CONFIG_WITH_CALLBACK_URLS,
             ),
         ):
@@ -55,11 +63,11 @@ class TestGetCallbackServer:
     def test_pre_returns_pre_url(self):
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_current_env",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
                 return_value="pre",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_config",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_config",
                 return_value=_CONFIG_WITH_CALLBACK_URLS,
             ),
         ):
@@ -69,11 +77,11 @@ class TestGetCallbackServer:
     def test_dev_falls_back_to_pre_url(self):
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_current_env",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
                 return_value="dev",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_config",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_config",
                 return_value=_CONFIG_WITH_CALLBACK_URLS,
             ),
         ):
@@ -83,11 +91,11 @@ class TestGetCallbackServer:
     def test_unknown_env_returns_pre_url(self):
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_current_env",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_current_env",
                 return_value="staging",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.get_config",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.get_config",
                 return_value=_CONFIG_WITH_CALLBACK_URLS,
             ),
         ):
@@ -185,14 +193,14 @@ class TestDispatchStartHook:
         """dispatch_start_hook should start a daemon thread."""
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._get_callback_server",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
                 return_value="https://example.com",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.threading.Thread",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
             ) as mock_thread,
         ):
             mock_thread_instance = MagicMock()
@@ -205,6 +213,7 @@ class TestDispatchStartHook:
                 rendered_hook="echo test",
                 hook_timeout=60,
                 facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
                 publish_id=123,
             )
 
@@ -217,14 +226,14 @@ class TestDispatchStartHook:
         """Wrapper dispatch success should log and return (via thread)."""
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
             ) as mock_exec,
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._get_callback_server",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
                 return_value="https://example.com",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.threading.Thread",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
             ) as mock_thread,
         ):
             mock_exec.return_value = {"exit_code": 0, "stdout": "ok", "stderr": ""}
@@ -239,6 +248,7 @@ class TestDispatchStartHook:
                 rendered_hook="echo test",
                 hook_timeout=60,
                 facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
                 publish_id=123,
             )
 
@@ -248,17 +258,17 @@ class TestDispatchStartHook:
         """Wrapper dispatch non-zero exit should call _report_failure."""
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
             ) as mock_exec,
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._get_callback_server",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
                 return_value="https://example.com",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._report_failure",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._report_failure",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.threading.Thread",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
             ) as mock_thread,
         ):
             mock_exec.return_value = {
@@ -277,6 +287,7 @@ class TestDispatchStartHook:
                 rendered_hook="echo test",
                 hook_timeout=60,
                 facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
                 publish_id=123,
             )
 
@@ -286,18 +297,18 @@ class TestDispatchStartHook:
         """Wrapper exception should call _report_failure."""
         with (
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
+                "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script",  # noqa: E501
                 side_effect=Exception("Connection failed"),
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._get_callback_server",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._get_callback_server",
                 return_value="https://example.com",
             ),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher._report_failure",
+                "secbaas.community.core.service.paas._start_hook_dispatcher._report_failure",
             ) as mock_report,
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.threading.Thread",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.threading.Thread",
             ) as mock_thread,
         ):
             mock_thread_instance = MagicMock()
@@ -310,6 +321,7 @@ class TestDispatchStartHook:
                 rendered_hook="echo test",
                 hook_timeout=60,
                 facade=MagicMock(),
+                callback_handler=_test_callback_handler(),
                 publish_id=123,
             )
 
@@ -344,7 +356,7 @@ class TestReportFailure:
                 return_value=mock_callback,
             ),
         ):
-            from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+            from secbaas.community.core.service.paas._start_hook_dispatcher import (
                 _report_failure,
             )
 
@@ -355,6 +367,7 @@ class TestReportFailure:
                 stdout="output",
                 stderr="error",
                 tenant="test-tenant",
+                callback_handler=_test_callback_handler(),
             )
 
             from secbaas.community.api.publish_manage import (
@@ -380,7 +393,7 @@ class TestReportFailure:
                 side_effect=Exception("import error"),
             ),
         ):
-            from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+            from secbaas.community.core.service.paas._start_hook_dispatcher import (
                 _report_failure,
             )
 
@@ -392,6 +405,7 @@ class TestReportFailure:
                 stdout=None,
                 stderr=None,
                 tenant="test-tenant",
+                callback_handler=_test_callback_handler(),
             )
 
     def test_report_failure_publish_id_none_sends_zero(self):
@@ -408,7 +422,7 @@ class TestReportFailure:
                 return_value=mock_callback,
             ),
         ):
-            from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+            from secbaas.community.core.service.paas._start_hook_dispatcher import (
                 _report_failure,
             )
 
@@ -419,6 +433,7 @@ class TestReportFailure:
                 stdout=None,
                 stderr=None,
                 tenant="test-tenant",
+                callback_handler=_test_callback_handler(),
             )
 
             from secbaas.community.api.publish_manage import DeviceCallbackRequest
@@ -440,7 +455,7 @@ class TestReportFailure:
                 return_value=mock_callback,
             ),
         ):
-            from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+            from secbaas.community.core.service.paas._start_hook_dispatcher import (
                 _report_failure,
             )
 
@@ -451,6 +466,7 @@ class TestReportFailure:
                 stdout=None,
                 stderr=None,
                 tenant="test-tenant",
+                callback_handler=_test_callback_handler(),
             )
 
 
@@ -460,7 +476,7 @@ class TestExecuteWrapperScriptAsync:
     def test_debug_file_write_failure_logs_warning(self):
         """OSError on debug file write logs warning and continues."""
 
-        from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+        from secbaas.community.core.service.paas._start_hook_dispatcher import (
             _execute_wrapper_script,
         )
 
@@ -472,7 +488,7 @@ class TestExecuteWrapperScriptAsync:
         with (
             patch("builtins.open", side_effect=OSError("Permission denied")),
             patch(
-                "secbaas.community.core.service.device_manage._start_hook_dispatcher.logger",
+                "secbaas.community.core.service.paas._start_hook_dispatcher.logger",
             ) as mock_logger,
         ):
             result = _execute_wrapper_script(
@@ -492,11 +508,11 @@ class TestExecuteWrapperScriptAsync:
         """_execute_wrapper_script calls _execute_wrapper_script_async."""
 
         with patch(
-            "secbaas.community.core.service.device_manage._start_hook_dispatcher._execute_wrapper_script_async",
+            "secbaas.community.core.service.paas._start_hook_dispatcher._execute_wrapper_script_async",
         ) as mock_async:
             mock_async.return_value = {"exit_code": 0, "stdout": "ok", "stderr": ""}
 
-            from secbaas.community.core.service.device_manage._start_hook_dispatcher import (
+            from secbaas.community.core.service.paas._start_hook_dispatcher import (
                 _execute_wrapper_script,
             )
 
