@@ -205,9 +205,29 @@ call. Two behaviors are additionally pinned:
 | --- | --- |
 | A retried request already reached BaaS | `/http-info` is idempotent; it resolves and returns, mutating nothing |
 | Worst-case latency doubles on total failure | Bounded at 2 deadlines; only on the path that previously failed outright |
-| Long-lived client holds a stale connection | httpx's pool detects closed connections and reconnects; this is standard client behavior |
+| Long-lived client holds a stale connection | Partly mitigated, not eliminated. httpcore checks `is_readable` before reusing an idle connection, but that check races the peer's FIN, and httpx — unlike urllib3 — does **not** auto-retry a dropped keep-alive. Measured at ~0.2% (2/1000 `RemoteProtocolError`) against a server dropping keep-alive every 5th request, versus 0/1000 for a client per call. The honest trade is **N handshakes saved for a small stale-reuse error rate on paths that are not retried**. `get_http_info` is covered (a `RemoteProtocolError` carries no `response`, so it classifies as a transport failure); `upload_skill`'s per-file POSTs are not, and by design must not be |
+| Pooled client replays cookies across callers | `httpx.Client` extracts `Set-Cookie` into a jar that, on a process-lifetime singleton, would outlive every call. Blocked outright with `DefaultCookiePolicy(allowed_domains=[])`, pinned by a real-server test |
 | Extraction changes LLM retry behavior | `test_llm_helpers` / `test_llm_request_retry` run unmodified as the check |
 | Pooled client shared across threads | `httpx.Client` is thread-safe for requests; no shared mutable state added |
+
+## Known latent interaction — `invoke_http`'s total-timeout budget
+
+`invoke_http` documents its `timeout` as the **total** budget: it gives
+`get_http_info` a slice of `min(timeout, 5.0)`, then hands the container call
+`max(timeout - elapsed, 0.001)`. That arithmetic assumes the `get_http_info`
+stage consumes at most its slice, which retry makes untrue — the stage can now
+cost ~2× the slice plus backoff.
+
+Concretely, `invoke_http(..., timeout=5.0)` where attempt 1 times out at 5.0s
+and the retry succeeds at 5.2s leaves the container call a 1 ms deadline, which
+surfaces as a raw `httpx.TimeoutException` rather than the `BaasServiceError`
+the docstring promises and callers catch.
+
+**Latent, not live:** no call site passes `timeout=` to `invoke_http` today
+(`baas_invoke_transport.py`, `teclaw_device_filesystem.py` and the rest all omit
+it), so `timeout is None` and neither branch runs. Left unfixed here rather than
+widening this change's blast radius into `invoke_http`; it must be addressed
+before anyone starts passing that argument.
 
 ## Out of scope
 

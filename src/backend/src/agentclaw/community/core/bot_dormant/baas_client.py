@@ -47,9 +47,12 @@ QUALIFIER_BAAS]``) — same transport seam BaasService uses. This means:
 
   - base_url is injected by ``InfrastructureModule.baas_http_client`` from
     YAML ``baas.api_base_url_pre`` / ``api_base_url`` (no env fallback).
-  - prod uses sync ``httpx.Client`` per call (``HttpxClient``), so the
-    sofa_tracer SpawnProcess hook problem on ``AsyncClient.send`` does not
-    apply (the tracer patches AsyncClient, not Client).
+  - prod uses one pooled sync ``httpx.Client`` (``HttpxClient``), reused across
+    calls. Note the long-standing claim that the sofa_tracer SpawnProcess hook
+    only patches ``AsyncClient.send`` and so cannot affect the sync client is
+    contradicted by the 2026-08-06 ``/http-info`` incident, where a sync-client
+    call surfaced as ``Error in httpx send hook``. Treat sync transport errors
+    as potentially wrapped — see ``agentclaw.community.utils.retry``.
   - singlebox / pytest use ``LocalHttpClient`` — unstubbed calls raise rather
     than silently hitting the network.
 """
