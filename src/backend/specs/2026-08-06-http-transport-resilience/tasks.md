@@ -61,7 +61,7 @@ Paths are relative to `src/backend/`.
 
 ## Group C — Adopt the component in `get_http_info`
 
-- [ ] **C1. Wrap the transport call.** In
+- [x] **C1. Wrap the transport call.** In
   `src/agentclaw/community/core/service_bot/services/baas_service.py`,
   `get_http_info`: replace the bare `self._http.get(...)` with
   `retry_transport_call(lambda: self._http.get(...), operation="BaasService.get_http_info")`.
@@ -69,7 +69,7 @@ Paths are relative to `src/backend/`.
   `HttpConnectionInfo` construction all stay **outside** the thunk and unchanged.
   Do not change the `timeout` parameter or its `5.0` default.
 
-- [ ] **C2. Make the failure log actionable.** In the trailing
+- [x] **C2. Make the failure log actionable.** In the trailing
   `except Exception as e` of `get_http_info`, format with `describe_exception(e)`
   and raise `BaasServiceError(...) from e`. Leave the `httpx.HTTPStatusError` and
   `BaasServiceError` handlers alone.

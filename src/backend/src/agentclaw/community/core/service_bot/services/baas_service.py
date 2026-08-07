@@ -38,6 +38,7 @@ from agentclaw.community.core.bot_management.repository.protocol import BotLooku
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.utils.retry import describe_exception, retry_transport_call
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     DEFAULT_DEVICE_PROVIDER,
@@ -3552,10 +3553,18 @@ class BaasService:  # pragma: no cover
             params["ws_conn_mode"] = ws_conn_mode
 
         try:
-            response = self._http.get(
-                f"/api/v1/bots/{device_id}/http-info",
-                params=params,
-                timeout=timeout,
+            # Only the transport call is retried. Everything below —
+            # raise_for_status, .json(), the code check — runs on a response
+            # that *arrived*, and a response is an answer, not a blip: retrying
+            # it would change status-handling behavior. The GET is idempotent,
+            # which is what makes retrying it safe at all.
+            response = retry_transport_call(
+                lambda: self._http.get(
+                    f"/api/v1/bots/{device_id}/http-info",
+                    params=params,
+                    timeout=timeout,
+                ),
+                operation="BaasService.get_http_info",
             )
             response.raise_for_status()
 
@@ -3592,11 +3601,15 @@ class BaasService:  # pragma: no cover
         except BaasServiceError:
             raise
         except Exception as e:
+            # describe_exception rather than bare ``{e}``: in prod the send-hook
+            # wrapper re-types transport errors, and formatting only the wrapper
+            # yields "Error in httpx send hook", which names nothing.
+            detail = describe_exception(e)
             logger.error(
                 f"[BaasService.get_http_info] "
-                f"Failed to get http info: {e}"
+                f"Failed to get http info: {detail}"
             )
-            raise BaasServiceError(f"Failed to get http info: {e}")
+            raise BaasServiceError(f"Failed to get http info: {detail}") from e
 
     def invoke_http(
         self,
