@@ -184,6 +184,22 @@ def test_step1_hit_claude_code_with_normalcc_stays_claude_code(
     assert conn_info["engine_type"] == "claude_code"
 
 
+def test_step1_hit_claude_code_with_empty_template_type_stays_claude_code(
+    fake_binding, fake_baas_service, fake_bot_repo, fake_device_repo
+):
+    """claude_code + 空 template_type 不应归一为 aicoding。"""
+    fake_bot_repo.get_by_binding_id.return_value = {
+        "active_engine": "claude_code",
+        "template_type": "",
+        "bot_type": "desktop",
+    }
+    builder = _make_builder(fake_baas_service, fake_bot_repo, fake_device_repo)
+
+    conn_info = builder.build(fake_binding, user_id="user-1")
+
+    assert conn_info["engine_type"] == "claude_code"
+
+
 # ── Step 2 反查:service bot via binding.device_props.bolt_id ──────
 #
 # 现场:trace 0be8ed2217816832272041880e9da7
