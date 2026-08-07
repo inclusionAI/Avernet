@@ -15,9 +15,7 @@ import asyncio
 import copy
 import hashlib
 import json
-import os
 import subprocess
-import sys
 import time
 import uuid
 from pathlib import Path
@@ -78,81 +76,6 @@ _BOT_GONE_ERROR_CODES = frozenset({"BOT_NOT_FOUND", "DEVICE_NOT_FOUND"})
 # Draft restoration copies a potentially large historical workspace. Bound the
 # whole operation, rather than granting each individual command a fresh timeout.
 _DRAFT_RESTORE_TIMEOUT_SECONDS = 30 * 60
-
-# ARCA/DaaS starts service-bot hooks as ``admin``.  The current image contract
-# fixes that runtime identity at uid/gid 1000. A versioned artifact is not
-# publishable until this identity can traverse and read it, but it must remain
-# immutable to that runtime because rollback reuses the same version path.
-_PUBLISHED_ARTIFACT_OWNER = "0:1000"
-# Unknown Backend host identities may still need to stat or reopen an artifact.
-# ``o=X`` grants directory traversal only; regular files remain inaccessible.
-_PUBLISHED_ARTIFACT_MODE = "u=rwX,g=rX,o=X"
-_PUBLISHED_RUNTIME_UID = 1000
-_PUBLISHED_RUNTIME_GID = 1000
-_RUNTIME_ARTIFACT_TREE_READ_PROBE = (
-    "def check(path):\n"
-    "    with os.scandir(path) as entries:\n"
-    "        for entry in entries:\n"
-    "            if entry.is_symlink():\n"
-    "                os.readlink(entry.path)\n"
-    "            elif entry.is_dir(follow_symlinks=False):\n"
-    "                check(entry.path)\n"
-    "            elif entry.is_file(follow_symlinks=False):\n"
-    "                with open(entry.path, \"rb\"):\n"
-    "                    pass\n"
-    "            else:\n"
-    "                os.lstat(entry.path)\n"
-)
-_RUNTIME_ARTIFACT_READABILITY_PROBE = (
-    "import os, sys\n"
-    + _RUNTIME_ARTIFACT_TREE_READ_PROBE
-    + "check(sys.argv[1])\n"
-)
-_NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE = (
-    "import errno, os, sys\n"
-    "runtime_uid = int(sys.argv[1])\n"
-    "runtime_gid = int(sys.argv[2])\n"
-    "artifact_path = sys.argv[3]\n"
-    # Do not ask sudo to resolve uid 1000 through the Backend host's NSS
-    # database.  The identity belongs to the separate DaaS runtime image and
-    # may deliberately be unknown on the build host.
-    "os.setgroups([])\n"
-    "os.setgid(runtime_gid)\n"
-    "os.setuid(runtime_uid)\n"
-    + _RUNTIME_ARTIFACT_TREE_READ_PROBE
-    + "check(artifact_path)\n"
-    "write_probe = os.path.join(artifact_path, "
-    "f\".runtime-write-probe-{os.getpid()}\")\n"
-    "try:\n"
-    "    fd = os.open(write_probe, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)\n"
-    "except OSError as exc:\n"
-    "    if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):\n"
-    "        raise\n"
-    "else:\n"
-    "    os.close(fd)\n"
-    "    os.unlink(write_probe)\n"
-    "    raise PermissionError(\n"
-    "        'artifact unexpectedly writable by published runtime'\n"
-    "    )\n"
-    "def assert_not_replaceable(path, message):\n"
-    "    sibling = f\"{path}.runtime-rename-probe-{os.getpid()}\"\n"
-    "    try:\n"
-    "        os.rename(path, sibling)\n"
-    "    except OSError as exc:\n"
-    "        if exc.errno not in (errno.EACCES, errno.EPERM, errno.EROFS):\n"
-    "            raise\n"
-    "    else:\n"
-    "        os.rename(sibling, path)\n"
-    "        raise PermissionError(message)\n"
-    "assert_not_replaceable(\n"
-    "    artifact_path,\n"
-    "    'artifact path unexpectedly replaceable by published runtime',\n"
-    ")\n"
-    "assert_not_replaceable(\n"
-    "    os.path.dirname(artifact_path),\n"
-    "    'version path unexpectedly replaceable by published runtime',\n"
-    ")\n"
-)
 
 
 class BotBuildServiceError(Exception):
@@ -352,11 +275,6 @@ class BotBuildService:
             # ============================================================
             # Step 2: Bot 实例迁移
             # ============================================================
-            # A previous attempt for this version may already have sealed the
-            # target read-only. Re-open it only for the Backend writer before
-            # retrying; a successful build seals it again below.
-            self._prepare_artifact_for_build(target_dir)
-
             # 2.1 执行 rsync 迁移
             migration_success = self._migrate_bot_instance(
                 device_id=device_id,
@@ -368,11 +286,6 @@ class BotBuildService:
                 build_plan=build_plan,
                 provider=provider,
             )
-            if migration_success:
-                # ``rsync -a`` preserves Draft ownership and modes. Normalize
-                # them to the Backend writer before the remaining host-side
-                # config generators append to the artifact.
-                self._prepare_artifact_for_build(target_dir)
 
             # The host-side engine-root rsync is the sole writer of the
             # versioned artifact. It preserves active symlinks and local Skill
@@ -399,17 +312,6 @@ class BotBuildService:
                     target_dir=target_dir,
                 )
 
-            # All artifact writers must finish before ownership is normalized.
-            # In particular, MCP and OpenClaw stage configs are generated after
-            # rsync and would be missed by an rsync-only --chown fix.
-            artifact_writes_success = (
-                migration_success
-                and mcp_success
-                and openclaw_configs_success
-            )
-            if artifact_writes_success:
-                self._finalize_runtime_artifact(target_dir)
-
             logger.info(
                 f"[BotBuildService.build] Step 2 completed: "
                 f"migration_success={migration_success}, "
@@ -418,7 +320,7 @@ class BotBuildService:
             )
 
             # 构建结果
-            success = artifact_writes_success
+            success = migration_success and mcp_success and openclaw_configs_success
             result = {
                 "success": success,
                 "bot_id": bot_id,
@@ -797,135 +699,6 @@ class BotBuildService:
             )
 
         return result
-
-    def _prepare_artifact_for_build(self, target_dir: Path) -> None:
-        """Restore Backend writer access before building or retrying a version."""
-        writer_owner = f"{os.geteuid()}:{os.getegid()}"
-        self._run_local_command(
-            cmd=["sudo", "mkdir", "-p", str(target_dir)],
-            command_name="prepare artifact directory",
-            error_message="prepare artifact directory failed",
-        )
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chown",
-                "-hR",
-                writer_owner,
-                str(target_dir),
-            ],
-            command_name="prepare artifact owner",
-            error_message="prepare artifact owner failed",
-        )
-        self._run_local_command(
-            cmd=["sudo", "chmod", "-R", "u+rwX", str(target_dir)],
-            command_name="prepare artifact mode",
-            error_message="prepare artifact mode failed",
-        )
-
-    def _finalize_runtime_artifact(self, target_dir: Path) -> None:
-        """Make a completed artifact readable by the Published Runtime.
-
-        Backend is the sole writer of the versioned artifact, but ``rsync -a``
-        deliberately preserves the Draft NAS ownership and modes. Normalize
-        only the constructed artifact root to root ownership with the runtime
-        group granted read/traverse access, without following active-Skill
-        symlinks, then perform the same recursive read that Published startup
-        requires. Because the Runtime is not the owner and receives no group
-        write bit, it cannot chmod, replace, or delete the source later reused
-        by restart and rollback.
-
-        Any failure is fatal at build time.  Deferring it to the BaaS start hook
-        leaves a publish in VALIDATE_PUB with a sandbox that can see the mount
-        but cannot install its contents.
-        """
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chown",
-                "-hR",
-                _PUBLISHED_ARTIFACT_OWNER,
-                str(target_dir),
-            ],
-            command_name="seal artifact owner",
-            error_message="seal artifact owner failed",
-        )
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chmod",
-                "-R",
-                _PUBLISHED_ARTIFACT_MODE,
-                str(target_dir),
-            ],
-            command_name="seal artifact mode",
-            error_message="seal artifact mode failed",
-        )
-        version_dir = target_dir.parent
-        artifact_store = version_dir.parent
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chown",
-                _PUBLISHED_ARTIFACT_OWNER,
-                str(version_dir),
-            ],
-            command_name="seal artifact version owner",
-            error_message="seal artifact version owner failed",
-        )
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chmod",
-                _PUBLISHED_ARTIFACT_MODE,
-                str(version_dir),
-            ],
-            command_name="seal artifact version mode",
-            error_message="seal artifact version mode failed",
-        )
-        # The bot-data mount remains writable because the active engine lives
-        # beside versioned artifacts. Make root the directory owner and use
-        # sticky-directory semantics so runtime gid 1000 can manage its own
-        # active entries but cannot rename a root-owned version directory.
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chown",
-                _PUBLISHED_ARTIFACT_OWNER,
-                str(artifact_store),
-            ],
-            command_name="protect artifact store owner",
-            error_message="protect artifact store owner failed",
-        )
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                "chmod",
-                "u=rwx,g=rwx,o=x",
-                str(artifact_store),
-            ],
-            command_name="protect artifact store mode",
-            error_message="protect artifact store mode failed",
-        )
-        self._run_local_command(
-            cmd=["sudo", "chmod", "+t", str(artifact_store)],
-            command_name="protect artifact version entry",
-            error_message="protect artifact version entry failed",
-        )
-        self._run_local_command(
-            cmd=[
-                "sudo",
-                sys.executable,
-                "-I",
-                "-c",
-                _NUMERIC_RUNTIME_ARTIFACT_READABILITY_PROBE,
-                str(_PUBLISHED_RUNTIME_UID),
-                str(_PUBLISHED_RUNTIME_GID),
-                str(target_dir),
-            ],
-            command_name="verify artifact runtime readability",
-            error_message="artifact is not readable by published runtime",
-        )
 
     def _migrate_bot_instance(
         self,
