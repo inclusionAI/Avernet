@@ -267,6 +267,56 @@ def run_typecheck(
     return {"ok": completed.returncode == 0, "exit_code": completed.returncode, "log": str(log_file)}
 
 
+def stage_runtime_plugin(plugin_dir: Path, install_dir: Path) -> Path:
+    """Copy built plugin artifacts beside the selected OpenClaw installation."""
+    destination = install_dir / "extensions/openclaw-channel-bcn"
+    shutil.copytree(
+        plugin_dir / "dist",
+        destination / "dist",
+        ignore=shutil.ignore_patterns("node_modules"),
+    )
+    for filename in ("package.json", "openclaw.plugin.json"):
+        source = plugin_dir / filename
+        if not source.is_file():
+            raise RuntimeError(f"runtime plugin artifact is missing: {source}")
+        shutil.copy2(source, destination / filename)
+    if (destination / "node_modules").exists():
+        raise RuntimeError("isolated runtime plugin unexpectedly contains node_modules")
+    return destination
+
+
+def resolve_runtime_sdk(runtime_plugin_dir: Path, install_dir: Path, output_dir: Path) -> str:
+    """Verify Node resolves SDK imports to the selected host package."""
+    script = (
+        "import { createRequire } from 'node:module';"
+        "const require = createRequire(process.argv[1]);"
+        "process.stdout.write(require.resolve('openclaw/plugin-sdk/core'));"
+    )
+    completed = subprocess.run(
+        ["node", "--input-type=module", "--eval", script, str(runtime_plugin_dir / "package.json")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    log_file = output_dir / "runtime-sdk-resolution.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_text(
+        f"stdout: {completed.stdout}\nstderr: {completed.stderr}\n",
+        encoding="utf-8",
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"runtime SDK resolution failed; see {log_file}")
+    resolved = Path(completed.stdout.strip()).resolve()
+    expected_root = (install_dir / "node_modules/openclaw").resolve()
+    try:
+        resolved.relative_to(expected_root)
+    except ValueError as error:
+        raise RuntimeError(
+            f"runtime SDK resolved outside selected OpenClaw package: {resolved}"
+        ) from error
+    return str(resolved)
+
+
 def open_process(
     command: list[str],
     *,
@@ -372,11 +422,13 @@ def run_runtime_probe(
     version: str,
     executable: Path,
     install_dir: Path,
-    plugin_dir: Path,
+    source_plugin_dir: Path,
+    runtime_plugin_dir: Path,
     work_dir: Path,
     output_dir: Path,
     timeout_seconds: int,
 ) -> dict[str, Any]:
+    runtime_sdk_entry = resolve_runtime_sdk(runtime_plugin_dir, install_dir, output_dir)
     llm_ready = output_dir / "mock-llm-ready.json"
     llm_requests = output_dir / "mock-llm-requests.jsonl"
     bcs_ready = output_dir / "mock-bcs-ready.json"
@@ -415,7 +467,7 @@ def run_runtime_probe(
         bcs_process, handle = open_process(
             [
                 "node",
-                str(plugin_dir / "test/compat/mock_bcs.mjs"),
+                str(source_plugin_dir / "test/compat/mock_bcs.mjs"),
                 "--ready-file",
                 str(bcs_ready),
                 "--result-file",
@@ -427,7 +479,7 @@ def run_runtime_probe(
                 "--timeout-ms",
                 str(timeout_seconds * 1000),
             ],
-            cwd=plugin_dir,
+            cwd=source_plugin_dir,
             log_file=output_dir / "mock-bcs.log",
         )
         handles.append(handle)
@@ -436,7 +488,7 @@ def run_runtime_probe(
         gateway_port = free_port()
         config = runtime_config(
             version=version,
-            plugin_dir=plugin_dir,
+            plugin_dir=runtime_plugin_dir,
             workspace_dir=workspace_dir,
             llm_base_url=str(llm_info["base_url"]),
             bcs_ws_url=str(bcs_info["ws_url"]),
@@ -475,6 +527,8 @@ def run_runtime_probe(
             "ok": bool(bcs_payload.get("ok")) and llm_request_count > 0,
             "bcs": bcs_payload,
             "llm_request_count": llm_request_count,
+            "isolated_plugin": True,
+            "runtime_sdk_entry": runtime_sdk_entry,
             "gateway_exit_code": gateway_process.poll(),
             "logs": {
                 "gateway": str(output_dir / "openclaw-gateway.log"),
@@ -504,6 +558,16 @@ def status_from_phases(phases: dict[str, dict[str, Any]]) -> str:
     if "typecheck" in phases and not phases["typecheck"].get("ok"):
         return "PASS_WITH_WARNINGS"
     return "PASS"
+
+
+def apply_skipped_phase_status(status: str, skipped_phases: list[str]) -> str:
+    if status not in {"PASS", "PASS_WITH_WARNINGS"}:
+        return status
+    if "runtime" in skipped_phases:
+        return "INCOMPLETE_SKIPPED_RUNTIME"
+    if skipped_phases and status == "PASS":
+        return "PASS_WITH_WARNINGS"
+    return status
 
 
 def parse_args() -> argparse.Namespace:
@@ -584,11 +648,13 @@ def main() -> int:
 
         if not args.skip_runtime:
             try:
+                runtime_plugin_dir = stage_runtime_plugin(args.plugin_dir.resolve(), install_dir)
                 result["phases"]["runtime"] = run_runtime_probe(
                     version=args.version,
                     executable=executable,
                     install_dir=install_dir,
-                    plugin_dir=args.plugin_dir.resolve(),
+                    source_plugin_dir=args.plugin_dir.resolve(),
+                    runtime_plugin_dir=runtime_plugin_dir,
                     work_dir=work_dir / "runtime",
                     output_dir=args.output_dir,
                     timeout_seconds=args.timeout_seconds,
@@ -604,8 +670,7 @@ def main() -> int:
         ]
         if skipped_phases:
             result["skipped_phases"] = skipped_phases
-            if result["status"] == "PASS":
-                result["status"] = "PASS_WITH_WARNINGS"
+        result["status"] = apply_skipped_phase_status(result["status"], skipped_phases)
     except Exception as error:
         result["error"] = str(error)
         result["status"] = status_from_phases(result["phases"])

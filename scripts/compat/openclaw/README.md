@@ -7,7 +7,9 @@ through npm's current non-beta `latest` release.
 It deliberately keeps the fast plugin unit-test stub and the compatibility
 proof separate. Each compatibility run:
 
-1. installs an exact OpenClaw package in an isolated temporary directory;
+1. installs an exact OpenClaw package in an isolated temporary directory and
+   stages the built plugin beside it without the source checkout's
+   `node_modules`;
 2. imports the real SDK subpaths and required named exports;
 3. copies plugin TypeScript sources without `src/typings/openclaw.d.ts` and
    records a non-blocking source type-drift diagnostic against the real SDK;
@@ -58,3 +60,7 @@ plugin rather than recompiling its source. `FAIL_LLM_PIPELINE` means OpenClaw
 started but never reached the local model endpoint. Missing or
 infrastructure-failed rows make the aggregate report incomplete and fail the
 command.
+
+`--skip-typecheck` skips only the optional source type-drift diagnostic.
+`--skip-runtime` is useful for diagnosis, but produces
+`INCOMPLETE_SKIPPED_RUNTIME` and cannot prove compatibility.

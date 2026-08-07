@@ -220,6 +220,8 @@ async function main() {
           void finish(false, `final reply was not exactly ${args.expectedText}`);
         } else if (!observations.chatAck) {
           void finish(false, 'final reply arrived without a valid chat.send acknowledgement');
+        } else if (observations.chatDeltas < 1) {
+          void finish(false, 'final reply arrived without a preceding delta chat.event');
         } else {
           void finish(true, 'chat.send completed through the real OpenClaw runtime');
         }

@@ -9,6 +9,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -98,6 +99,16 @@ def selected_versions(args: argparse.Namespace, discovery: dict[str, Any]) -> li
     return versions
 
 
+def remove_existing_file(path: Path) -> None:
+    if path.is_file() or path.is_symlink():
+        path.unlink()
+
+
+def clear_selected_results(results_dir: Path, versions: list[str]) -> None:
+    for version in versions:
+        remove_existing_file(results_dir / version_slug(version) / "result.json")
+
+
 def parse_args() -> argparse.Namespace:
     repo_root = repository_root()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -129,8 +140,10 @@ def main() -> int:
     reports_dir = args.output_dir / "reports"
     discovery_file = args.output_dir / "discovery.json"
     npm_cache = args.npm_cache
+    discovery_is_current = False
 
     try:
+        remove_existing_file(discovery_file)
         discovery = discover(
             package_file=args.plugin_dir.resolve() / "package.json",
             versions_file=args.versions_file,
@@ -146,15 +159,13 @@ def main() -> int:
         discovery["count"] = len(versions)
         discovery["matrix"] = {"include": [{"openclaw": version} for version in versions]}
         discovery_file.write_text(json.dumps(discovery, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        discovery_is_current = True
+        clear_selected_results(results_dir, versions)
         ensure_plugin_ready(args.plugin_dir.resolve(), args.output_dir / "setup-logs")
-        for version in versions:
-            stale_result = results_dir / version_slug(version) / "result.json"
-            if stale_result.is_file():
-                stale_result.unlink()
     except Exception as error:
         print(f"OpenClaw compatibility setup failed: {error}", file=sys.stderr)
         try:
-            if not discovery_file.is_file():
+            if not discovery_is_current:
                 discovery_file.write_text(
                     json.dumps(
                         {
@@ -169,12 +180,13 @@ def main() -> int:
                     + "\n",
                     encoding="utf-8",
                 )
-            write_reports(
-                results_dir=results_dir,
-                output_dir=reports_dir,
-                discovery_file=discovery_file,
-                setup_error=str(error),
-            )
+            with tempfile.TemporaryDirectory(prefix="avernet-openclaw-empty-results-") as temporary:
+                write_reports(
+                    results_dir=Path(temporary),
+                    output_dir=reports_dir,
+                    discovery_file=discovery_file,
+                    setup_error=str(error),
+                )
         except Exception as report_error:
             print(f"OpenClaw setup failure report could not be written: {report_error}", file=sys.stderr)
         return 2
