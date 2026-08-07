@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
-from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
 from agentclaw.community.core.devices.errors import DeviceServiceError
 from agentclaw.community.log import get_logger
 
@@ -385,8 +384,14 @@ class SystemConfigBaasTemplateResolver:
     ) -> str:
         """把历史 engine 表达归一成 template 配置里的 engine。"""
         normalized_engine = (engine_type or "openclaw").strip().lower().replace("-", "_")
-        # Claude Code 的 coding 模板沿用 AI Coding 模板，配置侧统一写 engine=aicoding。
-        if normalized_engine == "claude_code" and template_type in CODING_TEMPLATE_TYPES:
+        normalized_template_type = (template_type or "").strip().lower()
+        # Claude Code 除 normalCC 外，只要有明确 template_type，
+        # 都复用 AI Coding 模板，配置侧统一写 engine=aicoding。
+        if (
+            normalized_engine == "claude_code"
+            and normalized_template_type
+            and normalized_template_type != "normalcc"
+        ):
             return "aicoding"
         return normalized_engine
 
