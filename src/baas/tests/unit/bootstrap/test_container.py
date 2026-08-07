@@ -358,3 +358,17 @@ class TestSandboxDeviceRouterFullChain:
         assert callable(getattr(router, "query_active_sandboxes", None))
         assert callable(getattr(router, "warn_device", None))
         assert callable(getattr(router, "renew_ttl", None))
+
+
+class TestInjectEnterprisePluginsImportError:
+    def test_import_error_is_silently_caught(self) -> None:
+        import sys
+        from unittest.mock import patch
+
+        from secbaas.community.bootstrap._container import (
+            _inject_enterprise_plugins,
+        )
+
+        container = object()
+        with patch.dict(sys.modules, {"secbaas.community.plugin_registry": None}):
+            _inject_enterprise_plugins(container)

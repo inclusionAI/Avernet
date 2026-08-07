@@ -41,7 +41,7 @@ def issuer(db: DataSourcePlugin) -> AccessKeyIssuer:
 async def test_issue_persists_row_and_returns_record(
     issuer: AccessKeyIssuer, db: DataSourcePlugin
 ) -> None:
-    issued = await issuer.issue("ak-new", "t1", _EXPIRE)
+    issued = await issuer.issue("ak-new", "t1", _EXPIRE, creator="alice")
     assert isinstance(issued, IssuedAccessKey)
     assert issued.access_key == "ak-new"
     assert issued.tenant == "t1"
@@ -54,9 +54,20 @@ async def test_issue_persists_row_and_returns_record(
     assert rec.tenant == "t1"
     assert rec.expire_at == _EXPIRE
 
+    # The registering caller is recorded as both creator and modifier (non-empty),
+    # never a fabricated default.
+    with db.orm_session() as session:
+        from gateway.community.core.access_key._orm import AccessKeyRow
+
+        row = (
+            session.query(AccessKeyRow).filter(AccessKeyRow.token == issued.token).one()
+        )
+        assert row.creator == "alice"
+        assert row.modifier == "alice"
+
 
 async def test_issue_token_has_expected_claims(issuer: AccessKeyIssuer) -> None:
-    issued = await issuer.issue("ak-new", "t1", _EXPIRE)
+    issued = await issuer.issue("ak-new", "t1", _EXPIRE, creator="alice")
     decoded = jwt.decode(issued.token, "k", algorithms=["HS256"])
     assert decoded["typ"] == "access_key"
     assert decoded["sub"] == "ak-new"

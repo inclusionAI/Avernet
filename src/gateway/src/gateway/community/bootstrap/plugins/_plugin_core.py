@@ -12,6 +12,7 @@ from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.database.sqlite import SqliteDatabasePlugin
 from gateway.community.plugins.forwarder.httpx import HttpxForwarder
 from gateway.community.plugins.schema_catalog.file import FileSchemaCatalog
+from gateway.community.plugins.schema_catalog.http import HttpSchemaCatalog
 from gateway.community.plugins.secret_resolver.community import CommunitySecretResolver
 
 
@@ -32,9 +33,9 @@ class PluginContainer(containers.DeclarativeContainer):
         httpx=providers.Singleton(HttpxForwarder),
     )
 
-    schema_catalog = providers.Selector(
-        config.plugins.schema_catalog,
+    schema_catalogs = providers.Dict(
         file=providers.Singleton(FileSchemaCatalog),
+        http=providers.Singleton(HttpSchemaCatalog),
     )
 
     cache_plugin = providers.Selector(
@@ -68,7 +69,7 @@ class PluginContainer(containers.DeclarativeContainer):
             _default, config.authn.google.token_header, "x-google-token"
         ),
         default_tenant=providers.Callable(
-            _default, config.authn.google.default_tenant, "default"
+            _default, config.authn.google.default_tenant, None
         ),
         userinfo_url=providers.Callable(
             _default,

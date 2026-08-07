@@ -140,6 +140,33 @@ def test_rebuild_context_from_api_key():
     assert ctx.build_auth_token() == "OPEN_API:app:sk-abc"
 
 
+def test_rebuild_context_from_metadata():
+    """metadata 中有 app_id 时直接重建，不查 api_key_repository。"""
+    repo = MagicMock()
+    repo.get_by_prefix.side_effect = AssertionError("should not call get_by_prefix")
+    ctx = _rebuild_context(
+        "rk-prefix",
+        repo,
+        metadata={"app_id": "app-x", "app_type": "app", "tenant": "tn"},
+    )
+    assert ctx.api_key_prefix == "rk-prefix"
+    assert ctx.app_id == "app-x"
+    assert ctx.app_type == "app"
+    assert ctx.tenant == "tn"
+    assert ctx.build_auth_token() == "OPEN_API:app:rk-prefix"
+
+
+def test_rebuild_context_metadata_without_app_id_falls_back():
+    """metadata 中无 app_id 时 fallback 到 api_key_repository 反查。"""
+    ctx = _rebuild_context(
+        "sk-abc",
+        _api_key_repo("sk-abc"),
+        metadata={"request_type": "chat"},
+    )
+    assert ctx.api_key_prefix == "sk-abc"
+    assert ctx.app_id == "app-1"
+
+
 def test_rebuild_context_api_key_not_found():
     repo = MagicMock()
     repo.get_by_prefix.return_value = None
@@ -487,6 +514,54 @@ async def test_executor_stream_error_flushes_agent_buffer():
     assert error_calls[0][1]["content"] == "stream execution failed"
 
     repo.update_error.assert_called_once_with("re", "stream execution failed")
+
+
+async def test_executor_stream_error_chunk_marks_failed():
+    """stream 模式：error chunk 不再 fallthrough 为 COMPLETED，而是 update_error(FAILED)。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-err-chunk",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    chunks = [
+        StreamChunk(type="delta", content="partial"),
+        StreamChunk(type="error", content="CONNECTION_ERROR"),
+    ]
+
+    async def _stream_gen(*a, **kw):
+        for c in chunks:
+            yield c
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stream_gen
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo, plugin, selector, chunk_repo, MagicMock(), _api_key_repo()
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-err-chunk", bot_id="bot-1:ent", session_id="sess-e")
+    )
+
+    # error chunk 应写入 DB
+    error_calls = [
+        c
+        for c in chunk_repo.insert_chunk.call_args_list
+        if c[1]["chunk_type"] == "error"
+    ]
+    assert len(error_calls) == 1
+    assert error_calls[0][1]["content"] == "CONNECTION_ERROR"
+
+    # bot_run 应标记为 FAILED，而非 COMPLETED
+    repo.update_error.assert_called_once_with("r-err-chunk", "CONNECTION_ERROR")
+    repo.update_result.assert_not_called()
 
 
 # ----------------------------- stream engine_type 透传 -----------------------------

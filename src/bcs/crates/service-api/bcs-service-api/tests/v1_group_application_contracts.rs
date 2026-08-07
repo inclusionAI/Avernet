@@ -6,7 +6,7 @@ use bcs_service_api::application::v1::{
     AuthenticatedUserIdentity, BotFinalDelivery, DeleteGroup, DeleteGroupParticipant, DeleteResult,
     DirectMessageGroupSummary, GetGroup, GroupDeliveryPolicy, GroupDetail, GroupKindFilter,
     GroupService, GroupStatus, GroupSummary, GroupVisibility, ListGroups, Membership,
-    MembershipFilter, Page, Participant, ParticipantMode, ParticipantRole, Principal, UpdateGroup,
+    MembershipFilter, Page, Participant, ParticipantMode, Principal, UpdateGroup,
     UpdateGroupParticipant,
 };
 
@@ -66,7 +66,7 @@ impl GroupService for NoopGroupService {
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "staff-1".into(),
             username: "alice".into(),
@@ -92,7 +92,7 @@ fn principal_preserves_gateway_identity_without_bot_impersonation() {
             display_name: None,
             full_name: None,
         },
-        "tenant-a",
+        Some("tenant-a".into()),
         BTreeSet::new(),
     );
     assert_eq!(human.actor_id(), "human_staff-1");
@@ -172,7 +172,6 @@ fn participant_commands_carry_caller_and_no_raw_credentials() {
         caller: caller.clone(),
         group_id: "g1".into(),
         actor_id: "bot-2".into(),
-        role: ParticipantRole::Consultant,
     };
     let update = UpdateGroupParticipant {
         caller: caller.clone(),

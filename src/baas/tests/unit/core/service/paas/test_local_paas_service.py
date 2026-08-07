@@ -121,6 +121,14 @@ def mock_relay_repository():
 
 
 @pytest.fixture
+def mock_secret_plugin():
+    """Create a mock SecretStorePlugin for proxypass JWT signing."""
+    mock = MagicMock()
+    mock.get_secret.return_value = "mock-proxypass-secret"
+    return mock
+
+
+@pytest.fixture
 def local_paas_service(
     local_credentials,
     mock_repository,
@@ -128,6 +136,7 @@ def local_paas_service(
     mock_instance_router,
     mock_device_template_repository,
     mock_desktop_sandbox_plugin,
+    mock_secret_plugin,
 ):
     """Create a LocalPaasService instance with mocked dependencies."""
     return LocalPaasService(
@@ -137,6 +146,7 @@ def local_paas_service(
         instance_router=mock_instance_router,
         server_ip="test-instance",
         desktop_sandbox_plugin=mock_desktop_sandbox_plugin,
+        secret_plugin=mock_secret_plugin,
         env="test",
         device_template_repository=mock_device_template_repository,
     )
@@ -151,6 +161,7 @@ def local_paas_service_with_relay(
     mock_device_template_repository,
     mock_desktop_sandbox_plugin,
     mock_relay_repository,
+    mock_secret_plugin,
 ):
     """Create a LocalPaasService instance with relay_repository injected."""
     return LocalPaasService(
@@ -160,6 +171,7 @@ def local_paas_service_with_relay(
         instance_router=mock_instance_router,
         server_ip="test-instance",
         desktop_sandbox_plugin=mock_desktop_sandbox_plugin,
+        secret_plugin=mock_secret_plugin,
         env="test",
         device_template_repository=mock_device_template_repository,
         relay_repository=mock_relay_repository,
@@ -1885,6 +1897,7 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -1909,6 +1922,7 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=None,
         )
@@ -1939,6 +1953,7 @@ class TestGetDefaultLocalTemplateId:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -1973,6 +1988,7 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -2012,6 +2028,7 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -2047,6 +2064,7 @@ class TestHandleMngRegister:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -3669,6 +3687,7 @@ class TestHandleMngDisconnect:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -3764,6 +3783,7 @@ class TestHandleMngDisconnect:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=None,  # Explicitly None
@@ -4044,6 +4064,7 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=None,
             device_repository=None,  # Not configured
@@ -4085,6 +4106,7 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4121,6 +4143,7 @@ class TestHandleContainerReady:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4341,6 +4364,7 @@ class TestHandleMngRegisterEdgeCases:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
         )
@@ -4394,6 +4418,7 @@ class TestHandleContainerReadyIdempotency:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4440,6 +4465,7 @@ class TestHandleContainerReadyIdempotency:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -4550,6 +4576,7 @@ class TestConstructorEdgeCases:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
             )
 
     def test_env_defaults_from_get_current_env_when_none(
@@ -4568,6 +4595,7 @@ class TestConstructorEdgeCases:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
         )
         assert service._env is not None
 
@@ -4633,6 +4661,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4689,6 +4718,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4751,6 +4781,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4807,6 +4838,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4858,6 +4890,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4911,6 +4944,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -4956,6 +4990,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5033,6 +5068,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5091,6 +5127,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5134,6 +5171,7 @@ class TestRouteCommandWorkerRouter:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -5357,6 +5395,7 @@ class TestHandleHeartbeatContainers:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -5583,6 +5622,7 @@ class TestHandleContainerReadySuccess:
                 instance_router=mock_instance_router,
                 server_ip="test-instance",
                 desktop_sandbox_plugin=MagicMock(),
+                secret_plugin=MagicMock(),
                 env="test",
                 device_template_repository=mock_device_template_repository,
                 device_repository=mock_device_repo,
@@ -5732,6 +5772,7 @@ class TestProcessPublishCallbackForDevice:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=MagicMock(),
@@ -6036,6 +6077,7 @@ class TestHeartbeatPublishTrigger:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6271,6 +6313,7 @@ class TestHandleContainerReadyDelegation:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6329,6 +6372,7 @@ class TestHandleContainerReadyDelegation:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             device_template_repository=mock_device_template_repository,
             device_repository=mock_device_repo,
@@ -6388,6 +6432,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
         )
 
@@ -6422,6 +6467,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
         )
 
@@ -6466,6 +6512,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
         )
 
@@ -6504,6 +6551,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6554,6 +6602,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6598,6 +6647,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6657,6 +6707,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6700,6 +6751,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6742,6 +6794,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6775,6 +6828,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=mock_worker_router,
         )
@@ -6803,6 +6857,7 @@ class TestDispatchToLocalConnection:
             instance_router=mock_instance_router,
             server_ip="test-instance",
             desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
             env="test",
             worker_router=None,  # explicitly not wired
         )

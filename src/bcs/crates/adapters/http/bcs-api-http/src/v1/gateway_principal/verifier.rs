@@ -5,9 +5,16 @@ use bcs_service_api::application::v1::{
     AuthenticatedCaller, AuthenticatedUserIdentity,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
+use serde::de::{DeserializeOwned, IntoDeserializer};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use tracing::warn;
 
-use super::wire::{GatewayClaims, GatewayPrincipal};
+use super::wire::{
+    GatewayAccessKeyPrincipal, GatewayAppPrincipal, GatewayBotPrincipal, GatewayClaims,
+    GatewayPrincipal, GatewayUserPrincipal,
+};
 use crate::v1::common::{PrincipalVerificationError, PrincipalVerifier};
 
 const CLOCK_SKEW_SECONDS: u64 = 5;
@@ -72,18 +79,45 @@ impl GatewayPrincipalTokenVerifier {
         token: &str,
         now: u64,
     ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
+        let token_fingerprint = token_fingerprint(token);
+
         if token.is_empty() {
+            warn!("Gateway Principal token is empty");
             return Err(GatewayPrincipalVerificationError::EmptyToken);
         }
-        let header =
-            decode_header(token).map_err(|_| GatewayPrincipalVerificationError::InvalidHeader)?;
+        let header = decode_header(token).map_err(|e| {
+            warn!(
+                error = %e,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token header is malformed"
+            );
+            GatewayPrincipalVerificationError::InvalidHeader
+        })?;
         if header.alg != Algorithm::HS256 {
+            warn!(
+                alg = ?header.alg,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token uses unsupported algorithm"
+            );
             return Err(GatewayPrincipalVerificationError::UnsupportedAlgorithm);
         }
         if header.typ.as_deref() != Some("JWT") {
+            warn!(
+                typ = ?header.typ,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token has invalid type"
+            );
             return Err(GatewayPrincipalVerificationError::InvalidTokenType);
         }
         if header.kid.as_deref() != Some(self.trust.key_id.as_str()) {
+            warn!(
+                token_kid = ?header.kid,
+                expected_kid = %self.trust.key_id,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token key id mismatch"
+            );
             return Err(GatewayPrincipalVerificationError::InvalidKeyId);
         }
 
@@ -94,21 +128,88 @@ impl GatewayPrincipalTokenVerifier {
         validation.leeway = 0;
         validation.validate_exp = false;
 
-        let claims = decode::<GatewayClaims>(token, &self.decoding_key, &validation)
+        let token_data = decode::<Value>(token, &self.decoding_key, &validation)
             .map_err(|error| match error.kind() {
                 jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+                    warn!(
+                        kid = ?header.kid,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token signature is invalid"
+                    );
                     GatewayPrincipalVerificationError::InvalidSignature
                 }
-                _ => GatewayPrincipalVerificationError::InvalidClaims,
-            })?
-            .claims;
+                other => {
+                    warn!(
+                        kid = ?header.kid,
+                        error_kind = ?other,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token claims are invalid"
+                    );
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
+            })?;
+        let claims: GatewayClaims = serde_path_to_error::deserialize(
+            token_data.claims.into_deserializer(),
+        )
+        .map_err(|error| {
+            let claim_path = error.path().to_string();
+            warn!(
+                kid = ?header.kid,
+                claim_path = %claim_path,
+                error_kind = schema_error_kind(error.inner()),
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token claim schema is invalid"
+            );
+            GatewayPrincipalVerificationError::InvalidClaims
+        })?;
+        let principals = deserialize_principals(claims.principals).map_err(|error| {
+            warn!(
+                kid = ?header.kid,
+                claim_path = %error.path,
+                error_kind = error.kind,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token claim schema is invalid"
+            );
+            GatewayPrincipalVerificationError::InvalidClaims
+        })?;
 
-        if claims.iss != self.trust.issuer || claims.aud != self.trust.audience {
+        if claims.iss != self.trust.issuer {
+            warn!(
+                expected_iss = %self.trust.issuer,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token issuer mismatch"
+            );
             return Err(GatewayPrincipalVerificationError::InvalidClaims);
         }
-        validate_times(claims.iat, claims.exp, now)?;
+        if claims.aud != self.trust.audience {
+            warn!(
+                expected_aud = %self.trust.audience,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token audience mismatch"
+            );
+            return Err(GatewayPrincipalVerificationError::InvalidClaims);
+        }
+        if let Err(e) = validate_times(claims.iat, claims.exp, now) {
+            warn!(
+                now,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal token time validation failed"
+            );
+            return Err(e);
+        }
 
-        project_principals(claims.principals)
+        project_principals(principals).map_err(|e| {
+            warn!(
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                error_kind = ?e,
+                "Gateway Principal set is invalid"
+            );
+            e
+        })
     }
 }
 
@@ -154,6 +255,102 @@ fn is_non_blank(value: &str) -> bool {
     !value.trim().is_empty()
 }
 
+/// Correlate failures without logging any compact-JWT segment or claim value.
+fn token_fingerprint(token: &str) -> String {
+    Sha256::digest(token.as_bytes())[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+struct ClaimSchemaError {
+    path: String,
+    kind: &'static str,
+}
+
+fn deserialize_principals(
+    values: Vec<Value>,
+) -> Result<Vec<GatewayPrincipal>, ClaimSchemaError> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let prefix = format!("principals[{index}]");
+            let principal_type = value
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ClaimSchemaError {
+                    path: format!("{prefix}.type"),
+                    kind: "missing_or_invalid_type",
+                })?;
+            match principal_type {
+                "user" => {
+                    let principal: GatewayUserPrincipal =
+                        deserialize_principal(value, &prefix)?;
+                    Ok(GatewayPrincipal::User {
+                        tenant: principal.tenant,
+                        subject: principal.subject,
+                    })
+                }
+                "bot" => {
+                    let principal: GatewayBotPrincipal =
+                        deserialize_principal(value, &prefix)?;
+                    Ok(GatewayPrincipal::Bot {
+                        tenant: principal.tenant,
+                        bot: principal.bot,
+                    })
+                }
+                "app" => {
+                    let principal: GatewayAppPrincipal =
+                        deserialize_principal(value, &prefix)?;
+                    Ok(GatewayPrincipal::App {
+                        tenant: principal.tenant,
+                        app: principal.app,
+                    })
+                }
+                "access_key" => {
+                    let principal: GatewayAccessKeyPrincipal =
+                        deserialize_principal(value, &prefix)?;
+                    Ok(GatewayPrincipal::AccessKey {
+                        tenant: principal.tenant,
+                        access_key: principal.access_key,
+                    })
+                }
+                _ => Err(ClaimSchemaError {
+                    path: format!("{prefix}.type"),
+                    kind: "unknown_principal_type",
+                }),
+            }
+        })
+        .collect()
+}
+
+fn deserialize_principal<T: DeserializeOwned>(
+    value: Value,
+    prefix: &str,
+) -> Result<T, ClaimSchemaError> {
+    serde_path_to_error::deserialize(value.into_deserializer()).map_err(|error| {
+        let suffix = error.path().to_string();
+        ClaimSchemaError {
+            path: if suffix == "." {
+                prefix.to_string()
+            } else {
+                format!("{prefix}.{suffix}")
+            },
+            kind: schema_error_kind(error.inner()),
+        }
+    })
+}
+
+fn schema_error_kind(error: &serde_json::Error) -> &'static str {
+    match error.classify() {
+        serde_json::error::Category::Io => "io",
+        serde_json::error::Category::Syntax => "syntax",
+        serde_json::error::Category::Data => "data",
+        serde_json::error::Category::Eof => "eof",
+    }
+}
+
 fn project_principals(
     principals: Vec<GatewayPrincipal>,
 ) -> Result<AuthenticatedCaller, GatewayPrincipalVerificationError> {
@@ -169,12 +366,17 @@ fn project_principals(
                 tenant: outer_tenant,
                 subject,
             } => {
-                validate_tenant(&mut tenant, &outer_tenant)?;
+                if let Some(candidate) = outer_tenant.as_deref() {
+                    validate_tenant(&mut tenant, candidate)?;
+                }
                 if user.is_some()
                     || !is_non_blank(&subject.id)
                     || !is_non_blank(&subject.username)
                     || subject.tenant_id.as_ref().is_some_and(|nested_tenant| {
-                        !is_non_blank(nested_tenant) || nested_tenant != &outer_tenant
+                        !is_non_blank(nested_tenant)
+                            || outer_tenant
+                                .as_ref()
+                                .is_some_and(|outer_tenant| nested_tenant != outer_tenant)
                     })
                 {
                     return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
@@ -239,8 +441,16 @@ fn project_principals(
         }
     }
 
+    if user.is_none()
+        && bot_identity.is_none()
+        && app_identity.is_none()
+        && access_key_identity.is_none()
+    {
+        return Err(GatewayPrincipalVerificationError::InvalidPrincipalSet);
+    }
+
     Ok(AuthenticatedCaller {
-        tenant: tenant.ok_or(GatewayPrincipalVerificationError::InvalidPrincipalSet)?,
+        tenant,
         user,
         bot: bot_identity,
         app: app_identity,

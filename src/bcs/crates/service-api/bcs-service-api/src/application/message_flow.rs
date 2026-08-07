@@ -37,6 +37,7 @@ pub struct WebSendCommand {
     /// Original IM message id when this command came from a channel ingress.
     pub source_im_message_id: Option<String>,
     pub sender_conn_id: Option<u64>,
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
@@ -60,6 +61,7 @@ pub struct GroupChatCommand {
     pub requested_sender_id: Option<String>,
     pub message: String,
     pub session_id: Option<String>,
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 #[derive(Debug)]

@@ -1,35 +1,63 @@
-"""Endpoint-injection coverage for the Skills Pool operator API."""
+"""Endpoint-injection coverage for the Skills Pool operator API.
+
+These routes are thin: each one calls a rollout / query / command service and
+envelopes the result. What the cases here pin is that layer — routing, request
+validation, the ``RolloutOperationError`` → 409 mapping — so the services
+behind them are stood in for.
+
+The stand-ins are bound through the injector as subclasses of whatever the
+graph wired (``bind_overrides``), never patched onto the production classes.
+That matters beyond style: a class-level patch outlived the case that set it
+whenever an assertion failed before the teardown hook ran, silently poisoning
+later tests. A binding cannot, because the injector it lives on is discarded
+with the test.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from unittest.mock import patch
 
-from agentclaw.community.core.skills_pool.operational_query import (
-    SkillsPoolOperationalQuery,
+from agentclaw.community.api.skills_pool_operational_query_service import (
+    SkillsPoolOperationalQueryServiceProtocol,
 )
-from agentclaw.community.core.skills_pool.operations import (
-    RolloutOperationError,
-    SkillsPoolRolloutOperations,
+from agentclaw.community.api.skills_pool_operator_commands_service import (
+    SkillsPoolOperatorCommandsServiceProtocol,
 )
-from agentclaw.community.core.skills_pool.operator_commands import (
-    SkillsPoolOperatorCommands,
+from agentclaw.community.api.skills_pool_recovery_service import (
+    SkillsPoolRecoveryServiceProtocol,
 )
-from agentclaw.community.core.skills_pool.recovery_service import (
-    SkillsPoolRecoveryService,
-    SkillsPoolRollbackService,
+from agentclaw.community.api.skills_pool_rollback_service import (
+    SkillsPoolRollbackServiceProtocol,
 )
+from agentclaw.community.api.skills_pool_rollout_service import (
+    SkillsPoolRolloutServiceProtocol,
+)
+from agentclaw.community.core.skills_pool.operations import RolloutOperationError
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
 )
 
 
 _HEADERS = {"x-user-id": "skills-pool-operator"}
 _SCOPE = BotSkillLayoutScope("dev", "entity-1", "bot-1")
+
+# Every rollout mutation the router exposes. Listed rather than derived so a
+# new route shows up here as a deliberate edit.
+_ROLLOUT_MUTATIONS = (
+    "set_feature_enabled",
+    "set_full_rollout",
+    "set_owner_full_rollout",
+    "promote_engine",
+    "add_bot",
+    "remove_bot",
+    "accept_batch",
+    "set_control_bot",
+)
 
 
 @dataclass(frozen=True)
@@ -41,83 +69,41 @@ class _Result:
 
 
 def _seed_happy_services(world) -> None:
+    """Bind every skills-pool service to a stand-in that reports success."""
     result = _Result(scope=_SCOPE)
 
-    def get_snapshot(*_args, **_kwargs):
+    def answer(_self, *_args, **_kwargs):
         return result
 
-    def mutation(*_args, **_kwargs):
+    async def answer_async(_self, *_args, **_kwargs):
         return result
 
-    def get_bot(*_args, **_kwargs):
-        return result
-
-    def summarize_batch(*_args, **_kwargs):
-        return result
-
-    def wake(*_args, **_kwargs):
-        return result
-
-    def resolve(*_args, **_kwargs):
-        return result
-
-    async def rollback(*_args, **_kwargs):
-        return result
-
-    patchers = [
-        patch.object(
-            SkillsPoolRolloutOperations,
-            "get_snapshot",
-            get_snapshot,
-        ),
-        *[
-            patch.object(SkillsPoolRolloutOperations, method, mutation)
-            for method in (
-                "set_feature_enabled",
-                "set_full_rollout",
-                "set_owner_full_rollout",
-                "promote_engine",
-                "add_bot",
-                "remove_bot",
-                "accept_batch",
-                "set_control_bot",
-            )
-        ],
-        patch.object(SkillsPoolOperationalQuery, "get_bot", get_bot),
-        patch.object(
-            SkillsPoolOperationalQuery,
-            "summarize_batch",
-            summarize_batch,
-        ),
-        patch.object(SkillsPoolOperatorCommands, "wake", wake),
-        patch.object(
-            SkillsPoolRecoveryService,
-            "resolve_repair_state",
-            resolve,
-        ),
-        patch.object(SkillsPoolRollbackService, "rollback", rollback),
-    ]
-    for patcher in patchers:
-        patcher.start()
-    world.skills_pool_patchers = patchers
+    bind_overrides(
+        world,
+        SkillsPoolRolloutServiceProtocol,
+        {"get_snapshot": answer, **{m: answer for m in _ROLLOUT_MUTATIONS}},
+    )
+    bind_overrides(
+        world,
+        SkillsPoolOperationalQueryServiceProtocol,
+        {"get_bot": answer, "summarize_batch": answer},
+    )
+    bind_overrides(world, SkillsPoolOperatorCommandsServiceProtocol, {"wake": answer})
+    bind_overrides(
+        world, SkillsPoolRecoveryServiceProtocol, {"resolve_repair_state": answer},
+    )
+    bind_overrides(
+        world, SkillsPoolRollbackServiceProtocol, {"rollback": answer_async},
+    )
 
 
 def _seed_rollout_error(world) -> None:
-    def fail(*_args, **_kwargs):
+    """A rollout config the operations layer rejects — the 409 mapping."""
+
+    def fail(_self, *_args, **_kwargs):
         raise RolloutOperationError("invalid rollout config")
 
-    patcher = patch.object(
-        SkillsPoolRolloutOperations,
-        "get_snapshot",
-        fail,
-    )
-    patcher.start()
-    world.skills_pool_patchers = [patcher]
-
-
-def _stop_patches(_response, world) -> None:
-    for patcher in reversed(getattr(world, "skills_pool_patchers", [])):
-        patcher.stop()
+    bind_overrides(world, SkillsPoolRolloutServiceProtocol, {"get_snapshot": fail})
 
 
 _HAPPY_CASES = (
@@ -282,7 +268,6 @@ for _index, (_method, _path, _input) in enumerate(_HAPPY_CASES):
             status=200,
             json_contains={"success": True},
         ),
-        extra_assertions=(_stop_patches,),
     )(lambda: None)
 
 
@@ -312,7 +297,6 @@ endpoint_test(
     input=CaseInput(headers=_HEADERS),
     seed=_seed_rollout_error,
     expect=ExpectError(status=409),
-    extra_assertions=(_stop_patches,),
 )(lambda: None)
 
 for _path, _path_params in (

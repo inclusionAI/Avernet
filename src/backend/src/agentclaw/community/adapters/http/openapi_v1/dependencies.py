@@ -15,6 +15,11 @@ first, so it does the work and caches the outcome on the request scope; the
 dependency reuses it. Verifying twice would be wasted signature work and, worse,
 a window in which the two seams could disagree about who the caller is.
 
+:func:`resolve_caller` is that shared step, exported because the access log
+(``access_log.py``) is a third reader of it: it names the caller on every
+completed request and must name the *same* caller the route was scoped by, not a
+second opinion arrived at independently.
+
 Failure is uniform on purpose. No header, a bad signature, an expired token, an
 audience meant for another component, a payload we cannot parse — every one of
 them yields *no caller* and a ``401`` carrying the same fixed message. The
@@ -35,10 +40,13 @@ on the environment, and this seam only ever sees one of the two cases:
 
 from __future__ import annotations
 
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
+    PrincipalType,
     PrincipalVerificationError,
     VerifiedCaller,
     verify_principal_token,
@@ -74,7 +82,7 @@ _UNSET = _Unset()
 Principal = VerifiedCaller
 
 
-def _resolve_caller(request: Request) -> VerifiedCaller | None:
+def resolve_caller(request: Request) -> VerifiedCaller | None:
     """Verify the forwarded principal once per request, caching the outcome.
 
     ``None`` means "no caller we can trust" — absent header or failed
@@ -92,14 +100,37 @@ def _resolve_caller(request: Request) -> VerifiedCaller | None:
 
 def _verify_from_headers(request: Request) -> VerifiedCaller | None:
     """Verify the request's principal header, logging why if it fails."""
+    config = get_principal_verifier_config()
     token = request.headers.get(PRINCIPAL_HEADER, "").strip()
     if not token:
+        # Distinguished from a rejected token, and on its own log line, because
+        # the two point at completely different things. A *missing* header is
+        # not an auth failure at all: the gateway injects it on every forwarded
+        # request, so its absence means this request did not come through the
+        # gateway, or came through one whose route table does not require an
+        # identity for this path. Chasing signing keys for that is chasing the
+        # wrong half of the system, which is exactly what the previous silence
+        # invited.
+        logger.warning(
+            "no %s header on %s %s (request did not arrive through the "
+            "gateway's authenticated path; verifier key fp=%s)",
+            PRINCIPAL_HEADER,
+            request.method,
+            request.url.path,
+            config.key_fingerprint,
+        )
         return None
     try:
-        return verify_principal_token(token, get_principal_verifier_config())
+        return verify_principal_token(token, config)
     except PrincipalVerificationError as exc:
         # Log the reason (never the token) and treat the caller as absent. The
-        # request goes on to answer 401 from require_principal.
+        # request goes on to answer 401 from require_principal. The reason
+        # carries the fingerprint of the key this component judged the token
+        # against, plus the token's own JOSE header marked as caller-supplied —
+        # see ``core/gateway_principal/verifier.py``. The fingerprint is the
+        # part to reason from: compared against the gateway's boot line it
+        # separates a key mismatch from an expiry or a wrong audience, while
+        # the header is unauthenticated and can say anything a forger likes.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
             request.method,
@@ -111,9 +142,18 @@ def _verify_from_headers(request: Request) -> VerifiedCaller | None:
 
 async def require_principal(request: Request) -> Principal:
     """Return the verified caller, or raise :class:`MissingPrincipalError` (401)."""
-    caller = _resolve_caller(request)
+    caller = resolve_caller(request)
     if caller is None:
         raise MissingPrincipalError("no verified caller for this request")
+    return caller
+
+
+async def require_user_and_app_principal(
+    caller: Annotated[Principal, Depends(require_principal)],
+) -> Principal:
+    """Require the signed caller to contain both User and App identities."""
+    if not any(principal.type == PrincipalType.APP for principal in caller.principals):
+        raise MissingPrincipalError("no verified user-and-app caller for this request")
     return caller
 
 
@@ -134,7 +174,7 @@ def resolve_avernet_tenant(request: Request) -> str:
     :func:`require_principal` and therefore answers ``401`` first — a property
     pinned by ``test_public_routes_require_principal``, not left to inspection.
     """
-    caller = _resolve_caller(request)
+    caller = resolve_caller(request)
     if caller is None:
         return DEFAULT_AVERNET_TENANT
     return caller.tenant

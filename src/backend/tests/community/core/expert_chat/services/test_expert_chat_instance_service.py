@@ -270,7 +270,14 @@ class TestCreateContainer:
         _wire_binding_repo(binding_repo)
         bot_build_service.release_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 888})
 
-        await svc._create_container(BOT_ID, OWNER_ID, USER_ID, migration_path="/nas/path", version=2)
+        await svc._create_container(
+            BOT_ID,
+            OWNER_ID,
+            USER_ID,
+            migration_path="/nas/path",
+            version=2,
+            docker_image="registry/arka:v2",
+        )
 
         bot_build_service.release_async.assert_called_once()
         call_kwargs = bot_build_service.release_async.call_args[1]
@@ -280,6 +287,7 @@ class TestCreateContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "2"
+        assert call_kwargs["docker_image"] == "registry/arka:v2"
 
 
 class TestUpgradeContainer:
@@ -335,7 +343,14 @@ class TestUpgradeContainer:
         _wire_bot_repo(bot_repo, bot_info)
         bot_build_service.upgrade_async = AsyncMock(return_value={"bot_uuid": BOT_UUID, "publish_id": 999})
 
-        await svc._upgrade_container(BOT_UUID, BOT_ID, OWNER_ID, migration_path="/nas/path", version=3)
+        await svc._upgrade_container(
+            BOT_UUID,
+            BOT_ID,
+            OWNER_ID,
+            migration_path="/nas/path",
+            version=3,
+            docker_image="registry/arka:v2",
+        )
 
         bot_build_service.upgrade_async.assert_called_once()
         call_kwargs = bot_build_service.upgrade_async.call_args[1]
@@ -346,6 +361,7 @@ class TestUpgradeContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "3"
+        assert call_kwargs["docker_image"] == "registry/arka:v2"
 
 
 class TestBuildConnection:

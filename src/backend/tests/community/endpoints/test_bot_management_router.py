@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import pytest
 
@@ -16,12 +15,14 @@ from agentclaw.community.adapters.http.bot_management.router import (
     _build_bots_by_owner_or_collaborator_data,
     list_bots_by_owner_or_collaborator as list_bots_route,
 )
+from agentclaw.community.core.workspace.constants import _get_engine_types
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot, make_collaborator
 from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_failing_method,
     endpoint_test,
 )
 
@@ -190,17 +191,17 @@ def test_owner_or_collaborator_list_defaults_null_engine_types():
                 for engine in engine_types
             }
 
-    with patch(
-        "agentclaw.community.adapters.http.bot_management.router._get_engine_types",
-        return_value=["openclaw"],
-    ):
-        data = _build_bots_by_owner_or_collaborator_data(
-            owner_id="u",
-            bot_service=BotServiceWithNullEngineTypes(),
-        )
+    data = _build_bots_by_owner_or_collaborator_data(
+        owner_id="u",
+        bot_service=BotServiceWithNullEngineTypes(),
+    )
 
+    # The contract is the fallback itself: a bot with no engine_types of its
+    # own gets the deployment's configured list. Deriving the expectation from
+    # that same list keeps this pinned to the fallback rather than to whichever
+    # engines happen to be configured.
     assert data["items"][0]["engine_paths"] == {
-        "openclaw": "/tmp/bot-1/openclaw"
+        engine: f"/tmp/bot-1/{engine}" for engine in _get_engine_types()
     }
 
 
@@ -358,19 +359,21 @@ def list_bots_by_owner_or_collaborator_various_statuses():
 
 
 def _seed_with_service_error(world):
-    """Seed: mock bot service to raise an exception."""
-    from agentclaw.community.core.bot_management.services.bot_service import BotService
+    """Break the listing the way a database outage would.
 
-    def mock_list_bots_by_owner_or_collaborator(*args, **kwargs):
-        raise RuntimeError("Mock service error")
+    The route's except branch answers ``success=False`` for faults no request
+    can produce, so the failure is injected at the DI seam instead of being
+    pretended into existence with a patch.
+    """
+    from agentclaw.community.api.bot_service import BotServiceProtocol
 
-    patcher = patch.object(
-        BotService,
+    make_staff_user(world, user_id="u_owner")
+    bind_failing_method(
+        world,
+        BotServiceProtocol,
         "list_bots_by_owner_or_collaborator",
-        mock_list_bots_by_owner_or_collaborator,
+        RuntimeError("Mock service error"),
     )
-    patcher.start()
-    world._bot_list_service_error_patcher = patcher
 
 
 @endpoint_test(
@@ -428,15 +431,21 @@ def get_bots_ceiling_ok():
 
 
 def _seed_ceiling_service_error(world):
-    """Patch PolicyService.get_bots_ceiling to raise, exercising the except branch."""
-    from agentclaw.community.core.access.services.policy_service import PolicyService
+    """Break the ceiling lookup, exercising the route's except branch.
 
-    def mock_get_bots_ceiling(*args, **kwargs):
-        raise RuntimeError("Mock policy service error")
+    ``get_bots_ceiling`` swallows every malformed-policy case and returns the
+    default, so no seeded row can make it raise; the seam is the only honest
+    way to reach the branch.
+    """
+    from agentclaw.community.api.policy_service import PolicyServiceProtocol
 
-    patcher = patch.object(PolicyService, "get_bots_ceiling", mock_get_bots_ceiling)
-    patcher.start()
-    world._get_bots_ceiling_error_patcher = patcher
+    make_staff_user(world, user_id="u_owner")
+    bind_failing_method(
+        world,
+        PolicyServiceProtocol,
+        "get_bots_ceiling",
+        RuntimeError("Mock policy service error"),
+    )
 
 
 @endpoint_test(

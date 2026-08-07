@@ -9,6 +9,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -30,6 +33,65 @@ DEVICE_COUNT_DEFAULT_PARAM_CODE = "default"
 
 class RestartMixin:
     """Bot restart (re-deploy) operations, mixed into PublishFlowService."""
+
+    # ── durable-task accessors ───────────────────────────────────────────────
+    # The restart poll and the restart task read the record through these rather
+    # than reaching into the private collaborators. They live on the mixin with
+    # the rest of the restart concern, and are deliberately NOT on
+    # ``PublishFlowServiceProtocol`` — that carries the API-boundary methods
+    # adapters call, not task-handler accessors.
+    def is_restart_in_progress(self, publish_id: int) -> bool:
+        """True while a restart issued for this record is still awaiting its BaaS
+        workflow — ``ext.restart.restarting`` is set *and* the record is in a
+        status ``sync_restart_progress`` can still resolve a stage for.
+
+        The restart poll's wait-state test, standing in for the publish status
+        the restart path never transitions. The status half matters as much as
+        the marker: once a record leaves the restartable statuses the sync can
+        never reconcile it either (it derives the stage from the status too), so
+        the poll must stop rather than spin to its deadline."""
+        record = self._publish_service.get_publish_by_id(publish_id)
+        if record is None:
+            return False
+        if self._determine_restart_stage(PublishStatus(record.status)) is None:
+            return False
+        restart_ext = (record.ext or {}).get("restart")
+        return isinstance(restart_ext, dict) and bool(restart_ext.get("restarting"))
+
+    def has_unreconciled_restart(self, publish_id: int, stage: str) -> bool:
+        """True when a restart for ``stage`` was already submitted and is still
+        awaiting its terminal workflow.
+
+        The restart task's redelivery guard. ``execute_restart`` COMPLETEs its
+        ledger op before returning, and ``open_publish_operation`` resumes only a
+        *non-terminal* op — past a terminal one it opens the next attempt. So an
+        at-least-once redelivery would issue a second BaaS restart unless the
+        handler can recognise a restart it already submitted.
+
+        All three conditions are required, and the third is the subtle one: a
+        crash mid-``execute_restart`` (its RESTART op still open) or between a
+        recreate's ext write and its completion (a FIRST_RELEASE op still open)
+        must fall *through* this guard, so the runner resumes and finalises that
+        work exactly as it does today. Only a stage with no deploy operation left
+        open is genuinely "submitted, nothing left to run but the observation"."""
+        record = self._publish_service.get_publish_by_id(publish_id)
+        if record is None:
+            return False
+
+        restart_ext = (record.ext or {}).get("restart")
+        if not isinstance(restart_ext, dict):
+            return False
+        if not restart_ext.get("restarting") or not restart_ext.get(stage):
+            return False
+
+        terminal = {state.value for state in PublishOperationState.terminal()}
+        for kind in (PublishOperationKind.RESTART, PublishOperationKind.FIRST_RELEASE):
+            op = self._publish_operation_repo.get_latest_by_kind(
+                publish_id, kind.value, stage
+            )
+            if op is not None and op.state not in terminal:
+                return False
+        return True
 
     def restart_bot(
         self,
@@ -229,7 +291,11 @@ class RestartMixin:
         if not migration_path and not config_artifact:
             return {"success": False, "message": f"Missing build artifact: publish_id={publish_id}"}
 
-        # Mark restart in progress (cleared on success/failure by sync_restart_progress)
+        # Mark restart in progress, and note that every failure return above this
+        # point leaves it untouched — the restart task's failure branch relies on
+        # that to avoid clearing a concurrent restart's marker. Cleared on an
+        # observed terminal workflow by sync_restart_progress, which the restart
+        # poll now drives.
         def _set_restarting_flag(latest_ext: dict) -> None:
             latest_ext.setdefault("restart", {})["restarting"] = True
 
@@ -240,6 +306,7 @@ class RestartMixin:
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         # A prior recreate that crashed between its ext write and its
         # complete_operation left a dangling op. That crashed leg IS this restart
@@ -321,6 +388,7 @@ class RestartMixin:
                     version=version,
                     delivery=delivery,
                     skills_env=skills_env,
+                    docker_image=image_pin.docker_image,
                     operator=operator,
                 )
 
@@ -335,6 +403,7 @@ class RestartMixin:
                 version=version,
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
             )
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
@@ -386,6 +455,7 @@ class RestartMixin:
                 version=version,
                 delivery=delivery,
                 skills_env=skills_env,
+                docker_image=image_pin.docker_image,
                 operator=operator,
             )
         restart_publish_id = op.baas_publish_id
@@ -477,6 +547,7 @@ class RestartMixin:
         version: str,
         delivery,
         skills_env: dict[str, str] | None,
+        docker_image: str | None,
         operator: str,
     ) -> dict:
         """Recreate a restart's gone target bot — crash-safe (closes the former
@@ -511,6 +582,7 @@ class RestartMixin:
                 version=version,
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=docker_image,
             )
 
         op = await acquire_deploy_workflow(

@@ -40,6 +40,11 @@ from agentclaw.community.core.skill_center.path_resolution import (
 from agentclaw.community.core.skill_center.utils.skill_metadata_writer import SkillSetMetadataWriter
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE  # noqa: E402
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.core.skills_pool.edit_guard import (
+    SkillsPoolEditGuard,
+    SkillsPoolEditPausedError,
+)
+from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 
@@ -188,6 +193,7 @@ class SkillSetService:
         self._bot_repo = bot_repo
 
         self.bot_id = bot_id or "default"
+        self.user_id = user_id
         self.entity_id = entity_id
         self.entity_type = entity_type or "staff"
         self.engine_type = engine_type or DEFAULT_ENGINE_TYPE
@@ -206,7 +212,7 @@ class SkillSetService:
         self.is_desktop = False
         if user_id or entity_id:
             try:
-                owner_id = entity_id if entity_id else user_id
+                owner_id = user_id or entity_id
                 bot = self._bot_repo.get_by_id_and_owner(self.bot_id, owner_id)
                 if bot and bot.get("bot_type") == "desktop":
                     self.is_desktop = True
@@ -236,7 +242,7 @@ class SkillSetService:
         self._pool_layout_paths = pool_layout_paths or (
             lambda _owner_id, _bot_id, _engine: None
         )
-        effective_owner = entity_id or user_id
+        effective_owner = user_id or entity_id
         if effective_owner is not None:
             pool_paths = self._pool_layout_paths(
                 str(effective_owner),
@@ -260,7 +266,7 @@ class SkillSetService:
         try:
             # 优先从数据库查询
             active_set = self.skill_set_repo.get_active_skill_set(
-                user_id=self.entity_id,
+                user_id=self.user_id or self.entity_id,
                 bolt_id=self.bot_id,
                 engine_type=self.engine_type
             )
@@ -314,6 +320,10 @@ class SkillSetService:
         except Exception as e:
             logger.warning(f"[_sync_symlinks_to_device_if_needed] Failed to sync symlinks: {e}", exc_info=True)
             return False
+
+    def sync_runtime(self) -> bool:
+        """Reconcile this Bot's desired Skill mapping to its runtime."""
+        return self._sync_symlinks_to_device_if_needed(self.user_id or self.entity_id)
 
     def _validate_name(self, name: str) -> None:
         """Validate skill set name (cannot contain underscore)."""
@@ -590,6 +600,34 @@ class SkillSetService:
                 else:
                     results["failed"].append({"skill_id": skill_id, "error": "Skill not found"})
                     continue
+
+            # Local skills are stored in a per-Bot workspace and must never be
+            # associated with another Bot's skill set. Numeric skill IDs are
+            # globally resolvable, so a stale caller bot_id could otherwise
+            # create a cross-Bot association here.
+            skill_git_path = skill.get("git_path", "")
+            target_bot_id = skill_set.get("bolt_id") or self.bot_id
+            if (
+                skill_git_path.startswith("local://")
+                and skill.get("bolt_id") is not None
+                and skill.get("bolt_id") != target_bot_id
+            ):
+                results["failed"].append(
+                    {
+                        "skill_id": skill_id,
+                        "error": "Skill belongs to another bot",
+                    }
+                )
+                logger.warning(
+                    "[add_skills_to_set] Rejected cross-Bot local skill: "
+                    "skill_id=%s, skill_bot_id=%s, skill_set_id=%s, "
+                    "skill_set_bot_id=%s",
+                    skill_id,
+                    skill.get("bolt_id"),
+                    skill_set_id,
+                    target_bot_id,
+                )
+                continue
 
             # Check if already associated in the same skill set
             existing_skills = self.skill_set_repo.get_skills_in_set(skill_set_id)
@@ -1018,7 +1056,7 @@ class SkillSetService:
             ]
         """
         effective_bolt_id = bolt_id if bolt_id else self.bot_id
-        effective_user_id = user_id if user_id else self.entity_id
+        effective_user_id = user_id if user_id else self.user_id or self.entity_id
 
         logger.info(f"[get_all_skill_sets_with_skills] user_id={effective_user_id}, bolt_id={effective_bolt_id}")
 
@@ -1290,7 +1328,7 @@ class SkillSetService:
                 # 从路径中提取技能名称（最后一个目录名）
                 if path_part.startswith('/'):
                     # 绝对路径格式: /aidesktop/.../skills-local/skill-name
-                    skill_name = path_part.rstrip('/').split('/')[-1]
+                    link_name = skill_name or path_part.rstrip('/').split('/')[-1]
                     source = (
                         canonical_pool_local_path(path_part, skills_local_dir)
                         if pool_layout_paths is not None
@@ -1298,9 +1336,13 @@ class SkillSetService:
                     )
                 else:
                     # 相对名称格式: skill-name
-                    skill_name = path_part.split('/')[-1] if '/' in path_part else path_part
-                    source = str(skills_local_dir / skill_name)
-                target = str(base_skills_dir / skill_name)
+                    source_name = path_part.split('/')[-1] if '/' in path_part else path_part
+                    # Replacement packages are staged under a temporary
+                    # directory (for example ``.foo.replacement-*``), but
+                    # their runtime link must retain the logical Skill name.
+                    link_name = skill_name or source_name
+                    source = str(skills_local_dir / source_name)
+                target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
         logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(symlinks)}")
@@ -1915,7 +1957,26 @@ class _DeviceSyncMixin:
     _resolver: "DeviceContextResolver"
     _device_sync_dispatcher: "DeviceSyncDispatcher"
     _device_plugin: DeviceAccessor
+    _edit_guard: SkillsPoolEditGuard
     skill_set_service: SkillSetService
+
+    def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
+        owner_id = (
+            self.skill_set_service.entity_id
+            or user_id
+            or self.skill_set_service.user_id
+        )
+        bot_id = self.skill_set_service.bot_id
+        if not owner_id or not bot_id:
+            return None
+        bot = self.skill_set_service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None or bot.get("entity_id") is None or bot.get("env") is None:
+            return None
+        return BotSkillLayoutScope(
+            env=str(bot["env"]),
+            entity_id=str(bot["entity_id"]),
+            bot_id=str(bot_id),
+        )
 
     def _do_device_sync(self, user_id: str | None, caller: str = "DeviceSyncMixin") -> dict:
         """Sync symlink mappings to device via DeviceSyncPlugin.
@@ -1970,6 +2031,7 @@ class SkillSetSwitcherFactory:
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
+        edit_guard: SkillsPoolEditGuard,
     ) -> None:
         self._skill_set_factory = skill_set_factory
         self._resolver = resolver
@@ -1977,6 +2039,7 @@ class SkillSetSwitcherFactory:
         self._device_plugin = device_plugin
         self._path_factory = path_factory
         self._device_fs_dispatcher = device_fs_dispatcher
+        self._edit_guard = edit_guard
 
     def create(
         self,
@@ -1993,6 +2056,7 @@ class SkillSetSwitcherFactory:
             device_plugin=self._device_plugin,
             path_factory=self._path_factory,
             device_fs_dispatcher=self._device_fs_dispatcher,
+            edit_guard=self._edit_guard,
             entity_id=entity_id,
             bot_id=bot_id,
             engine_type=engine_type,
@@ -2012,6 +2076,7 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         *,
         path_factory: WorkspacePathFactory,
         device_fs_dispatcher: "DeviceFilesystemDispatcher",
+        edit_guard: SkillsPoolEditGuard,
         skills_dir: Path | None = None,
         repo_dir: Path | None = None,
         local_dir: Path | None = None,
@@ -2024,6 +2089,7 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         self._device_sync_dispatcher = device_sync_dispatcher
         self._device_plugin = device_plugin
         self._device_fs_dispatcher = device_fs_dispatcher
+        self._edit_guard = edit_guard
         # Cache user/owner/bot for plugin retrieval at cleanup-time.
         self._user_id_for_dispatcher = user_id
         self._entity_id_for_dispatcher = entity_id
@@ -2175,6 +2241,32 @@ class SkillSetSwitcher(_DeviceSyncMixin):
         skill_set_id: str,
         user_id: str | None = None,
         proxy_token: str | None = None
+    ) -> SwitchResult:
+        """Serialize a Bot-scoped switch with Local Skill mutations."""
+        scope = self._bot_layout_scope(user_id)
+        if scope is None:
+            return await self._switch_to_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError:
+            return SwitchResult(
+                success=False,
+                message="Skills are temporarily read-only while layout work is running",
+            )
+        try:
+            return await self._switch_to_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _switch_to_skill_set_unlocked(
+        self,
+        skill_set_id: str,
+        user_id: str | None = None,
+        proxy_token: str | None = None,
     ) -> SwitchResult:
         """Switch to a new skill set."""
         result = SwitchResult(success=False, message="")
@@ -2346,7 +2438,28 @@ class SkillSetSwitcher(_DeviceSyncMixin):
 
         return result
 
-    async def sync_skill_set_to_active(self, skill_set_id: str, user_id: str | None = None) -> SwitchResult:
+    async def sync_skill_set_to_active(
+        self, skill_set_id: str, user_id: str | None = None
+    ) -> SwitchResult:
+        """Serialize an additive Bot sync with Local Skill mutations."""
+        scope = self._bot_layout_scope(user_id)
+        if scope is None:
+            return await self._sync_skill_set_to_active_unlocked(skill_set_id, user_id)
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError:
+            return SwitchResult(
+                success=False,
+                message="Skills are temporarily read-only while layout work is running",
+            )
+        try:
+            return await self._sync_skill_set_to_active_unlocked(skill_set_id, user_id)
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _sync_skill_set_to_active_unlocked(
+        self, skill_set_id: str, user_id: str | None = None
+    ) -> SwitchResult:
         """Sync a skill set to active skills without deactivating others."""
         result = SwitchResult(success=False, message="")
 
@@ -2464,12 +2577,14 @@ class SkillSetActivatorFactory:
         device_sync_dispatcher: "DeviceSyncDispatcher",
         device_plugin: DeviceAccessor,
         path_factory: WorkspacePathFactory,
+        edit_guard: SkillsPoolEditGuard,
     ) -> None:
         self._skill_set_factory = skill_set_factory
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._device_plugin = device_plugin
         self._path_factory = path_factory
+        self._edit_guard = edit_guard
 
     def create(
         self,
@@ -2485,6 +2600,7 @@ class SkillSetActivatorFactory:
             device_sync_dispatcher=self._device_sync_dispatcher,
             device_plugin=self._device_plugin,
             path_factory=self._path_factory,
+            edit_guard=self._edit_guard,
             entity_id=entity_id,
             bot_id=bot_id,
             engine_type=engine_type,
@@ -2503,6 +2619,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         device_plugin: DeviceAccessor,
         *,
         path_factory: WorkspacePathFactory,
+        edit_guard: SkillsPoolEditGuard,
         user_id: str | None = None,
         entity_id: str | None = None,
         bot_id: str | None = None,
@@ -2511,6 +2628,7 @@ class SkillSetActivator(_DeviceSyncMixin):
         self._resolver = resolver
         self._device_sync_dispatcher = device_sync_dispatcher
         self._device_plugin = device_plugin
+        self._edit_guard = edit_guard
 
         # Use new path structure
         if user_id or entity_id:
@@ -2540,6 +2658,32 @@ class SkillSetActivator(_DeviceSyncMixin):
         skill_set_id: str,
         user_id: str | None = None,
         proxy_token: str | None = None
+    ) -> ActivateResult:
+        """Serialize Bot-scoped activation with Local Skill mutations."""
+        scope = self._bot_layout_scope(user_id)
+        if scope is None:
+            return await self._activate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError:
+            return ActivateResult(
+                success=False,
+                message="Skills are temporarily read-only while layout work is running",
+            )
+        try:
+            return await self._activate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _activate_skill_set_unlocked(
+        self,
+        skill_set_id: str,
+        user_id: str | None = None,
+        proxy_token: str | None = None,
     ) -> ActivateResult:
         """激活单个能力集（增量激活）
 

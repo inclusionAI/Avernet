@@ -30,8 +30,8 @@ CREATE TABLE IF NOT EXISTS `avernet_application` (
   `status` varchar(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '状态(ACTIVE/INACTIVE)',
   `env` varchar(64) NOT NULL DEFAULT '' COMMENT '环境标识',
   `config` json DEFAULT NULL COMMENT '扩展配置(JSON)',
-  `creator` varchar(128) DEFAULT NULL COMMENT '创建人',
-  `modifier` varchar(128) DEFAULT NULL COMMENT '修改人',
+  `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
+  `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_avernet_application_token` (`token`),
   KEY `idx_avernet_application_app_name` (`app_name`)
@@ -47,8 +47,8 @@ CREATE TABLE IF NOT EXISTS `avernet_tenant` (
   `description` varchar(1024) NOT NULL DEFAULT '' COMMENT '租户描述',
   `owner` varchar(128) NOT NULL DEFAULT '' COMMENT '租户归属',
   `config` json DEFAULT NULL COMMENT '扩展配置(JSON)',
-  `creator` varchar(128) DEFAULT NULL COMMENT '创建人',
-  `modifier` varchar(128) DEFAULT NULL COMMENT '修改人',
+  `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
+  `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_avernet_tenant_name` (`name`)
 ) DEFAULT CHARSET = utf8mb4 COMMENT = '租户主数据表';
@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS `avernet_access_key_token` (
   `access_key` varchar(256) NOT NULL COMMENT '访问密钥ID',
   `tenant` varchar(64) NOT NULL COMMENT '所属租户(逻辑引用 avernet_tenant.name)',
   `expire_at` timestamp NOT NULL COMMENT '过期时间',
-  `creator` varchar(128) DEFAULT NULL COMMENT '创建人',
-  `modifier` varchar(128) DEFAULT NULL COMMENT '修改人',
+  `creator` varchar(128) NOT NULL DEFAULT '' COMMENT '创建人',
+  `modifier` varchar(128) NOT NULL DEFAULT '' COMMENT '修改人',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_avernet_access_key_token_token` (`token`),
   KEY `idx_avernet_access_key_token_access_key` (`access_key`)

@@ -5,7 +5,16 @@ import logging
 import uuid
 from pathlib import Path
 
+from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
+    BotFriendRepositoryProtocol,
+)
+from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
+from agentclaw.community.core.devices.services.device_context import (
+    DeviceContext,
+    DeviceNotBoundError,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -44,6 +53,8 @@ class SessionResourceService:
         token_vault: TokenVault,
         adapter_transport: DeviceAdapterTransport,
         default_tenant: str,
+        bot_repository: BotRepository,
+        bot_friend_repository: BotFriendRepositoryProtocol,
     ) -> None:
         self._repository = repository
         self._baas = baas_client
@@ -52,6 +63,8 @@ class SessionResourceService:
         self._vault = token_vault
         self._adapter_transport = adapter_transport
         self._default_tenant = default_tenant.strip()
+        self._bot_repository = bot_repository
+        self._bot_friend_repository = bot_friend_repository
 
     def create_upload_intent(
         self,
@@ -62,11 +75,19 @@ class SessionResourceService:
         scope_type: str,
         engine_type: str,
         filename: str,
+        target_entity_id: str | None = None,
+        binding_id: int | None = None,
         size_bytes: int | None = None,
         content_hash: str | None = None,
     ) -> SessionUploadIntent:
         safe_filename = self._safe_filename(filename)
-        context = self._resolver.resolve_for_bot(bot_id, owner_id)
+        context, binding_id = self._resolve_upload_context(
+            bot_id=bot_id,
+            requester_id=owner_id,
+            target_entity_id=target_entity_id,
+            scope_type=scope_type,
+            binding_id=binding_id,
+        )
         raw_tenant = context.conn_info.get("tenant")
         raw_bot_uuid = context.conn_info.get("bot_uuid")
         provider = (
@@ -142,6 +163,7 @@ class SessionResourceService:
                 transfer_id=grant.transfer_id,
                 status=SessionResourceStatus.UPLOAD_URL_ISSUED,
                 transfer_api_version=TransferApiVersion.SESSION_V2,
+                binding_id=binding_id,
                 session_key_ciphertext=self._vault.encrypt(session_key),
                 size_bytes=size_bytes,
                 client_content_hash=content_hash,
@@ -255,7 +277,7 @@ class SessionResourceService:
         )
         if record.status is not SessionResourceStatus.READY:
             raise ValueError("resource_not_ready")
-        context = self._resolver.resolve_for_bot(record.bot_id, record.owner_id)
+        context = self._resolve_record_context(record)
         response = await self._adapter_transport.stream(
             context.conn_info,
             "GET",
@@ -449,6 +471,106 @@ class SessionResourceService:
         if not session_id:
             raise ValueError("session_key_missing")
         return session_id
+
+    def _resolve_upload_context(
+        self,
+        *,
+        bot_id: str,
+        requester_id: str,
+        target_entity_id: str | None,
+        scope_type: str,
+        binding_id: int | None,
+    ) -> tuple[DeviceContext, int]:
+        if binding_id is not None:
+            try:
+                context = self._resolver.resolve_for_binding(
+                    binding_id,
+                    requester_id,
+                    bot_id=bot_id,
+                )
+            except DeviceNotBoundError as exc:
+                log.warning(
+                    "session_resource.upload_intent.binding.reject requester_hash=%s bot_hash=%s binding_id=%s reason=binding_unavailable",
+                    hash_identifier(requester_id)[:16],
+                    hash_identifier(bot_id)[:16],
+                    binding_id,
+                )
+                raise ValueError("bot_device_unavailable") from exc
+            log.info(
+                "session_resource.upload_intent.binding.accept requester_hash=%s bot_hash=%s binding_id=%s source=frontend",
+                hash_identifier(requester_id)[:16],
+                hash_identifier(bot_id)[:16],
+                binding_id,
+            )
+            return context, binding_id
+        target_id = target_entity_id or requester_id
+        if target_entity_id and target_entity_id != requester_id:
+            relation = self._bot_friend_repository.get_by_entity_ids(
+                requester_entity_id=requester_id,
+                target_entity_id=target_entity_id,
+                target_bot_id=bot_id,
+            )
+            if not relation or relation.get("status") != BotFriendStatus.ACCEPTED.value:
+                log.warning(
+                    "session_resource.upload_intent.target.reject requester_hash=%s target_hash=%s bot_hash=%s reason=friend_access_denied",
+                    hash_identifier(requester_id)[:16],
+                    hash_identifier(target_entity_id)[:16],
+                    hash_identifier(bot_id)[:16],
+                )
+                raise ValueError("target_bot_access_denied")
+        elif target_entity_id is None and scope_type == "friend_bot_chat":
+            log.warning(
+                "session_resource.upload_intent.target.fallback requester_hash=%s bot_hash=%s reason=missing_target_entity",
+                hash_identifier(requester_id)[:16],
+                hash_identifier(bot_id)[:16],
+            )
+        bot = self._bot_repository.get_by_id_and_owner(bot_id, target_id)
+        binding_id = bot.get("binding_id") if bot else None
+        if (
+            not isinstance(binding_id, int)
+            or isinstance(binding_id, bool)
+            or binding_id <= 0
+        ):
+            log.warning(
+                "session_resource.upload_intent.target.reject requester_hash=%s target_hash=%s bot_hash=%s reason=binding_missing",
+                hash_identifier(requester_id)[:16],
+                hash_identifier(target_id)[:16],
+                hash_identifier(bot_id)[:16],
+            )
+            raise ValueError("bot_device_unavailable")
+        try:
+            context = self._resolver.resolve_for_binding(
+                binding_id,
+                requester_id,
+                bot_id=bot_id,
+            )
+        except DeviceNotBoundError as exc:
+            log.warning(
+                "session_resource.upload_intent.target.reject requester_hash=%s target_hash=%s bot_hash=%s binding_id=%s reason=binding_inactive",
+                hash_identifier(requester_id)[:16],
+                hash_identifier(target_id)[:16],
+                hash_identifier(bot_id)[:16],
+                binding_id,
+            )
+            raise ValueError("bot_device_unavailable") from exc
+        return context, binding_id
+
+    def _resolve_record_context(self, record: SessionResourceRecord) -> DeviceContext:
+        if record.binding_id is None:
+            return self._resolver.resolve_for_bot(record.bot_id, record.owner_id)
+        try:
+            return self._resolver.resolve_for_binding(
+                record.binding_id,
+                record.owner_id,
+                bot_id=record.bot_id,
+            )
+        except DeviceNotBoundError as exc:
+            log.warning(
+                "session_resource.context.reject resource_id=%s binding_id=%s reason=binding_inactive",
+                record.resource_id,
+                record.binding_id,
+            )
+            raise ValueError("bot_device_unavailable") from exc
 
     def _owned(
         self,

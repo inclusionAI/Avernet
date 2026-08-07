@@ -12,11 +12,11 @@ import pytest
 
 from secbaas.community.plugins.sandbox.teclaw._stub import StubTeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
-    _BotCreateResult,
-    _BotDestroyResult,
-    _BotInfo,
-    _BotRestartResult,
-    _BotUpdateResult,
+    BotCreateResult,
+    BotDestroyResult,
+    BotInfo,
+    BotRestartResult,
+    BotUpdateResult,
 )
 
 
@@ -36,7 +36,7 @@ class TestStubCreateBot:
     async def test_creates_bot_with_id_prefix(self, stub_plugin):
         """bot_id starts with 'stub-teclaw-'."""
         result = await stub_plugin.create_bot({"key": "val"})
-        assert isinstance(result, _BotCreateResult)
+        assert isinstance(result, BotCreateResult)
         assert result.teclaw_bot_id.startswith("stub-teclaw-")
         # 12 hex chars after prefix
         hex_part = result.teclaw_bot_id[len("stub-teclaw-") :]
@@ -68,7 +68,7 @@ class TestStubDestroyBot:
         """status == 'DELETED'."""
         create_result = await stub_plugin.create_bot({"key": "val"})
         result = await stub_plugin.destroy_bot(create_result.teclaw_bot_id)
-        assert isinstance(result, _BotDestroyResult)
+        assert isinstance(result, BotDestroyResult)
         assert result.status == "DELETED"
 
     @pytest.mark.asyncio
@@ -105,11 +105,11 @@ class TestStubUpdateBot:
 
     @pytest.mark.asyncio
     async def test_update_returns_correct_type(self, stub_plugin):
-        """Returns _BotUpdateResult."""
+        """Returns BotUpdateResult."""
         create_result = await stub_plugin.create_bot({"key": "val"})
         bid = create_result.teclaw_bot_id
         result = await stub_plugin.update_bot(bid, {"new": "config"})
-        assert isinstance(result, _BotUpdateResult)
+        assert isinstance(result, BotUpdateResult)
         assert result.teclaw_bot_id == bid
         assert result.status == "ONLINE"
         assert result.teclaw_bot_config == {"new": "config"}
@@ -182,7 +182,7 @@ class TestStubRestartBot:
         """status == 'ONLINE'."""
         create_result = await stub_plugin.create_bot({"key": "val"})
         result = await stub_plugin.restart_bot(create_result.teclaw_bot_id)
-        assert isinstance(result, _BotRestartResult)
+        assert isinstance(result, BotRestartResult)
         assert result.status == "ONLINE"
 
     @pytest.mark.asyncio
@@ -217,7 +217,7 @@ class TestStubGetBot:
         create_result = await stub_plugin.create_bot({"key": "val"})
         bid = create_result.teclaw_bot_id
         info = await stub_plugin.get_bot(bid)
-        assert isinstance(info, _BotInfo)
+        assert isinstance(info, BotInfo)
         assert info.teclaw_bot_id == bid
         assert info.status == "ONLINE"
         assert info.teclaw_bot_config == {"key": "val"}
@@ -226,7 +226,7 @@ class TestStubGetBot:
     async def test_get_bot_unknown_id(self, stub_plugin):
         """Returns status 'UNKNOWN' and bot_config None for unknown IDs."""
         info = await stub_plugin.get_bot("nonexistent")
-        assert isinstance(info, _BotInfo)
+        assert isinstance(info, BotInfo)
         assert info.teclaw_bot_id == "nonexistent"
         assert info.status == "UNKNOWN"
         assert info.teclaw_bot_config is None

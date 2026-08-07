@@ -7,6 +7,7 @@ All consumers (core/service/, adapters/) depend on this API layer.
 
 from ._enums import APIKeyStatus
 from ._exceptions import APIKeyError
+from ._jwt import verify_jwt_token
 from ._models import (
     APIKeyCreate,
     APIKeyCreateResponse,
@@ -27,6 +28,7 @@ from ._permission import (
 )
 from ._policy import APIKeyPolicy, parse_policy
 from ._protocols import APIKeyService, APIKeyValidator
+from ._resource_key import ResourceKeyRecord, ResourceKeyRepository
 
 __all__ = [
     # Admin
@@ -55,4 +57,9 @@ __all__ = [
     "APIKeyError",
     "APIKeyService",
     "APIKeyValidator",
+    # Resource Key (re-exported for adapter consumption)
+    "ResourceKeyRecord",
+    "ResourceKeyRepository",
+    # JWT
+    "verify_jwt_token",
 ]

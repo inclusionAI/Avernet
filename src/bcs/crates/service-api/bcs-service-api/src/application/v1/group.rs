@@ -142,6 +142,18 @@ pub struct StateMachineDefinitionReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateMachineDefinitionContent {
+    pub content_yaml: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StateMachineDefinition {
+    Reference(StateMachineDefinitionReference),
+    Content(StateMachineDefinitionContent),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateMachineParticipantBinding {
     pub binding: String,
     pub actor_ids: Vec<String>,
@@ -165,7 +177,7 @@ pub struct ManagerWorkerConfiguration {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateMachineConfiguration {
-    pub definition: StateMachineDefinitionReference,
+    pub definition: StateMachineDefinition,
     pub participant_bindings: Vec<StateMachineParticipantBinding>,
 }
 
@@ -293,7 +305,6 @@ pub struct GetGroup {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GroupPatch {
     pub name: Option<String>,
-    pub context: Option<String>,
     pub visibility: Option<GroupVisibility>,
     pub delivery_policy: Option<GroupDeliveryPolicy>,
 }
@@ -301,7 +312,6 @@ pub struct GroupPatch {
 impl GroupPatch {
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
-            && self.context.is_none()
             && self.visibility.is_none()
             && self.delivery_policy.is_none()
     }
@@ -318,6 +328,7 @@ pub struct UpdateGroup {
 pub struct DeleteGroup {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
+    pub acting_bot_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -325,7 +336,6 @@ pub struct AddGroupParticipant {
     pub caller: AuthenticatedCaller,
     pub group_id: String,
     pub actor_id: String,
-    pub role: ParticipantRole,
 }
 
 #[derive(Debug, Clone)]

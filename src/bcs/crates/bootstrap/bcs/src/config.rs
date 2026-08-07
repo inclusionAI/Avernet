@@ -107,7 +107,7 @@ fn default_session_files_share_link_ttl() -> u64 {
     3600
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFilesShareConfig {
     /// HMAC secret for share-token mint/consume. If unset, bootstrap logs a
     /// warning and generates a random 32-byte secret that does NOT survive
@@ -123,10 +123,78 @@ pub struct SessionFilesShareConfig {
     /// to `bcs_endpoint` or `http://{bind}:{port}` in the service layer.
     #[serde(default)]
     pub share_base_url: Option<String>,
+
+    /// TTL (seconds) for share URLs minted at history-read time for image
+    /// echo. Clamped to [60, 604800]. Independent from `default_ttl_seconds`
+    /// (the share-API default) so history echo can be tuned separately.
+    #[serde(default = "default_history_attachment_ttl")]
+    pub history_attachment_ttl_seconds: u64,
+}
+
+impl Default for SessionFilesShareConfig {
+    fn default() -> Self {
+        Self {
+            token_secret: None,
+            default_ttl_seconds: default_session_files_share_ttl(),
+            share_base_url: None,
+            history_attachment_ttl_seconds: default_history_attachment_ttl(),
+        }
+    }
 }
 
 fn default_session_files_share_ttl() -> u64 {
     86400
+}
+
+fn default_history_attachment_ttl() -> u64 {
+    3600
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderHttpConfig {
+    /// Inbound HTTP header names that BCS may forward to HTTP provider webhooks.
+    /// Empty by default; matching is case-insensitive.
+    #[serde(default)]
+    pub bypass_headers: Vec<String>,
+}
+
+impl ProviderHttpConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        for raw_name in &self.bypass_headers {
+            let name = raw_name.trim();
+            if name.is_empty() {
+                return Err(
+                    "provider_http.bypass_headers must not contain empty header names".to_string(),
+                );
+            }
+            axum::http::HeaderName::try_from(name).map_err(|_| {
+                format!("provider_http.bypass_headers contains invalid header name '{raw_name}'")
+            })?;
+            if is_reserved_provider_bypass_header(name) {
+                return Err(format!(
+                    "provider_http.bypass_headers contains reserved header name '{raw_name}'"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_reserved_provider_bypass_header(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "authorization"
+            | "cookie"
+            | "host"
+            | "content-length"
+            | "content-type"
+            | "x-bcs-bot-token"
+            | "x-bcs-service-key"
+    ) || lower == "bcn"
+        || lower.starts_with("bcn-")
+        || lower.starts_with("x-bcn-")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -259,7 +327,8 @@ fn default_collaboration_templates_default_language() -> String {
 /// Gateway Principal verification trust and signing-key lookup configuration.
 ///
 /// The signing key itself is intentionally not configuration: bootstrap resolves
-/// it from `signing_key_env` at process startup.
+/// it from `signing_key_secret` through the configured SecretAccessPort, or
+/// falls back to `signing_key_env` at process startup for compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayPrincipalConfig {
@@ -274,6 +343,9 @@ pub struct GatewayPrincipalConfig {
 
     #[serde(default = "default_gateway_principal_signing_key_env")]
     pub signing_key_env: String,
+
+    #[serde(default)]
+    pub signing_key_secret: Option<String>,
 }
 
 impl Default for GatewayPrincipalConfig {
@@ -283,6 +355,7 @@ impl Default for GatewayPrincipalConfig {
             audience: default_gateway_principal_audience(),
             key_id: default_gateway_principal_key_id(),
             signing_key_env: default_gateway_principal_signing_key_env(),
+            signing_key_secret: None,
         }
     }
 }
@@ -298,6 +371,13 @@ impl GatewayPrincipalConfig {
             if value.trim().is_empty() {
                 return Err(format!("gateway_principal.{field} must not be blank"));
             }
+        }
+        if self
+            .signing_key_secret
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        {
+            return Err("gateway_principal.signing_key_secret must not be blank".to_string());
         }
         Ok(())
     }
@@ -317,6 +397,38 @@ fn default_gateway_principal_key_id() -> String {
 
 fn default_gateway_principal_signing_key_env() -> String {
     "AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE".to_string()
+}
+
+/// Group-session WebSocket JWT signing-key lookup configuration.
+///
+/// The signing key material is resolved through the configured SecretAccessPort
+/// using `signing_key_secret` as the logical secret name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GroupSessionWsConfig {
+    #[serde(default = "default_group_session_ws_signing_key_secret")]
+    pub signing_key_secret: String,
+}
+
+impl Default for GroupSessionWsConfig {
+    fn default() -> Self {
+        Self {
+            signing_key_secret: default_group_session_ws_signing_key_secret(),
+        }
+    }
+}
+
+impl GroupSessionWsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.signing_key_secret.trim().is_empty() {
+            return Err("group_session_ws.signing_key_secret must not be blank".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn default_group_session_ws_signing_key_secret() -> String {
+    "bcn-group-session-ws-jwt".to_string()
 }
 
 /// BCS configuration.
@@ -371,6 +483,10 @@ pub struct BcsConfig {
     #[serde(default)]
     pub gateway_principal: GatewayPrincipalConfig,
 
+    /// Group-session WebSocket JWT signing-key lookup configuration.
+    #[serde(default)]
+    pub group_session_ws: GroupSessionWsConfig,
+
     /// Leader election configuration for distributed deployment.
     /// When enabled, uses a configured election provider to elect one leader per environment.
     #[serde(default)]
@@ -394,6 +510,10 @@ pub struct BcsConfig {
     /// Channel(IM bridge) configuration.
     #[serde(default)]
     pub channels: ChannelConfigSection,
+
+    /// HTTP provider webhook adapter configuration.
+    #[serde(default)]
+    pub provider_http: ProviderHttpConfig,
 
     /// Structured collaboration authoring-template configuration.
     #[serde(default)]
@@ -808,11 +928,13 @@ impl Default for BcsConfig {
             dingtalk_accounts: Vec::new(),
             auth_token: None,
             gateway_principal: GatewayPrincipalConfig::default(),
+            group_session_ws: GroupSessionWsConfig::default(),
             leader_election: None,
             cache: CacheConfig::default(),
             database: DatabaseConfig::default(),
             secret: SecretConfig::default(),
             channels: ChannelConfigSection::default(),
+            provider_http: ProviderHttpConfig::default(),
             collaboration: CollaborationConfig::default(),
             max_groups_as_driver: default_max_groups_as_driver(),
             max_group_members: default_max_group_members(),
@@ -1234,7 +1356,15 @@ fn validate_loaded_config(config: &BcsConfig) -> Result<(), Box<dyn std::error::
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
+    config.group_session_ws.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
     config.telemetry.validate().map_err(|e| {
+        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+            as Box<dyn std::error::Error>
+    })?;
+    config.provider_http.validate().map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn std::error::Error>
     })?;
@@ -1286,6 +1416,92 @@ mod tests {
         assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
         assert!(config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "bcn-group-session-ws-jwt"
+        );
+    }
+
+    #[test]
+    fn group_session_ws_signing_key_secret_can_be_configured() {
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = "other_manual_teamclawgw_principal_signing_key"
+        "#;
+
+        let config: BcsConfig = toml::from_str(toml)
+            .expect("parse configurable group-session WebSocket secret name");
+
+        assert_eq!(
+            config.group_session_ws.signing_key_secret,
+            "other_manual_teamclawgw_principal_signing_key"
+        );
+    }
+
+    #[test]
+    fn blank_group_session_ws_signing_key_secret_is_rejected() {
+        let tmp = tempfile::TempDir::new().expect("temp config dir");
+        std::fs::write(
+            tmp.path().join("bcs-config.toml"),
+            r#"
+            bots_base_dir = "/bots"
+
+            [group_session_ws]
+            signing_key_secret = " "
+            "#,
+        )
+        .expect("write config");
+
+        let err = BcsConfig::try_load_with_env(Some(&tmp.path().to_path_buf()))
+            .expect_err("blank group-session WebSocket secret name rejected");
+
+        assert!(err.contains("group_session_ws.signing_key_secret must not be blank"));
+    }
+
+    #[test]
+    fn provider_http_bypass_headers_parse_and_default() {
+        let default_config = BcsConfig::default();
+        assert!(default_config.provider_http.bypass_headers.is_empty());
+
+        let toml = r#"
+            bots_base_dir = "/bots"
+
+            [provider_http]
+            bypass_headers = ["X-Sandbox-Bypass"]
+        "#;
+        let config: BcsConfig = toml::from_str(toml).expect("parse [provider_http]");
+        assert_eq!(
+            config.provider_http.bypass_headers,
+            vec!["X-Sandbox-Bypass".to_string()]
+        );
+        config.provider_http.validate().expect("valid bypass header");
+    }
+
+    #[test]
+    fn provider_http_bypass_headers_reject_invalid_and_reserved_names() {
+        for name in [
+            "",
+            "bad header",
+            "Authorization",
+            "Cookie",
+            "Host",
+            "Content-Length",
+            "Content-Type",
+            "X-BCS-Bot-Token",
+            "X-BCS-Service-Key",
+            "bcn-message-id",
+            "x-bcn-protocol-version",
+        ] {
+            let config = ProviderHttpConfig {
+                bypass_headers: vec![name.to_string()],
+            };
+            assert!(
+                config.validate().is_err(),
+                "header name {name:?} should be rejected"
+            );
+        }
     }
 
     #[test]

@@ -8,6 +8,7 @@ plugins or core.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 from gateway.community.config import Config
@@ -23,34 +24,43 @@ _DEFAULT_REFRESH_SECONDS = 300.0
 
 def build_forwarding(
     forwarder: Forwarder,
-    catalog: SchemaCatalog,
+    schema_catalogs: Mapping[str, SchemaCatalog],
     ws_forwarder: WebSocketForwarder,
 ) -> Forwarding:
-    """Build the forwarding subsystem (called once from ``create_app``).
-
-    All parameters are required — the caller must resolve every dependency
-    through the DI container. Schema sources are loaded from configs and
-    injected into the catalog if it supports ``set_sources``.
-    """
     from gateway.community.config import ConfigLoader
+
+    file_cat = schema_catalogs["file"]
+    http_cat = schema_catalogs["http"]
 
     config = ConfigLoader.load()
     domain_map = _load_domain_map(config)
+
+    file_sources: dict[str, Path] = {}
+    http_sources: dict[str, str] = {}
     refresh_seconds = _DEFAULT_REFRESH_SECONDS
-    sources: dict[str, str | Path] = {}
+
     if config.config_dir is not None:
         for name, domain in domain_map.domains.items():
-            if domain.schema.source == "file" and domain.schema.location:
-                sources[name] = config.config_dir / domain.schema.location
+            if not domain.schema.location:
+                continue
+            if domain.schema.source == "file":
+                file_sources[name] = config.config_dir / domain.schema.location
                 refresh_seconds = float(domain.schema.refresh_seconds)
-    if sources and hasattr(catalog, "set_sources"):
-        catalog.set_sources(sources)
-        if hasattr(catalog, "refresh_all"):
-            catalog.refresh_all()
+            elif domain.schema.source == "http":
+                http_sources[name] = domain.schema.location
+                refresh_seconds = float(domain.schema.refresh_seconds)
+
+    if file_sources:
+        file_cat.set_sources(file_sources)
+        file_cat.refresh_all()
+    if http_sources:
+        http_cat.set_sources(http_sources)
+        http_cat.refresh_all()
+
     return Forwarding(
         domain_map=domain_map,
         forwarder=forwarder,
-        catalog=catalog,
+        schema_catalogs=schema_catalogs,
         ws_forwarder=ws_forwarder,
         refresh_seconds=refresh_seconds,
     )

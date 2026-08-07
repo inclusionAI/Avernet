@@ -6,6 +6,12 @@ import pytest
 from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
 
 
+def _edit_guard():
+    guard = MagicMock()
+    guard.acquire_for_edit_wait = AsyncMock(return_value=object())
+    return guard
+
+
 # ── fixtures ────────────────────────────────────────────────────────
 
 
@@ -1224,6 +1230,7 @@ class TestSwitchToSkillSetOwnerIdResolution:
             device_plugin=MagicMock(),
             path_factory=MagicMock(),
             device_fs_dispatcher=MagicMock(),
+            edit_guard=_edit_guard(),
             skills_dir=MagicMock(),
             bot_id="bot-1",
             user_id="user1",
@@ -1380,6 +1387,7 @@ class TestSyncSkillSetToActiveOwnerIdResolution:
             device_plugin=MagicMock(),
             path_factory=MagicMock(),
             device_fs_dispatcher=MagicMock(),
+            edit_guard=_edit_guard(),
             skills_dir=MagicMock(),
             bot_id="bot-1",
             user_id="user1",

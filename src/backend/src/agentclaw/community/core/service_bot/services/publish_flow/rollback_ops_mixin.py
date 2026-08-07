@@ -9,6 +9,9 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
 )
 from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
@@ -113,6 +116,7 @@ class RollbackOpsMixin:
         version = f"{target_record.version}"
         delivery = self._ext_state.compose_stored(target_ext, PublishStage.ONLINE)
         skills_env = service_skills_env_from_ext(target_ext, bot)
+        image_pin = resolve_publish_image_pin(target_record)
 
         # (#197) Crash-safe issuance via the operation runner (existing bot →
         # adopt-by-query on resume, never a second rollback deploy).
@@ -135,6 +139,7 @@ class RollbackOpsMixin:
                 version=version,
                 delivery=delivery,
                 extra_envs=skills_env,
+                docker_image=image_pin.docker_image,
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)
@@ -333,4 +338,3 @@ class RollbackOpsMixin:
                 f"[PublishFlowService._destroy_bot_by_stage] "
                 f"Failed to destroy bot: binding_id={binding_id}, stage={stage.value}, error={e}"
             )
-

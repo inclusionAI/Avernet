@@ -179,7 +179,7 @@ async fn bot_joined_produces_context_injection_and_notification() {
         actor: new_bot,
     };
 
-    let messages = producer.produce(&event, &group, &registry, &group.participants).await;
+    let (messages, user_message) = producer.produce(&event, &group, &registry, &group.participants).await;
 
     assert_eq!(
         messages.len(),
@@ -227,4 +227,63 @@ async fn bot_joined_produces_context_injection_and_notification() {
     assert!(notification.recipients.contains(&"driver-id".to_string()));
     assert!(notification.recipients.contains(&"consultant-id".to_string()));
     assert!(!notification.recipients.contains(&"new-bot-id".to_string()));
+
+    // Persistence policy: the personalized injection is owned by the new bot;
+    // the identical-for-all notification is one public record (owner = None).
+    assert_eq!(injection.persist, bcs_domain::PersistMode::PerRecipient);
+    assert_eq!(notification.persist, bcs_domain::PersistMode::Public);
+
+    // user_message is the OTHER-bots notification text (NOT the new-bot injection).
+    assert_eq!(
+        user_message.as_deref(),
+        Some("NewBot(new-bot-id) 已加入协作群 - 能力集: {name: \"coding\"}")
+    );
+    assert!(
+        !user_message.as_deref().unwrap().contains("你加入了 BCS 协作群"),
+        "user_message must not leak the new-bot context injection"
+    );
+}
+
+#[tokio::test]
+async fn bot_joined_emits_user_message_even_when_only_new_bot_present() {
+    let driver = Participant::bot("driver-id", ParticipantRole::Driver);
+    let new_bot = Participant::bot("new-bot-id", ParticipantRole::Consultant);
+    let group = Group::new("group-1", "driver-id", vec![driver.clone(), new_bot.clone()]);
+
+    let mut registry = MockRegistry::default();
+    registry.bots.insert(
+        "new-bot-id".to_string(),
+        RegisteredBot {
+            bot_uuid: "new-bot-id".to_string(),
+            capabilities: BotCapabilities {
+                name: Some("NewBot".to_string()),
+                skills: vec![Skill::new("coding")],
+                ..Default::default()
+            },
+            dynamic_status: BotDynamicStatus::default(),
+            env: None,
+            created_by: None,
+            actor_kind: ActorKind::Bot,
+            status: ActorStatus::default(),
+        },
+    );
+
+    let producer = BotJoinedMessageProducer::new(Arc::new(bcs_test_support::NoopGroupMessageHistoryService));
+    let event = SystemMessageEvent::BotJoined {
+        group_id: "group-1".to_string(),
+        actor: new_bot.clone(),
+    };
+
+    let (messages, user_message) = producer.produce(&event, &group, &registry, &[driver, new_bot]).await;
+
+    // only driver + new bot: other-recipients includes driver → notification has 1 recipient.
+    let notification = messages
+        .iter()
+        .find(|m| m.recipients != vec!["new-bot-id".to_string()])
+        .expect("notification message");
+    assert_eq!(notification.recipients, vec!["driver-id".to_string()]);
+    assert_eq!(
+        user_message.as_deref(),
+        Some("NewBot(new-bot-id) 已加入协作群 - 能力集: {name: \"coding\"}")
+    );
 }

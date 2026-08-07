@@ -95,7 +95,7 @@ def _gateway_to(url: str) -> FastAPI:
     app.state.principal_signer = BarePrincipalSigner(
         PrincipalSignerConfig(signing_key=DEVELOPMENT_SIGNING_KEY)
     )
-    for route in relay_routes("/openapi/v1", "collaboration"):
+    for route in relay_routes("/openapi/v1/collaboration"):
         app.add_api_websocket_route(route, forward_websocket)
     app.add_api_route("/{full_path:path}", forward_request, methods=_ALL_METHODS)
     return app

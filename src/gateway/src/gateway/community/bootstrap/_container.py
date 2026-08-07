@@ -148,17 +148,25 @@ def initialize_services(container: containers.DeclarativeContainer) -> None:
         providers.Singleton(
             build_forwarding,
             forwarder=plugins.providers["forwarder"],
-            catalog=plugins.providers["schema_catalog"],
-            # Constructed here rather than selected from the plugin container:
-            # the outbound socket transport has one implementation and no
-            # edition-specific flavor, so a selector would be a config knob with
-            # a single legal value. Still injected rather than built inside
-            # ``build_forwarding`` so the subsystem keeps one composition root.
+            schema_catalogs=plugins.providers["schema_catalogs"],
             ws_forwarder=providers.Singleton(WebsocketsForwarder),
         )
     )
 
     logger.info("All components initialised successfully")
+
+
+def _inject_enterprise_plugins(container: ApplicationContainer) -> None:
+    try:
+        from gateway.community.plugin_registry import (
+            has_enterprise_plugins,
+            inject_into_plugin_container,
+        )
+
+        if has_enterprise_plugins():
+            inject_into_plugin_container(container)
+    except ImportError:
+        pass
 
 
 def shutdown_services(container: containers.DeclarativeContainer) -> None:

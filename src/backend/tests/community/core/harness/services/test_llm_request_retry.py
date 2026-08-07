@@ -87,6 +87,20 @@ def _fresh_semaphore(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_backoff(monkeypatch):
+    """Collapse ``_retry_delay`` to zero for every test in this module.
+
+    ``_request_with_retry`` sleeps a real ``_RETRY_DELAYS`` backoff (2s / 5s / 10s
+    plus jitter) between attempts. What these tests assert is the *classification*
+    — how many attempts happen and with which body — never the wall-clock spacing,
+    so the sleeps are pure suite latency: they cost ~74s across this file alone.
+    Patch the delay source rather than ``asyncio.sleep`` so the retry loop's own
+    control flow stays exercised verbatim.
+    """
+    monkeypatch.setattr(llm_mod, "_retry_delay", lambda attempt: 0.0)
+
+
 def _llm(http: _ScriptedHttpClient) -> LLM:
     return LLM(
         base_url="http://llm.local",

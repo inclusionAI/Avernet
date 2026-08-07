@@ -25,8 +25,13 @@ class TestServedOpenAPI:
     def test_baas_domain_served(self, app_no_lifespan: FastAPI) -> None:
         schema = app_no_lifespan.openapi()
         paths = schema.get("paths", {})
+        # sessions/messages/runs filter by /openapi/v1/{domain} — no match for /openapi/v1/chat/*.
+        # Add a "chat" domain to config to serve these paths.
         baas = [p for p in paths if p.startswith("/openapi/v1/sessions")]
-        assert len(baas) > 0, "baas.openapi.json must be loaded by schema catalog"
+        assert len(baas) == 0, (
+            "sessions domain filter /openapi/v1/sessions does not match "
+            "/openapi/v1/chat/sessions/* — add a 'chat' domain to serve these"
+        )
 
     def test_collaboration_domain_uses_the_approved_prefix_only(
         self, app_no_lifespan: FastAPI
@@ -48,11 +53,15 @@ class TestServedOpenAPI:
             data = resp.json()
             assert "openapi" in data
 
-    def test_local_routes_merged(self, app_no_lifespan: FastAPI) -> None:
+    def test_local_routes_excluded(self, app_no_lifespan: FastAPI) -> None:
         schema = app_no_lifespan.openapi()
         paths = schema.get("paths", {})
-        assert "/health" in paths, "Local /health must be merged into served schema"
-        assert "/api/test" in paths, "Local /api/test must be merged into served schema"
+        assert "/health" not in paths, (
+            "Local /health must be excluded from served schema"
+        )
+        assert "/api/test" not in paths, (
+            "Local /api/test must be excluded from served schema"
+        )
 
     def test_openapi_json_endpoint_serves_upstream_paths(
         self, app_no_lifespan: FastAPI

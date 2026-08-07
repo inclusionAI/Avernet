@@ -27,8 +27,8 @@ use tracing::{debug, info, warn};
 use crate::Result;
 use crate::auth_wiring::AuthPluginFactory;
 use crate::config::{
-    BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, LlmConfig,
-    LlmProviderType,
+    BcsConfig, CollaborationTemplateStorageKind, GatewayPrincipalConfig, GroupSessionWsConfig,
+    LlmConfig, LlmProviderType,
 };
 use crate::lifecycle::LifecycleOrchestrator;
 use crate::plugins::{
@@ -461,6 +461,7 @@ impl StateMachineResultPublisherPort for MessageFlowStateMachineResultPublisher 
                 idempotency_key: Some(idempotency_key),
                 source_im_message_id: None,
                 sender_conn_id: None,
+                provider_bypass_headers: Vec::new(),
             })
             .await?;
         Ok(())
@@ -1242,13 +1243,35 @@ fn build_gateway_principal_verifier_from_process(
     build_gateway_principal_verifier(config, material.as_deref())
 }
 
-const GROUP_SESSION_WS_SECRET_NAME: &str = "bcn-group-session-ws-jwt";
+async fn build_gateway_principal_verifier_from_secret_access(
+    config: &GatewayPrincipalConfig,
+    secret_access: Arc<dyn SecretAccessPort>,
+) -> crate::Result<Arc<dyn PrincipalVerifier>> {
+    config.validate().map_err(crate::BcsError::InvalidConfig)?;
+    let secret_name = config
+        .signing_key_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    if let Some(secret_name) = secret_name {
+        let record = secret_access.get_secret(secret_name).await.map_err(|_| {
+            crate::BcsError::InvalidConfig(format!(
+                "Gateway Principal signing key secret '{secret_name}' is required"
+            ))
+        })?;
+        return build_gateway_principal_verifier(config, Some(record.value.as_str()));
+    }
+
+    build_gateway_principal_verifier_from_process(config)
+}
+
 const GROUP_SESSION_WS_TEST_SIGNING_KEY: &str =
     "test-only-group-session-key-at-least-32-bytes";
 
-fn group_session_test_secret_access() -> Arc<dyn SecretAccessPort> {
+fn group_session_test_secret_access(config: &GroupSessionWsConfig) -> Arc<dyn SecretAccessPort> {
     Arc::new(InMemorySecretAccess::with_entries([(
-        GROUP_SESSION_WS_SECRET_NAME,
+        config.signing_key_secret.trim().to_string(),
         String::new(),
         GROUP_SESSION_WS_TEST_SIGNING_KEY.to_string(),
     )]))
@@ -1268,29 +1291,32 @@ fn build_secret_access_blocking(config: &BcsConfig) -> crate::Result<Arc<dyn Sec
 }
 
 async fn build_group_session_token_port(
+    config: &GroupSessionWsConfig,
     secret_access: Arc<dyn SecretAccessPort>,
 ) -> crate::Result<Arc<dyn GroupSessionTokenPort>> {
+    let secret_name = config.signing_key_secret.trim();
     let secret = secret_access
-        .get_secret(GROUP_SESSION_WS_SECRET_NAME)
+        .get_secret(secret_name)
         .await
         .map_err(|_| {
-            crate::BcsError::InvalidConfig(
-                "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required".to_string(),
-            )
+            crate::BcsError::InvalidConfig(format!(
+                "group_session_ws.signing_key_secret '{secret_name}' is required"
+            ))
         })?;
     let tokens = GroupSessionJwtService::new(&secret.value).map_err(|_| {
-        crate::BcsError::InvalidConfig(
-            "BCS_SECRET_BCN_GROUP_SESSION_WS_JWT must be non-empty".to_string(),
-        )
+        crate::BcsError::InvalidConfig(format!(
+            "group_session_ws.signing_key_secret '{secret_name}' must resolve to non-empty material"
+        ))
     })?;
     Ok(Arc::new(tokens))
 }
 
 async fn build_group_session_connection_service(
     sessions: Arc<dyn bcs_service_api::application::v1::SessionService>,
+    config: &GroupSessionWsConfig,
     secret_access: Arc<dyn SecretAccessPort>,
 ) -> crate::Result<Arc<dyn GroupSessionConnectionService>> {
-    let tokens = build_group_session_token_port(secret_access).await?;
+    let tokens = build_group_session_token_port(config, secret_access).await?;
     Ok(Arc::new(GroupSessionConnectionServiceImpl::new(
         sessions, tokens,
     )))
@@ -1453,6 +1479,28 @@ mod gateway_principal_tests {
         );
     }
 
+    #[tokio::test]
+    async fn gateway_principal_signing_key_can_come_from_secret_access() {
+        let mut config = trust_config();
+        config.signing_key_secret =
+            Some("other_manual_teamclawgw_principal_signing_key".to_string());
+        let access: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
+            InMemorySecretAccess::with_entries([(
+                "other_manual_teamclawgw_principal_signing_key",
+                "teamclawgw".to_string(),
+                "mist-test-signing-key".to_string(),
+            )]),
+        );
+
+        let result = build_gateway_principal_verifier_from_secret_access(&config, access).await;
+
+        if let Err(error) = result {
+            let message = error.to_string();
+            assert!(!message.contains("mist-test-signing-key"));
+            panic!("Mist-backed Gateway Principal signing key must be accepted: {message}");
+        }
+    }
+
     #[test]
     fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
         for field in ["issuer", "audience", "key_id", "signing_key_env"] {
@@ -1475,20 +1523,26 @@ mod gateway_principal_tests {
     async fn group_session_websocket_signing_key_is_required_and_non_empty() {
         let missing: Arc<dyn bcs_service_api::port::SecretAccessPort> =
             Arc::new(InMemorySecretAccess::new());
-        let missing_error = match build_group_session_token_port(missing).await {
+        let config = GroupSessionWsConfig::default();
+        let missing_error = match build_group_session_token_port(&config, missing).await {
             Ok(_) => panic!("missing group-session WebSocket key must fail"),
             Err(error) => error,
         };
         assert!(matches!(missing_error, crate::BcsError::InvalidConfig(_)));
+        assert!(
+            missing_error
+                .to_string()
+                .contains("group_session_ws.signing_key_secret 'bcn-group-session-ws-jwt' is required")
+        );
 
         let empty: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
             InMemorySecretAccess::with_entries([(
-                GROUP_SESSION_WS_SECRET_NAME,
+                config.signing_key_secret.clone(),
                 String::new(),
                 "   ".to_string(),
             )]),
         );
-        let empty_error = match build_group_session_token_port(empty).await {
+        let empty_error = match build_group_session_token_port(&config, empty).await {
             Ok(_) => panic!("empty group-session WebSocket key must fail"),
             Err(error) => error,
         };
@@ -1499,15 +1553,18 @@ mod gateway_principal_tests {
     #[tokio::test]
     async fn explicit_group_session_websocket_signing_key_is_accepted() {
         let secret_material = "test-only-group-session-key-at-least-32-bytes";
+        let config = GroupSessionWsConfig {
+            signing_key_secret: "other_manual_teamclawgw_principal_signing_key".to_string(),
+        };
         let access: Arc<dyn bcs_service_api::port::SecretAccessPort> = Arc::new(
             InMemorySecretAccess::with_entries([(
-                GROUP_SESSION_WS_SECRET_NAME,
+                config.signing_key_secret.clone(),
                 String::new(),
                 secret_material.to_string(),
             )]),
         );
 
-        let result = build_group_session_token_port(access).await;
+        let result = build_group_session_token_port(&config, access).await;
 
         if let Err(error) = result {
             let message = error.to_string();
@@ -1626,6 +1683,13 @@ impl Default for BcsServerState {
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service_blocking(
+            &config,
+            crate::env::resolve_env(),
+            None,
+            None,
+            session_repo.clone(),
+        );
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -1639,6 +1703,8 @@ impl Default for BcsServerState {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -1861,13 +1927,7 @@ impl Default for BcsServerState {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service_blocking(
-                &config,
-                crate::env::resolve_env(),
-                None,
-                None,
-                session_repo.clone(),
-            ))
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 
@@ -2631,6 +2691,8 @@ fn create_group_message_history_service(
     new_participant_visible_limit: u64,
     default_page_limit: u32,
     max_page_limit: u32,
+    session_file: Arc<dyn bcs_service_api::application::session_files::SessionFileService>,
+    history_attachment_ttl: u64,
 ) -> Arc<dyn GroupMessageHistoryService> {
     let websocket_request: Arc<dyn GroupHistoryBotRequestPort> =
         Arc::new(BootstrapGroupHistoryBotRequestPort { bot_connections });
@@ -2649,11 +2711,13 @@ fn create_group_message_history_service(
         session_repo,
         group,
         registry,
+        session_file,
         cutoff_timestamp,
         manager_worker_cutoff_timestamp,
         new_participant_visible_limit,
         default_page_limit,
         max_page_limit,
+        history_attachment_ttl,
     ))
 }
 
@@ -2770,9 +2834,19 @@ impl BcsServer {
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let group_session_secret_access = build_secret_access_blocking(&config)
             .expect("Secret provider configuration must be valid");
-        let gateway_principal_verifier = build_gateway_principal_verifier_from_process(
-            &config.gateway_principal,
-        )
+        let gateway_principal_verifier = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    tokio::runtime::Runtime::new()
+                        .expect("temp runtime for Gateway Principal verifier build")
+                        .block_on(build_gateway_principal_verifier_from_secret_access(
+                            &config.gateway_principal,
+                            group_session_secret_access.clone(),
+                        ))
+                })
+                .join()
+                .expect("Gateway Principal verifier build thread panicked")
+        })
         .expect("Gateway Principal verifier configuration must be valid");
         Self::new_with_outbound_url_guards(
             config,
@@ -2785,12 +2859,13 @@ impl BcsServer {
     }
 
     pub fn new_allowing_private_outbound_for_tests(config: BcsConfig) -> Self {
+        let group_session_secret_access = group_session_test_secret_access(&config.group_session_ws);
         Self::new_with_outbound_url_guards(
             config,
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
             OutboundUrlGuard::allowing_private_networks_for_tests(),
-            group_session_test_secret_access(),
+            group_session_secret_access,
             gateway_principal_verifier_for_tests(),
         )
     }
@@ -2909,6 +2984,13 @@ impl BcsServer {
         );
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service_blocking(
+            &config,
+            crate::env::resolve_env(),
+            None,
+            None,
+            session_repo.clone(),
+        );
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -2922,6 +3004,8 @@ impl BcsServer {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -3124,13 +3208,7 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service_blocking(
-                &config,
-                crate::env::resolve_env(),
-                None,
-                None,
-                session_repo.clone(),
-            ))
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 
@@ -3212,9 +3290,18 @@ impl BcsServer {
         use bcs_service_api::BotRegistryCoreService;
 
         let invite_token_secret = resolve_invite_token_secret(&config);
-        let gateway_principal_verifier =
-            build_gateway_principal_verifier_from_process(&config.gateway_principal)?;
         let group_session_secret_access = crate::http_adapter::build_secret_access(&config).await?;
+        let gateway_principal_verifier = build_gateway_principal_verifier_from_secret_access(
+            &config.gateway_principal,
+            group_session_secret_access.clone(),
+        )
+        .await?;
+        info!(
+            issuer = %config.gateway_principal.issuer,
+            audience = %config.gateway_principal.audience,
+            key_id = %config.gateway_principal.key_id,
+            "Gateway Principal verifier initialized"
+        );
         let outbound_url_guard = outbound_url_guard_from_config(&config);
         let admin_invocation_runs = Arc::new(AdminInvocationStore::default());
         let user_directory = match extensions.user_directory_plugin.clone() {
@@ -3474,6 +3561,14 @@ impl BcsServer {
         };
         let bot_run_context: Arc<dyn BotRunContextPort> =
             Arc::new(bcs_message_flow::MemoryBotRunContextStore::new());
+        let session_file_service = build_session_files_service(
+            &config,
+            crate::env::resolve_env(),
+            infrastructure_plugins.db(),
+            Some(db_flavor),
+            session_repo.clone(),
+        )
+        .await;
         let group_message_history = create_group_message_history_service(
             sessions.clone(),
             bot_registry.clone(),
@@ -3487,6 +3582,8 @@ impl BcsServer {
             config.message_history.new_participant_visible_limit,
             config.message_history.default_page_limit,
             config.message_history.max_page_limit,
+            session_file_service.clone(),
+            config.session_files.share.history_attachment_ttl_seconds,
         );
         let a2a_run_store = Arc::new(bcs_message_flow::a2a_chat::ChatRunStore::with_capacity(
             config.async_chat_run_max_entries,
@@ -3709,13 +3806,7 @@ impl BcsServer {
             .session_management(session_management.clone())
             .channel(channel_service.clone())
             .secret(default_bootstrap_secret_service())
-            .session_files(build_session_files_service(
-                &config,
-                crate::env::resolve_env(),
-                infrastructure_plugins.db(),
-                Some(db_flavor),
-                session_repo.clone(),
-            ).await)
+            .session_files(session_file_service)
             .build()
             .expect("services must be fully wired");
 
@@ -3884,6 +3975,7 @@ impl BcsServer {
         );
         let group_session_connections = build_group_session_connection_service(
             self.state.openapi_v1.session_service.clone(),
+            &self.config.group_session_ws,
             self.state.group_session_secret_access.clone(),
         )
         .await?;
@@ -4349,6 +4441,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn new_allowing_private_outbound_for_tests_seeds_configured_group_session_secret() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let mut config = BcsConfig::default();
+        config.session_files.backend.insert(
+            "data_dir".to_string(),
+            toml::Value::String(tmp.path().to_string_lossy().into_owned()),
+        );
+        config.group_session_ws.signing_key_secret =
+            "custom-group-session-ws-test-secret".to_string();
+
+        let server = BcsServer::new_allowing_private_outbound_for_tests(config);
+
+        let _ = server
+            .build_router()
+            .await
+            .expect("test constructor should seed group-session signing material under configured name");
+    }
+
+    #[tokio::test]
     #[serial_test::serial]
     async fn public_constructor_does_not_install_test_group_session_signing_key() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
@@ -4379,7 +4490,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("BCS_SECRET_BCN_GROUP_SESSION_WS_JWT is required")
+                .contains("group_session_ws.signing_key_secret 'bcn-group-session-ws-jwt' is required")
         );
     }
 

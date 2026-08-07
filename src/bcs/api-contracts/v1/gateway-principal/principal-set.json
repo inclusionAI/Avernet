@@ -5,13 +5,13 @@
   "principals": [
     {
       "type": "user",
-      "tenant": "tenant-a",
+      "tenant": null,
       "subject": {
         "id": "user-1",
         "username": "alice",
         "display_name": "Alice",
         "full_name": null,
-        "tenant_id": "tenant-a"
+        "tenant_id": null
       }
     },
     {

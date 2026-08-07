@@ -1,6 +1,9 @@
-"""Identity group — ``/openapi/v1/bots/identity`` bot identity files.
+"""Identity group — ``/openapi/v1/bots/identity/{bot_id}`` bot identity files.
 
 Read/write a bot's identity markdown files (RULES, SOUL, …), addressed by bot.
+``{bot_id}`` is the first segment after the component, as everywhere on this
+surface — there is no ``/bot/`` segment before it, because the base already
+says ``bots`` and saying it twice told a reader nothing the base did not.
 Every route requires an authenticated user principal. ``entity_type`` is
 hardcoded to ``staff`` for the personal-bot surface — ``proj``/``team``
 identity files (both valid entity types) are intentionally out of scope for
@@ -44,7 +47,7 @@ router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
-@router.get("/bot/{bot_id}", response_model=Envelope[IdentityFileList])
+@router.get("/{bot_id}", response_model=Envelope[IdentityFileList])
 @envelope_errors
 async def list_bot_identity_files(
     bot_id: str,
@@ -78,7 +81,7 @@ async def list_bot_identity_files(
 
 
 @router.get(
-    "/bot/{bot_id}/{file_type}",
+    "/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFile],
 )
 @envelope_errors
@@ -123,7 +126,7 @@ async def get_bot_identity_file(
 
 
 @router.put(
-    "/bot/{bot_id}/{file_type}",
+    "/{bot_id}/{file_type}",
     response_model=Envelope[IdentityFileRef],
 )
 @envelope_errors

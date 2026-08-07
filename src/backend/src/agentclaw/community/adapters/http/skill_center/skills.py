@@ -11,7 +11,7 @@ import time
 import zipfile
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from starlette.concurrency import run_in_threadpool
 
 from agentclaw.community.adapters.http.dependencies import (
@@ -79,9 +79,16 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     VersionListResponse,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.bot_management.repository.protocol import (
+    BotLookupAmbiguousError,
+    BotRepository,
+)
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
+from agentclaw.community.core.skill_center.errors import (
+    SkillDeleteConsistencyError,
+    SkillReferencedBySkillSetError,
+)
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
@@ -367,6 +374,12 @@ async def upload_skill(
     bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
     if not bot:
         return UploadSkillResponse(success=False, message="Bot not found.")
+    bot_owner_id = str(bot.get("owner_id") or "")
+    if not bot_owner_id:
+        return UploadSkillResponse(
+            success=False,
+            message="Bot ownership metadata is incomplete.",
+        )
 
     # 状态闸门:桌面 bot 的 DB 状态(ac_bots.status)有延迟 —— BaaS 上 VM 已
     # ACTIVE 但 ac_bots 还停旧值会误拒上传。桌面 bot 先用 BaaS 实时状态覆盖;
@@ -452,11 +465,10 @@ async def upload_skill(
 
         logger.info(f"[skills.upload_skill] Calling service.upload_skill with {len(uploaded_files)} files")
 
-        # ``user_id`` identifies the Bot owner for collaborator authorization and
-        # device access. Skill metadata belongs to the authenticated uploader;
-        # using the owner for both made collaborator-uploaded local Skills appear
-        # to have been authored by the Bot owner.
-        effective_user_id = user_id or ctx.user_id
+        # ``ctx.user_id`` is the authenticated actor used by the collaborator
+        # interceptor and audit trail.  Local Skill metadata follows the
+        # historical product contract and belongs to the Bot owner, resolved
+        # from the persisted Bot rather than a caller-controlled parameter.
 
         # Call the service method (async)
         edit_lease = edit_guard.acquire_for_edit(
@@ -469,8 +481,7 @@ async def upload_skill(
         try:
             skill = await service.upload_skill(
                 uploaded_files,
-                user_id=effective_user_id,
-                author_id=ctx.user_id,
+                user_id=bot_owner_id,
                 bolt_id=effective_bot_id,
             )
         finally:
@@ -1234,7 +1245,8 @@ async def get_skill_readme(
     # A Skill may be read while the caller is operating another Bot.  Its DB
     # ``bolt_id`` is the authoritative target; derive owner, entity type and
     # engine from that Bot instead of trusting the caller's route parameters.
-    # ``skill.user_id`` is only the Skill author and can be a collaborator.
+    # ``skill.user_id`` is metadata ownership, but historical rows may contain
+    # a collaborator ID; device ownership must still come from the Bot row.
     read_bot_id = (skill or {}).get("bolt_id") or effective_bot_id
     target_bot = None
     # ``default`` is shared by many owners.  Resolve an explicitly supplied
@@ -1945,33 +1957,110 @@ async def update_skill_risk_tags(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+async def _extract_skill_mutation_permission(
+    skill_id: str,
+    ctx: InterceptorContext,
+) -> PermissionParams:
+    """Resolve the persisted Bot identity used for local Skill mutations."""
+    if not skill_id or ctx.injector is None:
+        return PermissionParams()
+    try:
+        service = ctx.injector.get(SkillServiceFactoryProtocol).create()
+        skill = service.get_skill(skill_id)
+    except Exception:
+        return PermissionParams()
+    if not skill:
+        return PermissionParams()
+    return PermissionParams(
+        bot_id=skill.get("bolt_id"),
+        owner_id=skill.get("user_id"),
+    )
+
+
+class _FailClosedSkillMutationPermissionInterceptor(
+    CollaboratorPermissionInterceptor,
+):
+    """Never turn a collaborator permission lookup failure into mutation access."""
+
+    def __init__(self, *args, authorization_state_key: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._authorization_state_key = authorization_state_key
+
+    async def before(
+        self,
+        ctx: InterceptorContext,
+    ) -> InterceptorContext | None:
+        actor_id = ctx.user.staffId if ctx.user else None
+        # Preserve the pre-existing global Skill admin capability; it is not a
+        # Bot-collaborator grant and therefore must not depend on that service.
+        if actor_id and actor_id in skill_admin():
+            ctx.metadata["permission_level"] = "SKILL_ADMIN"
+            return ctx
+
+        result = await super().before(ctx)
+        if result is None:
+            return None
+        actor_id = ctx.metadata.get("_log_user_id")
+        owner_id = ctx.metadata.get("_log_owner_id")
+        if actor_id != owner_id:
+            if not ctx.metadata.get("permission_level"):
+                ctx.response = InterceptedResponse(
+                    success=False,
+                    message="协作者权限服务暂不可用",
+                    error_code=503,
+                )
+                return None
+            if ctx.request is not None:
+                setattr(ctx.request.state, self._authorization_state_key, True)
+            for value in ctx.route_kwargs.values():
+                if isinstance(value, RequestContext):
+                    value.metadata[self._authorization_state_key] = True
+        return result
+
+
 @router.post("/{skill_id}/mcp-dependencies", response_model=SkillDetailResponse)
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
+    params_extractor=_extract_skill_mutation_permission,
+    extractor_params={"skill_id": "$skill_id"},
+    persist_audit_log=True,
+    authorization_state_key="skill_mcp_collaborator_authorized",
+))
 async def update_skill_mcp_dependencies(
     skill_id: str,
     request: UpdateMCPDependenciesRequest,
     user: AuthenticatedUser = Depends(get_current_user),
+    http_request: Request = None,
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
 ) -> SkillDetailResponse:
     """Update skill MCP dependencies by ID.
 
     权限控制：只有技能的创建者或管理员可以修改 MCP 依赖。
     """
-    # 管理员名单校验：非管理员只能修改自己创建的技能
-    if user.staffId not in skill_admin():
-        service = skill_service_factory.create()
+    service = skill_service_factory.create()
+    try:
         existing = service.get_skill(skill_id, user_id=user.staffId)
         if not existing:
             raise HTTPException(status_code=404, detail="Skill not found")
         skill_owner = str(existing.get("user_id", ""))
-        if skill_owner and skill_owner != user.staffId:
-            logger.warning(
-                f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} "
-                f"尝试修改非自己创建的 skill_id={skill_id} (owner={skill_owner}) 的MCP依赖"
+        is_local_skill = str(existing.get("git_path") or "").startswith("local://")
+        collaborator_authorized = bool(
+            http_request
+            and getattr(
+                http_request.state,
+                "skill_mcp_collaborator_authorized",
+                False,
             )
-            raise HTTPException(status_code=403, detail="无权修改此技能的MCP依赖，仅技能创建者或管理员可操作")
-
-    service = skill_service_factory.create()
-    try:
+        )
+        if (
+            user.staffId not in skill_admin()
+            and skill_owner
+            and skill_owner != user.staffId
+            and not (is_local_skill and collaborator_authorized)
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="无权修改此技能的MCP依赖，仅技能创建者、已授权协作者或管理员可操作",
+            )
         # 使用认证用户ID替代请求体中的user_id，防止越权
         if request.user_id and request.user_id != user.staffId:
             logger.warning(f"[update_skill_mcp_dependencies] 权限拒绝: user={user.staffId} 尝试以 user_id={request.user_id} 修改 skill_id={skill_id} 的MCP依赖，已使用认证用户ID")
@@ -2057,10 +2146,11 @@ async def extract_from_skill_id(skill_id: str, ctx) -> PermissionParams:
 
 
 @router.delete("/{skill_id}", response_model=MessageResponse)
-@with_interceptors(CollaboratorPermissionInterceptor(
+@with_interceptors(_FailClosedSkillMutationPermissionInterceptor(
     params_extractor=extract_from_skill_id,
     extractor_params={"skill_id": "$skill_id"},  # 表达式：从路由参数取值
     persist_audit_log=True,  # 记录操作审计日志
+    authorization_state_key="skill_delete_collaborator_authorized",
 ))
 async def delete_skill(
     skill_id: str,
@@ -2068,8 +2158,12 @@ async def delete_skill(
     entity_id: str | None = Query(None, description="Entity ID (pure ID, no prefix needed)"),
     entity_type: str | None = Query(None, description="Entity type (staff/proj/team, default: staff)"),
     bot_id: str | None = Query(None, description="Bot ID"),
-    engine_type: str | None = Query(None, description="Engine type override; defaults to bot's active_engine"),
+    engine_type: str | None = Query(
+        None,
+        description="Legacy compatibility hint; when provided it must match the Bot active_engine",
+    ),
     ctx: RequestContext = Depends(get_request_context),
+    skill_repo: SkillRepository = Injected(SkillRepository),
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
@@ -2084,35 +2178,100 @@ async def delete_skill(
     - 协作者（member 角色）返回 403
     - 管理员可直接删除（Service 层双重保障）
     """
-    # 优先使用传入的 user_id 参数，否则使用认证上下文的 user_id
-    current_user_id = user_id or ctx.user_id
-
-    if entity_id and bot_id:
-        effective_entity_id = entity_id
-        effective_entity_type = entity_type if entity_type else "staff"
-        effective_bot_id = bot_id
-    elif current_user_id:
-        effective_entity_id = current_user_id
-        effective_entity_type = "staff"
-        effective_bot_id = "default"
-    else:
+    # 删除的物理上下文必须以已持久化 Skill 所属 Bot 为准。历史客户端
+    # 不传 bot_id/entity_id，不能因此回退到 default/openclaw 并删错路径。
+    # ``user_id`` is a legacy compatibility hint supplied by the caller and
+    # must never override the authenticated actor.  In particular, shared
+    # market Skills have no owner row, so trusting the query parameter here
+    # would let any authenticated caller impersonate a configured Skill admin.
+    current_user_id = ctx.user_id
+    if not current_user_id:
         raise HTTPException(status_code=401, detail="未认证用户无法删除技能")
+    if not skill_id.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid skill ID")
 
-    owner_id_for_lookup = entity_id if entity_id else (current_user_id or "")
-
-    effective_engine = resolve_engine_for_bot(
-        bot_id=effective_bot_id,
-        owner_id=owner_id_for_lookup,
-        override=engine_type,
-        bot_repo=bot_repo,
+    skill = skill_repo.get_by_id(skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    persisted_git_path = str(skill.get("git_path") or "")
+    is_shared_source = (
+        not skill.get("user_id")
+        and persisted_git_path.startswith(("git://", "center://"))
     )
-    is_desktop = False
+    if is_shared_source:
+        service = skill_service_factory.create()
+        try:
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+            )
+            if not success:
+                raise HTTPException(status_code=404, detail="Skill not found")
+            return MessageResponse(
+                success=True,
+                message="Skill deleted successfully",
+            )
+        except SkillReferencedBySkillSetError as e:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                    "message": "请先从所有技能集中移除该技能，再删除技能",
+                    "skill_set_ids": e.skill_set_ids,
+                },
+            ) from e
+        except ValueError as e:
+            error_msg = str(e)
+            if "无权删除" in error_msg or "Permission denied" in error_msg:
+                raise HTTPException(status_code=403, detail=error_msg) from e
+            raise HTTPException(status_code=400, detail=error_msg) from e
+
+    effective_bot_id = str(skill.get("bolt_id") or "")
+    if not effective_bot_id:
+        raise HTTPException(status_code=409, detail="Skill is missing its Bot identity")
+    if bot_id and bot_id != effective_bot_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Skill 持久化归属的 Bot",
+                "bot_id": effective_bot_id,
+            },
+        )
+
     try:
-        bot = bot_repo.get_by_id_and_owner(effective_bot_id, owner_id_for_lookup)
-        if bot and bot.get("bot_type") == "desktop":
-            is_desktop = True
-    except Exception:
-        bot = None
+        bot = (
+            bot_repo.get_by_id_and_entity(effective_bot_id, entity_id)
+            if entity_id
+            else bot_repo.get_unique_by_id(effective_bot_id)
+        )
+    except BotLookupAmbiguousError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_BOT_CONTEXT_AMBIGUOUS",
+                "message": "历史 Bot ID 不唯一，请提供 entity_id 精确定位",
+                "bot_id": effective_bot_id,
+            },
+        ) from e
+    if not bot:
+        raise HTTPException(status_code=404, detail="Bot not found")
+
+    effective_entity_id = str(
+        bot.get("entity_id") or bot.get("owner_id") or ""
+    )
+    effective_entity_type = str(bot.get("entity_type") or "staff")
+    effective_engine = str(bot.get("active_engine") or DEFAULT_ENGINE_TYPE)
+    if engine_type and engine_type != effective_engine:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_ENGINE_CONTEXT_MISMATCH",
+                "message": "删除技能必须使用 Bot 当前的生效引擎",
+                "active_engine": effective_engine,
+            },
+        )
+    is_desktop = bot.get("bot_type") == "desktop"
 
     # teclaw deletes the skill files from the (draft) container; resolve provider
     # so the device-fs path is the workspace-namespace form.
@@ -2128,12 +2287,11 @@ async def delete_skill(
         local_dir=local_dir,
         local_skill_path_adapter=local_skill_adapter,
         entity_id=effective_entity_id,
+        bot_owner_id=str(bot.get("owner_id") or ""),
         bot_id=effective_bot_id,
         engine_type=effective_engine,
     )
     try:
-        if bot is None:
-            raise HTTPException(status_code=404, detail="Bot not found")
         edit_lease = edit_guard.acquire_for_edit(
             scope=BotSkillLayoutScope(
                 env=str(bot["env"]),
@@ -2142,7 +2300,17 @@ async def delete_skill(
             )
         )
         try:
-            success = await service.delete_skill(skill_id, user_id=current_user_id)
+            # 路由已先通过 CollaboratorPermissionInterceptor；仍把持久化
+            # Bot owner 显式传给 Service 做 scope 双重校验，不能把协作者当成
+            # Skill metadata owner。
+            success = await service.delete_skill(
+                skill_id,
+                user_id=current_user_id,
+                authorized_bot_owner_id=str(bot.get("owner_id") or ""),
+                collaborator_authorization_verified=bool(
+                    ctx.metadata.get("skill_delete_collaborator_authorized")
+                ),
+            )
         finally:
             edit_guard.release(edit_lease)
         if not success:
@@ -2150,6 +2318,17 @@ async def delete_skill(
         return MessageResponse(success=True, message="Skill deleted successfully")
     except SkillsPoolEditPausedError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillDeleteConsistencyError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except SkillReferencedBySkillSetError as e:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "SKILL_REFERENCED_BY_SKILL_SET",
+                "message": "请先从所有技能集中移除该技能，再删除技能",
+                "skill_set_ids": e.skill_set_ids,
+            },
+        ) from e
     except ValueError as e:
         error_msg = str(e)
         # 权限错误返回 403
@@ -2201,8 +2380,8 @@ def _resolve_parameter_bot(
     not the authenticated actor (who may be an ADMIN collaborator).
 
     The requested Bot ID is used only as a lookup key; ownership always comes
-    from the Bot row. ``Skill.user_id`` records the author and may therefore be
-    a collaborator, so it must never participate in device-owner resolution.
+    from the Bot row. Historical ``Skill.user_id`` values may contain a
+    collaborator, so they must never participate in device-owner resolution.
     Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
     no Bot binding and remain usable across Bots.
     """

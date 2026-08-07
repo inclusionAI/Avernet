@@ -79,12 +79,19 @@ structured_output = "json_schema"
 type = "mysql"
 
 # Select a linked secret backend in deployments that do not use environment
-# variables. The session-bound WebSocket key is resolved by its fixed name.
+# variables. Group-session WebSocket JWT signing material is resolved through
+# [group_session_ws].signing_key_secret. The default logical name remains
+# "bcn-group-session-ws-jwt" for backward compatibility.
 [secret]
 provider = "env"
 
 [secret.providers.env]
 prefix = "BCS_SECRET_"
+
+[group_session_ws]
+# Optional. Override when the deployment secret backend uses a different
+# logical secret name for group-session WebSocket JWT signing material.
+signing_key_secret = "bcn-group-session-ws-jwt"
 
 [cache]
 type = "redis"

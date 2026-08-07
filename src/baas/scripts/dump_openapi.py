@@ -1,4 +1,4 @@
-"""Dump the public ``/openapi/v1`` description as the gateway's pinned artifact.
+"""Dump the public ``/openapi/v1/chat`` description as the gateway's pinned artifact.
 
 Run in CI on release: it produces the BaaS *published description* (the public
 surface only), which the gateway consumes to generate its served doc.
@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_PUBLIC_BASE = "/openapi/v1"
+_PUBLIC_BASE = "/openapi/v1/chat"
 
 
 def build_public_openapi() -> dict[str, Any]:

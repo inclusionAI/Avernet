@@ -29,8 +29,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 ## 全局视角（请先读这一节）
 
 **目标：** 实现公共 `/openapi/v1` API，其调用方是**外部注册租户**。它位于
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**
-类别已经实现（PR #494）；其余六个仍然是**带桩（stub）处理器的路由定义**。
+`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**、
+**mcp** 与 **skills** 类别已有实现 handler；其余类别保留各自在下方看板中的 readiness 状态。
 
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
 > `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
@@ -53,14 +53,15 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   每一类数据都做到按租户隔离。**Track A 按设计不实现任何端点** —— 它是底层管道。
 - **Track B —— 公共 API 实现。** 把七个 `/openapi/v1` 类别处理器接到已有的服务上。
   **这才是真正落地端点/API 代码的地方。** 每个类别都依赖于其数据已先经过 Track A 的
-  隔离。**七个里已完成两个：bots（PR #494）、mcp（PR #610）。**
+  隔离。Skills 的 implementation/CI 已完成，但 schema 和 pre-production 发布闸口仍待完成；
+  详见其看板行。
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
-  客户端的 HTTP 包装到 `/openapi/v1/bots/{bot_id}/…` 之下，并用一个净化过的
+  客户端的 HTTP 包装到 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，并用一个净化过的
   socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
-> Track B —— bots 已完成，其余六个仍是桩。
+> Track B —— 每个类别状态以看板为准；实现完成本身不代表类别已经 release-complete。
 >
 > ⚠️ **Track C 没有对应的 Track A 阶段，这是对的。** Track A 与 Track B 是成对的
 > （先隔离一个类别，再接通它的端点）；Track C 不是。它的数据在 Bot 的设备上，
@@ -79,7 +80,7 @@ Track A，所以两者都归同一个人。）
 
 | 成员 | 负责（纵向切片） | Track A 阶段 | Track B 端点组 |
 |---|---|---|---|
-| **totalfrank** | bots、mcp、channels、**skills**（共担） | 1（bots ✅）、5（mcp）、3（channels）、4（skills，共担） | bots、mcp、channels、skills（共担） |
+| **totalfrank** | bots、mcp、**skills**（共担） | 1（bots ✅）、5（mcp）、4（skills，共担） | bots、mcp、skills（共担） |
 | **lucas-xzp** | resources、routines、identity、**skills**（共担） | 2（resources）、6（routines）、4（skills，共担） | resources、routines、identity、skills（共担） |
 
 - **totalfrank** 同时负责**可复用的 Track A 机制**（在 Stage 1 / PR #456 中构建）—— 其余
@@ -95,7 +96,7 @@ Track A，所以两者都归同一个人。）
 | 层级 | 类别 | 负责人 |
 |---|---|---|
 | **P1 —— 第一优先** | bots、mcp、resources、routines | bots + mcp → totalfrank；resources + routines → lucas-xzp |
-| **P2 —— 第二优先** | channels、identity | channels → totalfrank；identity → lucas-xzp |
+| **P2 —— 第二优先** | identity | identity → lucas-xzp |
 | **P3 —— 第三优先** | skills | **共担**（totalfrank + lucas-xzp）—— 最复杂的类别 |
 
 在各自的分工里，先做 **P1** 切片，再做 P2，最后做 P3。skills（P3）是共担且最复杂的那个 ——
@@ -115,7 +116,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 |---|---|---|---|---|---|
 | 1 | 机器人记录（`ac_bots` / `BotModel`） | totalfrank | P1 | ✅ **DONE —— PR #456 已于 2026-07-27 合并** | —— |
 | 2 | 资源（`ac_resource`） | lucas-xzp | P1 | ✅ DONE —— Phase 0（分支 `rongzhi_0727`） | 列 + 守卫 + 测试通过；内部 API 不变 — 已验：to_dict 不含 tenant、guard 直接表达式非 lambda、Changelog 见下 |
-| 3 | 渠道（`ac_channel_config`） | totalfrank | 🅳 **已降级** | ⏸️ 已搁置 —— 范围保持不变，并非取消 | 同上（若重新启动） |
+| 3 | 渠道（`ac_channel_config`） | —— | ❌ **已放弃** | 该阶段从未开工；其 Track B 组件已于 2026-08-03 删除 | 不适用 |
 | 4 | 技能（skill 相关表） | totalfrank + lucas-xzp | P3 | ⬜ TODO | 同上 |
 | 5 | MCP 配置（`ac_user_mcp_config` + `ac_bot_mcp_call_config`） | totalfrank | P1 | ✅ DONE —— **PR #564** | PR #564 合并后 |
 | 6 | 例程（Routines） | lucas-xzp | P1 | ⬜ TODO | 同上 |
@@ -123,7 +124,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
-### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成两个）
+### Track B —— 公共 API 实现（端点真正落地之处）
 _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
@@ -131,9 +132,9 @@ _按优先级分层排序。_
 | mcp | totalfrank | P1 | `openapi_v1/mcp/router.py` | ✅ **DONE —— PR #610**（6/6 端点） | ~~Track A 阶段 5~~ ✅（PR #564） |
 | resources | lucas-xzp | P1 | `openapi_v1/resources/router.py` | 🔧 IN PROGRESS（PARTIAL）— 9 handler 全接通但 DEFINITION-ONLY / NOT PUBLIC-READY | Track A resources ✅(Phase 0)，Track B 全 9 端点接通 stub→service；待 auth workstream(gateway principal seam) 落地 + DDL 部署后才可对外 |
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
-| channels | totalfrank | 🅳 **已降级** | `openapi_v1/channels/router.py` *(桩)* | ⏸️ 已搁置 —— 范围保持不变，并非取消 | Track A 阶段 3（同样搁置） |
+| channels | —— | ❌ **已删除（2026-08-03）** | *(已删除)* | 路由、schema 与两条已发布路径均删除 —— 见下方 channels 小节 | 不适用 |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
-| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
 
 ### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
@@ -187,7 +188,12 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 > 第二个租户持有真实数据之前定下来。
 | **阶段 5 对 `ac_user_mcp_config` 的唯一键替换** | ⬜ TODO（DDL 见下文） | **在第二个租户写入 MCP 配置之前**完成 —— 不必赶在发布之前 |
 
-> **⏸️ 渠道为何被搁置（2026-07-29）。** 目前产品并不需要渠道，因此它不应再以"下一个该
+> **❌ 渠道已删除（2026-08-03）。** 自 2026-07-29 起以"降级"的形式搁置；现已整体删除。
+> 搁置对它并不合适：该组件是**已发布**的，所以一个被搁置的桩并不是看板上一行休眠的记录 ——
+> 它是网关所提供文档里的 6 个操作，每一个都回 500。Track A 阶段从未开工，因此没有数据层
+> 的工作需要回退。被删除的内容见**端点**部分的 channels 小节。
+>
+> _（以下为 2026-07-29 的原始说明，保留作为历史。）_ 目前产品并不需要渠道，因此它不应再以"下一个该
 > 动手的事项"的形式出现在看板上。这是一次**降级，而不是取消** —— 两行都保留完整范围，
 > 可以原样重新启动。如果渠道确实被取消，应当删除这两行，而不是让它们停留在搁置状态。
 
@@ -466,19 +472,68 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 **PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 截至
 2026-07-29 仍是 open/draft；此处作为参考保留）中的 v1 契约总览做了交叉核对。
 
-> ⚠️ **路径分歧 —— `mcp` 已定案（PR #610），其余桩组仍未对齐。** 路由把所有非 `bots`
-> 的组都嵌套在 `/openapi/v1/bots/...` 之下（如 `/openapi/v1/bots/resources`、
-> `/openapi/v1/bots/mcp`）。而 PR #363 的总览用的是**顶层**路径
-> （`/openapi/v1/resources`、`/openapi/v1/mcp` 等）。**裁定（mcp 负责人，PR #610）：
-> 保持嵌套的路由形态** —— 以路由为准，界面尚在认证前（pre-auth），重排前缀带来的改动没有收益。
-> 其余五个组沿用这一先例，除非各自负责人另有决定；如果确实想要顶层形态，请修改路由的
-> `prefix` 并在同一个 PR 里更新本节。_（bots 不受影响：两种读法下它都是 `/openapi/v1/bots`，
-> #494 也正是按这个形状上线的。）_
->
-> **挂载顺序是有承重作用的。** `build_public_router()` 会先挂那六个字面量子组，再挂
-> bots 组，这样 `/openapi/v1/bots/channels` 才能排在通配的
-> `/openapi/v1/bots/{bot_id}` 前面被解析。新增的组要放进 `_SUBGROUPS` 列表里，位于
-> bots 路由之前。
+## 寻址规则
+
+**每个操作的地址都是 `/openapi/v1/bots/<component>/…`。** 组件的**字面**名称在前；
+带 Agent 作用域的操作把 `{bot_id}` 放在组件名**之后**的第一段 —— 不在它前面，中间
+也不再夹一个 `/bot/`。
+
+```text
+/openapi/v1/bots/<component>            # 该组件自己的集合
+/openapi/v1/bots/<component>/{bot_id}   # …限定到某一个 Agent
+```
+
+`bots` 组件是唯一的例外，而且仅仅因为它**就是** base 所命名的那个组件：它拥有
+`/openapi/v1/bots` 与 `/openapi/v1/bots/{bot_id}`，它自己的子资源（`/status`、
+`/passport`、`/restart`、`/auth-status`、`/engine-config`）挂在这个 Agent 记录之下。
+这些是 Agent 本身的属性，而不是别的组件来借用 Agent 的地址。
+
+**为什么。** 曾有三处违反此规则 —— `identity` 多带了一段冗余的 `/bot/`；
+`connection`/`engine`/`approvals`/`sessions`/`models`/`skills` 则把 `{bot_id}` 放在了
+自己的组件名之前。这让一个路由文件无法自述其地址（读
+`engine_runtime/sessions/router.py` 的人无从判断 `/openapi/v1/bots/{bot_id}/sessions`
+是由该文件提供，还是由 bots 组件里某个 `{bot_id}` 形态的路由提供），也堵死了同一个
+base 之下再容纳第二个 owner 的可能 —— BCS 正是从另一侧撞上同一问题，并以同样方式把自
+己的控制面迁到了 `/openapi/v1/bots/collaboration/{bot_id}`
+（`src/bcs/docs/plans/2026-08-03-bcn-collaboration-paths-design.md`）。本次在
+`2026-08-03-openapi-v1-path-normalization` 规格中统一；测试
+（`tests/…/openapi_v1/test_path_convention.py`）直接针对生成的文档断言该规则，因此违反
+它的路由会在测试里失败，而不是留给评审去发现。
+
+**保留名。** 由于 `bots` 组件保留了裸的 `/openapi/v1/bots/{bot_id}`，如果某个 Agent 的
+id 恰好等于某个组件名，它在该地址上就不可达。这个集合是固定的，同一个测试会断言下面这份
+清单仍然等于路由实际发布的字面量（英文版 `README.md` 中的同名清单是被解析的那一份）：
+
+<!-- reserved-component-names -->
+```text
+approvals  ceiling  check-name  connection  engine  identity  logs
+mcp  models  resources  routines  sessions  skills
+```
+
+**先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。
+它们的保留理由与上面那份**不同**：没有任何路由提供它们，因此当前也不存在"某个地址不可达"
+的问题。保留是因为该地址已被别处占用，且我们确实打算在那里放一个组件，所以在此期间不能让
+某个 Agent id 把它占走。
+
+<!-- reserved-component-names-unrouted -->
+```text
+messages
+```
+
+- `messages` —— 网关在 `/openapi/v1/bots/messages/ws/**` 上提供 Agent 的聊天 WebSocket，
+  并中继到 engine proxy（`src/gateway/configs/application.yaml`）。该占用**只在 socket
+  平面**上成立，因此发往该地址的 HTTP 请求仍会到达本服务；这个名字是为将来要放在那里的
+  HTTP 端点保留的。参见
+  `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/`。
+
+一旦有路由发布了这份清单里的某个名字，就必须把它移到上面那份已路由的清单里 —— 约定测试会
+断言两份清单互不相交，因此"加了路由却没搬名字"会在测试里失败，而不是留给评审去发现。
+
+> **挂载顺序是有承重作用的。** `build_public_router()` 会先挂字面量子组，再挂 bots 组，
+> 这样 `/openapi/v1/bots/resources` 才能排在通配的 `/openapi/v1/bots/{bot_id}` 前面被
+> 解析。如今真正依赖它的只剩下那些提供单段集合根的组件（`resources`、`routines`，以及
+> bots 自己的 `check-name`/`ceiling`）—— 其余组件都只在两段及以上才可达 —— 但新增的组
+> 仍应放进 `_SUBGROUPS` 列表里、位于 bots 路由之前，而不是每次都去重新推演这个例外。
 
 除注明外，所有响应都使用 `openapi_v1/contracts.py` 里的 `Envelope[T]` / `Page[T]` 结构
 （二进制流不走信封）。
@@ -514,16 +569,14 @@ _内部 `/api/bots` 也有变化，全部是有意为之，并由 #494 覆盖：
 `bot_id` 一起比较；删除默认 bot 会抛 `BotOperationNotAllowedError`（内部响应结构不变，
 公共界面映射为 409）。_
 
-### 🟦 totalfrank · P2 —— channels（6 个端点）· `openapi_v1/channels/router.py`
-钉钉（`dingding`）渠道配置 CRUD + 状态切换。
-| 方法 | 路径 | 用途 | 成功响应 |
-|---|---|---|---|
-| GET | `/openapi/v1/bots/channels` | 列出渠道（可选 `bot_id`） | `Envelope[list[Channel]]` |
-| POST | `/openapi/v1/bots/channels` | 创建渠道（初始为停用） | `201 Envelope[Channel]` |
-| GET | `/openapi/v1/bots/channels/{channel_id}` | 获取渠道 | `Envelope[Channel]` |
-| PUT | `/openapi/v1/bots/channels/{channel_id}` | 全量更新 | `Envelope[Channel]` |
-| PATCH | `/openapi/v1/bots/channels/{channel_id}` | 启用/停用切换 | `Envelope[Channel]` |
-| DELETE | `/openapi/v1/bots/channels/{channel_id}` | 删除 | `Envelope[Deleted]` |
+### ❌ channels —— **已删除（2026-08-03）**
+该组件已整体删除：路由、schema、包、挂载项，以及它发布出去的两条路径。它从未被实现；
+而与"尚未动工的组件"不同，它是**已发布**的 —— 集成方在服务端文档里看到一套渠道 API，
+每次调用却得到 500。搁置保留了这份代价，却没有换来任何好处。
+
+重新加回来所需要的东西并没有丢：那 6 个操作（钉钉渠道配置 CRUD + 状态切换）记录在本文
+2026-07-27 的历史与删除它的 PR 中。如果渠道要回来，它应当作为一个经过设计的组件回来，
+而不是复活一个桩。
 
 _注：桩里的列表返回 `Envelope[list[Channel]]`（不是 `Page`）；PR #363 里写的是
 `Page[Channel]`。接线时请确认用哪种。_
@@ -564,27 +617,28 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（7 个端点：桩里 5 个 + 提议新增 2 个 ★）· `openapi_v1/skills/router.py`
-目录在 `/openapi/v1/bots/skills`；某个 Agent 已安装的技能是 bot 的子资源。
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（六个已定案操作）· `openapi_v1/skills/router.py`
 
-> **共担 —— 最棘手的类别。** skills 有三层生命周期（全局**上传** → per-bot **安装** →
-> per-bot **启用/停用**）、两个尚未纳入桩的 ★ 端点，以及一个悬而未决的问题：后端更丰富的
-> skill-set 模型是否要升为一等公民。因此**两人共担**。动手前先商定一份共同的子计划 ——
-> 例如把 目录/上传 与 per-bot 安装/生命周期 分开 —— 并为它单独走一遍 SDD。在各自的 P1/P2
-> 切片之后再做。
+公共面是 Bot-owned `local://` Local Skill 生命周期，不是目录、市场、Git/Center 安装面或通用
+Skill Set API。collection 的可选 `active` filter 是唯一 Active-list 机制。所有操作均要求
+verified principal、按 owner/Bot 作用域处理，并使用标准 `Envelope` / `Page`。
 
-**状态**列标明每个端点是已经在路由桩里（`桩内`），还是来自 PR #363 的提议新增
-（`★ 提议` —— 尚未在桩里；实现前请与 totalfrank 确认）。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | 列出精确 Bot-owned Local Skill 元数据（`bot_id`、可选 owner locator、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/skills/upload` | 创建或安全替换一个原始 `application/zip` Local Skill 包 | `201 Envelope[SkillUpload]` / 替换时 `200` |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 读取一个部署范围 Skill ID 的公开元数据 | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 设为 Active desired state 并同步 runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 设为 Inactive desired state 并同步 runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
 
-| 方法 | 路径 | 用途 | 成功响应 | 状态 |
-|---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 技能目录（`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[SkillDetail]` | 桩内 |
-| POST ★ | `/openapi/v1/skills/upload` | 上传自定义技能（全局，归属调用者） | `Envelope[Skill]` | ★ 提议 |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | 列出某个 Agent 已安装的技能 | `Envelope[list[BotSkill]]` | 桩内 |
-| POST | `/openapi/v1/bots/{bot_id}/skills` | 为 Agent 安装技能（默认启用） | `201 Envelope[BotSkill]` | 桩内 |
-| PATCH ★ | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 启用/停用已安装技能（`status`） | `Envelope[BotSkill]` | ★ 提议 |
-| DELETE | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | 卸载（解除绑定） | `Envelope[Deleted]` | 桩内 |
+`413101` 只在原始 ZIP upload 上公开。稳定 Local Skill subcode 为 `400101`、`404000`、
+`409101`–`409104`、`413101`、`502101`、`502102`；既有公共类别保持原有 `xxx000` code。
+Generated OpenAPI 已由合同测试锁定为恰好这六个操作。
+
+**发布闸口：现在不得标记 Track B complete。** #725 的 cleanup-work DDL 必须先部署并验证，
+真实 owner/collaborator 预发验收仍需要已授权凭据与 Bot container。见英文
+[runbook 与回滚说明](skills-track-b-preprod-acceptance.md)。
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
@@ -603,9 +657,9 @@ _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart
 Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | 方法 | 路径 | 用途 | 成功响应 |
 |---|---|---|---|
-| GET | `/openapi/v1/bots/identity/bot/{bot_id}` | 列出身份文件（含是否存在） | `Envelope[IdentityFileList]` |
-| GET | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
-| PUT | `/openapi/v1/bots/identity/bot/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
+| GET | `/openapi/v1/bots/identity/{bot_id}` | 列出身份文件（含是否存在） | `Envelope[IdentityFileList]` |
+| GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
+| PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
 ### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
@@ -615,17 +669,17 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/{bot_id}/sessions…` —— 仅 personal bot |
-| engine | 3 | `…/engine/{status,capabilities,available}` |
-| models | 2 | `…/models`、`…/models/{model_id}` |
-| approvals | 3 | `…/approvals/mode`（GET/PUT）、`…/approvals/modes` |
-| connection | 1 | `…/connection` —— 完整 WS URL，取代 `get_device_connection` |
+| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 仅 personal bot |
+| engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
+| models | 2 | `/openapi/v1/bots/models/{bot_id}`、`…/{bot_id}/{model_id}` |
+| approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode`（GET/PUT）、`…/modes` |
+| connection | 1 | `/openapi/v1/bots/connection/{bot_id}` —— 完整 WS URL，取代 `get_device_connection` |
 
 ---
 
 ## 完成的定义（整个 `/openapi/v1` 工作）
 
-1. **Track A：** 每一类数据（bots、resources、channels、skills、mcp、routines）都带有
+1. **Track A：** 每一类数据（bots、resources、skills、mcp、routines）都带有
    `avernet_tenant` 并被守卫，Stage-1 的测试形态全绿。—— _6 个里完成 2 个（bots ✅、mcp ✅ PR #564）。_
 2. 全程内部 API 保持不变（`to_dict()` 无泄漏；内部套件不作修改）。—— _仍然成立：#494
    时整个 `tests/community` 全绿（9171 通过，3 跳过）。_
@@ -715,9 +769,17 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
 
+- **2026-08-04** —— **Skills Track B integration/release gate 的实现与 CI 已完成，但不等于
+  release complete。** Served OpenAPI 现锁定为恰好六个 Bot-owned Local Skill 操作；旧的
+  `{bot_id}/skills` install/uninstall stub 已移除。组装真实 guard 测试证明另一租户不能 list、
+  detail、upload/replace、activate、deactivate 或 delete 目标租户的 Local Skill。#725 的
+  `ac_local_skill_cleanup_work` deploy-before-code DDL 仍待执行；owner 加 authorized collaborator
+  的预发生命周期仍为 **PRE-PROD PENDING**。可执行验收、验证与回滚清单在
+  `skills-track-b-preprod-acceptance.md`。
+
 - **2026-07-27** —— 交接 README 创建。Track A Stage 1（bots + 可复用机制）已完成，位于
   **PR #456**，等待审批。Track B 尚未开始。
-- **2026-07-27** —— 按**纵向切片**完成分工（无跨人阻塞）：**totalfrank** = bots、channels、
+- **2026-07-27** —— 按**纵向切片**完成分工（无跨人阻塞）：**totalfrank** = bots、
   mcp；**lucas-xzp** = resources、skills、routines、identity。排序问题已定 → 按类别纵向切片。
   新增**各组件端点清单**（来自路由桩 + PR #363），并标注 `/openapi/v1/bots/...` 与顶层路径的
   分歧、以及两个提议的 ★ skills 端点。
@@ -872,3 +934,22 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   **新记为待办：** 没有任何跨仓测试钉住这份契约，任一侧改字段名都会让两边测试保持绿色
   而线上全 401。整套测试 10204 通过 / 3 跳过。SDD：
   `src/backend/specs/2026-08-02-public-api-user-only-principal/`。
+- **2026-08-03** —— **`/openapi/v1/bots` 路径规范化 + 删除 channels。**
+  每个组件的路由现在都位于 `/openapi/v1/bots/<component>/…` 之下，`{bot_id}` 作为组件
+  **之内**的第一段 —— 见新增的**寻址规则**一节，新增组件前应先读它。此前并存三种形态，而
+  其中只有一种是原本设计的那种：`identity` 多带一段冗余的 `/bot/`；`connection`、
+  `engine`、`approvals`、`sessions`、`models`、`skills` 把 `{bot_id}` 放在了自己的组件名
+  之前 —— 这让那些路由文件无法自述地址，也让共享 base 之下再容纳第二个 owner 变得不可能
+  （BCS 从另一侧撞上同一冲突，并以同样方式解决）。`skills` 另外获得一段字面的 `catalog`，
+  否则它的两类资源都会去争 `/openapi/v1/bots/skills/{…}`。`channels` 是删除而非搁置。
+  已发布路径 41 条（此前 43 条）。handler、schema、状态码、鉴权规则与租户隔离规则均未改变
+  —— 只改地址，且**不提供兼容别名**：该界面尚无可达的外部调用方，因此没有需要保留的契约。
+  网关钉住的 `bots.openapi.json` 经真实兼容性闸门（`--allow-breaking`）重新生成；它自
+  Track C 起就已过期，只有 32 条路径，而后端发布的是 43 条。新增测试
+  `tests/…/openapi_v1/test_path_convention.py` 针对生成的文档断言该规则以及本文的保留名
+  清单，使两者都在测试而非评审中失败。SDD：
+  `src/backend/specs/2026-08-03-openapi-v1-path-normalization/`。
+- **2026-08-04** —— **Track B Skills 契约最终定为 6 个端点。** 删除独立的
+  `/skills/active` 路由，改用列表的可选 `active` 过滤条件。同时定案了 Bot 范围的
+  原始 ZIP 上传、同名替换、owner 与协作者语义、离线可读、变更操作的 Bot ready 闸口，
+  以及运行时同步失败时的补偿。Skill Center 发布和租户级可复用 Skill 仍属于后续契约。

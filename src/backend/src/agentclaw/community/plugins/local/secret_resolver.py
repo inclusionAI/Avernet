@@ -4,12 +4,9 @@ The remote secret backend is unreachable in local/singlebox mode. Most secrets
 are unavailable, but the aiworkbench repo URL is configured locally so
 GitSyncService can reuse the same SecretResolver contract as corp.
 
-Deliberately **not** here: the gateway principal signing key. It would only ever
-be a singlebox-shaped stand-in for a secret store, shipped empty so it did
-nothing, and every deployment that actually serves ``/openapi/v1`` resolves it
-from a real store or the environment instead. Singlebox therefore has no key and
-answers 401 on the public surface — the state it has always been in. Giving it
-one is a deliberate change, not a config line.
+The gateway principal signing key may be injected by the singlebox composition
+root for live OpenAPI acceptance. No key is stored in repository configuration;
+without the explicit injection the public surface continues to deny requests.
 """
 
 from dataclasses import dataclass
@@ -24,6 +21,7 @@ from agentclaw.community.plugins.local._mock_seam import MockSeam
 logger = get_logger()
 
 _AIWORKBENCH_REPO_URL_SECRET_NAME = "other_manual_agentclaw_aiworkbench_repo_url"
+_GATEWAY_PRINCIPAL_SIGNING_KEY_SECRET_NAME = "gateway_principal_signing_key"
 
 
 @dataclass(frozen=True)
@@ -39,6 +37,9 @@ class _LocalSecret:
 )
 class LocalSecretResolver(MockSeam, SecretResolver):
     """Local resolver backed by application-singlebox.yaml for known secrets."""
+
+    def __init__(self, gateway_principal_signing_key: str = "") -> None:
+        self._gateway_principal_signing_key = gateway_principal_signing_key.strip()
 
     # B11: application-singlebox.yaml lives in the community subtree
     # (agentclaw/community/configs). parents[2] is agentclaw/community from this file
@@ -80,6 +81,14 @@ class LocalSecretResolver(MockSeam, SecretResolver):
     def get_secret(self, secret_name: str) -> Any | None:
         if secret_name == _AIWORKBENCH_REPO_URL_SECRET_NAME:
             return self._get_aiworkbench_repo_url_secret()
+        if (
+            secret_name == _GATEWAY_PRINCIPAL_SIGNING_KEY_SECRET_NAME
+            and self._gateway_principal_signing_key
+        ):
+            return _LocalSecret(
+                secret_user="",
+                secret_value=self._gateway_principal_signing_key,
+            )
 
         logger.info("[LocalMock] SecretResolver.get_secret(%s) -> None", secret_name)
         return None

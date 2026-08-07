@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import httpx
 
+from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthenticatedUser, AuthError
 from gateway.community.spi.authn import (
     CredentialBundle,
@@ -26,6 +27,8 @@ from gateway.community.spi.authn import (
     PrincipalType,
     UserPrincipal,
 )
+
+logger = get_logger("authn-google")
 
 # Google userinfo endpoint — called with a bearer access token to resolve the
 # caller's identity.
@@ -45,7 +48,7 @@ class GoogleUserStrategy:
         self,
         *,
         token_header: str,
-        default_tenant: str,
+        default_tenant: str | None = None,
         userinfo_url: str = GOOGLE_USERINFO_URL,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
@@ -65,15 +68,18 @@ class GoogleUserStrategy:
                 self._userinfo_url, headers={"Authorization": f"Bearer {token}"}
             )
         if resp.status_code != 200:
+            logger.warning("google userinfo returned status=%d", resp.status_code)
             raise AuthError("invalid google user token")
         try:
             body = resp.json()
             sub = body["sub"]
         except (ValueError, KeyError) as ex:
+            logger.warning("google userinfo returned invalid response")
             raise AuthError("invalid google userinfo response") from ex
         subject = AuthenticatedUser(
             id=sub,
             username=body.get("email") or sub,
             display_name=body.get("name"),
         )
+        logger.debug("google token resolved: sub=%s", sub)
         return UserPrincipal(tenant=self._default_tenant, subject=subject)

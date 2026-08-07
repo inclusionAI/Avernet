@@ -418,7 +418,7 @@ def test_group_query_normalizes_session_key_and_returns_optional_labels():
         repo,
         trace_id="trace_group",
         session_id="session_fixture",
-        session_key=f"agent:main:{session_fragment}",
+        session_key=f"agent:main:bcs:group:{session_fragment}",
         output="result available only in output",
     )
     with db.orm_session() as session:

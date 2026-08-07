@@ -22,6 +22,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
 )
 from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PROGRESS_POLL_TASK,
+    RESTART_POLL_TASK,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     DraftRestoreRetryableError,
@@ -680,12 +681,48 @@ async def test_retry_restart_enqueues_progress_poll_on_success():
     result = await svc.retry(publish_id=1, operator='u1')
 
     assert result.action == 'restart'
-    # The poll was enqueued for this record; the retry flag was NOT cleared.
-    svc._task_queue_service.enqueue.assert_called_once()
-    args = svc._task_queue_service.enqueue.call_args.args
-    assert args[0] == PROGRESS_POLL_TASK
-    assert args[1] == {'publish_id': 1}
+    # Both polls were enqueued for this record; the retry flag was NOT cleared.
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert enqueued == [PROGRESS_POLL_TASK, RESTART_POLL_TASK]
+    for call in svc._task_queue_service.enqueue.call_args_list:
+        assert call.args[1] == {'publish_id': 1}
     publish_service.update_publish_ext.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retry_restart_from_success_enqueues_restart_poll():
+    """A restart retry whose rollback target is SUCCESS is outside
+    _POLL_ACTIVE_STATES, so the progress poll completes immediately and cannot
+    drive it. Without the restart poll this path still depended on a client
+    calling /restart_status — leaving ext.restart.restarting set and a recreated
+    binding PENDING."""
+    publish_service = Mock()
+    build_service = Mock()
+    baas_service = Mock()
+    svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
+
+    ext = {
+        'source_status': PublishStatus.SUCCESS.value,
+        'retry': False,
+        'binding': {'online': 123},
+    }
+    records = [
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.FAILED.value, ext=ext.copy()),
+        _make_publish_record(status=PublishStatus.SUCCESS.value, ext={**ext, 'retry': True}),
+    ]
+    publish_service.get_publish_by_id.side_effect = records
+    publish_service.update_publish_status_with_ext.return_value = _make_publish_record(
+        status=PublishStatus.SUCCESS.value,
+        ext={**ext, 'retry': True},
+    )
+    svc.execute_restart = AsyncMock(return_value={'success': True, 'message': 'ok', 'stage': 'online'})
+
+    result = await svc.retry(publish_id=1, operator='u1')
+
+    assert result.action == 'restart'
+    enqueued = [c.args[0] for c in svc._task_queue_service.enqueue.call_args_list]
+    assert RESTART_POLL_TASK in enqueued
 
 
 @pytest.mark.asyncio
@@ -988,7 +1025,12 @@ async def test_restart_sets_restarting_flag_in_ext():
 
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "migration_path": "/path/to/artifact"},
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/path/to/artifact",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        },
     )
     _setup_restart(svc, record)
 
@@ -1051,13 +1093,19 @@ async def test_restart_recreate_threads_config_artifact():
     artifact = {"schema_version": 2, "skills": []}
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "config_artifact": artifact},
+        ext={
+            "binding": {"online": 1},
+            "config_artifact": artifact,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        },
     )
     _setup_restart(svc, record)
 
     result = await svc.execute_restart(publish_id=1, stage="online", operator="op")
     assert result["success"] is True
     assert build_service.release_async.await_args.kwargs["delivery"].config_artifact == artifact
+    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
     # The recreate minted a fresh binding for the new bot.
     assert publish_service.create_device_binding.call_args.kwargs["device_id"] == "BOT-recreated"
     # BOT_NOT_FOUND = the record is already gone → nothing to retire.
@@ -1142,7 +1190,12 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
     svc = _pf(publish_service, build_service, baas_service, Mock(), _arca_router(build_service))
     record = _make_publish_record(
         status=PublishStatus.SUCCESS.value,
-        ext={"binding": {"online": 1}, "migration_path": "/m/1"},
+        ext={
+            "binding": {"online": 1},
+            "migration_path": "/m/1",
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        },
     )
     _setup_restart(svc, record, bot_uuid="BOT-old")
 
@@ -1150,6 +1203,7 @@ async def test_restart_baas_not_live_target_upgrades_in_place():
 
     assert result["success"] is True
     build_service.upgrade_async.assert_awaited_once()
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
     build_service.release_async.assert_not_awaited()
     build_service.retire_superseded_bot.assert_not_called()
 
@@ -1586,7 +1640,12 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     svc.approve_baas_publish = Mock()
 
     record = _make_publish_record(
-        status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        },
     )
     await svc._execute_verify_first_release(
         publish_record=record,
@@ -1600,6 +1659,7 @@ async def test_verify_first_release_stamps_canary_delivered_and_persisted():
     # identity keys stable across the promotion
     assert delivered["engine_ext"]["bot_id"] == "b2"
     assert delivered["engine_ext"]["owner_id"] == "u1"
+    assert build_service.release_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
 
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
@@ -1623,7 +1683,12 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
     svc.refresh_publish_handle = Mock()
 
     record = _make_publish_record(
-        status=PublishStatus.BUILT.value, ext=_artifact_ext("draft")
+        status=PublishStatus.BUILT.value,
+        ext={
+            **_artifact_ext("draft"),
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
+        },
     )
     await svc._execute_verify_upgrade(
         publish_record=record,
@@ -1636,6 +1701,7 @@ async def test_verify_upgrade_stamps_canary_delivered_and_persisted():
 
     delivered = build_service.upgrade_async.await_args.kwargs["delivery"].config_artifact
     assert delivered["engine_ext"]["stage"] == "canary"
+    assert build_service.upgrade_async.await_args.kwargs["docker_image"] == "registry/arka:v2"
     persisted = svc._ext_state.update_status.call_args.kwargs["ext"]["config_artifact"]
     assert persisted["engine_ext"]["stage"] == "canary"
 
@@ -2168,6 +2234,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         status=PublishStatus.DRAFT.value,
         version=3,
         source_bot_id="bot-123",
+        ext={
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry.example.com/arka/openclaw:v3",
+        },
     )
 
     # Target version (v2, SUCCESS) - has a build artifact and binding
@@ -2178,6 +2248,8 @@ async def test_execute_rollback_uses_fixed_device_count_one():
         ext={
             "migration_path": "/tmp/build/v2",
             "binding": {"online": 100},  # binding_id
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry.example.com/arka/openclaw:v2",
             "skills_manifest": {
                 "schema_version": 1,
                 "engine": "openclaw",
@@ -2216,6 +2288,10 @@ async def test_execute_rollback_uses_fixed_device_count_one():
     # Verify upgrade_async uses the fixed device_count
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["device_count"] == 1
+    assert (
+        upgrade_call.kwargs["docker_image"]
+        == "registry.example.com/arka/openclaw:v2"
+    )
     assert upgrade_call.kwargs["extra_envs"] == {
         "AGENTCLAW_SKILLS_LAYOUT": "pool",
         "AGENTCLAW_SKILLS_LAYOUT_CONTRACT_VERSION": "skills-pool-p3-v1",
@@ -2368,6 +2444,7 @@ async def test_execute_rollback_with_config_artifact():
     upgrade_call = build_service.upgrade_async.call_args
     assert upgrade_call.kwargs["delivery"].config_artifact == artifact
     assert upgrade_call.kwargs["migration_path"] is None
+    assert upgrade_call.kwargs["docker_image"] is None
 
     assert result.publish_id == 2
     assert result.status == PublishStatus.ONLINE_PUB
@@ -2488,6 +2565,8 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         ext={
             "binding": {"online": 123},
             "skills_manifest": frozen_skills,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
         },
     )
     binding = Mock()
@@ -2510,6 +2589,9 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
     assert kwargs["owner_id"] == "u1"
     assert kwargs["target_count"] == 3
     assert kwargs["auto_approve_publish"] is True
+    assert kwargs["config"] == {
+        "deploy_config": {"docker_image": "registry/arka:v2"}
+    }
     # (#197) request_id is now the runner's deterministic op id (wall-clock id gone).
     assert kwargs["request_id"] == operation_request_id(10, "scale", "online", 1)
     publish_service.update_publish_ext.assert_called_once_with(
@@ -2517,6 +2599,8 @@ async def test_scale_bot_success_prefers_bot_ext_device_count():
         ext={
             "binding": {"online": 123},
             "skills_manifest": frozen_skills,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "registry/arka:v2",
             "scale": {"publish_id": 888},
         },
     )

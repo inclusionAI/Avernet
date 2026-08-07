@@ -28,10 +28,10 @@ use bcs_service_api::application::v1::{
         AddSessionParticipant, BotParticipantMode, CompleteSession, CreateSession,
         CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
         SessionCompletionResult, SessionDetail, SessionInput, SessionParticipant,
-        SessionParticipantInput, SessionService, SessionStatus as V1SessionStatus,
-        SessionSummary, UpdateSession, UpdateSessionParticipant,
+        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UpdateSession,
+        UpdateSessionParticipant,
     },
-    ApplicationError, AuthenticatedCaller, DeleteResult, Page, Principal,
+    ApplicationError, AuthenticatedCaller, DeleteResult, HumanPrincipal, Page, Principal,
     require_authenticated_user, require_human,
 };
 use bcs_service_api::application::session::{
@@ -96,28 +96,106 @@ impl SessionServiceImpl {
 
     // ── authorization helpers ──────────────────────────────────────────
 
-    /// Manager of the parent group (driver / originator / ManagerWorker
-    /// manager). Mirrors `bcs-app-group`'s `can_manage_group`.
-    fn can_manage_group(principal: &Principal, group: &DomainGroup) -> bool {
-        let actor_id = principal.actor_id();
-        actor_id == group.driver_bot
-            || actor_id == group.originator()
-            || (group.group_strategy == GroupStrategy::ManagerWorker
-                && group
+    /// Manager of the parent group (driver / originator / manager participant).
+    /// Mirrors `bcs-app-group`'s targeted Human-to-actor authority semantics.
+    fn group_management_actor_ids(group: &DomainGroup) -> Vec<String> {
+        let mut actor_ids = vec![group.driver_bot.clone(), group.originator().to_string()];
+        if group.group_strategy == GroupStrategy::ManagerWorker {
+            actor_ids.extend(
+                group
                     .participants
                     .iter()
-                    .any(|p| p.bot_uuid == actor_id && p.role == ParticipantRole::Manager))
+                    .filter(|participant| participant.role == ParticipantRole::Manager)
+                    .map(|participant| participant.bot_uuid.clone()),
+            );
+        }
+        actor_ids
+    }
+
+    async fn human_can_act_as_any(
+        &self,
+        human: &HumanPrincipal,
+        actor_ids: Vec<String>,
+    ) -> Result<bool, ApplicationError> {
+        let human_actor_id = format!("human_{}", human.subject.id);
+        let mut seen = HashSet::new();
+        for actor_id in actor_ids {
+            if !seen.insert(actor_id.clone()) {
+                continue;
+            }
+            if actor_id == human_actor_id {
+                return Ok(true);
+            }
+            if actor_id.starts_with("human_") {
+                continue;
+            }
+            let Some(bot) = self
+                .registry
+                .try_get(&actor_id)
+                .await
+                .map_err(map_service_error)?
+            else {
+                continue;
+            };
+            if bot.actor_kind != ActorKind::Bot {
+                continue;
+            }
+            if bot.created_by.as_deref() == Some(human.subject.id.as_str()) {
+                return Ok(true);
+            }
+            let creator_edge = self
+                .relation
+                .get_edge(&human_actor_id, &actor_id, &self.config.relation_env)
+                .await
+                .map_err(map_service_error)?;
+            if creator_edge.is_some_and(|edge| edge.is_creator) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    async fn can_manage_group(
+        &self,
+        principal: &Principal,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        let actor_id = principal.actor_id();
+        let candidates = Self::group_management_actor_ids(group);
+        if candidates.iter().any(|candidate| candidate == &actor_id) {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => self.human_can_act_as_any(human, candidates).await,
+            Principal::Bot(_) => Ok(false),
+        }
     }
 
     /// Manage a specific session: group manager OR the session's creator
-    /// (`session.created_by`). The creator qualifier covers the V1 design's
-    /// "creator" authorization for update / delete / complete.
-    fn can_manage_session(principal: &Principal, session: &Session, group: &DomainGroup) -> bool {
-        Self::can_manage_group(principal, group)
-            || session
-                .created_by
-                .as_deref()
-                .is_some_and(|creator| creator == principal.actor_id())
+    /// (`session.created_by`). Human callers may also act as any of those
+    /// target actors through direct Human identity, Bot ownership, or creator
+    /// relation edges.
+    async fn can_manage_session(
+        &self,
+        principal: &Principal,
+        session: &Session,
+        group: &DomainGroup,
+    ) -> Result<bool, ApplicationError> {
+        if self.can_manage_group(principal, group).await? {
+            return Ok(true);
+        }
+        let Some(created_by) = session.created_by.as_deref() else {
+            return Ok(false);
+        };
+        if created_by == principal.actor_id() {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => {
+                self.human_can_act_as_any(human, vec![created_by.to_string()]).await
+            }
+            Principal::Bot(_) => Ok(false),
+        }
     }
 
     async fn load_group(&self, group_id: &str) -> Result<DomainGroup, ApplicationError> {
@@ -139,7 +217,7 @@ impl SessionServiceImpl {
         group_id: &str,
     ) -> Result<DomainGroup, ApplicationError> {
         let group = self.load_group(group_id).await?;
-        if !Self::can_manage_group(principal, &group) {
+        if !self.can_manage_group(principal, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Only the Group originator, driver, or manager may manage Sessions",
             ));
@@ -165,7 +243,7 @@ impl SessionServiceImpl {
                 )
             })?;
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_manage_session(principal, &session, &group) {
+        if !self.can_manage_session(principal, &session, &group).await? {
             return Err(ApplicationError::forbidden(
                 "Principal may not manage this Session",
             ));
@@ -404,48 +482,15 @@ impl SessionService for SessionServiceImpl {
             .load_manageable_group(&principal, &command.group_id)
             .await?;
 
-        // The contract marks `driver_bot_uuid` as required and 404s on an
-        // unknown referenced Bot. The session's routing driver is inherited
-        // from the parent group (legacy semantics); `driver_bot_uuid` is
-        // validated and injected into the participant roster as the Driver so
-        // the session carries a lead responder.
-        // VSN7B: the driver and every participant must be collaboration-eligible
-        // for the caller (visible + friend/creator relation) before the session
-        // is materialized, mirroring the sibling Group V1 facade.
-        self.ensure_collaboration_eligible(
-            &principal,
-            &command.driver_bot_uuid,
-            "driver_bot_uuid",
-        )
-        .await?;
-
-        if command.participants.is_empty() {
+        // The V1 create-session contract no longer accepts driver_bot_uuid or
+        // an explicit participant roster. A session inherits its driver and
+        // initial participants from the parent group so the HTTP contract cannot
+        // drift from the group topology already authorized at group creation.
+        if group.participants.is_empty() {
             return Err(ApplicationError::invalid(
                 "invalid_participant",
-                "at least one session participant is required",
+                "parent group must contain at least one participant",
             ));
-        }
-        // VeHS7: reject duplicate participants before any persistence so the
-        // memory store doesn't silently accept an inflated roster and the MySQL
-        // store doesn't surface the `uk_session_participants_env_session_bot`
-        // unique constraint as a generic session-ID collision on retry. The
-        // contract mirrors this with `uniqueItems: true` on the array.
-        let mut seen: HashSet<&str> = HashSet::new();
-        for input in &command.participants {
-            if !seen.insert(input.bot_uuid.as_str()) {
-                return Err(ApplicationError::invalid(
-                    "invalid_request",
-                    format!("duplicate participant: {}", input.bot_uuid),
-                ));
-            }
-        }
-        for input in &command.participants {
-            self.ensure_collaboration_eligible(
-                &principal,
-                &input.bot_uuid,
-                "participants",
-            )
-            .await?;
         }
 
         // Wrap the V1 SessionInput into the legacy arbitrary-JSON `input`. When
@@ -459,36 +504,14 @@ impl SessionService for SessionServiceImpl {
                 .map(|ctx| serde_json::json!({ "query": ctx })),
         };
 
-        let mut participants: Vec<Participant> = command
-            .participants
-            .iter()
-            .map(|input| {
-                // VfhG3: derive role from parent group.participants if the bot is
-                // already there; otherwise strategy default (ManagerWorker→Worker,
-                // else Consultant). Mirrors legacy bcs-http create_session which
-                // clones group.participants preserving their roles rather than
-                // hardcoding Consultant and losing the Worker/Manager role.
-                let group_role = group
-                    .participants
-                    .iter()
-                    .find(|p| p.bot_uuid == input.bot_uuid)
-                    .map(|p| p.role);
-                let role = group_role.unwrap_or_else(|| match group.group_strategy {
-                    GroupStrategy::ManagerWorker => ParticipantRole::Worker,
-                    _ => ParticipantRole::Consultant,
-                });
-                build_participant(input, role)
-            })
-            .collect();
+        let mut participants = group.participants.clone();
 
-        // Ensure the driver is present in the roster with the Driver role.
-        match participants
-            .iter()
-            .position(|p| p.bot_uuid == command.driver_bot_uuid)
-        {
+        // Ensure the inherited group driver is present in the roster with the
+        // Driver role, preserving legacy routing expectations for sessions.
+        match participants.iter().position(|p| p.bot_uuid == group.driver_bot) {
             Some(index) => participants[index].role = ParticipantRole::Driver,
             None => participants.push(Participant::bot(
-                command.driver_bot_uuid.clone(),
+                group.driver_bot.clone(),
                 ParticipantRole::Driver,
             )),
         }
@@ -610,7 +633,22 @@ impl SessionService for SessionServiceImpl {
             None => return Ok(DeleteResult { deleted: false }),
         };
         let group = self.load_group(&session.group_id).await?;
-        if !Self::can_manage_session(&principal, &session, &group) {
+        let can_delete = if command.acting_bot_id.is_some() {
+            let acting_actor_id = self
+                .resolve_view_actor(&command.caller, command.acting_bot_id.as_deref())
+                .await?;
+            let management_actor_ids = Self::group_management_actor_ids(&group);
+            management_actor_ids
+                .iter()
+                .any(|actor_id| actor_id == &acting_actor_id)
+                || session
+                    .created_by
+                    .as_deref()
+                    .is_some_and(|creator| creator == acting_actor_id)
+        } else {
+            self.can_manage_session(&principal, &session, &group).await?
+        };
+        if !can_delete {
             return Err(ApplicationError::forbidden(
                 "Principal may not delete this Session",
             ));
@@ -708,9 +746,7 @@ impl SessionService for SessionServiceImpl {
                 ),
             ));
         }
-        let mode = command
-            .mode
-            .unwrap_or(BotParticipantMode::Auto);
+        let mode = BotParticipantMode::Auto;
         // VfhG3: derive role from parent group.participants if the bot is already
         // there; otherwise strategy default (ManagerWorker→Worker, else
         // Consultant). Mirrors legacy bcs-http add_session_participant which picks
@@ -825,9 +861,10 @@ impl SessionMessageService for SessionServiceImpl {
         // VSN7A/VUlai/VHxMU — reuse the legacy `bcs-message` visibility helper
         // (single source of truth) so the V1 session list applies the EXACT
         // same scoping the group history path does: the full 3-state
-        // `MessageOwnerFilter` (incl. ManagerWorker public-only `IsNull`) and
-        // the spec §5.2 new-participant `visible_from_seq` cutoff. The V1 facade
-        // no longer reimplements these predicates.
+        // `MessageOwnerFilter` (incl. ManagerWorker manager-viewer
+        // `PublicOrOwner`) and the spec §5.2 new-participant
+        // `visible_from_seq` cutoff. The V1 facade no longer reimplements
+        // these predicates.
         let group = self.load_group(&session.group_id).await?;
         let (owner_filter, visible_from_seq) =
             MessageService::compute_session_history_query(
@@ -878,18 +915,6 @@ impl SessionMessageService for SessionServiceImpl {
 /// (`config.rs::default_new_participant_visible_limit`); kept as a const here
 /// because the V1 session facade does not (yet) own its own history config.
 const NEW_PARTICIPANT_VISIBLE_LIMIT: i64 = 100;
-
-fn build_participant(input: &SessionParticipantInput, role: ParticipantRole) -> Participant {
-    let mode = map_v1_mode_to_domain(input.mode.unwrap_or(BotParticipantMode::Auto));
-    Participant {
-        bot_uuid: input.bot_uuid.clone(),
-        bot_name: None,
-        kind: None,
-        role,
-        actor_kind: ActorKind::Bot,
-        mode: Some(mode),
-    }
-}
 
 fn project_participant(participant: &Participant) -> SessionParticipant {
     // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`

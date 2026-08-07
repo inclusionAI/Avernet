@@ -1,60 +1,73 @@
-"""Endpoint coverage for dormant-bot ops routes."""
+"""Endpoint coverage for dormant-bot ops routes.
+
+Every case is decided by real bot state in the per-test database: a bot's
+``status`` and ``bot_type`` are exactly what ``DormantOpsService`` and
+``ActivateBotService`` check, so the happy and rejected paths here are the
+ones an operator would hit. The single exception is the passport failure,
+which belongs to AgentPass — driven through the passport plugin's DI seam,
+the boundary the ops service calls.
+"""
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
-from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService, InvalidBotStateError
+from agentclaw.community.core.bot_dormant.activate_service import ActivateBotService
 from agentclaw.community.core.bot_dormant.ops_service import DormantOpsService
+from agentclaw.community.plugin_api.passport import PassportPlugin
+from tests.community.factories.access import make_staff_user
+from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 
 
 _AUTH_HEADERS = {"Authorization": "Bearer singlebox-dormant-token-local"}
+_BOT_ID = "bot-ops"
+_OWNER_ID = "owner-ops"
+
+
+def _seed_bot(world, *, status: str, bot_type: str = "personal") -> None:
+    make_staff_user(world, user_id=_OWNER_ID)
+    make_bot(
+        world,
+        bot_id=_BOT_ID,
+        owner_id=_OWNER_ID,
+        owner_name=_OWNER_ID,
+        bot_type=bot_type,
+        status=status,
+    )
 
 
 def _seed_recycle_ok(world) -> None:
-    svc = MagicMock(spec=DormantOpsService)
-    svc.recycle_one.return_value = {
-        "run_id": "manual-recycle-test",
-        "bot_id": "bot-ops",
-        "owner_id": "owner-ops",
-        "dry_run": False,
-        "status": "recycled",
-    }
-    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+    """An ACTIVE personal bot — the only shape manual recycle accepts."""
+    _seed_bot(world, status="ACTIVE")
 
 
 def _seed_recycle_error(world) -> None:
-    svc = MagicMock(spec=DormantOpsService)
-    svc.recycle_one.side_effect = ValueError("only ACTIVE bot can be manually recycled")
-    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+    """A bot that is already RECYCLED — the guard the route exists to enforce."""
+    _seed_bot(world, status="RECYCLED")
 
 
 def _seed_unfreeze_passport_ok(world) -> None:
-    svc = MagicMock(spec=DormantOpsService)
-    svc.unfreeze_passport_one.return_value = {
-        "bot_id": "default",
-        "owner_id": "37565",
-        "status": "passport_online",
-    }
-    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+    _seed_bot(world, status="RECYCLED")
 
 
 def _seed_unfreeze_passport_error(world) -> None:
-    svc = MagicMock(spec=DormantOpsService)
-    svc.unfreeze_passport_one.side_effect = RuntimeError("passport unavailable")
-    world.injector.binder.bind(DormantOpsService, to=svc, scope=None)
+    """AgentPass refuses to bring the credential online."""
+    _seed_bot(world, status="RECYCLED")
+
+    def _passport_unavailable(*_args, **_kwargs):
+        raise RuntimeError("passport unavailable")
+
+    world.get(PassportPlugin).set_override(
+        "unfreeze_agent_passport", _passport_unavailable,
+    )
 
 
 def _seed_activate_ok(world) -> None:
-    svc = MagicMock(spec=ActivateBotService)
-    svc.activate.return_value = {"status": "REACTIVATING", "message": "激活中"}
-    world.injector.binder.bind(ActivateBotService, to=svc, scope=None)
+    """A bot already REACTIVATING — activation is idempotent for that state."""
+    _seed_bot(world, status="REACTIVATING")
 
 
 def _seed_activate_error(world) -> None:
-    svc = MagicMock(spec=ActivateBotService)
-    svc.activate.side_effect = InvalidBotStateError("仅回收状态的 Bot 可激活")
-    world.injector.binder.bind(ActivateBotService, to=svc, scope=None)
+    """An ACTIVE bot — activation only applies to a recycled one."""
+    _seed_bot(world, status="ACTIVE")
 
 
 @endpoint_test(
@@ -64,8 +77,8 @@ def _seed_activate_error(world) -> None:
     input=CaseInput(
         headers=_AUTH_HEADERS,
         json_body={
-            "bot_id": "bot-ops",
-            "owner_id": "owner-ops",
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
             "dry_run": False,
             "reason": "endpoint coverage",
         },
@@ -84,12 +97,14 @@ def recycle_one_ok():
     scenario="err",
     input=CaseInput(
         headers=_AUTH_HEADERS,
-        json_body={"bot_id": "bot-ops", "owner_id": "owner-ops"},
+        json_body={"bot_id": _BOT_ID, "owner_id": _OWNER_ID},
     ),
     seed=_seed_recycle_error,
     expect=ExpectError(
         status=400,
-        json_contains={"detail": "only ACTIVE bot can be manually recycled"},
+        json_contains={
+            "detail": "only ACTIVE bot can be manually recycled, current: RECYCLED",
+        },
     ),
 )
 def recycle_one_err():
@@ -104,8 +119,8 @@ def recycle_one_err():
     input=CaseInput(
         headers=_AUTH_HEADERS,
         json_body={
-            "bot_id": "default",
-            "owner_id": "37565",
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
             "reason": "recover license",
         },
     ),
@@ -127,8 +142,8 @@ def unfreeze_passport_one_ok():
     input=CaseInput(
         headers=_AUTH_HEADERS,
         json_body={
-            "bot_id": "default",
-            "owner_id": "37565",
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
             "reason": "recover license",
         },
     ),
@@ -150,8 +165,8 @@ def unfreeze_passport_one_err():
     input=CaseInput(
         headers=_AUTH_HEADERS,
         json_body={
-            "bot_id": "bot-ops",
-            "owner_id": "owner-ops",
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
             "nick_name": "ops",
         },
     ),
@@ -169,10 +184,10 @@ def activate_one_ok():
     scenario="err",
     input=CaseInput(
         headers=_AUTH_HEADERS,
-        json_body={"bot_id": "bot-ops", "owner_id": "owner-ops"},
+        json_body={"bot_id": _BOT_ID, "owner_id": _OWNER_ID},
     ),
     seed=_seed_activate_error,
-    expect=ExpectError(status=400, json_contains={"detail": "仅回收状态的 Bot 可激活"}),
+    expect=ExpectError(status=400, json_contains={"detail": "only RECYCLED bot can be activated, current: ACTIVE"}),
 )
 def activate_one_err():
     """Error path: invalid activation state is surfaced as HTTP 400."""

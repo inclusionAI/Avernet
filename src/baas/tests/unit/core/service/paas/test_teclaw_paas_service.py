@@ -24,11 +24,11 @@ from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.core.service.paas._teclaw_paas_service import TeClawPaasService
 from secbaas.community.spi.bot.teclaw._protocols import TeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
-    _BotCreateResult,
-    _BotDestroyResult,
-    _BotInfo,
-    _BotRestartResult,
-    _BotUpdateResult,
+    BotCreateResult,
+    BotDestroyResult,
+    BotInfo,
+    BotRestartResult,
+    BotUpdateResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -93,7 +93,7 @@ class TestCreateDevice:
     @pytest.mark.asyncio
     async def test_delegates_to_plugin(self, service, mock_plugin):
         """Verify plugin.create_bot called with config.teclaw_bot_config."""
-        mock_plugin.create_bot.return_value = _BotCreateResult(
+        mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"key": "value"},
@@ -104,8 +104,8 @@ class TestCreateDevice:
 
     @pytest.mark.asyncio
     async def test_converts_result_to_creation_result(self, service, mock_plugin):
-        """Mock _BotCreateResult, verify TeClawCreationResult field mapping."""
-        mock_plugin.create_bot.return_value = _BotCreateResult(
+        """Mock BotCreateResult, verify TeClawCreationResult field mapping."""
+        mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"model": "gpt-4"},
@@ -121,7 +121,7 @@ class TestCreateDevice:
     @pytest.mark.asyncio
     async def test_handles_empty_config(self, service, mock_plugin):
         """config.teclaw_bot_config is None -> bot_config={}."""
-        mock_plugin.create_bot.return_value = _BotCreateResult(
+        mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-xyz",
             status="ONLINE",
         )
@@ -140,7 +140,7 @@ class TestDestroyDevice:
     @pytest.mark.asyncio
     async def test_delegates_to_plugin(self, service, mock_plugin):
         """Verify plugin.destroy_bot(bot_id=paas_device_id)."""
-        mock_plugin.destroy_bot.return_value = _BotDestroyResult(
+        mock_plugin.destroy_bot.return_value = BotDestroyResult(
             teclaw_bot_id="bot-abc123",
             status="DELETED",
         )
@@ -150,7 +150,7 @@ class TestDestroyDevice:
     @pytest.mark.asyncio
     async def test_returns_true_when_deleted(self, service, mock_plugin):
         """Mock status='DELETED', verify returns True."""
-        mock_plugin.destroy_bot.return_value = _BotDestroyResult(
+        mock_plugin.destroy_bot.return_value = BotDestroyResult(
             teclaw_bot_id="bot-abc123",
             status="DELETED",
         )
@@ -160,7 +160,7 @@ class TestDestroyDevice:
     @pytest.mark.asyncio
     async def test_returns_false_when_not_deleted(self, service, mock_plugin):
         """Mock status='ONLINE', verify returns False."""
-        mock_plugin.destroy_bot.return_value = _BotDestroyResult(
+        mock_plugin.destroy_bot.return_value = BotDestroyResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
         )
@@ -177,7 +177,7 @@ class TestUpdateDevice:
     @pytest.mark.asyncio
     async def test_delegates_to_plugin(self, service, mock_plugin):
         """Verify plugin.update_bot called with correct args."""
-        mock_plugin.update_bot.return_value = _BotUpdateResult(
+        mock_plugin.update_bot.return_value = BotUpdateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"updated": True},
@@ -215,7 +215,7 @@ class TestRestartDevice:
     @pytest.mark.asyncio
     async def test_delegates_to_plugin(self, service, mock_plugin):
         """Verify plugin.restart_bot called."""
-        mock_plugin.restart_bot.return_value = _BotRestartResult(
+        mock_plugin.restart_bot.return_value = BotRestartResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
         )
@@ -225,7 +225,7 @@ class TestRestartDevice:
     @pytest.mark.asyncio
     async def test_returns_true_when_online(self, service, mock_plugin):
         """Mock status='ONLINE', verify True."""
-        mock_plugin.restart_bot.return_value = _BotRestartResult(
+        mock_plugin.restart_bot.return_value = BotRestartResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
         )
@@ -235,7 +235,7 @@ class TestRestartDevice:
     @pytest.mark.asyncio
     async def test_returns_false_when_not_online(self, service, mock_plugin):
         """Mock status='OFFLINE', verify False."""
-        mock_plugin.restart_bot.return_value = _BotRestartResult(
+        mock_plugin.restart_bot.return_value = BotRestartResult(
             teclaw_bot_id="bot-abc123",
             status="OFFLINE",
         )
@@ -252,7 +252,7 @@ class TestGetDeviceInfo:
     @pytest.mark.asyncio
     async def test_delegates_to_plugin(self, service, mock_plugin):
         """Verify plugin.get_bot called."""
-        mock_plugin.get_bot.return_value = _BotInfo(
+        mock_plugin.get_bot.return_value = BotInfo(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"key": "val"},
@@ -262,8 +262,8 @@ class TestGetDeviceInfo:
 
     @pytest.mark.asyncio
     async def test_converts_info_correctly(self, service, mock_plugin):
-        """_BotInfo -> TeClawDeviceInfo field mapping."""
-        mock_plugin.get_bot.return_value = _BotInfo(
+        """BotInfo -> TeClawDeviceInfo field mapping."""
+        mock_plugin.get_bot.return_value = BotInfo(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"model": "gpt-4"},
@@ -279,8 +279,8 @@ class TestGetDeviceInfo:
 
     @pytest.mark.asyncio
     async def test_converts_unconfigured_bot_correctly(self, service, mock_plugin):
-        """_BotInfo with teclaw_bot_config=None."""
-        mock_plugin.get_bot.return_value = _BotInfo(
+        """BotInfo with teclaw_bot_config=None."""
+        mock_plugin.get_bot.return_value = BotInfo(
             teclaw_bot_id="bot-unconfigured",
             status="PENDING",
             teclaw_bot_config=None,

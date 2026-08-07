@@ -10,6 +10,9 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
+from agentclaw.community.core.service_bot.services.arka_image_pin import (
+    resolve_publish_image_pin,
+)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -68,6 +71,7 @@ class EvalPublishMixin:
         # config_artifact read above is only the build-artifact presence guard. Eval
         # does not persist, so the applied overrides are discarded.
         delivery, _ = self._ext_state.compose_live(publish_record, publish_stage)
+        image_pin = resolve_publish_image_pin(publish_record)
 
         ext_info = {}
         if biz_id:
@@ -95,6 +99,7 @@ class EvalPublishMixin:
                 version=str(publish_record.version or 1),
                 delivery=delivery,
                 ext_info=ext_info,
+                docker_image=image_pin.docker_image,
             )
 
         op = await self._operation_runner.acquire_workflow(op, _issue)

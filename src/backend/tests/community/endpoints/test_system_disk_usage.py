@@ -9,8 +9,6 @@ Tests the following scenarios:
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
     CaseInput,

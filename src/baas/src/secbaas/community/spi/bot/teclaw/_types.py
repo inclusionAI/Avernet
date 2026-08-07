@@ -12,7 +12,7 @@ from typing import Any
 
 
 @dataclass(slots=True)
-class _BotCreateResult:
+class BotCreateResult:
     """Result of a CREATE operation (POST emergencyOnline)."""
 
     teclaw_bot_id: str
@@ -21,7 +21,7 @@ class _BotCreateResult:
 
 
 @dataclass(slots=True)
-class _BotDestroyResult:
+class BotDestroyResult:
     """Result of a DELETE operation (POST emergencyOnline)."""
 
     teclaw_bot_id: str
@@ -29,7 +29,7 @@ class _BotDestroyResult:
 
 
 @dataclass(slots=True)
-class _BotUpdateResult:
+class BotUpdateResult:
     """Result of an UPDATE operation (POST emergencyOnline)."""
 
     teclaw_bot_id: str
@@ -38,7 +38,7 @@ class _BotUpdateResult:
 
 
 @dataclass(slots=True)
-class _BotRestartResult:
+class BotRestartResult:
     """Result of a restart operation (proxied to UPDATE emergencyOnline)."""
 
     teclaw_bot_id: str
@@ -46,7 +46,7 @@ class _BotRestartResult:
 
 
 @dataclass(slots=True)
-class _BotInfo:
+class BotInfo:
     """Bot info from a GET /get query."""
 
     teclaw_bot_id: str

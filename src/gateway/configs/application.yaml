@@ -52,8 +52,20 @@ user_config:
 
   # PrincipalSigner (JWT client) config. The signing key is a secret and is
   # resolved at runtime via the SecretResolver using ``secret_name``; the
-  # remaining fields are non-secret and live here. A missing/empty key falls
-  # back to a dev key (single-box/tests only — NOT for production).
+  # remaining fields are non-secret and live here. With the community resolver
+  # above that means AVERNET_SECRET_PRINCIPAL_SIGNING_KEY_VALUE, and its value
+  # must equal the one the upstream verifies with — both sides log a
+  # fingerprint of it at boot so the two can be compared without printing it.
+  #
+  # There is NO fallback key. A missing or empty value refuses the boot in
+  # pre/prod, and elsewhere leaves the gateway unable to sign, so every
+  # forwarded request answers 500 rather than carrying an identity no upstream
+  # can verify. The dev key that used to fill this gap was a committed
+  # credential, and no upstream accepted tokens signed with it anyway.
+  #
+  # `issuer` is a two-sided contract: the backend pins the value it accepts in
+  # code, so changing this requires changing that constant in the same release
+  # or every request 401s.
   principal_signer:
     secret_name: "principal_signing_key"
     kid: "bare"
@@ -105,8 +117,16 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
+    # Bot Logs can query explicit user/Bot and trace identifiers. Require both
+    # the end-user identity and the registered calling application so a user
+    # credential alone cannot access this tenant-level observability surface.
+    "/openapi/v1/bots/logs/**":
+      user: required
+      app: required
+
     "/openapi/v1/collaboration/**":
       user: required
+      app: required
 
     "/openapi/v1/bcsfuse/**":
       user: required
@@ -114,9 +134,9 @@ user_config:
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
-    "GET /openapi/v1/collaboration/messages/ws": {}
+    "WEBSOCKET /openapi/v1/collaboration/messages/ws": {}
 
-    # The tenant engine socket, and the FIRST rule under /openapi/v1 that
+    # The tenant bot socket, and the FIRST rule under /openapi/v1 that
     # requires no identity at all. Deliberate: the credential is already in the
     # handshake's query string and is checked by the proxypass hop behind the
     # gateway, and a browser's WebSocket API can attach nothing else — it takes
@@ -127,7 +147,28 @@ user_config:
     # here would refuse every socket. Stating it keeps this table an honest
     # description of what the gateway requires, and makes tightening the prefix
     # a config edit rather than a code change.
-    "/openapi/v1/engine/**": {}
+    #
+    # QUALIFIED BY PLANE, and that is load-bearing rather than decorative.
+    #
+    # This table is plane-blind: an unqualified rule governs every request to the
+    # path, whichever entrypoint serves it. The exemption sits INSIDE the
+    # authenticated "/openapi/v1/bots/**" prefix above and outranks it on literal
+    # segment count — five to three — so unqualified it would exempt ordinary
+    # HTTP requests here too. Those do not 404: a socket domain is not a
+    # candidate on the HTTP plane, so they fall through to `bots` and are
+    # forwarded to the backend. An unauthenticated caller could therefore reach
+    # the backend through this prefix, and a `..` in the path normalises out on
+    # the way, landing anywhere under /openapi/v1.
+    #
+    # `WEBSOCKET` is the method the relay entrypoint authenticates under, so this
+    # rule matches a handshake and nothing else. An HTTP GET to the same path
+    # does not match it and falls to "/openapi/v1/bots/**" above — user required.
+    #
+    # Pinned to the socket's own `ws` subtree rather than to the whole of
+    # `/openapi/v1/bots/messages`, so it exempts exactly the paths the socket
+    # domain below claims. The HTTP endpoints `messages` is reserved for keep the
+    # user requirement they inherit from "/openapi/v1/bots/**", on every plane.
+    "WEBSOCKET /openapi/v1/bots/messages/ws/**": {}
 
   # Domain → upstream-server map for the gateway.
   #
@@ -142,6 +183,9 @@ user_config:
   #                                    each upstream publishes its dumped doc to an
   #                                    object store on deploy, gateway auto-adopts
   #                                    the latest via background refresh)
+  #   source: http          → `url`  (any deployed edition;
+  #                                    fetches the latest published description
+  #                                    from an HTTP endpoint with background refresh)
   # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
   # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
   # routing/auth/forwarding never read it.
@@ -149,6 +193,23 @@ user_config:
     base_path: /openapi/v1
 
     # Each domain may also declare:
+    #
+    #   match: <path pattern>
+    #     Which paths this domain claims: literal segments, then `**`. Unset
+    #     means `<base_path>/<domain name>/**` — the leading-segment routing
+    #     every domain had before patterns, so a domain that says nothing keeps
+    #     its address exactly. Declare one to put a domain BENEATH another, on a
+    #     different upstream.
+    #
+    #     Resolution matches first and ranks second: every domain claiming the
+    #     path AND answering the request's plane is a candidate, and the most
+    #     specific (most literal segments) wins. The plane filters the
+    #     candidates, so claiming a prefix for one plane leaves the other
+    #     plane's resolution of the same path untouched.
+    #
+    #     Startup REFUSES a pattern that does not pin `base_path` plus at least
+    #     one more literal segment. `match: /**` is an open proxy into that
+    #     domain's upstream, and this is the check that makes it untypable.
     #
     #   protocols: [http] | [websocket] | [http, websocket]
     #     Which plane serves it. Unset means `[http]`, so every domain below
@@ -195,31 +256,36 @@ user_config:
           source: file
           path: schemas/bcsfuse.openapi.json
           refresh_seconds: 300
-      sessions:
-        server: baas
-        schema:
-          source: file
-          path: schemas/baas.openapi.json
-          refresh_seconds: 300
-      messages:
-        server: baas
-        schema:
-          source: file
-          path: schemas/baas.openapi.json
-          refresh_seconds: 300
-      runs:
+      chat:
         server: baas
         schema:
           source: file
           path: schemas/baas.openapi.json
           refresh_seconds: 300
 
-      # The tenant engine socket. The backend's connection endpoint publishes
-      # `wss://<gateway>/openapi/v1/engine/<target><engine-path>?x-proxypass-token=…`
+      # The tenant bot socket. The backend's connection endpoint publishes
+      # `wss://<gateway>/openapi/v1/bots/messages/ws/<target><engine-path>?x-proxypass-token=…`
       # and this is what serves it.
       #
-      # Socket-only: an HTTP request here is an unknown route, because the one
-      # thing this domain publishes is a relayed socket.
+      # It sits BENEATH the `bots` domain above, on a different upstream, which
+      # is what `match` exists for: the whole bots scope — management on the
+      # backend, runtime on the engine proxy — is one team's surface and belongs
+      # under one public prefix. The leading segment names the OWNER, not the
+      # process, and the gateway is what decouples the two.
+      #
+      # Socket-only, and that is not a detail. Because a domain is only a
+      # candidate on the plane it declares, an HTTP request to this prefix is not
+      # served by this domain at all — it falls to `bots` above, and reaches the
+      # backend.
+      #
+      # `ws` is the socket's own segment, and it is claimed rather than inferred.
+      # `messages` names the channel, not the transport: HTTP endpoints are
+      # expected to grow under it, and the plane alone would keep them apart. The
+      # segment buys what the plane cannot — the claim, and the unauthenticated
+      # WEBSOCKET exemption in `route_security` above that follows it, are pinned
+      # to one subtree that is visible as such in a URL, so a future endpoint at
+      # `/openapi/v1/bots/messages/<anything-else>` is outside both by
+      # construction rather than by a reader's care.
       #
       # The engine proxy serves the same targets under `/proxypass/`, so the
       # prefix is substituted; everything past it — the routing target, the
@@ -233,11 +299,12 @@ user_config:
       # this path. The credential is checked once, at the handshake, and the
       # connection is designed to outlive its expiry — an idle deadline tears
       # down healthy sockets.
-      engine:
+      bots-messages-ws:
+        match: /openapi/v1/bots/messages/ws/**
         server: engine_proxy
         protocols: [websocket]
         rewrite:
-          from: /openapi/v1/engine
+          from: /openapi/v1/bots/messages/ws
           to: /proxypass
 
     servers:

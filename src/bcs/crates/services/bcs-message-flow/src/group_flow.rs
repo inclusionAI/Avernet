@@ -541,6 +541,7 @@ pub async fn handle_web_send(
             run_id: String::new(),
             history_meta: None,
             metadata: None,
+            attachments: None,
         };
         let outbound_message = match apply_outbound_interceptors(
             flow,
@@ -647,6 +648,7 @@ pub async fn handle_web_send(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: cmd.provider_bypass_headers.clone(),
             })
             .await;
 
@@ -927,6 +929,7 @@ pub async fn handle_group_chat(
             idempotency_key: None,
             source_im_message_id: None,
             sender_conn_id: None,
+            provider_bypass_headers: cmd.provider_bypass_headers,
         },
     )
     .await?;
@@ -1000,6 +1003,7 @@ pub async fn handle_persistent_group_send(
         run_id: String::new(),
         history_meta: None,
         metadata: None,
+        attachments: None,
     };
 
     let sender_type = if cmd.sender.starts_with("human_") {
@@ -1048,6 +1052,7 @@ pub async fn handle_persistent_group_send(
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
     for target in &decision.targets {
         let outbound = match apply_outbound_interceptors(flow, &cmd.group_id, &message, target).await
@@ -1104,6 +1109,7 @@ pub async fn handle_persistent_group_send(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
         match result {
@@ -1322,6 +1328,7 @@ async fn apply_chain_for_bot_pair(
         run_id: String::new(),
         history_meta: None,
         metadata: None,
+        attachments: None,
     };
     let mut outbound = OutboundMessage {
         group_id: context_tag.to_string(),
@@ -1380,6 +1387,7 @@ pub async fn handle_group_callback(
             run_id: String::new(),
             history_meta: None,
             metadata: cmd.metadata.clone(),
+            attachments: None,
         };
         try_persist_group_message(
             flow,
@@ -1419,6 +1427,7 @@ pub async fn handle_group_callback(
         idempotency_key: None,
         source_im_message_id: None,
         sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
     };
 
     for target in &decision.targets {
@@ -1441,6 +1450,7 @@ pub async fn handle_group_callback(
             run_id: String::new(),
             history_meta: None,
             metadata: cmd.metadata.clone(),
+            attachments: None,
         };
         let outbound_message =
             match apply_outbound_interceptors(flow, &cmd.group_id, &synthetic_message, target).await
@@ -1512,6 +1522,7 @@ pub async fn handle_group_callback(
                 frame,
                 delivery_kind,
                 provider_transport,
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 
@@ -1639,6 +1650,7 @@ pub async fn handle_chat_abort(
                 frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
                 delivery_kind: BotDeliveryKind::Abort,
                 provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
             })
             .await;
 

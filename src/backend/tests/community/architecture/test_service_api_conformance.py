@@ -31,6 +31,7 @@ discovery walk: most Protocols in ``api/`` still declare
 listing them here would assert nothing while implying coverage. Add a pair when
 its Protocol is given real signatures.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -42,9 +43,33 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.local_skill_query_service import (
+    LocalSkillQueryServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
+from agentclaw.community.api.local_skill_state_service import (
+    LocalSkillStateServiceProtocol,
+)
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.connection import EngineConnectionService
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
 from agentclaw.community.core.services.engine_config import EngineConfigService
+from agentclaw.community.core.skill_center.services.local_skill_query_service import (
+    LocalSkillQueryService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
+    LocalSkillUploadService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_state_service import (
+    LocalSkillStateService,
+)
+from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
+    LocalSkillDeleteService,
+)
 
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
@@ -52,6 +77,10 @@ _PAIRS = [
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),
+    (LocalSkillQueryServiceProtocol, LocalSkillQueryService),
+    (LocalSkillUploadServiceProtocol, LocalSkillUploadService),
+    (LocalSkillStateServiceProtocol, LocalSkillStateService),
+    (LocalSkillDeleteServiceProtocol, LocalSkillDeleteService),
 ]
 
 _IDS = [f"{p.__name__}->{c.__name__}" for p, c in _PAIRS]
@@ -96,7 +125,9 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
         actual = inspect.signature(impl)
 
         # Awaitability: adapters `await` these, so async→sync breaks every call.
-        if inspect.iscoroutinefunction(declared_fn) != inspect.iscoroutinefunction(impl):
+        if inspect.iscoroutinefunction(declared_fn) != inspect.iscoroutinefunction(
+            impl
+        ):
             mismatches.append(
                 f"{name}: protocol "
                 f"{'async' if inspect.iscoroutinefunction(declared_fn) else 'sync'} "
@@ -106,10 +137,7 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
         # Names, kinds AND defaults — a keyword-only parameter turning
         # positional-only keeps the name but breaks every keyword call site.
         def _shape(sig: inspect.Signature) -> list[tuple[str, int, object]]:
-            return [
-                (p.name, p.kind.value, p.default)
-                for p in sig.parameters.values()
-            ]
+            return [(p.name, p.kind.value, p.default) for p in sig.parameters.values()]
 
         if _shape(declared) != _shape(actual):
             mismatches.append(

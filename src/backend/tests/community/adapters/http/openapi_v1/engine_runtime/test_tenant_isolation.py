@@ -44,29 +44,36 @@ TENANT_B = "tenant-b"
 
 SESSION_ID = "session:abc:user:1"
 
-#: (method, suffix under /openapi/v1/bots/{bot_id}, body) for all 16 routes.
+#: (method, path template, body) for all 16 routes. ``{bot}`` is substituted
+#: with the bot the sweep is probing, and it sits *after* the component name —
+#: the surface's addressing rule (see ``openapi_v1/__init__.py``).
 #:
 #: Bodies are per-route and valid: every request model sets ``extra="forbid"``,
 #: so a generic body would 422 in validation — before the handler runs — and the
 #: sweep would prove nothing about ownership.
 ROUTES = [
-    ("get", "/sessions", None),
-    ("post", "/sessions", {"title": "T"}),
-    ("get", f"/sessions/{SESSION_ID}", None),
-    ("patch", f"/sessions/{SESSION_ID}", {"title": "T"}),
-    ("delete", f"/sessions/{SESSION_ID}", None),
-    ("get", f"/sessions/{SESSION_ID}/messages", None),
-    ("delete", f"/sessions/{SESSION_ID}/messages", None),
-    ("get", "/engine/status", None),
-    ("get", "/engine/capabilities", None),
-    ("get", "/engine/available", None),
-    ("get", "/models", None),
-    ("get", "/models/openai/gpt-5.3", None),
-    ("get", "/approvals/mode?session_key=k", None),
-    ("put", "/approvals/mode", {"session_key": "k", "mode": "never"}),
-    ("get", "/approvals/modes", None),
-    ("get", "/connection", None),
+    ("get", "/sessions/{bot}", None),
+    ("post", "/sessions/{bot}", {"title": "T"}),
+    ("get", f"/sessions/{{bot}}/{SESSION_ID}", None),
+    ("patch", f"/sessions/{{bot}}/{SESSION_ID}", {"title": "T"}),
+    ("delete", f"/sessions/{{bot}}/{SESSION_ID}", None),
+    ("get", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
+    ("delete", f"/sessions/{{bot}}/{SESSION_ID}/messages", None),
+    ("get", "/engine/{bot}/status", None),
+    ("get", "/engine/{bot}/capabilities", None),
+    ("get", "/engine/{bot}/available", None),
+    ("get", "/models/{bot}", None),
+    ("get", "/models/{bot}/openai/gpt-5.3", None),
+    ("get", "/approvals/{bot}/mode?session_key=k", None),
+    ("put", "/approvals/{bot}/mode", {"session_key": "k", "mode": "never"}),
+    ("get", "/approvals/{bot}/modes", None),
+    ("get", "/connection/{bot}", None),
 ]
+
+
+def _url(suffix: str, bot: str) -> str:
+    """A sweep entry's full path for *bot*."""
+    return f"/openapi/v1/bots{suffix.format(bot=bot)}"
 
 
 class _FakeConnections:
@@ -120,7 +127,7 @@ def test_a_bot_that_is_not_the_callers_is_a_masked_404(
     client, relay, method, suffix, body
 ):
     kwargs = {"json": body} if body is not None else {}
-    resp = getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    resp = getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
 
     assert resp.status_code == 404, resp.json()
     body = resp.json()
@@ -151,7 +158,7 @@ def test_no_device_is_reached_for_a_foreign_bot(
     it must branch on ``bot_type`` before deciding to forward at all.
     """
     kwargs = {"json": body} if body is not None else {}
-    getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
     assert relay.calls == [], f"{method.upper()} {suffix} reached a device"
     assert connections.built == [], (
         f"{method.upper()} {suffix} built a connection for a foreign bot"
@@ -174,7 +181,7 @@ def test_sessions_does_not_even_attempt_a_forward_for_a_foreign_bot(
     gate is ever moved after the forward.
     """
     kwargs = {"json": body} if body is not None else {}
-    getattr(client, method)(f"/openapi/v1/bots/not-my-bot{suffix}", **kwargs)
+    getattr(client, method)(_url(suffix, "not-my-bot"), **kwargs)
     assert relay.attempts == [], (
         f"{method.upper()} {suffix} tried to forward before checking the bot"
     )

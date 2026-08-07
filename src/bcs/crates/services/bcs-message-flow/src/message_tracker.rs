@@ -2,10 +2,15 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+const TOOL_CALL_START_TTL_MS: u64 = 6 * 60 * 60 * 1000;
+
+#[derive(Clone)]
 pub struct ToolCallStartInfo {
     pub run_id: String,
     pub session_id: String,
+    pub name: String,
     pub args: Value,
+    pub created_at_ms: u64,
 }
 
 /// In-memory tracker coordinating tool call lifecycle and streaming chat
@@ -16,7 +21,8 @@ pub struct ToolCallStartInfo {
 /// flushed as a single INSERT — drastically reducing DB write pressure for
 /// high-frequency per-token delta streams.
 pub struct MessageTracker {
-    /// tool_call_id → ToolCallStartInfo (cached on ToolCallStart, consumed on ToolCallEnd)
+    /// tool_call_id → ToolCallStartInfo (cached on ToolCallStart, cleared when
+    /// the owning run completes or the start event expires)
     tool_call_starts: Mutex<HashMap<String, ToolCallStartInfo>>,
     /// run_id:tool_call_id → first-seen timestamp for coordination echoes.
     coordination_echoes: Mutex<HashMap<String, u64>>,
@@ -76,12 +82,14 @@ impl MessageTracker {
 
     pub async fn cache_tool_call_start(&self, tool_call_id: String, info: ToolCallStartInfo) {
         let mut pending = self.tool_call_starts.lock().await;
+        cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
         pending.insert(tool_call_id, info);
     }
 
-    pub async fn take_tool_call_start(&self, tool_call_id: &str) -> Option<ToolCallStartInfo> {
+    pub async fn get_tool_call_start(&self, tool_call_id: &str) -> Option<ToolCallStartInfo> {
         let mut pending = self.tool_call_starts.lock().await;
-        pending.remove(tool_call_id)
+        cleanup_expired_tool_starts(&mut pending, bcs_protocol::now_ms());
+        pending.get(tool_call_id).cloned()
     }
 
     pub async fn mark_coordination_echo_seen(&self, key: String, now_ms: u64, ttl_ms: u64) -> bool {
@@ -227,6 +235,14 @@ impl MessageTracker {
     /// Clean up all per-run tracking when a run reaches a terminal state.
     /// Returns any pending chat buffer that was not yet flushed.
     pub async fn cleanup_run(&self, run_id: &str) -> Option<String> {
+        let now_ms = bcs_protocol::now_ms();
+        self.tool_call_starts
+            .lock()
+            .await
+            .retain(|_, info| {
+                info.run_id != run_id
+                    && !tool_start_expired(info, now_ms)
+            });
         self.chat_delta_mode.lock().await.remove(run_id);
         self.streaming_thinking_buf.lock().await.remove(run_id);
         self.channel_sender_info.lock().await.remove(run_id);
@@ -235,9 +251,21 @@ impl MessageTracker {
     }
 }
 
+fn cleanup_expired_tool_starts(
+    pending: &mut HashMap<String, ToolCallStartInfo>,
+    now_ms: u64,
+) {
+    pending.retain(|_, info| !tool_start_expired(info, now_ms));
+}
+
+fn tool_start_expired(info: &ToolCallStartInfo, now_ms: u64) -> bool {
+    now_ms.saturating_sub(info.created_at_ms) > TOOL_CALL_START_TTL_MS
+}
+
 #[cfg(test)]
 mod tests {
-    use super::MessageTracker;
+    use super::{MessageTracker, ToolCallStartInfo};
+    use serde_json::Value;
 
     #[tokio::test]
     async fn channel_source_message_ids_are_scoped_to_run_and_cleaned_up() {
@@ -265,6 +293,25 @@ mod tests {
             tracker.channel_source_message_id("run-2").await.as_deref(),
             Some("message-2")
         );
+    }
+
+    #[tokio::test]
+    async fn expired_tool_call_start_is_not_returned() {
+        let tracker = MessageTracker::new();
+        tracker
+            .cache_tool_call_start(
+                "tool-1".to_string(),
+                ToolCallStartInfo {
+                    run_id: "run-1".to_string(),
+                    session_id: "session-1".to_string(),
+                    name: "Bash".to_string(),
+                    args: Value::Null,
+                    created_at_ms: 0,
+                },
+            )
+            .await;
+
+        assert!(tracker.get_tool_call_start("tool-1").await.is_none());
     }
 
     #[tokio::test]

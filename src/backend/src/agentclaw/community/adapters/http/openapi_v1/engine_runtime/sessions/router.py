@@ -1,4 +1,4 @@
-"""Sessions group — ``/openapi/v1/bots/{bot_id}/sessions``.
+"""Sessions group — ``/openapi/v1/bots/sessions/{bot_id}``.
 
 Wraps the engine's ``/api/sessions`` surface. **Private personal bots only** —
 see :func:`_require_private_personal_bot`.
@@ -47,7 +47,7 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/sessions", tags=["sessions"])
+router = APIRouter(prefix="/openapi/v1/bots/sessions", tags=["sessions"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
@@ -322,7 +322,7 @@ def _history_page(
     return n, visible
 
 
-@router.get("", response_model=Envelope[SessionPage])
+@router.get("/{bot_id}", response_model=Envelope[SessionPage])
 @envelope_errors
 async def list_sessions(
     bot_id: str,
@@ -362,7 +362,7 @@ async def list_sessions(
     return page_envelope(total, items, request)
 
 
-@router.post("", status_code=201, response_model=Envelope[Session])
+@router.post("/{bot_id}", status_code=201, response_model=Envelope[Session])
 @envelope_errors
 async def create_session(
     bot_id: str,
@@ -388,7 +388,7 @@ async def create_session(
     return created(_map_session(result.data), request)
 
 
-@router.get("/{session_id}", response_model=Envelope[Session])
+@router.get("/{bot_id}/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def get_session(
     bot_id: str,
@@ -415,7 +415,7 @@ async def get_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.patch("/{session_id}", response_model=Envelope[Session])
+@router.patch("/{bot_id}/{session_id}", response_model=Envelope[Session])
 @envelope_errors
 async def update_session(
     bot_id: str,
@@ -445,7 +445,7 @@ async def update_session(
     return envelope(_map_session(result.data), request)
 
 
-@router.delete("/{session_id}", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}/{session_id}", response_model=Envelope[Deleted])
 @envelope_errors
 async def delete_session(
     bot_id: str,
@@ -464,7 +464,7 @@ async def delete_session(
     return deleted(request)
 
 
-@router.get("/{session_id}/messages", response_model=Envelope[MessagePage])
+@router.get("/{bot_id}/{session_id}/messages", response_model=Envelope[MessagePage])
 @envelope_errors
 async def list_session_messages(
     bot_id: str,
@@ -501,7 +501,7 @@ async def list_session_messages(
     return page_envelope(total, items, request)
 
 
-@router.delete("/{session_id}/messages", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}/{session_id}/messages", response_model=Envelope[Deleted])
 @envelope_errors
 async def clear_session_messages(
     bot_id: str,

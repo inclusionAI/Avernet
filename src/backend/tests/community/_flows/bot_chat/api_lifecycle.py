@@ -54,8 +54,8 @@ BOT_CHAT_LIFECYCLE_FLOWS: list[FlowCase] = [
     ),
     # Flow 2: list with one seeded trace — query returns it. The seed happens
     # in the test runner (out-of-band, not in the flow); the flow asserts the API
-    # surfaces the seeded row. Filter by owner_id="e2e_user" to scope: the route-A
-    # runner injects x-user-id=e2e_user, and the seed (see test_bot_chat_flows.py)
+    # surfaces the seeded row. The route-A runner injects x-user-id=e2e_user,
+    # and the seed (see test_bot_chat_flows.py)
     # writes aw_langfuse_traces.user_id="e2e_user" so the query window matches.
     FlowCase(
         name="bot_chat-list-with-seed",
@@ -63,7 +63,7 @@ BOT_CHAT_LIFECYCLE_FLOWS: list[FlowCase] = [
         steps=[
             FlowStep(
                 method="GET",
-                path="/api/v1/bot-chats?owner_id=e2e_user",
+                path="/api/v1/bot-chats",
                 expect_status=200,
                 # subset assert: cannot pin total without coupling to the test
                 # runner's seed count; instead extract the first session's id
@@ -87,7 +87,7 @@ BOT_CHAT_LIFECYCLE_FLOWS: list[FlowCase] = [
         steps=[
             FlowStep(
                 method="GET",
-                path="/api/v1/bot-chats?owner_id=e2e_user",
+                path="/api/v1/bot-chats",
                 expect_status=200,
                 expect={"success": True},
                 extract={"trace_id_for_detail": "data.sessions.0.id"},

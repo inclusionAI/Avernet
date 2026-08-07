@@ -1,7 +1,7 @@
 """HTTP schemas for session resources."""
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class UploadIntentFile(BaseModel):
@@ -15,7 +15,24 @@ class UploadIntentRequest(BaseModel):
     session_key: str
     scope_type: str
     engine_type: str
+    target_entity_id: str | None = Field(default=None, max_length=128)
+    binding_id: int | None = Field(default=None, ge=1)
     files: list[UploadIntentFile] = Field(min_length=1, max_length=20)
+
+    @field_validator("target_entity_id")
+    @classmethod
+    def normalize_target_entity_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("binding_id", mode="before")
+    @classmethod
+    def reject_boolean_binding_id(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("binding_id must be a positive integer")
+        return value
 
 
 class UploadCompleteRequest(BaseModel):

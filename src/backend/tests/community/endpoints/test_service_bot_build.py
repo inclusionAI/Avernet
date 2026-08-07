@@ -8,17 +8,26 @@ This endpoint exercises the post-R14 sandbox provider through
 The provider's ``base_path`` now comes from ``WorkspaceConfig`` (typed,
 YAML-driven) instead of an ``is_local_mode`` flag.
 
-In the test environment the rsync subprocess does not actually run:
-``_migrate_bot_instance`` early-returns ``False`` when the source
-directory does not exist (which it never does in CI/local-SQLite
-mode), so the build completes cleanly with ``data.success = False``
-while the HTTP envelope returns ``ApiResponse(success=True, ...)``.
-That distinction is what the assertions below verify — the HTTP
-wrapper is the routing concern, the migration outcome is internal data.
+The NAS shell-outs (``sudo chmod`` / ``sudo rsync`` against
+``/home/admin/.merge_nas``) are the one thing no test host can serve, so the
+happy case binds :class:`_LocalShellFreeBuildService` — a subclass that
+overrides that single method and inherits the rest — through the injector.
+Everything the case is actually about still runs for real: the source
+directory genuinely does not exist, so ``_migrate_bot_instance`` takes its
+own early return and the build completes with ``data.success = False`` while
+the HTTP envelope returns ``ApiResponse(success=True, ...)``. That
+distinction is what the assertions below verify — the HTTP wrapper is the
+routing concern, the migration outcome is internal data.
 """
 from __future__ import annotations
 
+import subprocess
+
+from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.service_bot.services.bot_build_service import (
+    BotBuildService,
+)
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
     CaseInput,
@@ -52,15 +61,43 @@ def _seed_build_bot(world):
     )
 
 
-def _patch_build_test_seams() -> None:
-    """Patch NAS migration side effects for endpoint smoke tests only."""
-    from unittest.mock import patch
+class _LocalShellFreeBuildService(BotBuildService):
+    """The real build service with its one subprocess boundary neutralised.
 
-    patch(
-        "agentclaw.community.core.service_bot.services.bot_build_service.BotBuildService._run_local_command",
-        return_value="",
-    ).start()
-    patch("pathlib.Path.exists", return_value=False).start()
+    ``BotBuildService`` shells out (``sudo chmod`` / ``sudo rsync``) against the
+    NAS mount at ``/home/admin/.merge_nas``, which no test host has. That single
+    method is the only thing standing between this endpoint and a hermetic run,
+    so the subclass overrides it and inherits every other line — path
+    computation, the sandbox-provider resolution this test exists to cover, the
+    early return when the source directory is absent, and the response shape.
+
+    Bound through the injector below, so the router resolves it exactly as it
+    resolves the production service: no patching, and no chance of the
+    substitution outliving the case that asked for it.
+    """
+
+    def _run_local_command(
+        self,
+        cmd: list[str],
+        command_name: str,
+        error_message: str,
+        timeout_seconds: float | None = None,
+    ) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+
+def _bind_shell_free_build_service(world) -> None:
+    """Serve ``BotBuildServiceProtocol`` from the shell-free subclass.
+
+    The instance is re-clothed from the injector's own service rather than
+    constructed here, so it carries the production collaborators — the same
+    device service, sandbox registry and path factory — and this file never
+    has to restate that wiring.
+    """
+    wired = world.get(BotBuildServiceProtocol)
+    shell_free = _LocalShellFreeBuildService.__new__(_LocalShellFreeBuildService)
+    shell_free.__dict__.update(wired.__dict__)
+    world.injector.binder.bind(BotBuildServiceProtocol, to=shell_free, scope=None)
 
 
 # ============================================================================
@@ -189,7 +226,9 @@ def build_bot_not_found():
         headers={"x-user-id": "u_owner"},
         json_body={"bot_id": "bot_build", "version": "v1"},
     ),
-    seed=lambda world: (_seed_build_bot(world), _patch_build_test_seams()),
+    seed=lambda world: (
+        _seed_build_bot(world), _bind_shell_free_build_service(world),
+    ),
     expect=ExpectSuccess(
         status=200,
         json_contains={

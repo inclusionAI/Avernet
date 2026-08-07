@@ -25,6 +25,7 @@ class AccessKeyRequest(BaseModel):
     access_key: str
     tenant: str
     expire_at: datetime
+    creator: str = Field(min_length=1)
 
 
 class AppRequest(BaseModel):
@@ -32,6 +33,7 @@ class AppRequest(BaseModel):
     owners: str
     app_type: str = "UNKNOWN"
     tenant: str
+    creator: str = Field(min_length=1)
     status: str = "ACTIVE"
     env: str = ""
     config: dict[str, Any] = Field(default_factory=dict)
@@ -49,7 +51,10 @@ async def issue_access_key(payload: AccessKeyRequest, request: Request) -> JSONR
     issuer = request.app.state.access_key_issuer
     try:
         issued = await issuer.issue(
-            payload.access_key, payload.tenant, payload.expire_at
+            payload.access_key,
+            payload.tenant,
+            payload.expire_at,
+            creator=payload.creator,
         )
     except Exception:
         logger.exception("access key issuance failed")
@@ -74,6 +79,7 @@ async def register_app(payload: AppRequest, request: Request) -> JSONResponse:
             payload.owners,
             payload.app_type,
             payload.tenant,
+            creator=payload.creator,
             status=payload.status,
             env=payload.env,
             config=payload.config,

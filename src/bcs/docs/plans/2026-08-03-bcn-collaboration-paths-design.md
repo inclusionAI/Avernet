@@ -4,6 +4,11 @@
 > [`2026-08-03-bcn-collaboration-prefix-design.md`](./2026-08-03-bcn-collaboration-prefix-design.md).
 > BCN now exposes every V1 operation below `/openapi/v1/collaboration/**`.
 
+> The latest contract also removes the public session completion endpoint and
+> group-participant patch endpoint; Group list is now
+> `GET /openapi/v1/collaboration/bots/{bot_id}/groups` rather than a generic
+> collection read with `view_bot_id`.
+
 **Date:** 2026-08-03
 **Status:** Superseded
 

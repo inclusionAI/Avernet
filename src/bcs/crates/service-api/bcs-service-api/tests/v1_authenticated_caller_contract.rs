@@ -11,7 +11,7 @@ fn authenticated_caller_preserves_all_identity_kinds_without_selecting_an_actor(
         Err(_) => panic!("valid contract timestamp"),
     };
     let caller = AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "user-1".into(),
             username: "alice".into(),
@@ -36,7 +36,7 @@ fn authenticated_caller_preserves_all_identity_kinds_without_selecting_an_actor(
         }),
     };
 
-    assert_eq!(caller.tenant, "tenant-a");
+    assert_eq!(caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(
         caller.user.as_ref().map(|value| value.id.as_str()),
         Some("user-1")
@@ -58,7 +58,7 @@ fn authenticated_caller_preserves_all_identity_kinds_without_selecting_an_actor(
 #[test]
 fn require_human_projects_only_the_authenticated_user() {
     let caller = AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "staff-1".into(),
             username: "alice".into(),
@@ -77,15 +77,35 @@ fn require_human_projects_only_the_authenticated_user() {
 
     let principal = require_human(&caller).expect("caller has User");
     assert_eq!(principal.actor_id(), "human_staff-1");
-    assert_eq!(principal.tenant(), "tenant-a");
+    assert_eq!(principal.tenant(), Some("tenant-a"));
     assert!(principal.scopes().is_empty());
     assert!(matches!(principal, Principal::Human(_)));
 }
 
 #[test]
+fn require_human_preserves_an_absent_user_tenant() {
+    let caller = AuthenticatedCaller {
+        tenant: None,
+        user: Some(AuthenticatedUserIdentity {
+            id: "staff-without-tenant".into(),
+            username: "alice".into(),
+            display_name: None,
+            full_name: None,
+        }),
+        bot: None,
+        app: None,
+        access_key: None,
+    };
+
+    let principal = require_human(&caller).expect("tenantless caller has a User");
+    assert_eq!(principal.actor_id(), "human_staff-without-tenant");
+    assert_eq!(principal.tenant(), None);
+}
+
+#[test]
 fn require_human_rejects_a_valid_caller_without_user() {
     let caller = AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: None,
         bot: Some(AuthenticatedBotIdentity {
             bot_uuid: "bot-only".into(),

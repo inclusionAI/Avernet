@@ -333,6 +333,7 @@ impl GroupProposalService for GroupProposalUseCases {
                     reason: proposal.reason.clone(),
                     session_input: None,
                     task_ledger: None,
+                    driver_delivery: None,
                 },
                 &session.id,
                 &session.participants,

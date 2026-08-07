@@ -450,7 +450,7 @@ async fn update_requires_created_by_and_rejects_descriptor_for_human() {
 }
 
 #[tokio::test]
-async fn mine_applies_reachability_before_pagination_and_callers_without_user_are_forbidden() {
+async fn mine_accepts_tenantless_users_and_callers_without_user_are_forbidden() {
     let fixture = Fixture::new();
     fixture
         .add_bot("reachable", "staff-1", "public", ActorStatus::Online)
@@ -469,10 +469,12 @@ async fn mine_applies_reachability_before_pagination_and_callers_without_user_ar
         .await
         .expect("ensure human");
 
+    let mut tenantless_user = human_caller("staff-1");
+    tenantless_user.tenant = None;
     let page = fixture
         .service
         .list_mine(ListMyBots {
-            caller: human_caller("staff-1"),
+            caller: tenantless_user,
             kind: None,
             name: None,
             status: None,
@@ -514,7 +516,7 @@ async fn invalid_application_inputs_use_stable_codes() {
 
 fn human_caller(staff_no: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
     bcs_service_api::application::v1::AuthenticatedCaller {
-        tenant: "tenant-1".into(),
+        tenant: Some("tenant-1".into()),
         user: Some(bcs_service_api::application::v1::AuthenticatedUserIdentity {
             id: staff_no.to_string(),
             username: staff_no.to_string(),
@@ -529,7 +531,7 @@ fn human_caller(staff_no: &str) -> bcs_service_api::application::v1::Authenticat
 
 fn bot_only_caller(bot_uuid: &str) -> bcs_service_api::application::v1::AuthenticatedCaller {
     bcs_service_api::application::v1::AuthenticatedCaller {
-        tenant: "tenant-1".into(),
+        tenant: Some("tenant-1".into()),
         user: None,
         bot: Some(bcs_service_api::application::v1::AuthenticatedBotIdentity {
             bot_uuid: bot_uuid.into(),

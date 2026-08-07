@@ -40,6 +40,7 @@ class TestSkillServiceAsyncRouting:
             mock_repo.get_bot_local_by_name.return_value = None
             mock_repo.create.side_effect = lambda data: {"id": "1", **data}
             mock_repo.get_by_name_global.return_value = None
+        mock_repo.list_skill_set_references.return_value = []
 
         service = SkillService(
             skill_repo=mock_repo,
@@ -399,6 +400,7 @@ class TestSkillServiceAsyncRouting:
             "bolt_id": "bot1", "user_id": "user1"
         }
         mock_repo.delete.return_value = True
+        mock_repo.list_skill_set_references.return_value = []
 
         service = SkillService(
             skill_repo=mock_repo,

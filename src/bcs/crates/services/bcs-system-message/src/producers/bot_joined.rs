@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_domain::{
-    DeliveryType, Group, GroupMessage, Participant, Skill, SystemMessageEvent,
+    DeliveryType, Group, GroupMessage, Participant, PersistMode, Skill, SystemMessageEvent,
     SystemMessageEventKind, SystemGroupMessage,
 };
 use bcs_service_api::{
@@ -43,39 +43,43 @@ impl SystemMessageProducerService for BotJoinedMessageProducer {
         group: &Group,
         registry: &dyn BotRegistryCoreService,
         participants: &[Participant],
-    ) -> Vec<SystemGroupMessage> {
+    ) -> (Vec<SystemGroupMessage>, Option<String>) {
         let SystemMessageEvent::BotJoined { actor, .. } = event else {
-            return vec![];
+            return (vec![], None);
         };
 
         let new_bot_uuid = actor.bot_uuid.clone();
         let mut messages = Vec::new();
 
-        // 1. Full context injection to the newly joined bot.
+        // 1. Full context injection to the newly joined bot (personalized,
+        // persisted with owner = the new bot only).
         let new_bot_content =
             build_context_injection_message(group, participants, &new_bot_uuid, registry, &*self.history).await;
         messages.push(SystemGroupMessage {
             recipients: vec![new_bot_uuid.clone()],
             message: new_bot_content,
             delivery_type: DeliveryType::Inject,
+            persist: PersistMode::PerRecipient,
         });
 
-        // 2. Notification to other bots.
+        // 2. Notification to other bots — identical text for every recipient,
+        // so persist a single public record (owner = None) that human viewers
+        // also read in history.
         let registered = registry.get(&new_bot_uuid).await;
         let summary = format_notification(&new_bot_uuid, registered.as_ref());
+        let user_message = Some(summary.clone());
         let others: Vec<String> = participants
             .iter()
             .filter(|p| p.bot_uuid != new_bot_uuid)
             .map(|p| p.bot_uuid.clone())
             .collect();
-        if !others.is_empty() {
-            messages.push(SystemGroupMessage {
-                recipients: others,
-                message: summary,
-                delivery_type: DeliveryType::Inject,
-            });
-        }
-        messages
+        messages.push(SystemGroupMessage {
+            recipients: others,
+            message: summary,
+            delivery_type: DeliveryType::Inject,
+            persist: PersistMode::Public,
+        });
+        (messages, user_message)
     }
 }
 
