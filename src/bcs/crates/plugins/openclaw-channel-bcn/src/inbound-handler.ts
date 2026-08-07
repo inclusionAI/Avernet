@@ -1008,6 +1008,15 @@ export async function handleChatSend(
     // from assistant agent events so BCS sees the same visible reply stream.
     const finalDeliveredParts: string[] = [];
     const blockDeliveredParts: string[] = [];
+    const replyOptions = {
+      runId,
+      abortSignal: abortController.signal,
+      disableBlockStreaming: false,
+      sourceReplyDeliveryMode: 'automatic' as const,
+      onAgentRunStart: (agentRunId: string) => {
+        bindAgentRun(runId, agentRunId, log);
+      },
+    };
 
     // Dispatch via SDK's buffered block dispatcher
     await rt.channel.reply.dispatchReplyWithBufferedBlockDispatcher({
@@ -1037,15 +1046,7 @@ export async function handleChatSend(
         },
       },
       // Pass our runId so SDK uses it for agent events — enables runContexts lookup
-      replyOptions: {
-        runId,
-        abortSignal: abortController.signal,
-        disableBlockStreaming: false,
-        sourceReplyDeliveryMode: 'automatic',
-        onAgentRunStart: (agentRunId: string) => {
-          bindAgentRun(runId, agentRunId, log);
-        },
-      },
+      replyOptions,
     });
 
     const settledContext = runContexts.get(runId);

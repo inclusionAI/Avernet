@@ -231,8 +231,11 @@ export function createBcsPlugin(options: BcsChannelPluginOptions = {}) {
           const sessionCfg = currentCfg.session && typeof currentCfg.session === 'object'
             ? currentCfg.session as { store?: unknown }
             : undefined;
+          const configuredStore = typeof sessionCfg?.store === 'string'
+            ? sessionCfg.store
+            : undefined;
           // Resolve store path - this will use the correct profile data dir
-          const storePath = rt.channel.session.resolveStorePath(sessionCfg?.store, {
+          const storePath = rt.channel.session.resolveStorePath(configuredStore, {
             agentId: 'main',
           });
           // Extract data directory from store path (go up from agents/main/sessions)
