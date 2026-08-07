@@ -35,11 +35,11 @@ Paths are relative to `src/backend/`.
   Define `DEFAULT_ATTEMPTS = 2`, `DEFAULT_BACKOFF_SECONDS = 0.1`, and a module-
   private jitter fraction. Export the public names via `__all__`.
 
-- [ ] **A6. Write `tests/community/utils/test_retry.py`** covering every bullet
+- [x] **A6. Write `tests/community/utils/test_retry.py`** covering every bullet
   in plan.md § _Test plan → New — test_retry.py_. Patch `time.sleep` so the
   suite does not actually wait.
 
-- [ ] **A7. Run** `tests/community/utils/test_retry.py` → green.
+- [x] **A7. Run** `tests/community/utils/test_retry.py` → green.
 
 ---
 
