@@ -374,6 +374,7 @@ def _upload_skill_di_app(
     bot_service=None,
     device_id=None,
     bot_owner_id=None,
+    engine_type="openclaw",
 ):
     bot_owner_id = bot_owner_id or mock_ctx.user_id
     mock_skill_service = MagicMock()
@@ -414,7 +415,7 @@ def _upload_skill_di_app(
         "owner_id": bot_owner_id,
         "entity_id": f"staff_{bot_owner_id}",
         "env": "local",
-        "active_engine": "openclaw",
+        "active_engine": engine_type,
         "bot_type": bot_type,
         "status": bot_status,
     }
@@ -630,6 +631,45 @@ class TestUploadSkillValidation:
             assert create_kwargs["entity_id"] == mock_ctx.user_id
             assert create_kwargs["bot_id"] == mock_ctx.bot_id
             assert create_kwargs["engine_type"] == "openclaw"
+
+    @pytest.mark.parametrize("engine_type", ["openclaw", "claude_code", "hermes"])
+    def test_desktop_upload_preserves_engine_and_bot_scope(
+        self, engine_type
+    ):
+        desktop_ctx = RequestContext(
+            user_id="desktop-owner",
+            bot_id=f"desktop-{engine_type}",
+        )
+        with _upload_skill_di_app(
+            desktop_ctx,
+            bot_status="ACTIVE",
+            bot_type="desktop",
+            engine_type=engine_type,
+        ) as (client, mock_svc, _, mock_factory):
+            # Real persistence returns ``bolt_id`` for the owning Bot; it does
+            # not populate the legacy response-only ``bot_id`` alias.
+            mock_svc.upload_skill.return_value.pop("bot_id")
+
+            response = client.post(
+                "/api/skills/upload",
+                files=[
+                    (
+                        "files",
+                        (
+                            "SKILL.md",
+                            b"---\nname: a\ndescription: a\n---",
+                            "text/markdown",
+                        ),
+                    )
+                ],
+                data={"file_paths": json.dumps(["SKILL.md"])},
+            )
+
+            assert response.status_code == 200, response.text
+            assert response.json()["data"]["bot_id"] == desktop_ctx.bot_id
+            create_kwargs = mock_factory.create.call_args.kwargs
+            assert create_kwargs["bot_id"] == desktop_ctx.bot_id
+            assert create_kwargs["engine_type"] == engine_type
 
     def test_upload_normalizes_runtime_unavailable_error_message(self, mock_ctx):
         with _upload_skill_di_app(mock_ctx, bot_status="ACTIVE") as (client, mock_svc, _, _):
