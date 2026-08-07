@@ -107,10 +107,10 @@ class ResultStatusTest(unittest.TestCase):
             "INCOMPLETE_SKIPPED_RUNTIME",
         )
 
-    def test_skipped_typecheck_remains_a_non_blocking_warning(self) -> None:
+    def test_skipped_optional_typecheck_does_not_degrade_status(self) -> None:
         self.assertEqual(
             apply_skipped_phase_status("PASS", ["typecheck"]),
-            "PASS_WITH_WARNINGS",
+            "PASS",
         )
 
     def test_reports_source_type_drift_as_a_non_blocking_warning(self) -> None:

@@ -61,6 +61,8 @@ started but never reached the local model endpoint. Missing or
 infrastructure-failed rows make the aggregate report incomplete and fail the
 command.
 
-`--skip-typecheck` skips only the optional source type-drift diagnostic.
+`--skip-typecheck` skips only the optional source type-drift diagnostic and
+does not degrade an otherwise successful result from `PASS`. The report still
+records `typecheck` in `skipped_phases`.
 `--skip-runtime` is useful for diagnosis, but produces
 `INCOMPLETE_SKIPPED_RUNTIME` and cannot prove compatibility.

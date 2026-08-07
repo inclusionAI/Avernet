@@ -565,8 +565,6 @@ def apply_skipped_phase_status(status: str, skipped_phases: list[str]) -> str:
         return status
     if "runtime" in skipped_phases:
         return "INCOMPLETE_SKIPPED_RUNTIME"
-    if skipped_phases and status == "PASS":
-        return "PASS_WITH_WARNINGS"
     return status
 
 
