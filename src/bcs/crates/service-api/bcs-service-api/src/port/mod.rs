@@ -33,6 +33,10 @@ pub use metrics::{
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
+    AuthzDecisionLogRepoPort, CapabilityCatalogRepoPort, EdgeGrantRepoPort,
+    PermissionProfileRepoPort, PermissionRequestRepoPort,
+};
+pub use repo::{
     BotRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     FriendRepoPort, FriendRequestRepoPort,

@@ -1,0 +1,525 @@
+<!-- 历史归档 / 非实现基线：本文记录早期讨论方案，可能包含已废弃的 role、edge_id 下发、permission_profiles[] / rules_grants[] 拆分、extra_rules 等设计。实现请以 2026-08-07 final design / implementation spec 为准。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2A 权限传递与授权申请讲解稿 · 2026-08-05</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg:#f6f7fb; --card:#ffffff; --text:#1f2329; --muted:#667085; --border:#d9dee8;
+    --blue:#2563eb; --blue-bg:#eaf1ff; --blue-dark:#1e40af;
+    --orange:#c05621; --orange-bg:#fff3e8;
+    --purple:#7c3aed; --purple-bg:#f2ecff;
+    --green:#15803d; --green-bg:#e9fbef;
+    --red:#c53030; --red-bg:#fff0f0;
+    --yellow:#b7791f; --yellow-bg:#fff8df;
+    --teal:#0f766e; --teal-bg:#e6fffb;
+    --gray:#475467; --gray-bg:#f2f4f7;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif;
+    line-height:1.65;
+  }
+  .wrap { max-width:1180px; margin:0 auto; padding:30px 34px 72px; }
+  header {
+    border-radius:18px; padding:34px 38px; color:white; margin-bottom:24px;
+    background:linear-gradient(135deg,#1e40af 0%,#2563eb 58%,#7c3aed 100%);
+    box-shadow:0 10px 28px rgba(37,99,235,.22);
+  }
+  header h1 { margin:0 0 8px; font-size:31px; letter-spacing:.2px; }
+  header .subtitle { font-size:17px; opacity:.94; }
+  header .meta { margin-top:18px; display:flex; gap:12px; flex-wrap:wrap; font-size:13px; }
+  header .meta span { background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.22); border-radius:999px; padding:4px 10px; }
+
+  section { background:var(--card); border:1px solid #edf0f5; border-radius:16px; padding:26px 30px; margin:20px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+  h2 { margin:0 0 18px; color:var(--blue-dark); font-size:23px; border-bottom:2px solid var(--blue-bg); padding-bottom:10px; }
+  h3 { margin:22px 0 10px; color:var(--orange); font-size:18px; }
+  h4 { margin:16px 0 8px; color:var(--blue-dark); font-size:15px; }
+  p { margin:9px 0; }
+  code { background:#eef2f7; color:#1e3a8a; border-radius:5px; padding:1px 6px; font-size:.9em; }
+  .lead { color:var(--muted); font-size:15px; }
+  .small { color:var(--muted); font-size:13px; }
+  .big-point { font-size:18px; font-weight:800; color:#111827; }
+
+  .toc { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .toc-card { border-radius:14px; padding:15px 16px; border:1px solid var(--border); background:#fff; }
+  .toc-card b { display:block; color:var(--blue-dark); margin-bottom:4px; }
+  @media(max-width:980px){ .toc{grid-template-columns:1fr 1fr;} }
+  @media(max-width:640px){ .toc{grid-template-columns:1fr;} }
+
+  .callout { border-radius:12px; padding:14px 17px; margin:14px 0; background:var(--blue-bg); border-left:5px solid var(--blue); }
+  .ok { background:var(--green-bg); border-left-color:var(--green); }
+  .warn { background:var(--yellow-bg); border-left-color:var(--yellow); }
+  .deny { background:var(--red-bg); border-left-color:var(--red); }
+  .neutral { background:var(--gray-bg); border-left-color:var(--gray); }
+
+  .mgraph { display:flex; justify-content:center; overflow-x:auto; padding:6px 0 2px; margin:8px 0; }
+  .mgraph .mermaid { min-width:720px; max-width:none; padding:6px; }
+  .mgraph.mid .mermaid { min-width:880px; }
+  .mgraph.seq .mermaid { min-width:860px; font-size:12px; }
+  .mgraph.small .mermaid { min-width:620px; }
+  .mgraph.wide .mermaid { min-width:1040px; }
+
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media(max-width:980px){ .grid2,.grid3{grid-template-columns:1fr;} }
+  .card { border:1px solid var(--border); border-radius:14px; padding:15px 16px; background:#fff; }
+  .card h3, .card h4 { margin-top:0; }
+  .card.allow { border-color:#9bd7af; background:linear-gradient(180deg,#f4fff7 0%,#fff 78%); }
+  .card.block { border-color:#f2b8b8; background:linear-gradient(180deg,#fff6f6 0%,#fff 78%); }
+  .card.tbd { border-color:#f4d47e; background:linear-gradient(180deg,#fffaf0 0%,#fff 78%); }
+  .card.info { border-color:#b8cef8; background:linear-gradient(180deg,#f6f9ff 0%,#fff 78%); }
+  .card.purple { border-color:#ccb8f8; background:linear-gradient(180deg,#fbf8ff 0%,#fff 78%); }
+
+  .tag { display:inline-block; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; margin-right:5px; }
+  .tag-ok { color:var(--green); background:var(--green-bg); }
+  .tag-deny { color:var(--red); background:var(--red-bg); }
+  .tag-info { color:var(--blue-dark); background:var(--blue-bg); }
+  .tag-warn { color:var(--yellow); background:var(--yellow-bg); }
+  .tag-purple { color:var(--purple); background:var(--purple-bg); }
+
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+  th,td { border-bottom:1px solid var(--border); padding:10px 12px; text-align:left; vertical-align:top; }
+  th { background:var(--blue-bg); color:var(--blue-dark); }
+
+  .rule {
+    background:#111827; color:#e5e7eb; border-radius:12px; padding:15px 18px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px;
+    white-space:pre; overflow-x:auto; line-height:1.75; margin:12px 0;
+  }
+  .quote { font-size:18px; font-weight:800; padding:14px 18px; background:var(--purple-bg); border-radius:14px; border-left:5px solid var(--purple); }
+  .footer-note { color:var(--muted); text-align:center; margin-top:22px; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>A2A 权限传递与授权申请讲解稿</h1>
+  <div class="subtitle">把“好友申请 / 角色申请”和“A2A 消息时鉴权”拆成几张小图讲清楚，避免一张大图承载所有细节。</div>
+  <div class="meta">
+    <span>日期：2026-08-05</span>
+    <span>类型：会议 briefing HTML</span>
+    <span>来源：a2a-permission-and-grant-workflow.md</span>
+    <span>重点：申请流程 + A2A 鉴权流程</span>
+  </div>
+</header>
+
+<section>
+  <h2>0. 先讲一句话</h2>
+  <div class="quote">申请流程解决“EdgeGrant 从哪里来”；A2A 鉴权流程解决“已批准的 EdgeGrant 在消息时怎么被安全使用”。</div>
+  <div class="toc" style="margin-top:16px;">
+    <div class="toc-card"><b>1. 概念拆分</b>ConnectRequest、RoleGrantRequest、EdgeGrant 不是同一个东西。</div>
+    <div class="toc-card"><b>2. 申请流程</b>加好友第一步；第二步可选申请角色；最终生成 approved EdgeGrant。</div>
+    <div class="toc-card"><b>3. A2A 鉴权流程</b>BCS 注入瘦引用；Bot 本地用 version-pinned cache 鉴权。</div>
+    <div class="toc-card"><b>4. 异常与更新</b>cache miss 就拉取；拉不到 deny；role 更新不影响旧 edge。</div>
+  </div>
+</section>
+
+<section>
+  <h2>1. 三个对象先分清楚</h2>
+  <p class="lead">给别人讲时先不要进入缓存、digest、版本钉。先把三个对象讲清楚：申请单不是授权事实，真正用于 A2A 鉴权的是 approved EdgeGrant。</p>
+
+  <div class="mgraph mid">
+<pre class="mermaid">
+flowchart LR
+  Discover["Discovery / Agent Card\n前端发现 Bot"]
+  Connect["ConnectRequest\n申请加好友 / 建立基础关系"]
+  RoleReq["RoleGrantRequest\n可选申请额外角色"]
+  Edge["Approved EdgeGrant\n最终授权事实"]
+  A2A["A2A Authz\n消息时只看 approved edge"]
+
+  Discover --> Connect
+  Connect --> Edge
+  Connect --> RoleReq
+  RoleReq --> Edge
+  Edge --> A2A
+
+  classDef info fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef req fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  classDef edge fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef a2a fill:#f2ecff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  class Discover info
+  class Connect,RoleReq req
+  class Edge edge
+  class A2A a2a
+</pre>
+  </div>
+
+  <div class="grid3">
+    <div class="card info">
+      <h3>ConnectRequest</h3>
+      <p><b>语义：</b>A 想和 B 建立基础关系。</p>
+      <p><b>审批后：</b>通常生成 <code>A→B role=default</code> 的基础 EdgeGrant。</p>
+    </div>
+    <div class="card info">
+      <h3>RoleGrantRequest</h3>
+      <p><b>语义：</b>A 想额外获得 B 的某个角色能力。</p>
+      <p><b>审批后：</b>生成对应 role 的 version-pinned EdgeGrant。</p>
+    </div>
+    <div class="card allow">
+      <h3>EdgeGrant</h3>
+      <p><b>语义：</b>授权事实，不是申请单。</p>
+      <p><b>A2A：</b>只有 approved EdgeGrant 才能进入 <code>active_grants</code>。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>2. 申请流程 A：只加好友，不申请角色</h2>
+  <p class="lead">这是最简单路径。用户只想先建立基础关系，第二步跳过角色申请。</p>
+
+  <div class="mgraph seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User A
+  participant FE as Frontend
+  participant BCS as BCS
+  participant O as Bot B Owner
+  participant DB as BCS DB
+
+  U->>FE: 点击 Connect Bot B
+  FE->>U: Step 1 填写好友申请
+  U->>FE: 提交 ConnectRequest
+  FE->>BCS: Create ConnectRequest(A, B)
+  BCS->>DB: 持久化 ConnectRequest(status=pending)
+  BCS->>O: 通知 owner 审批
+  O->>BCS: Approve Connect
+  BCS->>DB: ConnectRequest(status=approved)
+  BCS->>DB: 创建 EdgeGrant A→B role=default, status=approved
+</pre>
+  </div>
+
+  <div class="callout ok"><b>讲解重点：</b>只加好友也会产生授权边，但这条边通常只是 <code>default</code> 基础角色，不代表拿到所有能力。</div>
+</section>
+
+<section>
+  <h2>3. 申请流程 B：加好友后，可选申请角色</h2>
+  <p class="lead">mentor 定下来的产品形态：加好友第一步；第二步出现角色申请，可选，可以跳过。</p>
+
+  <div class="mgraph seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User A
+  participant FE as Frontend
+  participant BCS as BCS
+  participant O as Bot B Owner
+  participant DB as BCS DB
+
+  U->>FE: 点击 Connect Bot B
+  FE->>U: Step 1 好友申请
+  U->>FE: 填写申请说明
+  FE->>U: Step 2 展示可申请角色列表
+
+  alt 用户跳过角色申请
+    U->>FE: 跳过，只申请好友
+    FE->>BCS: Create ConnectRequest(A, B)
+  else 用户选择角色
+    U->>FE: 勾选 reader / writer 等角色
+    FE->>BCS: Create ConnectRequest(A, B)
+    FE->>BCS: Create RoleGrantRequests(role_def_ids)
+  end
+
+  BCS->>DB: 持久化申请单
+  BCS->>O: 合并展示待审批事项
+  O->>BCS: 审批 Connect / Role Requests
+  BCS->>DB: 通过项生成 approved EdgeGrant
+</pre>
+  </div>
+
+  <div class="grid2">
+    <div class="card info">
+      <h3><span class="tag tag-info">前端</span>可以是一个连续流程</h3>
+      <p>用户感觉上是在一次 Connect 流程里完成好友申请和角色申请，第二步可选。</p>
+    </div>
+    <div class="card purple">
+      <h3><span class="tag tag-purple">后端</span>仍然拆成不同申请单</h3>
+      <p><code>ConnectRequest</code> 和 <code>RoleGrantRequest</code> 分开持久化；审批通过后才生成 <code>EdgeGrant</code>。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4. 申请流程 C：已连接后再申请角色</h2>
+  <p class="lead">用户已经是好友后，不需要重新 Connect。直接在 Bot Profile 里申请更多角色。</p>
+
+  <div class="mgraph seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant U as User A
+  participant FE as Frontend
+  participant BCS as BCS
+  participant O as Bot B Owner
+  participant DB as BCS DB
+
+  U->>FE: 打开 Bot B Profile
+  FE->>BCS: Query Bot B roles
+  BCS->>DB: Load role_defs of B
+  BCS-->>FE: 返回角色列表和当前拥有状态
+  U->>FE: 申请 writer 角色
+  FE->>BCS: Create RoleGrantRequest(role_writer@latest)
+  BCS->>O: 按 approver_policy 进入审批
+  O->>BCS: Approve
+  BCS->>DB: Create/Update EdgeGrant A→B role=writer, role_def_version pinned
+</pre>
+  </div>
+
+  <div class="callout"><b>讲解重点：</b>Connect 是建立关系；Role Request 是增加能力。已连接后新增能力只走 Role Request。</div>
+</section>
+
+<section>
+  <h2>5. 从申请到 A2A：中间只交接 EdgeGrant</h2>
+  <p class="lead">这张图专门讲两个部分怎么衔接：申请流程的产物是 EdgeGrant；A2A 鉴权只消费 EdgeGrant。</p>
+
+  <div class="mgraph wide">
+<pre class="mermaid">
+flowchart LR
+  subgraph Apply["申请 / 审批阶段"]
+    CR["ConnectRequest"]
+    RR["RoleGrantRequest"]
+    Approval["Owner / Policy Approve"]
+    CR --> Approval
+    RR --> Approval
+  end
+
+  subgraph Fact["授权事实阶段"]
+    E1["EdgeGrant A→B\nrole=default\nstatus=approved"]
+    E2["EdgeGrant A→B\nrole=writer\nrole_def_version=7\nedge_version=12"]
+  end
+
+  subgraph Runtime["A2A 运行时"]
+    Msg["A sends message to B
+只触发一次运行时鉴权"]
+    Active["BCS computes active_grants
+查询 approved EdgeGrants"]
+    Local["B local authorization"]
+  end
+
+  Approval --> E1
+  Approval --> E2
+  Msg --> Active
+  E1 --> Active
+  E2 --> Active
+  Active --> Local
+
+  classDef apply fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  classDef fact fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef runtime fill:#f2ecff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  class CR,RR,Approval apply
+  class E1,E2 fact
+  class Msg,Active,Local runtime
+</pre>
+  </div>
+
+  <div class="rule">申请单状态 approved ≠ A2A 直接放行
+EdgeGrant 也不是包在 A 的消息里发给 B
+
+A sends message to B 只是触发运行时鉴权：
+  BCS 查询 approved EdgeGrants
+  → 过滤 status / env / expires_at / originator_policy
+  → 生成 active_grant refs
+  → 再下发给 B 本地鉴权</div>
+</section>
+
+<section>
+  <h2>6. A2A 鉴权流程 A：BCS 只注入 active grant refs</h2>
+  <p class="lead">这张图讲“消息里传什么”。关键是：A2A 不传完整 rules，只传 BCS 算出来的瘦引用。</p>
+
+  <div class="mgraph seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant A as Caller A
+  participant BCS as BCS Router/Authz
+  participant DB as BCS DB
+  participant B as Target Bot B
+
+  A->>BCS: Send A2A message to B
+  BCS->>BCS: Resolve caller / target / task_id / originator
+  BCS->>DB: Query approved A→B edge grants
+  DB-->>BCS: Edge grants
+  BCS->>BCS: Filter env / status / expires_at / originator_policy
+  BCS->>BCS: Build active_grant refs
+  BCS->>B: Forward message + AuthzContext(active_grant_refs)
+</pre>
+  </div>
+
+  <div class="grid2">
+    <div class="card allow">
+      <h3><span class="tag tag-ok">传</span>瘦引用</h3>
+      <div class="rule">active_grant_ref = {
+  edge_id,
+  edge_version,
+  edge_digest,
+  role_def_id,
+  role_def_version,
+  platform_guard_version
+}</div>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">不传</span>完整权限</h3>
+      <ul>
+        <li>不传完整 role rules</li>
+        <li>不传完整 edge extra_rules</li>
+        <li>不信 caller 自声明权限</li>
+        <li>不把 B 的完整权限集暴露进消息</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>7. A2A 鉴权流程 B：Bot 本地如何拼出鉴权集</h2>
+  <p class="lead">这张图讲“B 收到 refs 后怎么鉴权”。B 用本地 version-pinned cache 拼出 permission_set；缺缓存就拉 BCS，拉不到就拒绝。</p>
+
+  <div class="mgraph mid">
+<pre class="mermaid">
+flowchart TD
+  Ctx["Read AuthzContext.active_grants"]
+  Edge["Load edge_grant@version\n(edge_id, edge_version)"]
+  Role["Load role_def@version\n(role_def_id, role_def_version)"]
+  Guard["Load platform_guard@version"]
+  Check["Check digest / from / to / status / expires"]
+  Compose["Compose permission_set"]
+  Tool["before_tool_call"]
+  Allow["Allow"]
+  Deny["Deny"]
+
+  Ctx --> Edge --> Check
+  Ctx --> Role --> Compose
+  Ctx --> Guard --> Compose
+  Check --> Compose
+  Compose --> Tool
+  Tool -->|match allow and no guard deny| Allow
+  Tool -->|no rule / deny / invalid| Deny
+
+  classDef cache fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef check fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  classDef ok fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef bad fill:#fff0f0,stroke:#c53030,stroke-width:2px,color:#7f1d1d
+  class Edge,Role,Guard cache
+  class Check,Compose,Tool check
+  class Allow ok
+  class Deny bad
+</pre>
+  </div>
+
+  <div class="rule">permission_set =
+  platform_guard_rules@version
+  + role_def@version.rules_template
+  + edge_grant@version.extra_rules</div>
+</section>
+
+<section>
+  <h2>8. A2A 鉴权流程 C：缓存 miss / 版本不匹配怎么办</h2>
+  <p class="lead">这张图专门讲异常路径。安全闭环不是靠 BCS 主动下发，而是靠按需拉取；拉取失败就 deny。</p>
+
+  <div class="mgraph mid">
+<pre class="mermaid">
+flowchart TD
+  Ref["A2A active_grant_ref"]
+  Cache{"本地 cache 命中且版本匹配?"}
+  Digest{"digest / 字段校验通过?"}
+  Pull["Pull version-pinned snapshot from BCS"]
+  PullOk{"拉取成功且校验通过?"}
+  Build["Build permission_set"]
+  Deny["Deny"]
+
+  Ref --> Cache
+  Cache -- Yes --> Digest
+  Cache -- No --> Pull
+  Digest -- Yes --> Build
+  Digest -- No --> Pull
+  Pull --> PullOk
+  PullOk -- Yes --> Build
+  PullOk -- No --> Deny
+
+  classDef ok fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef bad fill:#fff0f0,stroke:#c53030,stroke-width:2px,color:#7f1d1d
+  classDef work fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  class Build ok
+  class Deny bad
+  class Ref,Cache,Digest,Pull,PullOk work
+</pre>
+  </div>
+
+  <div class="grid2">
+    <div class="card allow">
+      <h3>拉取是安全闭环</h3>
+      <p>Bot 本地缺少 <code>edge_grant@version</code>、<code>role_def@version</code> 或 <code>platform_guard@version</code> 时，向 BCS 拉取钉住版本。</p>
+    </div>
+    <div class="card block">
+      <h3>下发只是性能优化</h3>
+      <p>WebSocket/control channel 可以做预热和失效通知，但通知失败不会越权；下一次 miss 会拉取，拉不到就 deny。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>9. 版本钉：owner 改 role 不影响旧 edge</h2>
+  <p class="lead">这张图专门讲之前最容易误解的一点：旧 edge 不会自动套用 latest role。</p>
+
+  <div class="mgraph mid">
+<pre class="mermaid">
+flowchart LR
+  R7["role_writer@7"]
+  E12["edge_123@12\npins role_writer@7"]
+  AuthOld["旧消息鉴权\nrole_writer@7 + edge_123@12.extra_rules"]
+  Edit["owner edits writer role"]
+  R8["role_writer@8 latest"]
+  Reapply["explicit reapply / upgrade"]
+  E13["edge_123@13\npins role_writer@8"]
+  AuthNew["新消息鉴权\nrole_writer@8 + edge_123@13.extra_rules"]
+
+  R7 --> E12 --> AuthOld
+  Edit --> R8
+  R8 -. "不会自动影响" .-> E12
+  R8 --> Reapply --> E13 --> AuthNew
+
+  classDef old fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef new fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef warn fill:#fff8df,stroke:#b7791f,stroke-width:2px,color:#744210
+  class R7,E12,AuthOld old
+  class R8,E13,AuthNew new
+  class Edit,Reapply warn
+</pre>
+  </div>
+
+  <div class="callout warn"><b>讲解重点：</b>role 更新只产生新 role_def version；旧 edge 继续钉旧版本。只有显式 reapply / upgrade 后，才产生新的 edge_version。</div>
+</section>
+
+<section>
+  <h2>10. 讲解时建议按这个顺序</h2>
+  <table>
+    <tr><th>顺序</th><th>讲什么</th><th>一句话</th></tr>
+    <tr><td>1</td><td>概念拆分</td><td>申请单不是授权事实；approved EdgeGrant 才是事实。</td></tr>
+    <tr><td>2</td><td>申请流程</td><td>加好友第一步，第二步可选申请角色。</td></tr>
+    <tr><td>3</td><td>申请到 A2A 的交接</td><td>审批通过生成 EdgeGrant，A2A 只消费 EdgeGrant。</td></tr>
+    <tr><td>4</td><td>A2A 消息里传什么</td><td>BCS 只注入 active grant refs，不传完整权限。</td></tr>
+    <tr><td>5</td><td>Bot 本地怎么鉴权</td><td>用 edge_grant@version + role_def@version + platform_guard@version 拼权限集。</td></tr>
+    <tr><td>6</td><td>异常和更新</td><td>缺缓存就拉，拉不到 deny；旧 edge 不自动套 latest role。</td></tr>
+  </table>
+  <div class="callout ok"><b>最终结论：</b>产品上是两步申请；安全运行时是 BCS 算 refs、Bot 本地按版本钉鉴权。两部分通过 approved EdgeGrant 衔接。</div>
+</section>
+
+<div class="footer-note">A2A Permission & Grant Workflow Briefing · 2026-08-05 · small diagrams, clear story</div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad:true,
+    securityLevel:'loose',
+    theme:'base',
+    flowchart:{ curve:'basis', htmlLabels:true },
+    sequence:{ mirrorActors:false, useMaxWidth:false },
+    themeVariables:{
+      fontFamily:'-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif',
+      primaryColor:'#eaf1ff', primaryTextColor:'#1f2329', primaryBorderColor:'#2563eb',
+      lineColor:'#667085', tertiaryColor:'#f8fafc'
+    }
+  });
+</script>
+</body>
+</html>

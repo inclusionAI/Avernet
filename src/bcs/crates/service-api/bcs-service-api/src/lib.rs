@@ -31,6 +31,12 @@ pub use actors::{
     WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::authorization::{
+    AuthorizationService, AuthorizationUseCaseError, CreatePermissionRequestCommand,
+    DecidePermissionRequestCommand, DeletePermissionProfileCommand, ListPermissionProfilesCommand,
+    ListPermissionRequestsCommand, PermissionGrantDecisionView, ResolvePermissionProfileCommand,
+    ResolveRulesGrantCommand, UpsertPermissionProfileCommand,
+};
 pub use application::message_log::{
     MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
     MessageLogTargetSummary, MESSAGE_LOG_CONTENT_MAX_BYTES, MESSAGE_LOG_SCHEMA_VERSION,
@@ -131,6 +137,8 @@ pub use application::{
     RegisterProviderOutcome, UpdateProviderCommand,
 };
 pub use port::{
+    AuthzDecisionLogRepoPort, CapabilityCatalogRepoPort, EdgeGrantRepoPort,
+    PermissionProfileRepoPort, PermissionRequestRepoPort,
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
@@ -161,6 +169,11 @@ pub use workbench_use_cases::{
 };
 
 pub use types::{
+    AuthzContextType, AuthzDecision, AuthzDecisionLog, AuthzGrantRef, AuthzRuntimeContext,
+    Capability, CapabilitySource, CapabilityStatus, Decision, EdgeGrant, EdgeGrantStatus,
+    GrantKind, GrantRef, GrantSource, GrantStatus, PermissionProfile, PermissionProfileStatus,
+    PermissionRequest, PermissionRequestKind, PermissionRequestStatus, Rule, RuleDecision,
+    RuleEffect, RulesGrantMaterial, RuntimeContext,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderCredential, ProviderRecord, RedactedToken,
@@ -176,6 +189,7 @@ pub use types::{
 };
 
 pub use core::{
+    AuthzContext, AuthzContextBuilderCoreService, BuildA2aAuthzContextRequest,
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
     BotCapabilities, BotConnectParams, BotConnectResult, BotDynamicStatus, BotRegistryCoreService,
     BotSendResult, ChatEventRouting, ConnectError, ConnectionKind, ContextBotSummary, HiddenMentionInfo,

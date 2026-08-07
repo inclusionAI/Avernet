@@ -1,3 +1,4 @@
+pub mod authorization;
 pub mod bot;
 pub mod collaboration_template;
 pub mod collaboration;
@@ -9,6 +10,7 @@ pub mod relation;
 pub mod session;
 pub mod user_identity;
 
+pub use authorization::*;
 pub use bot::BotRepoPort;
 pub use collaboration_template::{CollaborationTemplateEntry, CollaborationTemplateRepoPort};
 pub use collaboration::{

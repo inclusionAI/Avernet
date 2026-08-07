@@ -1,0 +1,998 @@
+<!-- 历史归档 / 非实现基线：本文记录早期讨论方案，可能包含已废弃的 role、edge_id 下发、permission_profiles[] / rules_grants[] 拆分、extra_rules 等设计。实现请以 2026-08-07 final design / implementation spec 为准。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bcs边权限方案设计 · 讨论稿</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --c-bg:#f7f8fa; --c-card:#fff; --c-text:#1f2329; --c-muted:#646a73; --c-border:#dee0e3;
+    --c-primary:#2b6cb0; --c-primary-dark:#2c5282; --c-primary-light:#e8f0fc;
+    --c-accent:#c05621; --c-accent-light:#fdf3ea;
+    --c-purple:#805ad5; --c-purple-light:#f1ebfb;
+    --c-ok:#2f855a; --c-ok-bg:#e6fffa;
+    --c-deny:#c53030; --c-deny-bg:#fce8e8;
+    --c-yellow:#ca8a04; --c-yellow-light:#fff8e6;
+    --c-teal:#2c7a7b; --c-teal-light:#e6fffa;
+    --c-human:#2b6cb0; --c-bot:#805ad5;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; background:var(--c-bg); color:var(--c-text); margin:0; line-height:1.75; }
+  .wrap { max-width:1140px; margin:0 auto; padding:28px 32px 70px; }
+  header { background:linear-gradient(135deg,var(--c-primary) 0%,var(--c-primary-dark) 100%); color:#fff; padding:34px 32px; border-radius:12px; margin-bottom:24px; }
+  header h1 { margin:0 0 6px; font-size:26px; font-weight:700; }
+  header .subtitle { opacity:.92; font-size:15px; }
+  header .meta { margin-top:14px; font-size:13px; opacity:.85; display:flex; gap:18px; flex-wrap:wrap; }
+
+  .part-banner { background:linear-gradient(90deg,var(--c-accent) 0%, #d97757 100%); color:#fff; padding:14px 22px; border-radius:10px; margin:8px 0 22px; font-size:18px; font-weight:700; }
+  .part-banner .step { background:rgba(255,255,255,.25); border-radius:8px; padding:2px 10px; margin-right:12px; font-size:14px; }
+
+  section { background:var(--c-card); border-radius:12px; padding:26px 30px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  h2 { font-size:20px; margin:0 0 16px; padding-bottom:10px; border-bottom:2px solid var(--c-primary-light); color:var(--c-primary); }
+  h3 { font-size:16px; margin:20px 0 8px; color:var(--c-accent); }
+  h4 { font-size:15px; margin:14px 0 6px; color:var(--c-primary-dark); }
+  p { margin:10px 0; }
+  .lead { font-size:15px; color:var(--c-muted); }
+  code { background:#eef0f2; padding:1px 5px; border-radius:3px; font-size:.88em; color:#1a365d; }
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+  th,td { padding:9px 12px; text-align:left; border-bottom:1px solid var(--c-border); vertical-align:top; }
+  th { background:var(--c-primary-light); color:var(--c-primary); font-weight:600; }
+  .tag { display:inline-block; padding:2px 9px; border-radius:11px; font-size:12px; font-weight:600; margin-right:4px; }
+  .tag-allow{background:var(--c-ok-bg);color:var(--c-ok);} .tag-deny{background:var(--c-deny-bg);color:var(--c-deny);}
+  ul { padding-left:22px; } ul li { margin:6px 0; }
+  .callout { background:var(--c-primary-light); border-radius:10px; padding:14px 18px; margin:14px 0; border-left:4px solid var(--c-primary); font-size:14px; }
+  .callout b { color:var(--c-primary-dark); }
+  .deny-note { background:var(--c-deny-bg); color:#9b2c2c; padding:10px 14px; border-radius:8px; font-size:14px; margin:12px 0; }
+  .ok-note { background:var(--c-ok-bg); color:#22543d; padding:10px 14px; border-radius:8px; font-size:14px; margin:12px 0; }
+  .warn-note { background:var(--c-yellow-light); border-left:4px solid var(--c-yellow); padding:10px 14px; border-radius:8px; font-size:14px; margin:12px 0; }
+
+  .mgraph { display:flex; justify-content:center; margin:14px 0 4px; }
+  .mgraph .mermaid { font-family:inherit; max-width:100%; overflow-x:auto; padding:8px; }
+
+  .rule-block { background:#1a202c; color:#e2e8f0; border-radius:10px; padding:14px 18px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13px; line-height:1.75; overflow-x:auto; margin:12px 0; white-space:pre; }
+  .rule-block .kw{color:#90cdf9;} .rule-block .c{color:#718096;}
+  .rule-block .ok{color:#9ae6c4;} .rule-block .warn{color:#f6ad55;} .rule-block .bad{color:#feb2b2;}
+  .rule-block .str{color:#fbd38d;}
+
+  .ex-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin:14px 0; }
+  @media(max-width:860px){ .ex-row{grid-template-columns:1fr;} }
+  .ex-card { border-radius:12px; padding:14px; border:1.5px solid; }
+  .ex-card.pass { border-color:#9ae6c4; background:linear-gradient(180deg,#f4fdf8 0%,#fff 70%); }
+  .ex-card.deny { border-color:#f5b5b5; background:linear-gradient(180deg,#fef5f5 0%,#fff 70%); }
+  .ex-card.info { border-color:#bee3f8; background:linear-gradient(180deg,#f2f7fd 0%,#fff 70%); }
+  .ex-head { font-weight:700; font-size:14px; margin-bottom:8px; }
+
+  .legend { display:flex; gap:18px; flex-wrap:wrap; font-size:13px; color:var(--c-muted); margin:10px 0 6px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .legend i { width:14px; height:14px; border-radius:50%; display:inline-block; }
+
+  .anchor { font-size:12px; color:var(--c-muted); font-family:ui-monospace,monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>bcs边权限方案设计</h1>
+  <div class="subtitle">点-边图模型:点 = human / bot / service,有向边 = 角色 = 一组权限集合</div>
+  <div class="meta">
+    <span>日期:2026-07-14</span>
+    <span>类型:技术讨论稿</span>
+    <span>上游:07-14 TeamClaw 鉴权重设计 briefing</span>
+  </div>
+</header>
+
+<div class="callout">
+<b>本文结构</b>——两部分:<br>
+<b>第一部分</b> · <b>什么是边权限</b>:用点和边组成的图,给出边权限的定义、构成、求值规则。<br>
+<b>第二部分</b> · <b>边权限在真实场景中怎么用</b>:用一个完整故事,从建边到调用、长链、回环、改约,看图怎么动起来。
+</div>
+
+<div class="legend">
+  <span><i style="background:#2b6cb0;"></i>human 节点</span>
+  <span><i style="background:#805ad5;"></i>bot 节点</span>
+  <span><i style="background:#2c7a7b;"></i>service 节点</span>
+  <span><i style="background:#9ae6c4;border:1px solid #2f855a;"></i>allow 边</span>
+  <span><i style="background:#feb2b2;border:1px solid #c53030;"></i>deny 边</span>
+  <span><i style="background:#f6ad55;border:1px solid #c05621;"></i>守卫(最高优先级)</span>
+</div>
+
+<!-- ===================== 第一部分:什么是边权限 ===================== -->
+<div class="part-banner"><span class="step">第一部分</span>什么是边权限</div>
+
+<!-- §1 -->
+<section>
+<h2>1. 一张图说清边权限</h2>
+<p>边权限不是一张新表、不是一种新机制,它就是 <b>BCS 关系图本身的结构</b>。我们把多 bot 协作的权限关系,画成一张<b>有向图</b>:</p>
+<ul>
+  <li><b>点(vertex)有三类</b>:human、bot、service。没有第四种点。</li>
+  <li><b>有向边(edge)= 一个角色 = 一组权限集合</b>。边 <code>A → B</code> 表示"A 对 B 的角色",这个角色就是绑在这条边上的一组 <code>(tool, specifier, allow/deny)</code> 规则。角色<b>不是独立节点</b>,它就是边本身。</li>
+  <li><b>同一对 (A,B) 可以有多条边</b>(多角色),按 <b>allow 优先</b>合成。</li>
+  <li><b>env 是边键</b>:<code>(from, to, env)</code> 唯一,有向图按环境隔离。</li>
+  <li><b>边可开代理开关</b>:<code>proxy_allowed</code>(默认 false),允许此边代人转发,见 §3.5。</li>
+</ul>
+
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Alice(("human<br/>Alice"))
+  Bob(("human<br/>Bob"))
+  B2(("bot<br/>bot2"))
+  B3(("bot<br/>bot3"))
+  SVC(("service<br/>CI系统"))
+
+  Alice -->|"owner(owner边)<br/>权限集合: 全权"| B2
+  Bob -->|"只读者(角色边)<br/>Read允/Edit否/Bash否"| B2
+  Bob -->|"临时写tmp(角色边)<br/>Write(/tmp)允"| B2
+  B2 -->|"只读者(角色边)"| B3
+  SVC -->|"只读者(角色边)<br/>svc→bot,申请-审批"| B3
+
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  classDef svc fill:#e6fffa,stroke:#2c7a7b,stroke-width:2px,color:#234e52;
+  class Alice,Bob human;
+  class B2,B3 bot;
+  class SVC svc;
+</pre>
+</div>
+<p class="lead">上图:Alice 是 bot2 的 owner(owner 边=全权);Bob 对 bot2 挂了两条角色边(只读者 + 临时写 tmp);bot2 对 bot3 挂了一条只读者边;CI 系统(service 点)直接调用 bot3。每条边都是一个角色,每个角色都是一组权限集合。三类点的边同构、同求值。</p>
+</section>
+
+<!-- §2 -->
+<section>
+<h2>2. 点:human / bot / service</h2>
+<p>图里的点有<b>三类</b>,对应三种调用方身份:</p>
+<table>
+<tr><th>点类型</th><th>标识</th><th>凭证</th><th>说明</th></tr>
+<tr><td><b>human</b></td><td><code>human_{staff_no}</code></td><td>人类 SSO</td><td>人。可以是自己 bot 的 owner,也可以是借用别人 bot 的 caller。</td></tr>
+<tr><td><b>bot</b></td><td>bot uuid</td><td>bot token</td><td>bot。既能被调用(作为边的 to),也能去调用别的 bot(作为边的 from)。</td></tr>
+<tr><td><b>service</b></td><td><code>svc_{service_id}</code></td><td>机器凭证(API key / 服务账户 JWT / mTLS)</td><td>在线服务应用。既不是人也非 bot:无 LLM 智能体语义、不参与"自然语言→LLM解析→tool call"那套,而是<b>直接触发 bot 的能力</b>。如 CI 服务、工单系统、定时批处理。</td></tr>
+</table>
+<div class="callout"><b>没有"角色节点"</b>。角色就是边,不单独占点。三类点的边<b>完全同构</b>——service→bot 和 human→bot / bot→bot 一样,都是有向边=角色=权限集合,走<b>同一套求值器</b>。差别只在凭证与建边方式(见第二部分场景),不在求值。</div>
+<p class="anchor">对齐代码:actor id 见 <code>bcs-domain/src/actor.rs</code> 的 <code>ActorKind{Bot,Human}</code>(本次扩展加 <code>Service</code>),human 用 <code>human_{staff_no}</code>,bot 用 uuid,service 用 <code>svc_{service_id}</code>。</p>
+</section>
+
+<!-- §3 -->
+<section>
+<h2>3. 边:一条边就是一个角色</h2>
+<h3>3.1 边的两个身份</h3>
+<p>一条有向边 <code>A → B</code> 兼具两种身份,但<b>它们是同一条边、不是两件事</b>:</p>
+<table>
+<tr><th>身份</th><th>含义</th><th>承载</th></tr>
+<tr><td><b>关系身份</b></td><td>A 和 B 是否有关系(熟人 / owner)</td><td>边是否存在 + <code>is_creator</code></td></tr>
+<tr><td><b>权限身份</b></td><td>A 凭这条边能对 B 做哪些 tool 调用</td><td>绑在边上的 (tool,specifier,allow/deny) 集合</td></tr>
+</table>
+<div class="callout"><b>friend 就是 default 边——模型只有一类边</b>。原来 friend(关系层)与角色边(权限层)两件东西,本方案收敛成一类:<b>friend 即一条 <code>role_name=default</code> 的角色边</b>,其 rules 引用 bot owner 配的 default 规则集。于是"是熟人"= default 边存在,"走默认权限"= default 边参与求值。关系层/权限层之分只是同一条边的两个视角,不是两种结构。三类角色名并立:<code>default</code>(=friend,走默认)/ 具体角色名(只读者 等)/ <code>owner</code>(全权,§3.3)。<b>friend 管入场细度归 default,owner 管归属</b>。</div>
+
+<h3>3.2 边的数据形态</h3>
+<p>一条边是一个 <b>rule 容器</b>——角色名只是这组 rule 的友好标签,不是边的必需组成。一条边可装 1~N 条 rule;只装 1 条 rule 的边就是"单条权限形成的边"。同对点之间多条边,靠 <code>edge_id</code> 区分,不靠角色名(因为可以匿名)。</p>
+<div class="rule-block">
+Edge(A → B, env) = {
+  edge_id          : 自增主键                       <span class="c">★ 同对点多边靠它区分,不靠角色名</span>
+  role_name        : <span class="str">"只读者"</span> | <span class="str">"owner"</span> | 自定义 | <span class="warn">null</span>   <span class="c">★ 可选; null=匿名边</span>
+  rules[ ]         : 1~N 条,每条 = (tool, specifier, <span class="ok">allow</span> | <span class="bad">deny</span>)
+                     如 (Read, ./*,      allow)
+                        (Edit, /prod/**, deny)
+                        (Bash, rm *,     deny)
+  <span class="c">// 边的元信息(可选,默认安全)</span>
+  delegation_depth : 0 = 不可再委托给下游; >0 = 可向下传 N 跳
+  expires_at       : 过期时间; <span class="warn">null = 不过期(默认)</span>  <span class="c">★ 预留扩展:V1 全 null,为将来支持临时授权留口</span>
+  <span class="c">// 申请-审批(写入流程,见 §3.2.4)</span>
+  status           : pending | approved | rejected   <span class="c">★ 只有 approved 参与求值</span>
+  applicant        : 发起申请的 caller
+  approver         : 审批的 B 的 owner
+  grantor          : 谁授的这条边(= approver,审批通过者)
+  proxy_allowed    : false(默认) | true    <span class="c">★ 代理开关:是否允许此边代人转发,见 §3.5</span>
+}
+</div>
+
+<h4>3.2.1 单条权限 = 匿名边(角色名可选)</h4>
+<p>当只要授权<b>一条权限</b>时,不必为它临时造一个角色名。这条权限直接成一条 <code>role_name = null</code> 的<b>匿名边</b>——它就是容器 size=1 的退化,与命名角色边同构:</p>
+<div class="rule-block">
+<span class="c"># 只想给 Bob 单独开 "能往 /tmp 写" 这一条权限</span>
+Edge(human_bob → bot2, prod) = {
+  edge_id    : 42
+  role_name  : null                          <span class="c"># 匿名,不起名</span>
+  rules      : [ (Write, /tmp/**, <span class="ok">allow</span>) ]   <span class="c"># 只一条</span>
+  grantor    : human_alice
+}
+
+<span class="c"># 对比:批量授权"只读者"角色 = 命名边</span>
+Edge(human_bob → bot2, prod) = {
+  edge_id    : 41
+  role_name  : <span class="str">"只读者"</span>
+  rules      : [ (Read,./*,allow), (Edit,*,deny), (Bash,*,deny) ]
+  grantor    : human_alice
+}
+</div>
+<div class="callout"><b>角色名是管理便利,不是语义必需</b>。能复用时起名(只读者),临时单权限就不起名(匿名)。两条边在求值时<b>一视同仁</b>——A→B 的所有边展平成一个 rule 池,按 §5 三档求值(守卫→ allow 优先→ default)。命名与否不影响求值,只影响"按角色名批量删/改"的管理便利。</p></div>
+
+<h4>3.2.2 边爆炸的收敛:同源匿名边自动合并</h4>
+<p>若每条单权限都匿名成独立边,同一对点可能挂几十条小边。这不是错(多边本就是设计意图,删一条不影响其它,见 §17),但为收敛噪声,加一条轻规则:</p>
+<div class="rule-block">
+<span class="c"># 合并规则(写入时触发,对调用方透明)</span>
+当给 (A→B) 写一条匿名边时:
+  若已存在 <b>同一 grantor</b> 的匿名边 →
+    把新 rule 追加进那条已存在的匿名边(同一容器),不新建边
+  否则 → 新建一条匿名边
+
+<span class="c"># 即:同对点 + 同 grantor 的零散单权限,归并进同一条匿名边</span>
+<span class="c"># 命名角色边不参与合并(它是显式打包的,保持独立)</span>
+</div>
+<div class="warn-note"><b>合并只针对匿名边、只按 grantor 归并</b>。命名角色边(只读者、受限协作者)是 owner 显式打包的语义单元,保持独立、不被并。这样:零散单权限不致边爆炸(自动并进同源匿名边),命名角色仍可整块复用/撤销。合并对调用方透明——求值仍是展平 rule 池,合并与否结果一致。</div>
+
+<p>注意 <code>rules</code> 就是 briefing 的 <code>(tool, specifier, decision)</code> 三元组。<b>一条边 = 一组这种三元组</b>(装 1 条就是单权限,装多条配个名就是角色)。三元组里 decision 仅二元(allow/deny),贴合 briefing 第一层。</p>
+
+<h4>3.2.3 过期时间:默认不过期,预留扩展</h4>
+<p>每条边带一个 <code>expires_at</code> 字段。<b>V1 一律不过期(全 null)</b>——普通授权都是长期有效的。字段保留是为了将来支持<b>临时授权</b>(如"借给同事 7 天只读"、"外包任务 2 小时"等场景),不必到那时再改表结构。</p>
+<div class="rule-block">
+<span class="c"># 过期语义(实现于求值前置,对求值器透明)</span>
+读边时,若 expires_at != null 且 now > expires_at:
+  → 此边<b>视为不存在</b>(逻辑失效),不参与 §5 求值
+  → caller 该对点若无其它有效边 → 退回 bot default 集(同 §17 撤销后行为)
+  → 关系层:是否连 friend 关系一并失效? <b>默认仅权限身份失效,friend 保留</b>(最小破坏)
+<span class="c"># 物理清理:过期边可留作审计,或由后台 GC 异步清,不阻塞求值</span>
+</div>
+<div class="callout"><b>设计取舍</b>:过期<b>只失效权限身份、不撤 friend 关系</b>(和 §17 撤销边权限但保 friend 同源),最小破坏、最易回溯。物理删除走后台 GC,不进鉴权热路径。<code>expires_at</code> 是扩展字段,V1 全 null 零负担——读边 时一个 null 判断即可,过期功能后续平滑开启。</div>
+
+<h4>3.2.4 边的写入:申请-审批(被加者必须同意)</h4>
+<p><b>核心安全问题</b>:"加好友即加权限"会让被加方(actor B 的 owner)被动获得一条指向自己的边,产生不安,且给恶意 caller 单方面批量建边留口。本方案规定:<b>指向 B 的边,写入须经 B 的 owner 知情同意</b>。落地为统一的<b>申请-审批</b>流程,所有角色边(含 default/friend)都走这条路。</p>
+<div class="rule-block">
+<span class="c"># 申请-审批流程(申请方=caller,审批方=边指向的 B 的 owner)</span>
+① caller 发起申请: "我想要 B 的 [default | 只读者 | 自定义] 边"
+   → 写一条 status=pending 的边(不生效,不参与求值,不进准入)
+② B 的 owner 审批:
+   accept  → status=approved, 边生效(approver/grantor = owner)
+   reject  → status=rejected, 边不落(或留待审记录)
+③ 仅 status=approved 的边参与 §5 求值与准入
+
+<span class="c"># 安全闸(协议层硬约束)</span>
+指向 B 的边,写入须经 B 的 owner 知情同意。
+caller 永远不能在 owner 无任何表示时让指向他人 bot 的边生效。
+
+<span class="c"># 仅有 approved 边生效(本方案不渲染位图,§6):</span>
+status=pending / rejected → 边不参与求值,不进准入门放行
+status=approved           → 边生效,rules 参与 §5 求值
+<span class="c"># 无位图要同步,准入门/bot 端只认 status 字段,一致性好管</span>
+</div>
+<table>
+<tr><th>角色边类型</th><th>写入方式</th><th>发起方</th><th>生效条件</th></tr>
+<tr><td><code>default</code>(=friend)</td><td>申请-审批</td><td>caller</td><td>B owner 审批通过</td></tr>
+<tr><td>具体角色(只读者 等)</td><td>申请-审批</td><td>caller</td><td>B owner 审批通过</td></tr>
+<tr><td><code>owner</code>(全权)</td><td><b>不申请</b></td><td>—</td><td>owner 关系是事实(B 的创建者即 owner),系统初始化时落,无流程</td></tr>
+</table>
+<div class="warn-note"><b>为什么不"owner 直灌"</b>:owner 直灌在概念上安全,但实操繁琐——B owner 凭什么知道 caller 要什么角色?会把"我想用你的 bot 做只读"这类协调压成线下 IM/邮件文化。申请-审批把协调搬进系统:caller 在系统内发起,owner 在系统内审批待办,既有安全感(被加方同意)又不繁琐(无需线下)。区别于"单方面建边"——申请不立即生效,要审批才落,所以申请=双向同意的 caller 端发起,不是绕过 owner。</div>
+
+<h4>3.2.5 可选加速通道(降摩擦,限低危)</h4>
+<p>审批流若太严会给高频协作添堵。可选加两条加速通道,都建立在 owner 事先表达过信任的前提下:</p>
+<ul>
+<li><b>预授权白名单</b>:B owner 预先把某些 caller 标"可信",这些 caller 的申请自动 approved(免人工审批)。owner 仍掌控,只是减负。</li>
+<li><b>自助申请角色</b>:B owner 公开某些低危角色"可自助申请",caller 申请即自动落边,owner 事后审计而非事前审批。限低危角色(如只读)。</li>
+</ul>
+<p class="lead">这两条是可选优化,不是核心。核心流程就是 §3.2.4 的申请-审批。安全闸不变:无论申请还是加速通道,指向 B 的边写入都须经 B owner 知情同意(审批 / 预授权 / 公开模板都是"事先同意"的形态)。</p>
+
+<h3>3.3 owner 边是特例吗?</h3>
+<p>不是特例。owner 关系就是一条权限集合=全权的边。token 简化上 <code>is_creator</code> 标它,图里它和其他角色边同构,只是 rules 是 <code>(* , *, allow)</code>(除了平台守卫)。<b>同一张图、同一套求值器,无特例</b>。</p>
+
+<h3>3.4 角色是这些权限定义的组合:(tool, specifier, decision) 三元组</h3>
+<p>§3.2 说一条边(角色)的 <code>rules</code> 是"一组 <code>(tool, specifier, decision)</code> 三元组"。那么这三元组究竟长什么样?它从 opencode + claude code 抄底(底座同构,两产品已收敛)。<b>角色不是凭空一个名字,它就是若干三元组的组合</b>——把几条 <code>(tool, specifier, allow/deny)</code> 装进同一条边,这条边就有了角色身份。</p>
+<div class="callout"><b>三元组格式</b>:<code>(tool, specifier, decision)</code>。decision 三态 allow/ask/deny,但<b>本稿第一层(角色边)只用二元 allow/deny</b>(贴 briefing「第一层无 ask」);ask 归第二层 bot 自身鉴权。所以角色边上的每条 rule 就是 <code>(tool, specifier, allow | deny)</code>。</p></div>
+
+<p>每个 tool 的 <code>specifier</code> 类型不同(命令 / 路径 / 域名 / 工具名……),通配让组合既能<b>粗</b>(整类)又能<b>细</b>(精确)。下表给出各 tool 的 specifier 类型、危险面、可直接放进角色的示例 rule:</p>
+<table>
+<tr><th>tool</th><th>specifier 类型</th><th>危险面</th><th>示例 rule(装入角色即一条三元组)</th></tr>
+<tr><td><b>Bash</b></td><td>命令模式:<code>*</code>/<code>?</code> 通配;<code>&amp;&amp;</code>/<code>;</code>/<code>|</code> 复合分段,每段子命令独立匹配,任一段 deny → 整条 deny。可按参数限定</td><td><span class="tag tag-deny">高</span> 可写/删/部署</td><td><code>allow(Bash(git status))</code>、<code>allow(Bash(npm run *))</code>、<code>deny(Bash(rm *))</code>、<code>deny(Bash(git push origin main))</code></td></tr>
+<tr><td><b>Read</b></td><td>路径模式(gitignore 语义:<code>./cwd</code>、<code>~/home</code>、<code>/abs</code>);<code>*</code> 单层、<code>**</code> 递归</td><td><span class="tag tag-ask">中</span> 夹带凭证/隐私</td><td><code>allow(Read(./docs/**))</code>、<code>deny(Read(./.env))</code>、<code>deny(Read(./**/*.env))</code></td></tr>
+<tr><td><b>Edit / Write</b><br/>(含 apply_patch / NotebookEdit)</td><td>路径模式(同 Read)</td><td><span class="tag tag-deny">高</span> 写盘</td><td><code>allow(Write(/tmp/**))</code>、<code>deny(Edit(/prod/**))</code></td></tr>
+<tr><td><b>Grep / Glob</b></td><td>路径/正则模式</td><td><span class="tag tag-allow">低</span></td><td><code>allow(Glob(./*))</code>、<code>deny(Glob(./*.env))</code></td></tr>
+<tr><td><b>WebFetch</b></td><td>域名:<code>domain:&lt;glob&gt;</code></td><td><span class="tag tag-ask">中</span> 出口/外泄</td><td><code>allow(WebFetch(domain:github.com))</code>、<code>deny(WebFetch(domain:*.internal.company.com))</code></td></tr>
+<tr><td><b>WebSearch</b></td><td>无 specifier,整工具一刀切</td><td><span class="tag tag-ask">中</span> 出口/外泄</td><td><code>allow(WebSearch)</code>、<code>deny(WebSearch)</code></td></tr>
+<tr><td><b>Agent / Task</b><br/>(子代理)</td><td>子代理类型名,可按参数限定</td><td><span class="tag tag-ask">中</span> 启新权限面</td><td><code>allow(Agent(Explore))</code>、<code>deny(Agent(deploy))</code>、<code>deny(Agent(model:opus))</code></td></tr>
+<tr><td><b>Skill</b></td><td>skill 名(<code>SKILL.md</code> 的 <code>name</code>);通配 <code>skill *</code> 匹配剩余字符</td><td><span class="tag tag-ask">中</span></td><td><code>allow(Skill(review *))</code>、<code>deny(Skill(internal-*))</code></td></tr>
+<tr><td><b>MCP</b><br/><code>mcp__&lt;server&gt;__&lt;tool&gt;</code></td><td><code>mcp__server__tool</code>;<code>mcp__server__*</code> 通配整 server</td><td><span class="tag tag-ask">中</span> 按挂载</td><td><code>allow(mcp__github__create_issue)</code>、<code>deny(mcp__puppeteer__*)</code>、<code>deny(mcp__*)</code></td></tr>
+<tr><td><b>exec</b><br/>(bcn 自带执行工具)</td><td>命令模式,规则同 Bash</td><td><span class="tag tag-deny">高</span> 同 Bash 规</td><td><code>allow(exec(git *))</code>、<code>deny(exec(rm *))</code></td></tr>
+</table>
+
+<h4>角色 = 把若干三元组装进同一条边</h4>
+<p>"只读者""受限协作者"这些角色名,本质就是上面的三元组<b>组合</b>。举例(与第二部分 §9 Alice 定义的角色一致):</p>
+<div class="rule-block">
+<span class="c"># 角色「只读者」= 这几条三元组的组合</span>
+只读者 = [
+  (Read, ./*,      <span class="ok">allow</span>),
+  (Grep, ./*,      <span class="ok">allow</span>),
+  (Edit, *,        <span class="bad">deny</span>),
+  (Bash, *,        <span class="bad">deny</span>),
+]
+
+<span class="c"># 角色「受限协作者」= 另一组组合</span>
+受限协作者 = [
+  (Bash, git *,        <span class="ok">allow</span>),
+  (Read, ./src/**,     <span class="ok">allow</span>),
+  (Bash, rm *,         <span class="bad">deny</span>),     <span class="c"># 禁删</span>
+  (Bash, curl *,       <span class="bad">deny</span>),     <span class="c"># 禁外联</span>
+  (Edit, /prod/**,     <span class="bad">deny</span>),     <span class="c"># 禁改生产</span>
+]
+</div>
+<p>把上面任一组绑到一条 <code>A→B</code> 边上,这条边就拥有该角色;<b>多边</b>(§4)就是同一对点叠多个这样的组合。<b>裸名</b>写法如 <code>allow(Bash)</code>=整个 Bash 工具放行,<code>deny(Bash)</code>=把 Bash 从模型上下文移出(更彻底)——这是三元组的边界用法。</p>
+
+<div class="warn-note"><b>平台守卫不是角色边上的三元组</b>。表里的 <code>deny(Bash(rm -rf /))</code> 在本方案里属于<b>平台守卫层</b>(§5、§16),不是 owner 可配可撤的角色 rule——它最高优先级、不可取消,绕开角色边的 allow 优先。owner 在角色边里写的 <code>deny(Bash(rm *))</code> 才是角色 rule(可被另一条 allow 边压过)。</div>
+
+<div class="ok-note"><b>一句话</b>:<code>(tool, specifier, decision)</code> 三元组是权限的最小积木,角色(边)是积木的组合。specifier 的通配/路径/域名/命令模式让组合既能锁整类、又能精确到一条命令;装多少条、装哪些,就决定了这个角色能做什么。</div>
+
+<h3>3.5 代理转发:边上的 proxy_allowed 开关</h3>
+<p>除了"自己调 bot 干活",还有一种情形:<b>bot1 替一个第三方 caller 把活转给 bot2 做,结果算那第三方 caller 的账</b>。这就是"代理转发"。它不是普通调用,需要一个开关来管控,核心是<b>三个不混的概念</b>:</p>
+<table>
+<tr><th>概念</th><th>归属</th><th>含义</th></tr>
+<tr><td><code>original_caller</code></td><td><b>消息</b>(一次调用)上的印章</td><td>"这次调 bot2 真正算谁调的"——发起者身份。由执行转交的那一方盖、原样往下传、中途不改。</td></tr>
+<tr><td><code>proxy_allowed</code></td><td><b>边</b>上的开关(§3.2)</td><td>"这条边是否允许代人转发"。默认 false;由被调方 owner 设。</td></tr>
+<tr><td>"自用 / 代理"模式</td><td>调用方运行时选</td><td>调用方看自己边上的 proxy_allowed 决定本次走哪种模式。</td></tr>
+</table>
+
+<h4>3.5.1 三种调用模式(对照表)</h4>
+<table>
+<tr><th>调用场景</th><th>用哪条边</th><th>边上 proxy_allowed</th><th>消息 original_caller</th><th>结果算谁</th></tr>
+<tr><td><b>普通调用</b>:bot1 找 bot2 干活</td><td>bot1→bot2 普通授权边</td><td>false(默认,用不上)</td><td><b>无</b></td><td>bot1</td></tr>
+<tr><td><b>外包自用</b>:bot1 当甲方外包给 bot2</td><td>bot1→bot2 普通边</td><td>false 可</td><td><b>无</b>(算 bot1 自己的调用)</td><td>bot1</td></tr>
+<tr><td><b>代理转发</b>:bot1 替 caller3 转给 bot2</td><td>bot1→bot2 边(须 proxy_allowed=true)+ caller3→bot2 边</td><td><b>true(必须)</b></td><td><b>有,=caller3</b></td><td>caller3</td></tr>
+</table>
+<div class="callout"><b>普通协作零负担</b>。第一行就是绝大多数情况:bot1 找 bot2 干活,边是普通授权边,proxy_allowed 默认 false 也无所谓(消息没 original_caller,根本走不到代理校验),消息上无 original_caller。proxy / original_caller 只在"代人转发"这个<b>特殊场景</b>才出现,默认完全不碰。</div>
+
+<h4>3.5.2 为什么需要 proxy_allowed 开关</h4>
+<p>"为什么不能让 bot1 自由盖 original_caller、bot2 照单全收?" 三个不可省的理由:</p>
+<ul>
+<li><b>防 bot1 伪造发起者</b>。original_caller 是 bot1 自己盖的,没有门槛则 bot1 能在任意调用谎报"我替 bot某 来的"钻别人权限空子。proxy_allowed 把"bot1 可当代理"做成 owner 预授权的信任缓存——只在 owner 信任的边上,bot1 盖的 original_caller 才被认可。</li>
+<li><b>保证普通边不被代理语义污染</b>。proxy_allowed=false 的边,看到 original_caller 直接拒。普通协作边永远干净,不会误带代理语义——这正是"普通调用零负担"的保证。</li>
+<li><b>代理链可审计的最小信任边界</b>。一次代理调用必须<b>两证齐全</b>:发起者被授权(<code>caller3→bot2</code> 边)+ 代理被信任(<code>bot1→bot2.proxy_allowed</code>),缺一不可。没有 proxy_allowed 就缺了"代理被信任"这一证。</li>
+</ul>
+
+<h4>3.5.3 什么时候加 proxy_allowed、什么时候加 original_caller</h4>
+<div class="rule-block">
+<span class="c"># proxy_allowed(边属性):由谁、何时加</span>
+默认 false —— 所有普通边都是。
+当且仅当 bot2 owner 决定"让 bot1 当 bot2 的代理通道"时,
+在授权/改约 bot1→bot2 边时主动拨成 true。由被调方(bot2) owner 设;
+bot1 自己不能为自己开(否则自提权)。
+
+<span class="c"># original_caller(消息印章):由谁、何时加</span>
+bot1 运行时,决定"这次调 bot2 用什么模式"时:
+  读自己 bot1→bot2 边的 proxy_allowed:
+    false → bot1 不能选代理模式,original_caller 一律不带(自用/外包自用)
+    true  → bot1 被允许(非命令)选代理:
+              选"替 caller3 转" → 带 original_caller=caller3
+              选"自用外包"    → 不带
+<span class="c"># 关键:proxy_allowed=true 是许可(permissive)不是命令(imperative)</span>
+<span class="c"># original_caller 的值必须是真实发起者(caller3)身份,从请求追溯,bot1 不能凭空指一个 bot</span>
+</div>
+
+<h4>3.5.4 代理转发的双闸校验(单跳)</h4>
+<p>bot2 收到带 original_caller=caller3 的代理调用,做两道闸,缺一拒:</p>
+<div class="rule-block">
+caller3 → bot1 → bot2 (bot1 当代理):
+
+bot1→bot2 段,bot2 端双闸:
+  闸A 代理信任: bot1→bot2.proxy_allowed = true         (代理被信任)
+        + bot1→bot2 边 rules 对本次 tool call allow      (代理者有权限调 bot2 做 X)
+  闸B 发起者授权: caller3→bot2 边 rules 对本次 tool call allow (发起者被授权做 X)
+
+  全 allow → 终局 allow;任一 deny / 边不存在 → 拒(未授权必拦)
+</div>
+<div class="warn-note"><b>回到最初担心的越权</b>:caller3 没被 bot2 授权(闸B 扣除)→ 拦死;bot1 自作主张当代介但边没开 proxy_allowed(闸A 扣除)→ 拦死;两者都齐 → 放行,且这次调用花的是<b>caller3 自己</b>在 bot2 上的权限,不是借道 bot1 的——<b>多级代理不放大权限</b>。</div>
+
+<h4>3.5.5 多级代理:信任逐段传、发起者恒定带</h4>
+<p>允许 N 级代理。整条链靠两样东西传递:</p>
+<div class="rule-block">
+<span class="c"># 链路:caller3 → bot1 → bot1' → bot1'' → bot2 (三段代理)</span>
+
+<span class="c"># ① 信任:每条代理边 proxy_allowed=true,由"被调方 owner"逐级预授权</span>
+bot1  →bot1' .proxy_allowed = true   ← bot1'  owner 设
+bot1' →bot1''.proxy_allowed = true   ← bot1'' owner 设
+bot1''→bot2  .proxy_allowed = true   ← bot2   owner 设
+<span class="c"># 哪段没开,链就断在那段;没有谁一次性授权整条链</span>
+
+<span class="c"># ② 发起者:original_caller 从第一跳盖定,中途原样直传、不改值</span>
+bot1→bot1'  : original_caller = caller3
+bot1'→bot1'': original_caller = caller3  (不改)
+bot1''→bot2 : original_caller = caller3  (不改)
+<span class="c"># 中途代理者在变,但发起者恒等于 caller3。不篡改是协议硬约束</span>
+</div>
+<table>
+<tr><th>跳</th><th>谁发→谁做</th><th>判什么</th></tr>
+<tr><td>① caller3→bot1</td><td>发起者调首个代理</td><td>普通:看 caller3→bot1 边 rules allow?</td></tr>
+<tr><td>② ③ ...中间代理跳</td><td>代理→下一个代理</td><td><b>代理闸A</b>:本段代理边 proxy_allowed=true + rules allow?<br/>(中间代理不判发起者授权,只保证"能往下一跳转")</td></tr>
+<tr><td>末跳 →bot2</td><td>末代理→最终执行者</td><td><b>闸A + 闸B</b>:本段代理边 allow + caller3→bot2 边 allow?<br/>(发起者核对只在最终执行处一次)</td></tr>
+</table>
+<div class="callout"><b>分工</b>:信任<b>逐跳分散</b>(每段独立授权代理边),发起者核对<b>最终集中</b>(只执行者做一次)。每跳只看自己那段 + 一个恒定的 original_caller 常量——<b>不回溯发起者</b>,既消除死结①,又在终点兜住发起者授权。</div>
+<div class="warn-note"><b>三个必须钉死的边界</b>:① <b>链长限</b>:复用 delegation_depth,每过一跳代理 depth-1,到 0 不允许再代理;② <b>original_caller 不可篡改</b>:中途代理若改成自己,就是冒充发起者逃校验,协议层硬禁止;③ <b>整条链成立 = 每段代理边都 proxy_allowed=true(信任齐) AND caller3→bot2 边 allow(发起者被授权)</b>,两条件独立,任一不满足断链——故<b>多级代理不会放大权限</b>。</div>
+</section>
+
+<!-- §4 -->
+<section>
+<h2>4. 多边:同一对点可挂多个角色</h2>
+<p>同一对 (A→B) 可以同时挂多条边,每条一个角色。比如 Bob 对 bot2 同时有"只读者"和"临时写 tmp"两条边。这是本模型的灵活性所在。</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob"))
+  B2(("bot<br/>bot2"))
+  Bob -->|"边1 只读者<br/>Read允 / Edit否 / Bash否"| B2
+  Bob -->|"边2 临时写tmp<br/>Write(/tmp)允"| B2
+  Bob -.->|"边3 受限协作者<br/>Bash(git)允 / curl否"| B2
+
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Bob human;
+  class B2 bot;
+</pre>
+</div>
+<p>多边的意义:同一个 caller 在同一对 bot 上,可以叠加多个角色——一个长期基础角色(只读者)+ 若干临时增量角色(临时写 tmp)。增删某条边不影响其它边。</p>
+</section>
+
+<!-- §5 -->
+<section>
+<h2>5. 求值:多边 allow 优先 + 平台守卫兜底</h2>
+<p>多边必然带来"多条边对同一个 tool 给了不同 decision 怎么办"。本方案定 <b>allow 优先</b>(用户拍板),并配平台守卫做安全兜底。</p>
+
+<h3>5.1 两档优先级(守卫 + 角色边 allow 优先)</h3>
+<p>由于 <b>friend=default 边</b>(§3.1),"走 default"不再是一个单独的退路档——default 就是一条和其他角色边平等参与 allow 优先的角色边。求值从三档塌成<b>两档</b>:</p>
+<div class="rule-block">
+对一次 tool call (caller A → bot B, tool, args),按以下顺序判:
+
+  ① <span class="warn">平台守卫</span>(最高,不可被任何边覆盖)
+     命中守卫 deny(如 Bash(rm -rf /)) → <span class="bad">deny · 熔断</span>
+     命中守卫 ask(internal_directory 等) → 转 bot 第二层审批(本稿不展开)
+
+  ② <span class="ok">角色边</span>(A→B 的所有 approved 边,含 default 边,allow 优先)
+     <span class="c">// 注:若本次消息带 original_caller(代理转发),先按 §3.5.4 双闸处理;</span>
+     <span class="c">//     否则按下方普通求值</span>
+     任一边(含 default 边) allow → <span class="ok">allow</span>
+     无 allow、有 deny → <span class="bad">deny</span>
+     全未命中(含连 default 边都没有/都没命中) → <span class="bad">deny(零信任)</span>
+
+<span class="c"># 原"第三档 default 退路"已并入第②档:default 是一条角色边,和其他边一起 allow 优先</span>
+<span class="c"># caller 若连 default 边都没建 → 直接 deny(没有熟人关系即无入场)</span>
+</div>
+
+<h3>5.2 allow 优先的真值表</h3>
+<p>只看第②档(角色边之间),A→B 的<b>所有 approved 边(含 default 边)</b>对本次 (tool,specifier) 的产出。注意:default 不再是独立退路档,它就是表里的一条边,和其他边一起按下方规则参与:</p>
+<table>
+<tr><th>边集合命中情况</th><th>终局</th><th>直觉</th></tr>
+<tr><td>任一边(含 default 边) = allow</td><td><span class="tag tag-allow">allow</span></td><td>有人放行就放行</td></tr>
+<tr><td>无 allow,有 deny</td><td><span class="tag tag-deny">deny</span></td><td>没人放行,但有明确拒,则拒</td></tr>
+<tr><td>全未命中(含 default 边也没命中)</td><td><span class="tag tag-deny">deny</span></td><td>没人表态→零信任从严(无独立 default 退路档)</td></tr>
+</table>
+<div class="callout"><b>塌档说明</b>:原"第三档 default 退路"已删除——default 是一条角色边,它若 allow 就在第①行放行、若 deny 或未命中就走第②/③行。<b>不存在"落 default"这个独立动作</b>。caller 若连 default 边都没建,则该对点无任何 approved 边,直接落入第③行 deny。</div>
+
+<h3>5.3 两个必须说清的边界</h3>
+<div class="ex-row">
+  <div class="ex-card info">
+    <div class="ex-head">① 单条边内部,deny 仍从严</div>
+    <p>allow 优先是<b>边与边之间</b>。一条边(角色)内部的 <code>deny(Edit(/prod/**))</code>,仍然是"这条边对 Edit(/prod) 投了 deny"。只有当<b>另一条边</b>给了 allow,这条边的 deny 才被压过。即:deny 在"同一角色内"从严,跨角色时被 allow 压过。</p>
+  </div>
+  <div class="ex-card deny">
+    <div class="ex-head">② 绝对禁止靠平台守卫</div>
+    <p>allow 优先下,普通挂一条 deny 边拦不住别人挂的 allow。所以"谁都不能做"的兜底(删根、删家目录、外访内网)交给<b>平台守卫层</b>——它最高优先级,绕开 allow 优先,不归 owner 配、不可取消。安全否决权回到该在的地方,又不破坏"角色边之间 allow 优先"。</p>
+  </div>
+</div>
+
+<div class="warn-note"><b>为什么 allow 优先(而非 briefing 原版的 deny 优先)</b>:协作场景里我们希望 <b>bot 尽量能被放行去干活</b>,多角色叠加时"有一个角色允许就放行"更贴合"尽力服务"。代价是普通 deny 边不能用来收紧,收紧只能靠平台守卫层——这是有意的取舍:把"绝对禁止"和"角色放行"分层,前者守卫、后者角色。</div>
+
+<h3>5.4 代理跳的求值(与普通求值的关系)</h3>
+<p>§5.1~§5.3 讲的是"普通调用/外包自用"的求值。代理转发(§3.5)是另一条路径,两者关系:</p>
+<table>
+<tr><th>调用类型</th><th>触发</th><th>求值</th></tr>
+<tr><td>普通调用 / 外包自用</td><td>消息<b>无</b> original_caller</td><td>§5.1 两档:守卫→角色边 allow 优先(含 default 边,逐跳看自己边)</td></tr>
+<tr><td>代理转发</td><td>消息<b>有</b> original_caller</td><td>§3.5 双闸:代理边(闸A)∧ 发起者→执行者边(闸B),再叠加守卫①</td></tr>
+</table>
+<div class="callout"><b>关键</b>:多边 allow 优先(§5.2)是<b>同一对点之间多条角色边</b>的合成;代理双闸(§3.5.4)是<b>不同对点(代理者边 + 发起者边)</b>的合成。两者粒度不同、不冲突:同一对点的 N 条边先内部 allow 优先合成一个跳的 verdict;若是代理跳,再把这个 verdict 与发起者边的 verdict 做 AND。守卫①永远是最高优先级,两类都在其后。</div>
+</section>
+
+<!-- §6 -->
+<section>
+<h2>6. 边落在哪:边属性直判,不用位图</h2>
+<p>这张点-边图,在代码里就是 BCS 现有的关系表 <code>bcs_actor_relations</code>。每条边一行。<b>本方案不预渲染任何"权限位图"——准入期和 bot 端都直接读边上的显式字段判,不打包进 u64</b>。</p>
+<div class="rule-block">
+<span class="c">// bcs-domain/src/actor.rs:64-85  一条边 = 表里一行</span>
+<span class="kw">pub struct</span> RelationEdge {
+    <span class="kw">pub</span> from_id: String,      <span class="c">// 点 A (human_{staff_no} / bot uuid / svc_{service_id})</span>
+    <span class="kw">pub</span> to_id:   String,      <span class="c">// 点 B (bot uuid)</span>
+    <span class="kw">pub</span> env:     String,      <span class="c">// 边键,按环境隔离</span>
+    <span class="kw">pub</span> kinds:   u64,          <span class="c">// 预埋列,V1 恒 0 —— 本方案<b>不启用为权限位图</b>,留作未来扩展</span>
+    <span class="kw">pub</span> allow:   u64,          <span class="c">// 同上,不启用</span>
+    <span class="kw">pub</span> deny:    u64,          <span class="c">// 同上,不启用</span>
+    <span class="kw">pub</span> is_creator: bool,      <span class="c">// owner 边标识(边属性,准入期直判)</span>
+    <span class="c">// 权限与元信息以显式字段落扩展表 bcs_edge_grants(见下),不打包进位图</span>
+}
+</div>
+<p class="anchor">代码注释与 <code>human-actor/design.md §4.1</code>:kinds/allow/deny 三列虽为权限预埋,但本方案<b>选择不用它们做权限承载</b>——理由见下。写入口现硬编码 0,本方案<b>不打开它</b>(保持恒 0)。</p>
+
+<h3>6.1 为什么不用位图(边属性直判更优)</h3>
+<p>曾考虑用 <code>kinds/allow/deny</code> 这三个 64-bit 位图承载权限做"粗判快路径"。经权衡放弃,改<b>边属性直判</b>:</p>
+<table>
+<tr><th>若用位图</th><th>代价</th></tr>
+<tr><td>位段怎么分(192 bit 谁占谁)— 见原 D1</td><td>上线后改不动,要数据迁移;动态 tool(MCP/SKILL)天生不配固定位</td></tr>
+<tr><td>位图是 rules 的渲染摘要,两者双源</td><td>改 rules 要重渲染位图,漏同步则不一致</td></tr>
+<tr><td>pending 边要专门管位图一致性</td><td>多一处状态约束</td></tr>
+<tr><td>位图想提前到 BCS 准入拦,但准入期<b>拿不到 tool 名</b>(tool 是 bot LLM 才解析的)</td><td>tool 级位图只能挪 bot 端,丢了"准入期省.bot 唤醒"的最大卖点</td></tr>
+</table>
+<p>而位图唯一的好处"存储紧凑、一次读取",在准入期查边本就是一次索引扫描、读一列还是几列是 ns 级差——<b>收益极薄</b>。更要紧的是:<b>准入期能拦的东西(黑名单/owner 免审/高危加闸/限流),本质都是边的关系烈度或状态,本就是边上的显式字段</b>(status / is_creator / role 烈度 / 代理标记),用字段直判即可,不必打包进位图。<b>位图没带来额外拦截能力,只是换了个存储形态</b>——是负资产,故去之。</p>
+
+<h3>6.2 两层直判:准入期判边属性,bot 端判 rules</h3>
+<table>
+<tr><th>层级</th><th>时刻/拥有信息</th><th>判什么</th><th>读什么(全是边上的显式字段/扩展表)</th></tr>
+<tr><td><b>BCS 准入门</b></td><td>消息到达 BCS,无 tool(只知 caller/B)</td><td>关系是否存在 + 边是否 approved + 边级风险/烈度(黑名单拒、owner 免审放、高危加审批闸、限流拒)</td><td>边存在性 + <code>status</code> + <code>is_creator</code> + role 烈度 + <code>proxy_allowed</code> 等<b>显式字段</b></td></tr>
+<tr><td><b>bot 端 before_tool_call</b>(守卫+角色边 allow 优先,§5)</td><td>LLM 已解析出 tool+specifier</td><td>守卫① → 角色边 rules 对本次 (tool,specifier) 的 allow/deny(allow 优先)</td><td>扩展表 <code>bcs_edge_grants</code> 的 <code>rules</code>(tool 级真相,唯一源)</td></tr>
+</table>
+<div class="callout"><b>关键</b>:关系层(BCS 准入)和 tool 级权限层(bot 端)用<b>各自最自然的表达</b>——准入期读边属性(几个字段,各表一意),bot 端读 rules(tool 级)。<b>权限不再有两份(位图+rules)</b>,rules 是唯一 tool 级真相,无双源、无位段分配、无动态 tool 不适配。位图三列留着恒 0 当未来扩展位,不参与求值。</div>
+
+<h3>6.3 BCS 准入能提前拦的,正是边属性</h3>
+<table>
+<tr><th>准入期拦截</th><th>读的边属性</th><th>动作</th></tr>
+<tr><td>陌生人/无关系</td><td>边不存在 / 无 approved 边</td><td>拒,消息不进 bot</td></tr>
+<tr><td>owner 直接放</td><td><code>is_creator=true</code></td><td>免审放行</td></tr>
+<tr><td>黑名单 caller</td><td>role 烈度 = 拒绝级(或 status=rejected)</td><td>拒</td></tr>
+<tr><td>高危边加闸</td><td>边带 danger 标记(显式字段)</td><td>转审批/ask,不直放</td></tr>
+<tr><td>超限流/过期</td><td><code>expires_at</code> / rate 字段</td><td>拒</td></tr>
+</table>
+<p class="lead">这些<b>不依赖 tool 名</b>——都是 caller↔B 这条边的属性,准入期有边就判得了。位图三列恒 0 不参与;该拦的拦得住,该放的去 bot 端判 rules。</p>
+</section>
+
+<!-- §7 -->
+<section>
+<h2>7. 第一部分小结</h2>
+<div class="ok-note">
+<b>边权限 = 点-边图</b>:<br>
+① <b>点</b>有三类 human / bot / service;<b>边</b>就是角色,角色=一组权限集合;三类点的边同构、同求值。<br>
+② <b>friend=default 边</b>(§3.1):friend 即一条 default 角色边,模型只有一类边;求值从三档塌成两档。<br>
+③ 边的写入走统一<b>申请-审批</b>(§3.2.4):caller 申请→bot owner 审批→approved 才生效,被加者必须同意。<br>
+④ 同一对点多边(多角色),<b>allow 优先</b>合成;绝对禁止交给平台守卫层兜底。<br>
+⑤ 边上的 <code>proxy_allowed</code> 开关(默认 false)管控代理转发:靠它防伪造发起者、保普通边干净;代理跳走双闸(代理边 ∧ 发起者→执行者边),多级不放大权限。<br>
+⑥ 这张图在代码里就是 <code>bcs_actor_relations</code>。<b>不预渲染位图</b>,准入期读边属性、bot 端读 rules,各判各的。<br>
+接下来第二部分,看这张图在真实场景里怎么动起来。
+</div>
+</section>
+
+<!-- ===================== 第二部分:真实场景怎么用 ===================== -->
+<div class="part-banner"><span class="step">第二部分</span>边权限在真实场景中怎么使用</div>
+
+<!-- §8 场景设定 -->
+<section>
+<h2>8. 场景设定</h2>
+<p>用一套固定角色把边权限从建边到撤销跑一圈。所有环节都用这张图:</p>
+<table>
+<tr><th>角色</th><th>actor id</th><th>身份</th></tr>
+<tr><td>Alice</td><td><code>human_alice</code></td><td>bot2、bot3 的 owner</td></tr>
+<tr><td>Bob</td><td><code>human_bob</code></td><td>Alice 同事,想借用 bot2</td></tr>
+<tr><td>bot2</td><td>B2</td><td>能改文件、能 git 的协作 bot</td></tr>
+<tr><td>bot3</td><td>B3</td><td>只读探查 bot</td></tr>
+<tr><td>bot1</td><td>B1</td><td>会发起协作链的 caller(回环用例用)</td></tr>
+<tr><td>CI 系统</td><td><code>svc_ci</code></td><td>在线服务应用(service 点):定时跑代码审查,直接调 bot3</td></tr>
+<tr><td>bot1'</td><td>B1'</td><td>代理链中间跳(代理转发的中续)</td></tr>
+</table>
+<div class="callout"><b>主线</b>:Alice 配角色 → Bob 借用 bot2 → bot2 干活时调 bot3 → CI 系统(service)直连 bot3 → 代理转发 caller3→bot1→bot1'→bot2 → bot1→bot2→bot3→bot2 回环 → 改约/撤销。每个环节都回到"图"上看边怎么变。</div>
+</section>
+
+<!-- §9 环节一 -->
+<section>
+<h2>9. 环节一:Alice 建 owner 边 + 配角色(图初态)</h2>
+<p>Alice 作为 bot2、bot3 的 owner,从 onboarding 起就有一条 owner 边(全权)。她在 bot2 上配两个角色模板(角色的"内容"),备用。</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Alice(("human<br/>Alice"))
+  B2(("bot<br/>bot2"))
+  B3(("bot<br/>bot3"))
+  Alice -->|"owner边<br/>权限集合=全权(守卫外)"| B2
+  Alice -->|"owner边<br/>全权"| B3
+
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Alice human;
+  class B2,B3 bot;
+</pre>
+</div>
+<p>同时 Alice 在 bot2 定义两个角色(存在扩展表,供后面绑边用):</p>
+<div class="rule-block">
+<span class="c"># bot2 可被绑定的角色(权限集合)定义</span>
+<span class="ok">只读者</span>   = [ Read(./*)allow, Edit(*)deny, Bash(*)deny ]
+<span class="ok">受限协作者</span> = [ Bash(git *)allow, Read(./src/**)allow, Bash(rm *)deny, Bash(curl *)deny ]
+</div>
+<p class="lead">注意:角色定义是 bot 侧的内容(bot 最懂自己挂了哪些 tool),但绑到哪条边上是 BCS 侧的事(关系图职责)。</p>
+</section>
+
+<!-- §10 环节二 -->
+<section>
+<h2>10. 环节二:Bob 申请 default 边(成为 bot2 熟人 / friend)</h2>
+<p>Bob 想用 bot2,先要成为熟人(friend)。在本方案里<b>friend 就是 default 边</b>(§3.1),所以"加好友"= 申请一条 <code>role_name=default</code> 的边,且须经 bot2 owner(Alice)<b>审批</b>才能生效(§3.2.4)——被加者必须知情同意。</p>
+<div class="mgraph">
+<pre class="mermaid">
+sequenceDiagram
+  participant Bob as Bob(申请方)
+  participant BCS
+  participant Alice as Alice(审批方, bot2 owner)
+  Bob->>BCS: ① 申请 Bob→bot2 的 default 边(status=pending)
+  Note over BCS: pending 边:不生效,不进准入,不参与求值
+  BCS->>Alice: ② 通知:Bob 想加为熟人
+  Alice->>BCS: ③ accept
+  BCS->>BCS: ④ status=approved, default 边生效(approver/grantor=Alice)
+  Note over BCS: 此刻:Bob 是熟人(friend)<br/>凭 default 边走 bot2 的 default 规则集
+</pre>
+</div>
+<div class="callout"><b>friend=default 边,且写入走申请-审批</b>。这一步 Bob 拿到的是 default 边(走 Alice 配的 default 规则集),不是任何细粒度角色。<b>关键</b>:Bob 不能单方面让这条边生效——必须 Alice 审批,被加者知情同意,杜绝"加好友即被动获权"的不安。pending 边不生效,审批通过才落。</div>
+</section>
+
+<!-- §11 环节三 -->
+<section>
+<h2>11. 环节三:Bob 申请只读者角色边(细粒度权限,仍走审批)</h2>
+<p>default 边让 Bob 能走默认规则,但他还想要"只读 + 不受限"的更明确权限。Bob 再申请一条 <code>role_name=只读者</code> 的边——同样经 Alice 审批。这条边和 default 边并存(多边,§4),求值时 allow 优先合成。</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob"))
+  B2(("bot<br/>bot2"))
+  Bob -->|"default边(已approved)<br/>走默认规则"| B2
+  Bob -->|"只读者边(申请→审批)<br/>Read允 / Edit否 / Bash否"| B2
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Bob human;
+  class B2 bot;
+</pre>
+</div>
+<p>申请-审批动作 = caller 写一条 pending 边,owner 审批通过后 status=approved、规则存扩展表 rules,即生效:</p>
+<div class="rule-block">
+<span class="c"># ① Bob 申请(写 pending 边,不生效)</span>
+apply(from=human_bob, to=B2, role=只读者, rules=[...], status=pending, applicant=human_bob)
+<span class="c"># ② Alice 审批通过 → 边生效</span>
+approve(status=pending→approved, approver=human_alice)
+<span class="c"># rules 即为 tool 级唯一真相,无需渲染位图;status=approved 即生效信号</span>
+<span class="c"># 安全校验:approver 必须是 B2 的 owner(Alice);申请方 Bob 不能自审自批</span>
+</div>
+<div class="ok-note"><b>统一在申请-审批</b>:default 边(环节二)与具体角色边(本环节)都走同一条申请-审批流程,不再 owner 直灌、不再"先 friend 再绑角色"两套。审批方恒为边指向的 bot 的 owner。校验复用 <code>bcs-group/management.rs:ensure_reachable</code> 同源(查 approved 边是否存在)。</div>
+</section>
+
+<!-- §12 环节四 -->
+<section>
+<h2>12. 环节四:Bob 发起一次调用(图上走 allow/deny)</h2>
+<p>Bob 让 bot2 "看下 src/main.rs 的鉴权逻辑"。bot2 的 LLM 解析出一个 <code>Read</code> tool call。求值分两层(BCS 准入门判关系/approved;bot 端 before_tool_call 判 tool 级权限,走守卫+角色边两档):</p>
+<div class="mgraph">
+<pre class="mermaid">
+sequenceDiagram
+  participant Bob as Bob
+  participant BCS
+  participant B2 as bot2
+  Bob->>BCS: chat.send "看下鉴权逻辑"
+  BCS->>BCS: 准入门: Bob→bot2 有 approved 边? default 边在 → 准入放行(不判 tool)
+  BCS->>B2: 注入 caller=Bob + 边契约, 转发
+  B2->>B2: LLM → tool call Read(./src/main.rs)
+  B2->>B2: before_tool_call 第①档 守卫: Read 不命中守卫 deny → 过
+  B2->>B2: 第②档 读 rules 细判: 只读者 Read(./*)allow 命中 → allow
+  B2->>B2: 第二层(bot自身鉴权) → allow
+  B2-->>Bob: 返回内容 ✅
+</pre>
+</div>
+<p>若 Bob 改口"顺便把鉴权那段删了重写",触发 <code>Edit</code>:</p>
+<div class="ex-row">
+  <div class="ex-card pass">
+    <div class="ex-head">✓ Read 放行</div>
+    <p>守卫未命中 → 角色边"只读者" <code>Read(./*) allow</code> 命中 → allow。</p>
+  </div>
+  <div class="ex-card deny">
+    <div class="ex-head">✗ Edit 被哪一档挡?</div>
+    <p>守卫未命中 → 角色边"只读者" <code>Edit(*) deny</code>。<b>Bob→bot2 只这一条边</b>,无其它边给 allow → 终局 deny,在 bot 端细判即拒。</p>
+  </div>
+</div>
+<div class="callout"><b>多边 allow 优先在此还没显出来</b>——因为 Bob 此刻只有一条边。下一节给他加第二条边,就看到 allow 优先怎么让"临时写 tmp"突破"只读者的 Edit deny"。</div>
+</section>
+
+<!-- §13 环节五 -->
+<section>
+<h2>13. 环节五:多边 + allow 优先(图加第二条边)</h2>
+<p>Alice 临时给 Bob 再挂一条"临时写 tmp"边,让 Bob 能往 /tmp 写东西。此刻 Bob→bot2 有<b>两条边</b>。对 <code>Write(/tmp/x)</code> 这个调用:</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob"))
+  B2(("bot<br/>bot2"))
+  Bob -->|"边1 只读者<br/>Read允 / Edit否 / Bash否"| B2
+  Bob -->|"边2 临时写tmp<br/>Write(/tmp)允"| B2
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Bob human;
+  class B2 bot;
+</pre>
+</div>
+<table>
+<tr><th>tool call</th><th>边1 只读者</th><th>边2 临时写tmp</th><th>多边 allow 优先</th><th>终局</th></tr>
+<tr><td><code>Write(/tmp/x)</code></td><td>未命中</td><td>allow</td><td>任一 allow → allow</td><td><span class="tag tag-allow">allow</span></td></tr>
+<tr><td><code>Edit(/src/a.py)</code></td><td>deny</td><td>未命中</td><td>无 allow,有 deny → deny</td><td><span class="tag tag-deny">deny</span></td></tr>
+<tr><td><code>Read(./x)</code></td><td>allow</td><td>未命中</td><td>任一 allow → allow</td><td><span class="tag tag-allow">allow</span></td></tr>
+</table>
+<div class="ok-note"><b>allow 优先的体感</b>:边2 给 <code>Write(/tmp)</code> 开了 allow,即便边1 是"只读者(啥写都不行)",<code>Write(/tmp)</code> 仍放行——"有一个角色放行就放行"。而 <code>Edit(/src)</code> 没有任何边 allow,边1 又 deny,于是 deny——"没人放行且有拒,则拒"。</div>
+</section>
+
+<!-- §14 环节六 长链 -->
+<section>
+<h2>14. 环节六:长链协作(图上多跳,每跳一条边)</h2>
+<p>bot2 帮 Bob 干活时,自己要去调 bot3。于是有链 <code>Bob → bot2 → bot3</code>。<b>每一段都是图上独立的一条边,逐跳独立判,不回溯 Bob</b>。</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob")) -->|"边E1<br/>只读者"| B2(("bot<br/>bot2"))
+  B2 -->|"边E2<br/>只读者(bot3侧)"| B3(("bot<br/>bot3"))
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Bob human;
+  class B2,B3 bot;
+</pre>
+</div>
+<ul>
+<li><b>跳1 Bob→bot2</b>:判边 E1(Bob 对 bot2 的只读者边)——Bob 让 bot2 做是否被 E1 允许。</li>
+<li><b>跳2 bot2→bot3</b>:判边 E2(bot2 对 bot3 的只读者边)——bot2 让 bot3 做是否被 E2 允许。<b>这里完全不看 E1</b>。</li>
+</ul>
+<table>
+<tr><th>链</th><th>逐跳看自己的边</th><th>聚合</th></tr>
+<tr><td>Bob→bot2→bot3</td><td>v1(看E1) ∧ v2(看E2)</td><td><b>逐跳 AND,最严即终局</b></td></tr>
+</table>
+<div class="warn-note"><b>注意:跳内"多边 allow 优先",跳间"逐跳 AND 最严"</b>。这是两个粒度:同一对点之间多条边用 allow 优先合成一个跳的 verdict;不同跳(不同点对)之间用 AND 取最严。不冲突。</div>
+</section>
+
+<!-- §15 环节七 回环 -->
+<section>
+<h2>15. 环节七:回环委托(图上的环,briefing 死结①)</h2>
+<p>把链换成 bot1 发起:<code>bot1→bot2→bot3→bot2→bot3→…</code>,bot2 和 bot3 互相回头调,形成<b>环</b>。briefing 旧方案在"回溯到发起者"的委托链图上挂不上环,只能从严拒。</p>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  B1(("bot1")) -->|"E12"| B2a(("bot2"))
+  B2a -->|"E23"| B3a(("bot3"))
+  B3a -->|"E32 回环跳3"| B2b(("bot2'"))
+  B2b -->|"E23' 回环跳4"| B3b(("bot3'"))
+  B3b -. 中止 .-> STOP(("doom_loop 守卫<br/>重复N次自动deny"))
+  classDef actor fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  classDef cycle fill:#fffaf0,stroke:#c05621,stroke-width:2px,color:#7b341e;
+  classDef bad fill:#fce8e8,stroke:#c53030,stroke-width:2px,color:#9b2c2c;
+  class B2b,B3b cycle;
+  class STOP bad;
+  class B1,B2a,B3a actor;
+</pre>
+</div>
+<p>本方案:每跳都是图上一条已存在的边,逐跳独立判:</p>
+<table>
+<tr><th>跳</th><th>看哪条边</th><th>结果</th></tr>
+<tr><td>跳1 bot1→bot2</td><td>E12</td><td>v1</td></tr>
+<tr><td>跳2 bot2→bot3</td><td>E23</td><td>v2</td></tr>
+<tr><td>跳3 bot3→bot2 <b>(回环!)</b></td><td>E32 —— <b>就是又看这条边,与跳1无关</b></td><td>v3</td></tr>
+<tr><td>跳4 bot2→bot3 <b>(再回环)</b></td><td>E23(同跳2)</td><td>v4</td></tr>
+</table>
+<div class="callout" style="font-size:15px;">
+<b>聚合</b>:终局 = v1 ∧ v2 ∧ v3 ∧ v4 ∧ ……(逐跳 AND,最严即终局)。<br>
+<b>回环为何不再死结</b>:跳3 读的是 <code>bot3→bot2</code> 边 E32——它<b>本来就在图上</b>(friend 双向 + 各自角色),照常求值。<b>不回溯发起者,就没有挂不上的环</b>。死结①从图结构上消除。
+</div>
+<div class="warn-note"><b>真正兜底死循环的是另一道闸</b>:平台守卫 <code>doom_loop</code>——同一 <code>(caller,bot,tool,args)</code> 在一回合重复 N 次自动 deny。它与逐跳鉴权正交:边权限管"能不能做",doom_loop 管"做过头了"。环跑通 ≠ 放任死循环。</div>
+</section>
+
+<!-- §16 环节八 守卫 -->
+<section>
+<h2>16. 环节八:平台守卫兜底(allow 优先下的安全闸)</h2>
+<p>allow 优先意味着普通 deny 边拦不住别人挂的 allow。若有人给 bot2 挂了 <code>allow Bash</code> 的边,而 Bob 想跑 <code>rm -rf /</code>——靠角色边拦不住。这时平台守卫出手:</p>
+<div class="rule-block">
+<span class="c"># 守卫层(最高优先级,先于角色边判)</span>
+Bash(rm -rf /)            → <span class="bad">deny 熔断(删根/删家目录,任何边都盖不掉)</span>
+Bash(rm -rf ~)            → <span class="bad">deny 熔断</span>
+external_directory        → 转审批(触工作目录外路径)
+doom_loop                 → <span class="bad">deny(重复N次)</span>
+</div>
+<div class="callout"><b>守卫不是角色边</b>,是独立一层,不归 owner 配、不可取消、最高优先级。它先判,过了才进角色边的 allow 优先合成。这样把"绝对禁止"(守卫)和"角色放行"(边)分层,各自职责清晰:守卫保安全底线,边做协作灵活。</div>
+</section>
+
+<!-- §17 环节九 撤销 -->
+<section>
+<h2>17. 环节九:撤销与改约(图上删边/换边)</h2>
+<p>七天后 Alice 收回 Bob 的只读权限,或临时收紧。这对应图上的删边/换边:</p>
+<div class="ex-row">
+  <div class="ex-card info">
+    <div class="ex-head">撤销(删边)</div>
+    <p>删 <code>Bob→bot2</code> 的"只读者"边 → 该边失效(从 rules 池移除)。<b>default 边(friend)还在</b>(Bob 还是熟人),只是退回 default 规则。校验:只有 grantor(Alice)或 owner 能撤,带 version 乐观锁。</p>
+  </div>
+  <div class="ex-card deny">
+    <div class="ex-head">改约(换边)</div>
+    <p>把"只读者"换成更紧的自定义角色 → 改 roles 的 rules。version+1,bot 端缓存据此失效。<b>多边下删一条不影响其它边</b>——这正是多边的好处:删"临时写 tmp"不影响"只读者"。</p>
+  </div>
+</div>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob"))
+  B2(("bot<br/>bot2"))
+  Bob -->|"friend边还在(关系身份保留)<br/>权限身份=空,退回default"| B2
+  classDef human fill:#e8f0fc,stroke:#2b6cb0,stroke-width:2px,color:#1e3a5f;
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  class Bob human;
+  class B2 bot;
+</pre>
+</div>
+</section>
+
+<!-- 场景一 service 调用 -->
+<section>
+<h3 style="color:var(--c-primary);border-bottom:2px solid var(--c-teal);padding-bottom:6px;">特殊场景一:在线服务应用(service 点)调用 bot</h3>
+<p>CI 系统<small style="color:var(--c-muted);">(<code>svc_ci</code>)</small>是<b>service 点</b>——既非人也非 bot,无 LLM 语义、直接触发 bot 能力,用机器凭证。它要定时跑代码审查,直接调 bot3 做只读分析。</p>
+
+<h4>① 建边方式:同样申请-审批(service 用机器凭证申请)</h4>
+<p>统一申请-审批下,service 与 human 的建边<b>流程一致</b>——都走"申请→bot owner 审批→approved 边生效"。区别只在<b>凭证与审批形态</b>:service 用机器凭证(API key)发起申请,且常配 owner 预授权白名单(§3.2.5)做自动审批,适合机器协作的无人值守。</p>
+<div class="mgraph">
+<pre class="mermaid">
+sequenceDiagram
+  participant CI as CI系统(svc 申请方)
+  participant BCS
+  participant Alice as Alice(bot3 owner 审批方)
+  CI->>BCS: ① 申请 svc_ci→bot3 只读者边(机器凭证, status=pending)
+  alt 走人工审批
+    BCS->>Alice: 通知 CI 申请
+    Alice->>BCS: accept → approved
+  else 走预授权白名单(§3.2.5)
+    BCS->>BCS: CI 在白名单 → 自动 approved
+  end
+  BCS->>BCS: approved 边生效,rules 入扩展表
+</pre>
+</div>
+<div class="rule-block">
+<span class="c"># service 与 human 流程同构,区别在凭证与审批形态</span>
+apply(svc_ci → bot3):
+  role     = 只读者
+  rules    = [ Read(./*)allow, Edit(*)deny, Bash(*)deny ]
+  凭证     = API key(机器凭证, auth-plugin 链验)
+  审批     = owner 人工 accept 或 预授权白名单自动 approved
+  <span class="c"># 安全闸不变:指向 bot3 的边须经 bot3 owner 知情同意</span>
+</div>
+
+<h4>② 一次调用:求值零特判</h4>
+<p>CI 系统凭 API key 调 bot3 做一次 <code>Read(./repo/)</code>。求值走的是<b>与 human/bot 完全相同</b>的两档(守卫 + 角色边 allow 优先,含 default 边):</p>
+<div class="rule-block">
+CI 调 bot3 Read(./repo/):
+  ① 守卫:Read 未命中守卫 deny → 过
+  ② 角色边(含 default):svc_ci→bot3 的「只读者」边 Read(./*)allow 命中 → <span class="ok">allow</span>
+  终局 allow,bot3 返回分析结果 ✅
+</div>
+<div class="callout"><b>关键</b>:service 作为 caller <b>只影响第一层</b>(看 svc_ci→bot3 边)。第二层永远是"目标 bot 自己的 before_tool_call",与 caller 是谁无关。所以求值器<b>零特判</b>——service→bot 与 human→bot / bot→bot 同构、同求值、同申请-审批。三类点的仅区别在<b>凭证方式(service 用机器凭证)与审批形态(常配预授权白名单自动审批)</b>,不在求值、不在写入流程结构。</div>
+</section>
+
+<!-- 场景二 代理转发 -->
+<section>
+<h3 style="color:var(--c-primary);border-bottom:2px solid var(--c-teal);padding-bottom:6px;">特殊场景二:代理转发链(bot3→bot1→bot1'→bot2,含多级代理)</h3>
+<p>这是 §3.5 / §5.4 的真实跑法。caller3 找 bot1,bot1 决定<b>替 caller3 转给 bot2</b>,中间还经 bot1' 中续。全程展示:何时盖 original_caller、proxy_allowed 谁开、每跳判什么、未授权怎么拦。</p>
+
+<h4>① 配置阶段:每段代理边开 proxy_allowed(由被调方 owner)</h4>
+<div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  C3(("bot<br/>caller3")) -->|"caller3→bot1 边(普通)<br/>Read允"| B1(("bot<br/>bot1"))
+  B1 -->|"bot1→bot1' 边<br/>proxy_allowed=true"| B1p(("bot<br/>bot1'"))
+  B1p -->|"bot1'→bot2 边<br/>proxy_allowed=true"| B2(("bot<br/>bot2"))
+  C3 -->|"caller3→bot2 边(须存在)<br/>Read允(发起者授权)"| B2
+  classDef bot fill:#f1ebfb,stroke:#805ad5,stroke-width:2px,color:#553c9a;
+  classDef proxy fill:#fbf8da,stroke:#ca8a04,stroke-width:2px,color:#713f12;
+  class C3,B2 bot;
+  class B1,B1p proxy;
+</pre>
+</div>
+<div class="rule-block">
+<span class="c"># 三条代理边,各自由"被调方 owner"设 proxy_allowed=true</span>
+bot1 →bot1' .proxy_allowed = true  ← bot1' owner 设(信任 bot1 当代理)
+bot1'→bot2  .proxy_allowed = true  ← bot2  owner 设(信任 bot1' 当代理)
+<span class="c"># 注意:caller3→bot2 边也必须存在,这是发起者被 bot2 直接授权</span>
+caller3→bot2 = 只读者(Read 允)        ← 否则最终闸B 拦
+</div>
+
+<h4>② 运行阶段:盖 original_caller + 透传 + 双闸</h4>
+<div class="mgraph">
+<pre class="mermaid">
+sequenceDiagram
+  participant C3 as caller3
+  participant B1 as bot1
+  participant B1p as bot1'
+  participant B2 as bot2
+  C3->>B1: "帮我分析仓库"(普通调用, 无原caller)
+  B1->>B1: 读 bot1→bot1'.proxy_allowed=true → 决定当代理
+  B1->>B1p: 转交, 盖 original_caller=caller3
+  Note over B1p: original_caller 透传, 不改值
+  B1p->>B2: 继续转, original_caller=caller3
+  B2->>B2: 闸A: bot1'→bot2.proxy_allowed=true + 边 allow ✓
+  B2->>B2: 闸B: caller3→bot2 边 Read allow ✓
+  B2-->>C3: 返回结果(账算 caller3 的权限)✅
+</pre>
+</div>
+<div class="rule-block">
+<span class="c"># 每跳判定(见 §3.5.5)</span>
+跳① caller3→bot1  : 普通, 看 caller3→bot1 边 allow → v1 ✓
+跳② bot1→bot1'    : 代理闸A, bot1→bot1'.proxy_allowed=true + rules allow → v2 ✓
+跳③ bot1'→bot2    : 闸A + 闸B,
+                    闸A: bot1'→bot2.proxy_allowed=true + rules allow ✓
+                    闸B: caller3→bot2 边 Read allow ✓ → v3 ✓
+终局 = v1 ∧ v2 ∧ v3 = <span class="ok">allow</span>, 账算 caller3 在 bot2 上的权限
+</div>
+
+<h4>③ 未授权怎么拦(回到最初担心的越权)</h4>
+<div class="ex-row">
+  <div class="ex-card deny">
+    <div class="ex-head">✗ 情况A:caller3 没被 bot2 授权</div>
+    <p>若 <code>caller3→bot2</code> 边不存在/该 Read 是 deny → 跳③<b>闸B 拒</b>。bot1 通道再畅通也救不了未授权的 caller3——<b>未授权必拦</b>,越权放大被堵死。</p>
+  </div>
+  <div class="ex-card deny">
+    <div class="ex-head">✗ 情况B:bot1 没被开 proxy_allowed</div>
+    <p>若 <code>bot1→bot1'.proxy_allowed=false</code> → 跳②<b>闸A 拒</b>。bot1 自作主张当代介不行——代理被信任这一证缺失。bot1 的边成不了通行证。</p>
+  </div>
+  <div class="ex-card deny">
+    <div class="ex-head">✗ 情况C:bot1 篡改 original_caller</div>
+    <p>若 bot1 把 <code>original_caller</code> 改成自己 → 协议层硬禁止;即便没拦下,bot2 端闸B 校验的是改值后的"发起者",bot1 自身被 bot2 授权与否重新判,<b>无法逃过发起者校验</b>。</p>
+  </div>
+</div>
+<div class="ok-note"><b>一句话</b>:多级代理 = 每段代理边由被调方 owner 开 <code>proxy_allowed</code>(信任逐段传)+ original_caller 由首代盖定、原样透传(发起者恒定带)+ 最终执行处双闸一次性校验(代理边 ∧ 发起者→执行者边)。整条链成立 = 所有代理边齐 AND 发起者被授权,两条件独立 → <b>多级代理不放大权限</b>。普通协作(proxy_allowed 默认 false)完全不碰这套,零负担。</div>
+</section>
+
+<!-- §18 委托 -->
+<section>
+<h2>18. 委托:caller 把自己的部分权限向下传(图上加下游边)</h2>
+<p>bot2 若想在协作链里把自己部分权限下传给下游 bot3,用边的 <code>delegation_depth</code>。铁律——<b>只能收紧,不可升级</b>(下游 ⊆ 上游):</p>
+<div class="rule-block">
+<span class="c">// 委托时下游边 = 收紧后的上游边</span>
+new_allow = 下游_req.allow <span class="kw">&amp;</span> 上游.allow   <span class="c">// 只能是子集</span>
+new_deny  = 下游_req.deny  <span class="kw">|</span> 上游.deny    <span class="c">// 只能更严</span>
+new_depth = 上游.delegation_depth - 1                <span class="c">// 深度衰减</span>
+</div>
+<div class="ok-note"><b>逐跳 AND + 委托收紧,合力给出一个界</b>:链上任意 bot 能做的事,<b>恒 ⊆ 发起 caller 在第一跳被允许做的事</b>。无需回溯发起者即可得到这个界——这正是 briefing 想要、旧方案做不到的性质。</div>
+</section>
+
+<!-- §19 第二部分小结 -->
+<section>
+<h2>19. 第二部分小结:图跑了一整圈</h2>
+<div class="ok-note">
+<b>从建边到撤销,全程都在图上看边:</b><br>
+① <b>环节一</b> owner 边 + 角色定义(图初态)<br>
+② <b>环节二</b> 申请 default 边(friend)→ bot owner 审批生效(申请-审批)<br>
+③ <b>环节三</b> 申请只读者角色边→审批,与 default 边多边并存<br>
+④ <b>环节四</b> 一次调用三档判(守卫→角色边→default)<br>
+⑤ <b>环节五</b> 多边 allow 优先(临时写 tmp 突破只读者的写 deny)<br>
+⑥ <b>环节六</b> 长链逐跳看边 AND<br>
+⑦ <b>环节七</b> 回环每跳看自己的边,不回溯发起者 → 死结①消除<br>
+⑧ <b>环节八</b> 平台守卫兜底(allow 优先下的安全闸)<br>
+⑨ <b>环节九</b> 撤销/改约 = 删边/换边,default 边(friend)可独立保留<br>
+⑩ <b>特殊场景一</b> service 点调用 bot:机器凭证 + 申请-审批(常配预授权白名单自动审批) + 求值零特判(三类点边同构)<br>
+⑪ <b>特殊场景二</b> 代理转发链:proxy_allowed 逐段开、original_caller 恒定透传、双闸在终执行处一次性校验、多级不放大权限<br>
+⑫ <b>委托</b> 只能收紧不可升级 → 全局有界
+<br><br>
+<b>一句话收尾</b>:把权限画成点-边图——点有 human/bot/service 三类,边就是角色、是一组权限集合,<b>friend=default 边收敛成一类边</b>。边写入走统一<b>申请-审批</b>(被加者同意在前),多边 allow 优先让协作"尽力放行",平台守卫保安全底线,长链逐跳看边不回溯发起者让回环自然跑通,proxy_allowed 开关把代理转发管死(防伪造发起者、多级不放大权限)。图是 BCS 现成的关系图;<b>不预渲染位图</b>,准入期读边属性直判、bot 端读 rules 细判。
+</div>
+</section>
+
+<!-- §20 待讨论 -->
+<section>
+<h2>20. 待讨论</h2>
+<ul>
+<li><b>D1 位图段分配</b> <span class="tag tag-allow">已决:不用位图</span>:经权衡 <code>kinds/allow/deny</code> 三列<b>不启用为权限位图</b>(恒 0 当未来扩展位)——位图不在准入期(无 tool)、双源、动态 tool 不适配、位段难改,收益极薄。准入期读边属性直判、bot 端读 rules,详见 §6.1。原 D1 子问题(位段怎么分 / 动态 tool 占位)随之取消。</li>
+<li><b>D2 角色定义同步</b>:bot 侧定义角色(权限集合)后怎么同步到 BCS?推(owner API)还是拉(bot 启动拉取)?rules 缓存与失效策略?</li>
+<li><b>D3 缓存与失效</b>:bot 端缓存边契约用 version + TTL 拉,还是 BCS 授权后主动推送?singlebox 是否复用同一套?</li>
+<li><b>D4 委托/代理链长上限</b>:delegation_depth 兼管"委托级联"和"代理转发跳数",默认值与硬上限(防恶意长链放大)?要不要全局 max_depth?</li>
+<li><b>D5 多边的并发与一致性</b>:同一对点同时改多条边,version 怎么管?多边读到的快照是否要求一致?</li>
+<li><b>D6 与 briefing 二层衔接</b>:本稿第一层 allow 优先产二元后,喂给第二层 bot 自身三态鉴权;衔接契约怎么定义?代理转发带入的 original_caller 在第二层是否也需可见?</li>
+<li><b>D7 service 注凭证</b>:service 点的机器凭证(API key/JWT/mTLS)在 auth-plugin 链里如何与 ActorKind::Service 对齐,提取出 <code>svc_{service_id}</code>?与现有 human/bot token 路径如何并存?</li>
+<li><b>D8 original_caller 可信传递</b>:协议层如何硬保证 original_caller 不被中途篡改?靠消息签名还是每跳由转发方重盖+执行端回溯校验?</li>
+<li><b>D10 申请-审批</b>:审批超时默认(自动 reject?);申请被拒是否可申诉/重申;预授权白名单与自助申请模板的回收策略;批量申请防滥用;owner 边特例的系统初始化落点。</li>
+<li><b>D9 过期清理</b>:<code>expires_at</code> 过期边——后台 GC 频率?过期 default 边(friend)失效后是否等同"退场"(现状默认仅权限失效、关系身份保留,见 §3.2.3)?过期与撤销的审计是否统一记录?</li>
+</ul>
+<div class="warn-note"><b>本稿边界</b>:只管第一层协作鉴权(allow 优先产二元 + 平台守卫 + 代理转发双闸 + 边申请-审批)。第二层 bot 自身三态鉴权、守卫具体实现、bot runtime 审批流均不在本稿。与 briefing A1–A9 并行不冲突。</div>
+</section>
+
+</div>
+<script>
+  mermaid.initialize({ startOnLoad:true, securityLevel:'loose', theme:'base', flowchart:{ htmlLabels:true, curve:'basis', useMaxWidth:false }, themeVariables:{
+    background:'#fff', fontFamily:'-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif',
+    fontSize:'15px',
+    primaryColor:'#e8f0fc', primaryTextColor:'#1f2329', primaryBorderColor:'#2b6cb0', lineColor:'#646a73',
+    secondaryColor:'#f1ebfb', tertiaryColor:'#e6fffa',
+    nodeBorderRadius:'10px'
+  }});
+</script>
+</body>
+</html>

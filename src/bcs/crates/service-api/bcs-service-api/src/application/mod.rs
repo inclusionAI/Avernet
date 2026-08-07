@@ -1,5 +1,6 @@
 pub mod a2a_chat;
 pub mod actor_directory;
+pub mod authorization;
 pub mod bot_management;
 pub mod bot_onboarding;
 pub mod bot_query;
@@ -22,6 +23,7 @@ pub mod system_message;
 
 pub use a2a_chat::*;
 pub use actor_directory::*;
+pub use authorization::*;
 pub use bot_management::*;
 pub use bot_onboarding::*;
 pub use bot_query::*;

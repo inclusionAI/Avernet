@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod authorization;
 pub mod error;
 pub mod friend;
 pub mod fusion;
@@ -12,6 +13,7 @@ pub mod session;
 pub mod system_message;
 
 pub use actor::*;
+pub use authorization::*;
 pub use error::*;
 pub use friend::*;
 pub use fusion::*;
@@ -22,4 +24,4 @@ pub use provider::*;
 pub use registry::*;
 pub use routing::*;
 pub use system_message::*;
-pub use crate::types::{Session, SessionKind, SessionStatus, ServiceSpec};
+pub use crate::types::{AuthzContext, Session, SessionKind, SessionStatus, ServiceSpec};

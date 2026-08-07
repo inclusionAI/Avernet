@@ -10,6 +10,7 @@
 //! Phase 0 for the rationale.
 
 pub mod actor;
+pub mod authorization;
 pub mod collaboration;
 pub mod friend;
 pub mod fusion;
@@ -26,6 +27,7 @@ pub mod system_message;
 pub mod task_ledger;
 
 pub use actor::{ActorKind, ActorStatus, EnsureHumanResult, EnsureOwnerEdgesResult, RelationEdge};
+pub use authorization::*;
 pub use collaboration::{
     ChatRuntimeProfile, CollaborationDefinition, CollaborationDefinitionRef,
     CollaborationMetadata, CollaborationParticipantBinding, CollaborationRequirements,

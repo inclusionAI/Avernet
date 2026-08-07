@@ -15,6 +15,8 @@ members = [
     "crates/contracts/bcs-protocol",
     # services
     "crates/services/bcs-config",
+    "crates/services/bcs-authorization-store",
+    "crates/services/bcs-authorization",
     "crates/services/bcs-friend",
     "crates/services/bcs-friend-store",
     "crates/services/bcs-group",
@@ -185,6 +187,8 @@ bcs-admin      = { path = "crates/tools/bcs-admin" }
 bcs-cli        = { path = "crates/tools/bcs-cli" }
 bcs-bot   = { path = "crates/services/bcs-bot" }
 bcs-bot-store = { path = "crates/services/bcs-bot-store" }
+bcs-authorization = { path = "crates/services/bcs-authorization" }
+bcs-authorization-store = { path = "crates/services/bcs-authorization-store" }
 bcs-callback   = { path = "crates/services/bcs-callback" }
 bcs-collaboration-template = { path = "crates/services/bcs-collaboration-template" }
 bcs-collaboration-runtime = { path = "crates/services/bcs-collaboration-runtime" }

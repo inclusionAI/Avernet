@@ -1,25 +1,35 @@
 use std::sync::Arc;
 
-use bcs_message_flow::a2a_chat::{A2aChat, ChatRunStore, DrainOutcome, drain_chat_event, drain_chat_event_with_mode};
+use bcs_message_flow::a2a_chat::{
+    drain_chat_event, drain_chat_event_with_mode, A2aChat, ChatRunStore, DrainOutcome,
+};
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    A2aChatCommand, A2aChatRunService, A2aChatService, ActorKind, ActorStatus, AgentCredentials,
-    AsyncA2aChatCommand, BlockingA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand,
-    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
-    BotRegistryCoreService, CallerContext, ChatResponseMode, ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand,
-    DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, RegisteredBot,
-    ServiceError, ServiceResult,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
+    A2aChatCommand, A2aChatRunService, A2aChatService, ActorKind, ActorStatus, AgentCredentials,
+    AsyncA2aChatCommand, AuthzContext, AuthzContextBuilderCoreService, AuthzGrantRef,
+    BlockingA2aChatCommand, BotActor, BotCapabilities, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotRegistryCoreService, BuildA2aAuthzContextRequest, CallerContext, ChatResponseMode,
+    ChatRunCancelCommand, ChatRunCleanupPort, ChatRunEventPort, ChatRunQueryCommand, Decision,
+    DirectChatClientKind, DirectChatRunSnapshotPort, FriendCoreService, GrantKind, GrantSource,
+    RegisteredBot, ServiceError, ServiceResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
-use tokio::sync::{Mutex, Notify, RwLock, mpsc};
+use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 
 #[path = "../../../test-support/message_flow_contract_support.rs"]
 #[allow(dead_code)]
 mod support;
+
+fn allow_authz_builder() -> Arc<dyn AuthzContextBuilderCoreService> {
+    Arc::new(RecordingAuthzContextBuilder {
+        decision: Decision::Allow,
+    })
+}
 
 fn chat_command(target_bot_id: &str) -> A2aChatCommand {
     A2aChatCommand {
@@ -59,7 +69,8 @@ async fn build_service(
             30_000,
             registry.clone(),
             friend,
-        ),
+        )
+        .with_authz_context_builder(allow_authz_builder()),
         bot_delivery,
         registry,
     )
@@ -77,15 +88,18 @@ async fn build_run_service(
         .await;
     registry.insert("bot-target", "public", None).await;
     let run_port = Arc::new(RecordingRunPort::new(events, keep_open_after_send));
-    let service = Arc::new(A2aChat::new_with_run_ports(
-        bot_delivery,
-        run_store.clone(),
-        30_000,
-        registry,
-        Arc::new(StaticFriendCoreService::default()),
-        run_port.clone(),
-        run_port.clone(),
-    ));
+    let service = Arc::new(
+        A2aChat::new_with_run_ports(
+            bot_delivery,
+            run_store.clone(),
+            30_000,
+            registry,
+            Arc::new(StaticFriendCoreService::default()),
+            run_port.clone(),
+            run_port.clone(),
+        )
+        .with_authz_context_builder(allow_authz_builder()),
+    );
     (service, run_port, run_store)
 }
 
@@ -214,9 +228,9 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
     let counts = DirectChatRunSnapshotPort::direct_chat_run_counts(service.as_ref())
         .await
         .unwrap();
-    assert!(counts.iter().any(|count| {
-        count.client_kind == DirectChatClientKind::HttpChat && count.count > 0
-    }));
+    assert!(counts
+        .iter()
+        .any(|count| { count.client_kind == DirectChatClientKind::HttpChat && count.count > 0 }));
     assert!(counts.iter().any(|count| {
         count.client_kind == DirectChatClientKind::HttpChatAsync && count.count > 0
     }));
@@ -237,7 +251,8 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_authz_context_builder(allow_authz_builder());
 
     let outcome = service
         .chat(A2aChatCommand {
@@ -300,6 +315,62 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
 }
 
 #[tokio::test]
+async fn a2a_chat_injects_unified_authz_context_when_builder_is_wired() {
+    let (service, bot_delivery, _registry) = build_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "public", None),
+        ],
+        vec![],
+    )
+    .await;
+    let service = service.with_authz_context_builder(Arc::new(RecordingAuthzContextBuilder {
+        decision: Decision::Allow,
+    }));
+
+    service.chat(chat_command("bot-target")).await.unwrap();
+
+    let chat_send = bot_delivery
+        .frames()
+        .await
+        .into_iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(req) if req.method == "chat.send" => req.params,
+            _ => None,
+        })
+        .unwrap();
+    let authz = &chat_send["extensions"]["authz_context"];
+    assert_eq!(authz["from_id"], "bot-source");
+    assert_eq!(authz["to_id"], "bot-target");
+    assert_eq!(authz["context"]["type"], "public_chat");
+    assert_eq!(authz["grants"][0]["kind"], "permission_profile");
+    assert_eq!(authz["grants"][0]["ref_id"], "profile-target-default");
+}
+
+#[tokio::test]
+async fn a2a_chat_authz_failure_prevents_bot_delivery() {
+    let (service, bot_delivery, _registry) = build_service(
+        vec![
+            ("bot-source", "public", Some("owner-1")),
+            ("bot-target", "protected", None),
+        ],
+        vec![("bot-source", "bot-target")],
+    )
+    .await;
+    let service = service.with_authz_context_builder(Arc::new(RecordingAuthzContextBuilder {
+        decision: Decision::Deny,
+    }));
+
+    let error = service
+        .chat(chat_command("bot-target"))
+        .await
+        .expect_err("authz failure must fail closed");
+
+    assert!(error.to_string().contains("denied by test authz"));
+    assert!(bot_delivery.frames().await.is_empty());
+}
+
+#[tokio::test]
 async fn blocking_run_service_records_final_event_and_unregisters_run() {
     let (service, run_port, run_store) = build_run_service(
         vec![chat_event("delta", "po"), chat_event("final", "ng")],
@@ -343,8 +414,12 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
     let bot_delivery = Arc::new(support::RecordingBotDelivery::default());
     let run_store = Arc::new(ChatRunStore::new());
     let registry = Arc::new(support::FakeRegistryService::default());
-    registry.insert_named_actor("bot-source", "Source Bot").await;
-    registry.insert_named_actor("bot-target", "Target Bot").await;
+    registry
+        .insert_named_actor("bot-source", "Source Bot")
+        .await;
+    registry
+        .insert_named_actor("bot-target", "Target Bot")
+        .await;
     registry.set_visibility("bot-source", "public").await;
     registry.set_visibility("bot-target", "public").await;
     registry
@@ -362,7 +437,8 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
         Arc::new(StaticFriendCoreService::default()),
         run_port.clone(),
         run_port.clone(),
-    );
+    )
+    .with_authz_context_builder(allow_authz_builder());
 
     let accepted = service
         .start_async_chat(AsyncA2aChatCommand {
@@ -408,9 +484,7 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
     run_port
         .send_event("run-detached", chat_event_state("delivered"))
         .await;
-    run_port
-        .wait_for_event_unregister("run-detached")
-        .await;
+    run_port.wait_for_event_unregister("run-detached").await;
 
     let status = A2aChatRunService::get_run(
         &service,
@@ -480,8 +554,14 @@ async fn blocking_run_service_unregisters_when_recording_event_fails() {
         .send_event("record-error-run", chat_event("final", "late"))
         .await;
 
-    assert!(matches!(task.await.unwrap(), Err(ServiceError::BotNotFound(_))));
-    assert_eq!(run_port.event_unregistered().await, vec!["record-error-run"]);
+    assert!(matches!(
+        task.await.unwrap(),
+        Err(ServiceError::BotNotFound(_))
+    ));
+    assert_eq!(
+        run_port.event_unregistered().await,
+        vec!["record-error-run"]
+    );
 }
 
 #[tokio::test]
@@ -611,7 +691,9 @@ async fn async_run_after_last_tool_call_mode_returns_only_followup_text() {
         })
         .await
         .unwrap();
-    run_port.wait_for_event_unregister("async-after-tool-run").await;
+    run_port
+        .wait_for_event_unregister("async-after-tool-run")
+        .await;
 
     let status = A2aChatRunService::get_run(
         service.as_ref(),
@@ -671,7 +753,9 @@ async fn async_run_after_last_tool_call_mode_uses_agent_tool_boundary() {
         })
         .await
         .unwrap();
-    run_port.wait_for_event_unregister("async-agent-tool-run").await;
+    run_port
+        .wait_for_event_unregister("async-agent-tool-run")
+        .await;
 
     let status = A2aChatRunService::get_run(
         service.as_ref(),
@@ -730,7 +814,9 @@ async fn async_run_after_last_tool_call_mode_uses_final_when_agent_tool_has_no_f
         })
         .await
         .unwrap();
-    run_port.wait_for_event_unregister("async-agent-tool-final-run").await;
+    run_port
+        .wait_for_event_unregister("async-agent-tool-final-run")
+        .await;
 
     let status = A2aChatRunService::get_run(
         service.as_ref(),
@@ -834,7 +920,9 @@ async fn async_run_service_times_out_and_unregisters_when_no_terminal_event_arri
         .await
         .unwrap();
 
-    run_port.wait_for_event_unregister("async-timeout-run").await;
+    run_port
+        .wait_for_event_unregister("async-timeout-run")
+        .await;
     let status = A2aChatRunService::get_run(
         service.as_ref(),
         ChatRunQueryCommand {
@@ -924,7 +1012,8 @@ async fn cancel_run_marks_running_run_cancelled() {
         30_000,
         registry,
         Arc::new(StaticFriendCoreService::default()),
-    );
+    )
+    .with_authz_context_builder(allow_authz_builder());
     let caller = CallerContext::Bot(BotActor {
         bot_uuid: "bot-source".to_string(),
     });
@@ -972,13 +1061,16 @@ async fn run_events_update_status_and_wake_waiters() {
         .insert("bot-source", "public", Some("owner-1"))
         .await;
     registry.insert("bot-target", "public", None).await;
-    let service = Arc::new(A2aChat::new(
-        bot_delivery,
-        run_store,
-        30_000,
-        registry,
-        Arc::new(StaticFriendCoreService::default()),
-    ));
+    let service = Arc::new(
+        A2aChat::new(
+            bot_delivery,
+            run_store,
+            30_000,
+            registry,
+            Arc::new(StaticFriendCoreService::default()),
+        )
+        .with_authz_context_builder(allow_authz_builder()),
+    );
     let caller = CallerContext::Bot(BotActor {
         bot_uuid: "bot-source".to_string(),
     });
@@ -1380,6 +1472,41 @@ fn a2a_event_parser_deduplicates_repeated_after_tool_delta_before_final_snapshot
     assert_eq!(accumulated, "answer after tool");
 }
 
+struct RecordingAuthzContextBuilder {
+    decision: Decision,
+}
+
+#[async_trait::async_trait]
+impl AuthzContextBuilderCoreService for RecordingAuthzContextBuilder {
+    async fn build_a2a_authz_context(
+        &self,
+        request: BuildA2aAuthzContextRequest,
+    ) -> ServiceResult<AuthzContext> {
+        if self.decision == Decision::Deny {
+            return Err(ServiceError::Forbidden("denied by test authz".to_string()));
+        }
+        Ok(AuthzContext {
+            task_id: request.task_id,
+            run_id: request.run_id,
+            from_id: request.from_id,
+            to_id: request.to_id,
+            env: request.env,
+            originator: request.originator,
+            context: request.context,
+            grants: vec![AuthzGrantRef {
+                kind: GrantKind::PermissionProfile,
+                ref_id: "profile-target-default".to_string(),
+                revision: 9,
+                digest: "sha256:test".to_string(),
+                source: GrantSource::PublicDefault,
+            }],
+            issued_at: request.issued_at,
+            expires_at: request.issued_at + request.ttl_ms,
+            signature: None,
+        })
+    }
+}
+
 #[derive(Default)]
 struct MemoryRegistry {
     bots: RwLock<HashMap<String, RegisteredBot>>,
@@ -1387,7 +1514,8 @@ struct MemoryRegistry {
 
 impl MemoryRegistry {
     async fn insert(&self, bot_id: &str, visibility: &str, created_by: Option<&str>) {
-        self.insert_named(bot_id, bot_id, visibility, created_by).await;
+        self.insert_named(bot_id, bot_id, visibility, created_by)
+            .await;
     }
 
     async fn insert_named(
@@ -1822,6 +1950,7 @@ async fn a2a_chat_blocking_interceptor_prevents_bot_delivery() {
         registry,
         Arc::new(StaticFriendCoreService::default()),
     )
+    .with_authz_context_builder(allow_authz_builder())
     .with_interceptors(Arc::new(chain));
 
     let result = service
