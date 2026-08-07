@@ -5,8 +5,6 @@ Tests the following endpoints from ``adapters/http/bot_public/router.py``:
 """
 from __future__ import annotations
 
-from unittest.mock import patch, MagicMock
-
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot, make_collaborator
 from tests.community.framework import (

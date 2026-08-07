@@ -4,7 +4,8 @@
 
 use async_trait::async_trait;
 use bcs_domain::{
-    DeliveryType, Group, Participant, SystemMessageEvent, SystemMessageEventKind, SystemGroupMessage,
+    DeliveryType, Group, Participant, PersistMode, SystemMessageEvent, SystemMessageEventKind,
+    SystemGroupMessage,
 };
 use bcs_service_api::{BotRegistryCoreService, SystemMessageProducerService};
 
@@ -44,13 +45,22 @@ impl SystemMessageProducerService for GenericNotificationMessageProducer {
         } else {
             receivers.iter().map(|p| p.bot_uuid.clone()).collect()
         };
-        let bot_messages = if recipients.is_empty() {
+        // Identical text for every recipient: persist a single public record
+        // (owner = None) that human viewers also read in history. Empty
+        // messages persist nothing.
+        let persist = if message.trim().is_empty() {
+            PersistMode::Skip
+        } else {
+            PersistMode::Public
+        };
+        let bot_messages = if recipients.is_empty() && persist == PersistMode::Skip {
             vec![]
         } else {
             vec![SystemGroupMessage {
                 recipients,
                 message: message.clone(),
                 delivery_type: DeliveryType::Inject,
+                persist,
             }]
         };
         (bot_messages, user_message)
@@ -108,7 +118,11 @@ mod tests {
         let (messages, user_message) = GenericNotificationMessageProducer
             .produce(&event, &group, &NoopBotRegistryCoreService, &group.participants)
             .await;
-        assert!(messages.is_empty());
+        // No bot recipients, but the notice is still a public history record
+        // for human viewers (persisted with owner = None by the dispatcher).
+        assert_eq!(messages.len(), 1);
+        assert!(messages[0].recipients.is_empty());
+        assert_eq!(messages[0].persist, PersistMode::Public);
         assert_eq!(user_message.as_deref(), Some("维护开始"));
     }
 }

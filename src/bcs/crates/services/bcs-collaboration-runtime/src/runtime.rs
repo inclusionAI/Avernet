@@ -628,6 +628,7 @@ impl CollaborationRuntime {
                 frame,
                 delivery_kind: BotDeliveryKind::TaskDispatch,
                 provider_transport: Default::default(),
+                provider_bypass_headers: Vec::new(),
             })
             .await
         {
@@ -1055,6 +1056,7 @@ impl CollaborationRuntime {
             history_meta: None,
             metadata: Some(state_machine_panel_metadata(run)),
             run_id: String::new(),
+            attachments: None,
         }
     }
 
@@ -1118,6 +1120,7 @@ impl CollaborationRuntime {
                     history_meta: None,
                     metadata: Some(state_machine_message_metadata(run, &node, "output")),
                     run_id: String::new(),
+                    attachments: None,
                 });
             }
         }

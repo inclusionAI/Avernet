@@ -49,6 +49,10 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_chat.errors import (
+    InvalidBotLogQueryError,
+    SessionNotFoundError,
+)
 from agentclaw.community.core.bot_management.create_flow import (
     AuthStatusUnavailableError,
 )
@@ -81,6 +85,7 @@ from agentclaw.community.core.resources.service import (
 )
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
+    LocalSkillActiveError,
     LocalSkillEditPausedError,
     LocalSkillInvalidPackageError,
     LocalSkillNotFoundError,
@@ -157,6 +162,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # entry covers a handler that calls ``verify_principal_token`` directly, so
     # the error cannot escape the envelope as a 500.
     PrincipalVerificationError: (401, "Unauthorized"),
+    InvalidBotLogQueryError: (400, "Invalid log query"),
+    SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
@@ -198,6 +205,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
     LocalSkillNotReadyError: (409, "Bot is not ready"),
+    LocalSkillActiveError: (409, "Skill is active"),
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
@@ -291,6 +299,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillOwnerAmbiguousError: 409104,
     LocalSkillInvalidPackageError: 400101,
     LocalSkillNotReadyError: 409101,
+    LocalSkillActiveError: 409102,
     LocalSkillDuplicateError: 409103,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,

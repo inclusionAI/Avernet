@@ -59,7 +59,7 @@ impl GroupSessionConnectionService for RecordingConnectionService {
         self.verified_tokens.lock().await.push(command.token);
         match self.mode {
             VerifyMode::Valid => Ok(GroupSessionConnectionBinding {
-                tenant: "tenant-a".to_string(),
+                tenant: Some("tenant-a".to_string()),
                 user_id: "user-a".to_string(),
                 group_id: "group-a".to_string(),
                 session_id: "session-a".to_string(),
@@ -205,7 +205,7 @@ async fn valid_token_upgrades_and_connect_uses_the_immutable_verified_binding() 
     assert_eq!(
         authorizations[0].binding,
         GroupSessionConnectionBinding {
-            tenant: "tenant-a".to_string(),
+            tenant: Some("tenant-a".to_string()),
             user_id: "user-a".to_string(),
             group_id: "group-a".to_string(),
             session_id: "session-a".to_string(),

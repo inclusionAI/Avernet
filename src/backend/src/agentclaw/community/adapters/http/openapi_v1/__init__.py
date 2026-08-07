@@ -55,6 +55,7 @@ from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
 from .mcp import router as mcp_router
+from .bot_logs import router as logs_router
 from .resources import router as resources_router
 from .routines import router as routines_router
 from .skills import router as skills_router
@@ -67,6 +68,7 @@ PUBLIC_API_PREFIX = "/openapi/v1"
 # Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
 # See "Mount order" above for which literals actually depend on it.
 _SUBGROUPS = [
+    logs_router,
     identity_router,
     mcp_router,
     resources_router,

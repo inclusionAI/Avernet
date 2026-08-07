@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use bcs_domain::{
     ActorKind, DeliveryType, Group, GroupKind, GroupStatus, GroupStrategy, Participant,
-    ParticipantMode, ParticipantRole, RedactedToken, SystemGroupMessage, SystemMessageEvent,
-    SystemMessageEventKind,
+    ParticipantMode, ParticipantRole, PersistMode, RedactedToken, SystemGroupMessage,
+    SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
     ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryPort,
@@ -344,7 +344,10 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
     dispatcher.dispatch(event, &group, "session-test", &group.participants)
         .await.expect("dispatch");
 
-    // Persistence: one record per recipient.
+    // Persistence: the new-bot injection is per-recipient (owner=new-bot);
+    // the shared join notice is a single public record (owner=None) that
+    // human viewers and every bot's PublicOrOwner view read — no per-bot
+    // copies of the identical text.
     let appended = message_repo.appended().await;
     assert_eq!(appended.len(), 2);
     let injection = appended.iter().find(|m| m.owner_bot_id.as_deref() == Some(&new_bot_id))
@@ -353,10 +356,12 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
     assert_eq!(injection.message_type, "system");
     assert!(content_text(injection).contains("你加入了 BCS 协作群."),
         "new-bot context injection persisted under owner=new-bot");
-    let notice = appended.iter().find(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id))
-        .expect("existing-bot notification record");
+    let notice = appended.iter().find(|m| m.owner_bot_id.is_none())
+        .expect("public join notification record");
     assert!(content_text(notice).contains("已加入协作群"));
     assert!(!content_text(notice).contains("你加入了 BCS 协作群."));
+    assert!(!appended.iter().any(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id)),
+        "shared notice must not persist per-bot copies");
 
     // WS: exactly one publish, content = user_message (join notification),
     // NOT the new-bot context injection.
@@ -369,7 +374,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
 }
 
 #[tokio::test]
-async fn dispatch_bot_left_with_no_recipients_persists_zero_but_pushes_ws() {
+async fn dispatch_bot_left_with_no_recipients_persists_public_record_and_pushes_ws() {
     let leaving = "bot-only".to_string();
     let group = Group {
         id: "group-left".into(), label: None, status: GroupStatus::Active,
@@ -410,7 +415,10 @@ async fn dispatch_bot_left_with_no_recipients_persists_zero_but_pushes_ws() {
     dispatcher.dispatch(event, &group, "session-left", &group.participants)
         .await.expect("dispatch");
 
-    assert_eq!(message_repo.appended().await.len(), 0, "no recipients → 0 persisted records");
+    let appended = message_repo.appended().await;
+    assert_eq!(appended.len(), 1,
+        "no recipients → still a single public record for human history");
+    assert!(appended[0].owner_bot_id.is_none(), "public record has no owner");
     let published = frontend_delivery.published.lock().unwrap();
     assert_eq!(published.len(), 1);
     assert!(published[0].event_json.contains("已退出协作群"));
@@ -1277,6 +1285,7 @@ impl SystemMessageProducerService for WorkerOnlySessionContextProducer {
                 recipients: vec!["bot-worker".to_string()],
                 message: "worker-only context".to_string(),
                 delivery_type: DeliveryType::Inject,
+                persist: PersistMode::PerRecipient,
             }],
             None,
         )
@@ -1303,6 +1312,7 @@ impl SystemMessageProducerService for FixedProducer {
                 recipients: vec!["bot-provider".to_string()],
                 message: "member changed".to_string(),
                 delivery_type: DeliveryType::Inject,
+                persist: PersistMode::PerRecipient,
             }],
             None,
         )
@@ -1329,6 +1339,7 @@ impl SystemMessageProducerService for FixedSendProducer {
                 recipients: vec!["bot-provider".to_string()],
                 message: "member changed".to_string(),
                 delivery_type: DeliveryType::Send,
+                persist: PersistMode::PerRecipient,
             }],
             None,
         )
@@ -1355,6 +1366,7 @@ impl SystemMessageProducerService for FixedWebSocketSendProducer {
                 recipients: vec!["bot-ws".to_string()],
                 message: "member changed".to_string(),
                 delivery_type: DeliveryType::Send,
+                persist: PersistMode::PerRecipient,
             }],
             None,
         )

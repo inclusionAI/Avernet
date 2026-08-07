@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-RUNNER = Path(__file__).resolve().parents[1] / "scripts" / "test_live_bcs_forwarding.sh"
+RUNNER = Path(__file__).resolve().parents[3] / "scripts" / "test_live_bcs_forwarding.sh"
 
 
 def test_live_bcs_runner_requires_the_started_process_to_own_its_port() -> None:

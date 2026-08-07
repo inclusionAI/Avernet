@@ -2,7 +2,9 @@ use time::OffsetDateTime;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedCaller {
-    pub tenant: String,
+    /// Optional normalized tenant metadata. Gateway does not fabricate a
+    /// tenant for a tenantless User Principal.
+    pub tenant: Option<String>,
     pub user: Option<AuthenticatedUserIdentity>,
     pub bot: Option<AuthenticatedBotIdentity>,
     pub app: Option<AuthenticatedAppIdentity>,

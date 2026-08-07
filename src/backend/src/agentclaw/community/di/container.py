@@ -19,6 +19,7 @@ from injector import Injector, Module
 from agentclaw.community.di.modules.access_module import AccessModule
 from agentclaw.community.di.modules.aicoding_module import AICodingModule
 from agentclaw.community.di.modules.bot_collaborator_module import BotCollaboratorModule
+from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.modules.bot_dormant_module import BotDormantModule
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
@@ -116,6 +117,7 @@ def build_injector(
         SessionResourcesModule(),
         HarnessModule(),
         BotCollaboratorModule(),
+        BotChatOpenModule(),
         CallerIdentityModule(),
         UserListModule(),
         BotDormantModule(),
@@ -155,6 +157,7 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     config bindings) aren't expected to resolve cleanly under SQLite.
     """
     from agentclaw.community.di.modules_bootstrap import get_eager_check_keys
+    from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
     from agentclaw.community.plugin_api.auth import AuthPlugin
     from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -164,6 +167,7 @@ def eager_check_critical_bindings(injector: Injector) -> None:
     critical: list[type] = [
         DatabasePlugin,
         AuthPlugin,
+        OpenBotChatServiceProtocol,
         *get_eager_check_keys(),
     ]
 

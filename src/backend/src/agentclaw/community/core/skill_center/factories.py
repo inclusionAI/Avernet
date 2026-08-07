@@ -69,6 +69,10 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 
+class LocalSkillQuarantineRepairError(OSError):
+    """A partial authoritative-package delete could not be verified repaired."""
+
+
 class LocalSkillPackageStorage:
     """Explicit package-I/O port owned by the SkillService factory."""
 
@@ -96,6 +100,90 @@ class LocalSkillPackageStorage:
 
     async def cleanup(self) -> bool:
         return await self._filesystem.delete_tree(self._device_directory)
+
+    async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
+        """Copy, verify, then remove this authoritative package.
+
+        Device backends have no shared directory-rename operation.  This
+        portable sequence deliberately retains the authoritative source until
+        every copied file has been read back byte-for-byte from quarantine.
+        """
+        files = await self._read_package_files()
+        if await quarantine._filesystem.exists(quarantine.directory):
+            raise OSError("Local Skill quarantine already exists")
+        for relative_path, content in files:
+            await quarantine._filesystem.write_file(
+                f"{quarantine.directory}/{relative_path}", content
+            )
+        for relative_path, content in files:
+            copied = await quarantine._filesystem.read_file(
+                f"{quarantine.directory}/{relative_path}"
+            )
+            if copied != content:
+                raise OSError("Local Skill quarantine verification failed")
+        if not await self.cleanup():
+            try:
+                restored = await self._restore_contents(files)
+            except Exception as exc:
+                raise LocalSkillQuarantineRepairError(
+                    "Local Skill package repair failed"
+                ) from exc
+            if not restored:
+                raise LocalSkillQuarantineRepairError(
+                    "Local Skill package repair verification failed"
+                )
+            raise OSError("Local Skill package quarantine failed")
+
+    async def restore_from(
+        self, quarantine: "LocalSkillPackageStorage"
+    ) -> tuple[bool, bool]:
+        """Restore the package and report source repair and quarantine purge separately."""
+        if await self._filesystem.exists(self.directory):
+            return False, False
+        files = await quarantine._read_package_files()
+        if not await self._restore_contents(files):
+            return False, False
+        return True, await quarantine.cleanup()
+
+    async def _restore_contents(self, files: list[tuple[str, bytes]]) -> bool:
+        for relative_path, content in files:
+            await self._filesystem.write_file(
+                f"{self.directory}/{relative_path}", content
+            )
+        for relative_path, content in files:
+            restored = await self._filesystem.read_file(
+                f"{self.directory}/{relative_path}"
+            )
+            if restored != content:
+                return False
+        return True
+
+    async def _read_package_files(self) -> list[tuple[str, bytes]]:
+        entries = await self._filesystem.list_dir(
+            self._device_directory, recursive=True
+        )
+        if entries is None:
+            raise OSError("Local Skill package is missing")
+        files: list[tuple[str, bytes]] = []
+        for entry in entries:
+            if entry.get("is_dir"):
+                continue
+            relative_path = str(entry.get("relative_path") or "")
+            if (
+                not relative_path
+                or relative_path.startswith("/")
+                or ".." in relative_path.split("/")
+            ):
+                raise OSError("Local Skill package has an invalid file path")
+            content = await self._filesystem.read_file(
+                f"{self._device_directory}/{relative_path}"
+            )
+            if content is None:
+                raise OSError("Local Skill package file disappeared")
+            files.append((relative_path, content))
+        if not files:
+            raise OSError("Local Skill package is empty")
+        return files
 
 
 class SkillServiceFactory:

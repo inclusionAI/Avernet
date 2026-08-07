@@ -16,6 +16,7 @@ principal at the forwarder seam.
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from dataclasses import replace
 
@@ -24,9 +25,18 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.requests import HTTPConnection
 from starlette.responses import Response
 
+from gateway.community.adapters.web._log_redaction import redact_credentials
 from gateway.community.logger import get_logger
 from gateway.community.spi.auth import AuthError
-from gateway.community.spi.authn import CredentialBundle, Principal, PrincipalType
+from gateway.community.spi.authn import (
+    AccessKeyPrincipal,
+    AppPrincipal,
+    BotPrincipal,
+    CredentialBundle,
+    Principal,
+    PrincipalType,
+    UserPrincipal,
+)
 from gateway.community.spi.forwarder import ForwardRequest
 from gateway.community.spi.principal_signer import PrincipalSigner
 from gateway.community.tracer import get_tracer_plugin
@@ -79,6 +89,48 @@ def _target_url(base_url: str, path: str, request: Request) -> str:
     return f"{base}{path}" + (f"?{query}" if query else "")
 
 
+_ABSENT = "-"
+
+
+def _identity_label(identities: dict[PrincipalType, Principal]) -> tuple[str, str]:
+    """``(tenant, caller)`` for the log line, from the resolved identity set.
+
+    The gateway is the only hop that sees the credentials, so it is the only
+    place that can say *who* a request turned out to be; the upstream can only
+    report what it was told. Naming the identity set on both sides of the seam
+    is what makes a mismatch — a request scoped to a tenant the gateway did not
+    resolve — visible as a difference between two log lines instead of an
+    invisible one.
+
+    ``caller`` names each identity by the field that identifies it, so a
+    multi-identity route (user + app) is legible as such. No credential is
+    formatted: ``Bot.token`` and ``AccessKey.access_key_token`` are secrets the
+    gateway forwards, never ones it prints.
+    """
+    if not identities:
+        return _ABSENT, _ABSENT
+    labels = []
+    tenants = set()
+    for principal in identities.values():
+        if principal.tenant:
+            tenants.add(principal.tenant)
+        if isinstance(principal, UserPrincipal):
+            labels.append(f"user:{principal.subject.id}")
+        elif isinstance(principal, AppPrincipal):
+            labels.append(f"app:{principal.app.app_id}")
+        elif isinstance(principal, BotPrincipal):
+            labels.append(f"bot:{principal.bot.bot_uuid}")
+        elif isinstance(principal, AccessKeyPrincipal):
+            labels.append(f"access_key:{principal.access_key.access_key}")
+        else:
+            labels.append(f"{principal.type}:{_ABSENT}")
+    # A set that disagrees is logged as the several tenants it names rather than
+    # as one of them: downstream verification refuses such a token outright, and
+    # a log line that quietly picked a winner would hide exactly that failure.
+    tenant = "+".join(sorted(tenants)) if tenants else _ABSENT
+    return tenant, "+".join(labels)
+
+
 _PRINCIPAL_HEADER = "X-Avernet-Principal"
 # Inbound headers that must NEVER pass through to the upstream (call site
 # strips these when building ForwardRequest.headers). `host` is dropped so
@@ -109,6 +161,7 @@ async def _attach_identities(
 
 async def forward_request(request: Request) -> Response:
     """Resolve domain → authenticate → forward verbatim, streaming the response."""
+    started = time.perf_counter()
     path = request.url.path
     # Asked for the *HTTP* domain, not for whichever domain claims the path.
     # A socket domain is not a candidate here at all, so it can neither become an
@@ -170,12 +223,31 @@ async def forward_request(request: Request) -> Response:
             await cm.__aexit__(None, None, None)
 
     response = StreamingResponse(stream(), status_code=upstream.status_code)
+    tenant, caller = _identity_label(identities)
+    # The identity fields are the reason this line exists at all: an upstream can
+    # report the tenant it was *told*, only the gateway can report the tenant it
+    # *resolved*. ``duration_ms`` measures up to the upstream's response head —
+    # the body is still streaming when this is written, so it is time-to-first-
+    # byte, not the full transfer.
+    #
+    # The upstream URL carries the caller's query verbatim, and on this plane
+    # that query can hold a credential — the socket relay's is the documented
+    # case, but nothing stops an HTTP caller passing one the same way. The
+    # filter installed for uvicorn's own request lines does not reach this
+    # logger, so the value is redacted here, at the format site.
     logger.info(
-        "forward %s %s -> %s status=%d",
+        "forward %s %s -> %s status=%d duration_ms=%.1f tenant=%s caller=%s "
+        "domain=%s server=%s request_id=%s",
         request.method,
         path,
-        forward.url,
+        redact_credentials(forward.url),
         upstream.status_code,
+        (time.perf_counter() - started) * 1000,
+        tenant,
+        caller,
+        domain.name,
+        server.name,
+        _request_id() or _ABSENT,
     )
     # Set raw headers directly so duplicate headers (Set-Cookie) survive verbatim.
     response.raw_headers = [

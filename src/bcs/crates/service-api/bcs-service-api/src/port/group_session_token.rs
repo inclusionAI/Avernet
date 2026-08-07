@@ -6,7 +6,9 @@ pub const GROUP_SESSION_TOKEN_MAX_COMPACT_LEN: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GroupSessionTokenScope {
-    pub tenant: String,
+    /// Optional compatibility metadata; session authorization is bound by
+    /// User, Group, and Session identifiers.
+    pub tenant: Option<String>,
     pub user_id: String,
     pub group_id: String,
     pub session_id: String,

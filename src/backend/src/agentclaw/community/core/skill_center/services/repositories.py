@@ -14,6 +14,10 @@ OceanBase and local SQLite via the injected DatabasePlugin —
 from typing import List, Optional, Protocol, runtime_checkable
 
 
+class ActiveSkillSetReferenceError(RuntimeError):
+    """A Skill became referenced by an active custom SkillSet."""
+
+
 @runtime_checkable
 class SkillRepository(Protocol):
     """技能 Repository 接口"""
@@ -96,6 +100,18 @@ class SkillRepository(Protocol):
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:
+        ...
+
+    def delete_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        quarantine_locator: str,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically delete scoped state and commit prepared cleanup work."""
         ...
 
     def check_skill_blocked_by_bot(self, name: str, env: str | None = None) -> list[str]:

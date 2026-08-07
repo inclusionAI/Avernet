@@ -1,7 +1,6 @@
 import sys
 from pathlib import Path
 
-
 BCS_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = BCS_ROOT / "api-contracts" / "v1"
 sys.path.insert(0, str(BCS_ROOT))
@@ -10,7 +9,6 @@ from scripts.validate_openapi_contract import (  # noqa: E402
     load_contract,
     validate_contract,
 )
-
 
 TOKEN_PATH = "/openapi/v1/collaboration/sessions/{session_id}/token"
 WEBSOCKET_PATH = "/openapi/v1/collaboration/messages/ws"
@@ -24,7 +22,7 @@ def test_token_issuance_contract_matches_the_existing_http_delivery_slice() -> N
     operation = _contract()["paths"][TOKEN_PATH]["post"]
 
     assert operation["operationId"] == "issue_group_session_connection_token"
-    assert operation["x-avernet-security"] == {"user": "required"}
+    assert operation["x-avernet-security"] == {"user": "required", "app": "required"}
     assert "requestBody" not in operation
     assert operation["parameters"] == [
         {

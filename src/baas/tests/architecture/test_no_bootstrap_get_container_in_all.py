@@ -27,10 +27,6 @@ _ALLOWED_LAYERS = {"bootstrap"}
 _KNOWN_DEBT: dict[str, list[tuple[str, int]]] = {
     "core": [
         ("core/utils/callback_utils.py", 31),
-        ("core/repository/file_transfer_ticket/_factory.py", 7),
-        ("core/repository/ws_relay_session/_factory.py", 11),
-        ("core/service/paas/_local_paas_service.py", 1013),
-        ("core/service/paas/_local_paas_service.py", 2221),
     ],
     "plugins": [
         ("plugins/sandbox/utils/arca_utils.py", 92),

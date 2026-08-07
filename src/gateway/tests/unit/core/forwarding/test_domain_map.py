@@ -10,7 +10,7 @@ from gateway.community.core.forwarding import DomainMap, Server
 from gateway.community.core.forwarding._domains import _expand_vars, _parse_servers
 from gateway.community.spi.authn import Presence, PrincipalType
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
+_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 _VARS = {
     "backend_server_url": "http://backend:8080",
@@ -106,36 +106,55 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert websocket_requirement == {}
 
 
-def test_shipped_config_routes_bcsfuse_via_strip_rewrite() -> None:
+def test_shipped_config_routes_bcsfuse_clean_paths() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
 
-    fusion = dm.domain_for("/openapi/v1/bcsfuse/api/v1/groups/group-1")
+    # Clean public paths: matched children beneath /openapi/v1/bcsfuse/ hide the
+    # upstream's own /api/v1 and /v1 prefixes behind one version-free base.
+    fusion = dm.http_domain_for("/openapi/v1/bcsfuse/groups/group-1/fuse")
     assert fusion is not None
     assert fusion.server.name == "bcsfuse"
     assert fusion.server.base_url == "http://bcsfuse:8765"
     assert fusion.serves_http
-    assert not fusion.serves_websocket
     assert fusion.rewrite is not None
-    # Strip rewrite drops the domain prefix; the upstream's own /api/v1 and /v1 stay.
     assert (
-        fusion.upstream_path("/openapi/v1/bcsfuse/api/v1/groups/group-1")
-        == "/api/v1/groups/group-1"
+        fusion.upstream_path("/openapi/v1/bcsfuse/groups/group-1/fuse")
+        == "/api/v1/groups/group-1/fuse"
     )
+    assert fusion.schema.location == "schemas/bcsfuse-fusion.openapi.json"
+
+    workers = dm.http_domain_for("/openapi/v1/bcsfuse/workers/w-1/config")
+    assert workers is not None
+    assert workers.server.name == "bcsfuse"
     assert (
-        fusion.upstream_path("/openapi/v1/bcsfuse/v1/workers/w-1/config")
+        workers.upstream_path("/openapi/v1/bcsfuse/workers/w-1/config")
         == "/v1/workers/w-1/config"
     )
     assert (
-        fusion.upstream_path("/openapi/v1/bcsfuse/v1/workers/config/batch")
+        workers.upstream_path("/openapi/v1/bcsfuse/workers/config/batch")
         == "/v1/workers/config/batch"
     )
-    assert fusion.schema.location == "schemas/bcsfuse.openapi.json"
+    assert workers.schema.location == "schemas/bcsfuse-workers.openapi.json"
 
-    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    requirement = security.resolve("POST", "/openapi/v1/bcsfuse/api/v1/groups/group-1")
-    assert requirement is not None
-    assert requirement[PrincipalType.USER] is Presence.REQUIRED
+    # The two clean surfaces are distinct domains on the one bcsfuse upstream.
+    assert fusion is not workers
+
+    # The gateway exposes only the clean sub-prefixes. bcsfuse's own /api/v1 and
+    # /v1 shapes are NOT routed through the gateway — callers that need them reach
+    # bcsfuse directly — so they resolve to nothing here.
+    assert dm.http_domain_for("/openapi/v1/bcsfuse/api/v1/groups/group-1/fuse") is None
+    assert dm.http_domain_for("/openapi/v1/bcsfuse/v1/workers/w-1/config") is None
+
+    # The one /openapi/v1/bcsfuse/** route_security rule covers the clean paths.
+    for method, path in [
+        ("POST", "/openapi/v1/bcsfuse/groups/group-1/fuse"),
+        ("GET", "/openapi/v1/bcsfuse/workers/w-1/config"),
+    ]:
+        requirement = security.resolve(method, path)
+        assert requirement is not None, path
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
 
 
 # ── protocols ────────────────────────────────────────────────────────────────
@@ -948,3 +967,75 @@ def test_a_rewrite_anchored_off_the_declared_pattern_is_refused() -> None:
             "/openapi/v1/bots/messages/**",
             rewrite={"from": "/openapi/v1/x", "to": "/proxypass"},
         )
+
+
+# ── PathRewrite.reverse ──────────────────────────────────────────────
+
+
+def test_path_rewrite_reverse_exact_prefix() -> None:
+    """reverse() maps to_prefix → from_prefix when path equals to_prefix."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/proxypass") == "/openapi/v1/chat"
+
+
+def test_path_rewrite_reverse_prefix_with_slash() -> None:
+    """reverse() replaces to_prefix/ → from_prefix/ for sub-paths."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/proxypass/sessions") == "/openapi/v1/chat/sessions"
+
+
+def test_path_rewrite_reverse_non_matching_path_passed_through() -> None:
+    """A path not under to_prefix is returned unchanged (defensive branch)."""
+    from gateway.community.core.forwarding._domains import PathRewrite
+
+    rw = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    assert rw.reverse("/other/upstream/path") == "/other/upstream/path"
+
+
+# ── Domain.gateway_path ──────────────────────────────────────────────
+
+
+def test_gateway_path_with_rewrite() -> None:
+    """gateway_path() reverse-rewrites upstream paths to gateway-facing form."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "chat": {
+                    "match": "/openapi/v1/chat/**",
+                    "server": "baas",
+                    "rewrite": {
+                        "from": "/openapi/v1/chat",
+                        "to": "/proxypass",
+                    },
+                }
+            },
+            "servers": {"baas": {"base_url": "http://baas:9090"}},
+        },
+        variables={},
+    )
+    domain = dm.http_domain_for("/openapi/v1/chat/sessions")
+    assert domain is not None
+    assert domain.gateway_path("/proxypass/sessions") == "/openapi/v1/chat/sessions"
+
+
+def test_gateway_path_without_rewrite_is_identity() -> None:
+    """gateway_path() returns the path unchanged when no rewrite is configured."""
+    dm = DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {
+                    "match": "/openapi/v1/bots/**",
+                    "server": "backend",
+                }
+            },
+            "servers": {"backend": {"base_url": "http://backend:8080"}},
+        },
+        variables={},
+    )
+    domain = dm.http_domain_for("/openapi/v1/bots")
+    assert domain is not None
+    assert domain.gateway_path("/openapi/v1/bots") == "/openapi/v1/bots"

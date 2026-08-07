@@ -42,6 +42,7 @@ SessionConnectionTokenPath:
       five-minute credential for the session-bound Workbench WebSocket.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:

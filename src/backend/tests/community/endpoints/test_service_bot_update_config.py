@@ -8,8 +8,6 @@ Uses CollaboratorPermissionInterceptor for access control.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishServiceError
@@ -19,6 +17,7 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_failing_method,
     endpoint_test,
 )
 from tests.community.framework.world import World
@@ -432,18 +431,23 @@ def update_service_bot_config_invalid_config_replaced():
 # ============================================================================
 
 
-def _seed_and_mock_publish_error(world: World) -> None:
-    """Seed bot and mock update_bot_ext to raise BotPublishServiceError."""
+def _seed_and_fail_publish(world: World) -> None:
+    """Seed the bot, then make the ext write fail the way the domain would.
+
+    Nothing a caller can send makes ``update_bot_ext`` refuse — the refusal
+    comes from downstream publish state — so the failure is injected at the
+    DI seam. The router branch under test is the one that turns
+    ``BotPublishServiceError`` into error_code 403.
+    """
     from agentclaw.community.api.bot_service import BotServiceProtocol
     make_staff_user(world, user_id="u_owner")
     make_bot(world, bot_id="bot_test", owner_id="u_owner", bot_type="service", status="ACTIVE")
-    # Mock update_bot_ext to raise BotPublishServiceError
-    bot_service = world.get(BotServiceProtocol)
-    patch.object(
-        type(bot_service),
+    bind_failing_method(
+        world,
+        BotServiceProtocol,
         "update_bot_ext",
-        side_effect=BotPublishServiceError("Permission denied for update"),
-    ).start()
+        BotPublishServiceError("Permission denied for update"),
+    )
 
 
 @endpoint_test(
@@ -458,7 +462,7 @@ def _seed_and_mock_publish_error(world: World) -> None:
             "config_update": {"device_count": 2},
         },
     ),
-    seed=_seed_and_mock_publish_error,
+    seed=_seed_and_fail_publish,
     expect=ExpectError(
         status=200,
         json_contains={"success": False, "error_code": 403},
@@ -473,18 +477,22 @@ def update_service_bot_config_publish_error():
 # ============================================================================
 
 
-def _seed_and_mock_unexpected_error(world: World) -> None:
-    """Seed bot and mock update_bot_ext to raise unexpected Exception."""
+def _seed_and_fail_unexpectedly(world: World) -> None:
+    """Seed the bot, then drop the connection under the ext write.
+
+    A lost database connection is the archetypal failure this branch is for:
+    it cannot be provoked from the request, and the router must still answer
+    with the 500 envelope rather than a bare traceback.
+    """
     from agentclaw.community.api.bot_service import BotServiceProtocol
     make_staff_user(world, user_id="u_owner")
     make_bot(world, bot_id="bot_test", owner_id="u_owner", bot_type="service", status="ACTIVE")
-    # Mock update_bot_ext to raise generic Exception
-    bot_service = world.get(BotServiceProtocol)
-    patch.object(
-        type(bot_service),
+    bind_failing_method(
+        world,
+        BotServiceProtocol,
         "update_bot_ext",
-        side_effect=RuntimeError("Database connection lost"),
-    ).start()
+        RuntimeError("Database connection lost"),
+    )
 
 
 @endpoint_test(
@@ -499,7 +507,7 @@ def _seed_and_mock_unexpected_error(world: World) -> None:
             "config_update": {"device_count": 2},
         },
     ),
-    seed=_seed_and_mock_unexpected_error,
+    seed=_seed_and_fail_unexpectedly,
     expect=ExpectError(
         status=200,
         json_contains={"success": False, "error_code": 500},

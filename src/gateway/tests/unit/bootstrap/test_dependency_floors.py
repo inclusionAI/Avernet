@@ -11,7 +11,7 @@ import re
 import tomllib
 from pathlib import Path
 
-_PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+_PYPROJECT = Path(__file__).resolve().parents[3] / "pyproject.toml"
 
 
 def _floor(package: str) -> tuple[int, ...]:

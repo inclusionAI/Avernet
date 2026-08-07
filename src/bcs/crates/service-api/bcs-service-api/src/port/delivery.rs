@@ -25,6 +25,9 @@ pub struct BotDeliveryCommand {
     pub frame: BcsFrame,
     pub delivery_kind: BotDeliveryKind,
     pub provider_transport: ProviderTransportPreference,
+    /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
+    /// for forwarding to HTTP provider webhooks. Empty for non-HTTP ingress.
+    pub provider_bypass_headers: Vec<(String, String)>,
 }
 
 impl BotDeliveryCommand {

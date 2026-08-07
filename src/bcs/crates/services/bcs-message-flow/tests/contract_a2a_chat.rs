@@ -40,6 +40,7 @@ fn chat_command(target_bot_id: &str) -> A2aChatCommand {
         response_mode: ChatResponseMode::Full,
         caller_wait_mode: None,
         organization_code: None,
+        provider_bypass_headers: Vec::new(),
     }
 }
 
@@ -210,6 +211,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             client: None,
             response_mode: ChatResponseMode::Full,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -231,6 +233,7 @@ async fn direct_chat_run_snapshot_maps_http_client_kinds() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -284,6 +287,7 @@ async fn async_chat_creates_run_and_delivers_chat_send_frame() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: Some("detached".to_string()),
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -352,6 +356,7 @@ async fn blocking_run_service_records_final_event_and_unregisters_run() {
             client: Some("contract-test".to_string()),
             response_mode: ChatResponseMode::Full,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -411,6 +416,7 @@ async fn detached_provider_async_run_submits_after_downlink_ack_then_runs_on_cal
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: Some("detached".to_string()),
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -494,6 +500,7 @@ async fn blocking_run_service_unregisters_when_recording_event_fails() {
                     client: None,
                     response_mode: ChatResponseMode::Full,
                     organization_code: None,
+                    provider_bypass_headers: Vec::new(),
                 })
                 .await
         })
@@ -537,6 +544,7 @@ async fn run_service_preserves_omitted_from_as_run_channel_metadata_none() {
             client: None,
             response_mode: ChatResponseMode::Full,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -575,6 +583,7 @@ async fn async_run_service_accepts_and_drains_events_until_final() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -642,6 +651,7 @@ async fn async_run_after_last_tool_call_mode_returns_only_followup_text() {
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -703,6 +713,7 @@ async fn async_run_after_last_tool_call_mode_uses_agent_tool_boundary() {
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -763,6 +774,7 @@ async fn async_run_after_last_tool_call_mode_uses_final_when_agent_tool_has_no_f
             response_mode: ChatResponseMode::AfterLastToolCall,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -816,6 +828,7 @@ async fn async_run_service_marks_failed_on_chat_event_error() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -868,6 +881,7 @@ async fn async_run_service_times_out_and_unregisters_when_no_terminal_event_arri
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -920,6 +934,7 @@ async fn cancel_run_service_cancels_underlying_run_and_unregisters_channel() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -984,6 +999,7 @@ async fn cancel_run_marks_running_run_cancelled() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -1039,6 +1055,7 @@ async fn run_events_update_status_and_wake_waiters() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await
         .unwrap();
@@ -2117,6 +2134,7 @@ async fn a2a_chat_blocking_interceptor_prevents_bot_delivery() {
             response_mode: ChatResponseMode::Full,
             caller_wait_mode: None,
             organization_code: None,
+            provider_bypass_headers: Vec::new(),
         })
         .await;
 

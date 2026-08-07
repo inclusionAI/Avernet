@@ -228,6 +228,11 @@ async fn bot_joined_produces_context_injection_and_notification() {
     assert!(notification.recipients.contains(&"consultant-id".to_string()));
     assert!(!notification.recipients.contains(&"new-bot-id".to_string()));
 
+    // Persistence policy: the personalized injection is owned by the new bot;
+    // the identical-for-all notification is one public record (owner = None).
+    assert_eq!(injection.persist, bcs_domain::PersistMode::PerRecipient);
+    assert_eq!(notification.persist, bcs_domain::PersistMode::Public);
+
     // user_message is the OTHER-bots notification text (NOT the new-bot injection).
     assert_eq!(
         user_message.as_deref(),

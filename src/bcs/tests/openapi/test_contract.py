@@ -85,7 +85,7 @@ def test_operations_use_the_approved_gateway_security_boundary() -> None:
                 {}
                 if (method.lower(), path)
                 == ("get", "/openapi/v1/collaboration/messages/ws")
-                else {"user": "required"}
+                else {"user": "required", "app": "required"}
             )
             assert operation["x-avernet-security"] == expected, (
                 f"{method.upper()} {path} has the wrong Gateway security boundary"

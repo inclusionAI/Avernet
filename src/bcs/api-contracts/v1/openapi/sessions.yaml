@@ -45,6 +45,7 @@ GroupSessionsPath:
     summary: Create a Session under a Group.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
     requestBody:
@@ -115,6 +116,7 @@ GroupSessionsPath:
     summary: List Sessions under a Group for the selected View Actor.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/GroupIdPath
       - $ref: ../shared.yaml#/ViewBotIdQuery
@@ -191,6 +193,7 @@ SessionPath:
     summary: Get session detail.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     responses:
@@ -242,6 +245,7 @@ SessionPath:
     summary: Update the explicitly mutable session properties.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -313,6 +317,7 @@ SessionPath:
     summary: Delete a session using the authenticated Principal as caller.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/ActingBotIdQuery
@@ -362,6 +367,7 @@ SessionMessagesPath:
     summary: List session message history (cursor-based).
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - name: before
@@ -439,6 +445,7 @@ AddSessionParticipantPath:
     summary: Add a Bot as a Session participant.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
     requestBody:
@@ -515,6 +522,7 @@ SessionParticipantPath:
     summary: Update a Session participant mode.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath
@@ -586,6 +594,7 @@ SessionParticipantPath:
     summary: Remove a Session participant or let a Bot leave.
     x-avernet-security:
       user: required
+      app: required
     parameters:
       - $ref: ../shared.yaml#/SessionIdPath
       - $ref: ../shared.yaml#/BotUuidPath

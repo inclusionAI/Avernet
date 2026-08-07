@@ -270,7 +270,9 @@ def install_middleware(
 
     Order matters: CORS first (so preflights short-circuit before auth),
     then UserContextMiddleware, then TraceIdMappingMiddleware, then the
-    tracer's own middleware via ``tracer.install(app)``.
+    tracer's own middleware via ``tracer.install(app)``, then the public
+    API's access log — which must sit outside everything whose work it
+    reports.
 
     Starlette ``add_middleware`` prepends, so the tracer (installed last)
     is *outermost* — it establishes the trace context before
@@ -304,6 +306,19 @@ def install_middleware(
 
     # 安装 tracer 插件的中间件（由 DI 按 profile 绑定的实现决定行为）
     tracer.install(app)
+
+    # The public API's access log. Added after everything it reports on, so it
+    # is *outside* all of them: the status it records is the one that reaches
+    # the wire (including one an exception handler produced), and the trace id,
+    # the resolved caller and the request's tenant are already on the scope by
+    # the time it reads them on the way out. Function-local import so this
+    # module stays importable without pulling in every public router — the same
+    # reason AvernetTenantMiddleware imports its seam lazily.
+    from agentclaw.community.adapters.http.openapi_v1.access_log import (
+        PublicApiAccessLogMiddleware,
+    )
+
+    app.add_middleware(PublicApiAccessLogMiddleware)
 
     # Add last so it is outermost: it must sanitize the shared ASGI scope
     # before tracer, auth context, and default access logging use it.

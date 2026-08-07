@@ -1718,6 +1718,7 @@ pub async fn session_chat(
         requested_sender_id,
         message: body.message,
         session_id: Some(sid.clone()),
+        provider_bypass_headers: state.provider_bypass_headers_from(&headers),
     };
 
     match state.services.message_flow.handle_group_chat(cmd).await {

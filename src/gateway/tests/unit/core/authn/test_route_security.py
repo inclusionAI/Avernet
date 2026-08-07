@@ -9,7 +9,7 @@ import yaml
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.spi.authn import Presence, PrincipalType
 
-_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "application.yaml"
+_CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 
 def test_shipped_config_loads_and_requires_user() -> None:

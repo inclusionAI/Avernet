@@ -116,7 +116,7 @@ impl GroupSessionConnectionService for FakeConnectionService {
 
 fn human_caller() -> AuthenticatedCaller {
     AuthenticatedCaller {
-        tenant: "tenant-a".into(),
+        tenant: Some("tenant-a".into()),
         user: Some(AuthenticatedUserIdentity {
             id: "user-a".into(),
             username: "alice".into(),
@@ -272,7 +272,7 @@ async fn ignores_request_controlled_claims_and_uses_only_path_and_principal() {
     let commands = service.commands();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].session_id, "path-session");
-    assert_eq!(commands[0].caller.tenant, "tenant-a");
+    assert_eq!(commands[0].caller.tenant.as_deref(), Some("tenant-a"));
     assert_eq!(
         commands[0]
             .caller

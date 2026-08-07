@@ -236,6 +236,20 @@ class PathRewrite:
             return f"{self.to_prefix}{path[len(self.from_prefix) :]}"
         return path
 
+    def reverse(self, path: str) -> str:
+        """*path* with ``to_prefix`` replaced by ``from_prefix``.
+
+        Used for OpenAPI doc generation: the upstream's published description
+        carries its own internal paths (e.g. ``/proxypass/X``), but the gateway
+        exposes them under the domain prefix (e.g. ``/openapi/v1/engine/X``).
+        The served doc must show the gateway-facing paths.
+        """
+        if path == self.to_prefix:
+            return self.from_prefix
+        if path.startswith(f"{self.to_prefix}/"):
+            return f"{self.from_prefix}{path[len(self.to_prefix) :]}"
+        return path
+
 
 @dataclass(frozen=True)
 class SchemaSource:
@@ -293,6 +307,15 @@ class Domain:
     def upstream_path(self, path: str) -> str:
         """*path* as the upstream should see it — rewritten only if declared."""
         return path if self.rewrite is None else self.rewrite.apply(path)
+
+    def gateway_path(self, path: str) -> str:
+        """*path* as the gateway exposes it — reverse-rewritten only if declared.
+
+        Used for OpenAPI doc generation: the upstream's published description
+        uses its own internal paths, but the served doc must show the
+        gateway-facing paths clients actually use.
+        """
+        return path if self.rewrite is None else self.rewrite.reverse(path)
 
 
 @dataclass(frozen=True)

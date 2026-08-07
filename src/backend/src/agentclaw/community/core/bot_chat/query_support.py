@@ -17,7 +17,28 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
-_GROUP_SESSION_KEY_PREFIX = "agent:main:"
+_BCS_GROUP_SESSION_KEY_PREFIX = "agent:main:bcs:group:"
+_LEGACY_GROUP_SESSION_KEY_PREFIX = "agent:main:"
+
+
+def trace_keys_for_bcs_session(session_id: str) -> set[str]:
+    """Return current and legacy log keys for one BCS session ID."""
+    if session_id.startswith("agent:"):
+        return {session_id}
+    return {
+        f"{_BCS_GROUP_SESSION_KEY_PREFIX}{session_id}",
+        f"{_LEGACY_GROUP_SESSION_KEY_PREFIX}{session_id}",
+    }
+
+
+def bcs_session_candidates(session_key: str) -> set[str]:
+    """Return possible BCS session IDs encoded by one log session key."""
+    candidates = {session_key}
+    if session_key.startswith(_BCS_GROUP_SESSION_KEY_PREFIX):
+        candidates.add(session_key[len(_BCS_GROUP_SESSION_KEY_PREFIX):])
+    elif session_key.startswith(_LEGACY_GROUP_SESSION_KEY_PREFIX):
+        candidates.add(session_key[len(_LEGACY_GROUP_SESSION_KEY_PREFIX):])
+    return candidates
 
 
 class QueryScope(str, Enum):
@@ -122,12 +143,8 @@ def list_group_sessions(
         value = row.session_id.strip()
         if not value:
             continue
-        session_key = (
-            value
-            if value.startswith("agent:")
-            else f"{_GROUP_SESSION_KEY_PREFIX}{value}"
-        )
-        result.setdefault(session_key, row.session_kind)
+        for session_key in trace_keys_for_bcs_session(value):
+            result.setdefault(session_key, row.session_kind)
     return result
 
 
@@ -149,10 +166,8 @@ def enrich_group_labels(
             session_key = getattr(row, "session_key", None)
             if not session_key:
                 continue
-            candidate_to_keys.setdefault(session_key, set()).add(session_key)
-            if session_key.startswith(_GROUP_SESSION_KEY_PREFIX):
-                fragment = session_key[len(_GROUP_SESSION_KEY_PREFIX):]
-                candidate_to_keys.setdefault(fragment, set()).add(session_key)
+            for candidate in bcs_session_candidates(session_key):
+                candidate_to_keys.setdefault(candidate, set()).add(session_key)
         labels: dict[str, tuple[str, str | None]] = {}
         if candidate_to_keys:
             try:
@@ -341,9 +356,7 @@ def enrich_trace_labels(session: Any, row: Any) -> Any:
     if not session_key:
         return row
 
-    candidates = {session_key}
-    if session_key.startswith(_GROUP_SESSION_KEY_PREFIX):
-        candidates.add(session_key[len(_GROUP_SESSION_KEY_PREFIX):])
+    candidates = bcs_session_candidates(session_key)
     group_session = (
         session.query(BcsGroupSession)
         .filter(

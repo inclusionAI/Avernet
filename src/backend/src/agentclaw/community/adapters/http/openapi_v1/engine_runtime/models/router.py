@@ -1,4 +1,8 @@
-"""Models group — ``/openapi/v1/bots/models/{bot_id}``."""
+"""Models group — ``/openapi/v1/bots/models/{bot_id}``.
+
+**Private bots only** — private personal bots, and a service bot's
+pre-publication draft workspace; see ``engine_runtime/gating.py``.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
     page as page_envelope,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
@@ -52,8 +59,10 @@ async def list_models(
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/models",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET", path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
     # bare list. Reading it as a list yields an empty page on every call against
@@ -91,8 +100,10 @@ async def get_model(
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET",
         path=f"/api/models/{model_id}",
     )
     if not isinstance(result.data, dict):

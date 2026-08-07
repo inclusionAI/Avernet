@@ -29,8 +29,8 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
 ## 全局视角（请先读这一节）
 
 **目标：** 实现公共 `/openapi/v1` API，其调用方是**外部注册租户**。它位于
-`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**
-类别已经实现（PR #494）；其余六个仍然是**带桩（stub）处理器的路由定义**。
+`src/backend/src/agentclaw/community/adapters/http/openapi_v1/*`。其中 **bots**、
+**mcp** 与 **skills** 类别已有实现 handler；其余类别保留各自在下方看板中的 readiness 状态。
 
 > 🔒 **这套界面端到端仍不可被真正调用，但原因已不再是"桩"。**
 > `require_principal` 现在会真正校验网关签发的 `X-Avernet-Principal` 令牌，
@@ -53,14 +53,15 @@ _这是一份"活文档"，用于协调跨多个会话交付公共 `/openapi/v1`
   每一类数据都做到按租户隔离。**Track A 按设计不实现任何端点** —— 它是底层管道。
 - **Track B —— 公共 API 实现。** 把七个 `/openapi/v1` 类别处理器接到已有的服务上。
   **这才是真正落地端点/API 代码的地方。** 每个类别都依赖于其数据已先经过 Track A 的
-  隔离。**七个里已完成两个：bots（PR #494）、mcp（PR #610）。**
+  隔离。Skills 的 implementation/CI 已完成，但 schema 和 pre-production 发布闸口仍待完成；
+  详见其看板行。
 - **Track C —— Engine（运行时）面。** _2026-07-30 新增。_ 把 engine adapter 面向
   客户端的 HTTP 包装到 `/openapi/v1/bots/<component>/{bot_id}/…` 之下，并用一个净化过的
   socket 信息端点取代 `get_device_connection` 的移交。**16 个端点 —— 已实现，PR #630。**
 
 > ⚠️ **唯一需要避免的误解：** "隔离 Stage N 已完成"**并不**意味着任何 API 端点被实现了。
 > Track A 的每个阶段都只是底层管道（可复用机制 + 该类别的记录）。API 端点落在
-> Track B —— bots 已完成，其余六个仍是桩。
+> Track B —— 每个类别状态以看板为准；实现完成本身不代表类别已经 release-complete。
 >
 > ⚠️ **Track C 没有对应的 Track A 阶段，这是对的。** Track A 与 Track B 是成对的
 > （先隔离一个类别，再接通它的端点）；Track C 不是。它的数据在 Bot 的设备上，
@@ -123,7 +124,7 @@ _具体每个切片要实现哪些端点，见下方的 **各组件端点清单*
 > Stage 1 同时构建了后续每个阶段都会复制的**可复用机制**（见下文）。它是地基，
 > 不只是"机器人"。
 
-### Track B —— 公共 API 实现（端点真正落地之处 —— 七个里已完成两个）
+### Track B —— 公共 API 实现（端点真正落地之处）
 _按优先级分层排序。_
 | 类别 | 负责人 | 优先级 | 路由 | 状态 | 依赖 |
 |---|---|---|---|---|---|
@@ -133,7 +134,7 @@ _按优先级分层排序。_
 | routines | lucas-xzp | P1 | `openapi_v1/routines/router.py` | 🔧 IN PROGRESS（PARTIAL）— 7 handler 全接通但 NOT PUBLIC-READY | Track A routines 无表靠 ac_bots 间接隔离；Track B 7 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
 | channels | —— | ❌ **已删除（2026-08-03）** | *(已删除)* | 路由、schema 与两条已发布路径均删除 —— 见下方 channels 小节 | 不适用 |
 | identity | lucas-xzp | P2 | `openapi_v1/identity/router.py` | 🔧 IN PROGRESS（PARTIAL）— 3 handler 全接通但 NOT PUBLIC-READY | bots 隔离（Stage 1 ✅）；Track B 3 端点接通；待 gateway principal seam + tenant resolver 落地后才可对外 |
-| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` *(桩)* | ⬜ TODO | Track A skills（共担） |
+| skills | totalfrank + lucas-xzp | P3 | `openapi_v1/skills/router.py` | 🔧 **实现 + CI 完成；发布待定**——六个已定案 Local Skill 操作 | #725 cleanup-work DDL 必须先于代码部署；[预发验收 runbook](skills-track-b-preprod-acceptance.md) 仍为 **PRE-PROD PENDING** |
 
 ### Track C —— Engine（运行时）面（5 组已全部实现 —— PR #630）
 _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶段，没有 DDL。
@@ -505,7 +506,7 @@ id 恰好等于某个组件名，它在该地址上就不可达。这个集合�
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity
+approvals  ceiling  check-name  connection  engine  identity  logs
 mcp  models  resources  routines  sessions  skills
 ```
 
@@ -616,33 +617,28 @@ _已定案的决策（PR #610）：路径保持嵌套（`/openapi/v1/bots/mcp/..
 
 _注：upload 已定稿为原始 `application/octet-stream` body（非 multipart）。与 PR #363 总览的 multipart 描述不一致——实现以路由为准，若后续需改 multipart 是契约 PR。_
 
-### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（6 个端点：Track B 已定案）· `openapi_v1/skills/router.py`
-Skill 公开 API 使用 `/openapi/v1/bots/skills` 路径组，Local Skill 的上传和生命周期属于指定 Bot。
+### 🟪 totalfrank + lucas-xzp · P3 —— skills，共担（六个已定案操作）· `openapi_v1/skills/router.py`
 
-> **已与 totalfrank 定案。** 现有 Local Skill 由 Bot 的设备文件系统存储，不是可在租户内复用的
-> 全局资产。因此 Track B 采用 per-bot **上传** → **激活/停用** → **删除**
-> 的生命周期，不暴露独立的“安装”概念。租户级可复用 Skill 延后到 Skill Center 具备独立存储和分发能力后再设计。
-> 公开 API 不提供跨 Bot 的 Skill 目录；列表和上传必须通过查询参数携带 `bot_id`，
-> 列表通过可选的 `active` 过滤条件区分状态，不再设独立的 Active Skill 列表路由。
-> `skill_id` 对应 `ac_skill.id`，足以全局唯一定位 Skill；针对具体 Skill 的请求无需重复携带 `bot_id`。
+公共面是 Bot-owned `local://` Local Skill 生命周期，不是目录、市场、Git/Center 安装面或通用
+Skill Set API。collection 的可选 `active` filter 是唯一 Active-list 机制。所有操作均要求
+verified principal、按 owner/Bot 作用域处理，并使用标准 `Envelope` / `Page`。
 
-上传接受一个原始 `application/zip` 请求体，创建时默认为 Inactive。同名上传会在该 Bot
-范围内更新原 Skill，保持 Skill ID 和期望的 Active/Inactive 状态。针对服务 Bot，
-列表和上传可选携带 `owner_entity_id`，但它只能在权限校验后用于定位 owner 范围：
-Local Skill 仍归 Bot owner 所有，有权限的协作者只记录为操作人。读取使用数据库期望状态，
-Bot 离线时仍可用；变更操作要求 Bot ready，运行时同步失败时必须补偿。
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/skills` | 列出精确 Bot-owned Local Skill 元数据（`bot_id`、可选 owner locator、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` |
+| POST | `/openapi/v1/bots/skills/upload` | 创建或安全替换一个原始 `application/zip` Local Skill 包 | `201 Envelope[SkillUpload]` / 替换时 `200` |
+| GET | `/openapi/v1/bots/skills/{skill_id}` | 读取一个部署范围 Skill ID 的公开元数据 | `Envelope[Skill]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 设为 Active desired state 并同步 runtime | `Envelope[SkillState]` |
+| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 设为 Inactive desired state 并同步 runtime | `Envelope[SkillState]` |
+| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 可恢复地删除一个 Inactive Local Skill | `Envelope[Deleted]` |
 
-router stub 现已精确暴露这份定案契约。它们只定义 transport shape；Track B 的实现切片
-负责在其后接入持久化、包存储、权限与 runtime 同步。
+`413101` 只在原始 ZIP upload 上公开。稳定 Local Skill subcode 为 `400101`、`404000`、
+`409101`–`409104`、`413101`、`502101`、`502102`；既有公共类别保持原有 `xxx000` code。
+Generated OpenAPI 已由合同测试锁定为恰好这六个操作。
 
-| 方法 | 路径 | 用途 | 成功响应 | 状态 |
-|---|---|---|---|---|
-| GET | `/openapi/v1/bots/skills` | 指定 Bot 的 Local Skill 列表（`bot_id` 必填；`owner_entity_id`、`active`、`keyword`、分页） | `Envelope[Page[Skill]]` | 桩内 |
-| GET | `/openapi/v1/bots/skills/{skill_id}` | 技能详情 | `Envelope[Skill]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/upload` | 上传原始 ZIP（`bot_id` 必填；`owner_entity_id` 可选；创建时默认 Inactive） | `201/200 Envelope[SkillUpload]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{skill_id}/activate` | 激活 Skill | `Envelope[SkillState]` | 桩内 |
-| POST | `/openapi/v1/bots/skills/{skill_id}/deactivate` | 停用 Skill | `Envelope[SkillState]` | 桩内 |
-| DELETE | `/openapi/v1/bots/skills/{skill_id}` | 删除 Skill | `Envelope[Deleted]` | 桩内 |
+**发布闸口：现在不得标记 Track B complete。** #725 的 cleanup-work DDL 必须先部署并验证，
+真实 owner/collaborator 预发验收仍需要已授权凭据与 Bot container。见英文
+[runbook 与回滚说明](skills-track-b-preprod-acceptance.md)。
 
 ### 🟩 lucas-xzp · P1 —— routines（7 个端点）· `openapi_v1/routines/router.py`
 定时/触发的 Agent 任务（原来的 "cron"）；触发器是嵌套对象。
@@ -772,6 +768,14 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-04** —— **Skills Track B integration/release gate 的实现与 CI 已完成，但不等于
+  release complete。** Served OpenAPI 现锁定为恰好六个 Bot-owned Local Skill 操作；旧的
+  `{bot_id}/skills` install/uninstall stub 已移除。组装真实 guard 测试证明另一租户不能 list、
+  detail、upload/replace、activate、deactivate 或 delete 目标租户的 Local Skill。#725 的
+  `ac_local_skill_cleanup_work` deploy-before-code DDL 仍待执行；owner 加 authorized collaborator
+  的预发生命周期仍为 **PRE-PROD PENDING**。可执行验收、验证与回滚清单在
+  `skills-track-b-preprod-acceptance.md`。
 
 - **2026-07-27** —— 交接 README 创建。Track A Stage 1（bots + 可复用机制）已完成，位于
   **PR #456**，等待审批。Track B 尚未开始。

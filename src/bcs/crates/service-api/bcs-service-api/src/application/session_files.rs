@@ -172,6 +172,17 @@ pub trait SessionFileService: Send + Sync {
         cmd: ShareMintCommand,
     ) -> Result<ShareMintResult, SessionFileUseCaseError>;
 
+    /// Server-authoritative mint for history echo. Does NOT run `can_share`
+    /// (membership is enforced at the history HTTP entry; the pre-existing
+    /// horizontal-privilege gap there is tracked separately — see spec §13).
+    /// Still verifies file ownership via `repo.get(session_id, file_id)`.
+    async fn share_mint_for_history(
+        &self,
+        session_id: &str,
+        file_id: &str,
+        ttl_seconds: u64,
+    ) -> Result<ShareMintResult, SessionFileUseCaseError>;
+
     /// Verify share token (no session auth), return the file (must be Ready).
     async fn share_consume(
         &self,

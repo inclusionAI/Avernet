@@ -117,7 +117,18 @@ user_config:
     "/openapi/v1/bots/**":
       user: required
 
+    # Bot Logs can query explicit user/Bot and trace identifiers. Require both
+    # the end-user identity and the registered calling application so a user
+    # credential alone cannot access this tenant-level observability surface.
+    "/openapi/v1/bots/logs/**":
+      user: required
+      app: required
+
     "/openapi/v1/collaboration/**":
+      user: required
+      app: required
+
+    "/openapi/v1/bcsfuse/**":
       user: required
 
     "/openapi/v1/bcsfuse/**":
@@ -175,6 +186,9 @@ user_config:
   #                                    each upstream publishes its dumped doc to an
   #                                    object store on deploy, gateway auto-adopts
   #                                    the latest via background refresh)
+  #   source: http          → `url`  (any deployed edition;
+  #                                    fetches the latest published description
+  #                                    from an HTTP endpoint with background refresh)
   # "object_store" is vendor-neutral (S3 / MinIO / GCS / OSS / …); the reader is
   # a pluggable flavor of the SchemaCatalog SPI. The schema is a DOC-ONLY input —
   # routing/auth/forwarding never read it.
@@ -233,31 +247,33 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
-      bcsfuse:
+      # bcsfuse public surface: fusion + fusable worker-config queries, served
+      # under clean, version-free sub-prefixes. bcsfuse still serves its own /api/v1
+      # and /v1 prefixes directly (unchanged) for callers that reach the service
+      # without the gateway; the gateway exposes only these clean paths.
+      bcsfuse-fusion:
+        match: /openapi/v1/bcsfuse/groups/**
         server: bcsfuse
         protocols: [http]
-        # bcsfuse serves fusion under /api/v1 and worker-config under /v1.
-        # Strip the gateway prefix so both upstream prefixes pass through unchanged.
         rewrite:
-          from: /openapi/v1/bcsfuse
-          to: /
+          from: /openapi/v1/bcsfuse/groups
+          to: /api/v1/groups
         schema:
           source: file
-          path: schemas/bcsfuse.openapi.json
+          path: schemas/bcsfuse-fusion.openapi.json
           refresh_seconds: 300
-      sessions:
-        server: baas
+      bcsfuse-workers:
+        match: /openapi/v1/bcsfuse/workers/**
+        server: bcsfuse
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/bcsfuse/workers
+          to: /v1/workers
         schema:
           source: file
-          path: schemas/baas.openapi.json
+          path: schemas/bcsfuse-workers.openapi.json
           refresh_seconds: 300
-      messages:
-        server: baas
-        schema:
-          source: file
-          path: schemas/baas.openapi.json
-          refresh_seconds: 300
-      runs:
+      chat:
         server: baas
         schema:
           source: file

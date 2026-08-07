@@ -577,6 +577,7 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             }],
             limit: cmd.limit,
             before: cmd.before,
@@ -618,6 +619,7 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             }],
             limit: cmd.limit,
             before: cmd.before,
@@ -784,6 +786,7 @@ async fn build_group_app_with_identity(
         history_meta: None,
         metadata: None,
         run_id: String::new(),
+        attachments: None,
     });
 
     let group_store = Arc::new(GroupStore::new());
@@ -1246,6 +1249,7 @@ async fn state_machine_session_messages_use_runtime_history() {
                 history_meta: None,
                 metadata: None,
                 run_id: String::new(),
+                attachments: None,
             }],
             limit: 20,
             before: None,

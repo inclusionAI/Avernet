@@ -29,8 +29,12 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
+from agentclaw.community.api.local_skill_delete_service import (
+    LocalSkillDeleteServiceProtocol,
+)
 from agentclaw.community.core.models.skill import Skill
 from agentclaw.community.core.skill_center.errors import (
+    LocalSkillActiveError,
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
 )
@@ -126,12 +130,23 @@ class _State:
         }
 
 
-def _client(query: _Query, state: _State | None = None) -> TestClient:
+class _Delete:
+    def __init__(self) -> None:
+        self.args = None
+
+    async def delete_local_skill(self, **kwargs):
+        self.args = kwargs
+
+
+def _client(
+    query: _Query, state: _State | None = None, delete: _Delete | None = None
+) -> TestClient:
     class Bindings(Module):
         def configure(self, binder):
             binder.bind(LocalSkillQueryServiceProtocol, to=query)
             binder.bind(LocalSkillUploadServiceProtocol, to=_Upload())
             binder.bind(LocalSkillStateServiceProtocol, to=state or _State())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=delete or _Delete())
 
     app = FastAPI()
     app.include_router(router)
@@ -173,6 +188,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
             binder.bind(LocalSkillQueryServiceProtocol, to=_Query())
             binder.bind(LocalSkillUploadServiceProtocol, to=_UpdatedUpload())
             binder.bind(LocalSkillStateServiceProtocol, to=_State())
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
 
     app = FastAPI()
     app.include_router(router)
@@ -181,7 +197,8 @@ def test_upload_replacement_returns_200_and_updated_operation():
     client = TestClient(app)
     response = client.post(
         "/openapi/v1/bots/skills/upload?bot_id=bot-1",
-        content=b"PK\x03\x04", headers={"content-type": "application/zip"},
+        content=b"PK\x03\x04",
+        headers={"content-type": "application/zip"},
     )
     assert response.status_code == 200
     assert response.json()["code"] == 200000
@@ -225,6 +242,35 @@ def test_activate_and_deactivate_derive_scope_from_id_and_return_desired_state()
     assert deactivated.status_code == 200
     assert deactivated.json()["data"]["skill"]["active"] is False
     assert state.args == {"skill_id": "8", "actor_id": "actor", "active": False}
+
+
+def test_delete_derives_scope_from_skill_id_and_returns_standard_deleted_payload():
+    delete = _Delete()
+    response = _client(_Query(), delete=delete).delete("/openapi/v1/bots/skills/8")
+
+    assert response.status_code == 200
+    assert response.json()["code"] == 200000
+    assert response.json()["data"] == {"deleted": True}
+    assert delete.args == {"skill_id": "8", "actor_id": "actor"}
+
+
+def test_delete_active_error_uses_the_fixed_public_conflict_envelope():
+    class _ActiveDelete(_Delete):
+        async def delete_local_skill(self, **kwargs):
+            self.args = kwargs
+            raise LocalSkillActiveError()
+
+    response = _client(_Query(), delete=_ActiveDelete()).delete(
+        "/openapi/v1/bots/skills/8"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": 409102,
+        "message": "Skill is active",
+        "data": None,
+        "request_id": "",
+    }
 
 
 def test_list_uses_verified_actor_and_exposes_only_public_metadata():
@@ -287,8 +333,21 @@ def test_list_requires_bot_id_and_shared_page_limits():
     )
 
 
-def test_openapi_declares_exact_state_command_paths_and_response_shape():
+def test_openapi_declares_exactly_the_six_ratified_skills_operations():
     schema = _client(_Query()).app.openapi()
+    skill_paths = {
+        path: operations
+        for path, operations in schema["paths"].items()
+        if path.startswith("/openapi/v1/bots/skills")
+        or path.startswith("/openapi/v1/bots/{bot_id}/skills")
+    }
+    assert {path: set(operations) for path, operations in skill_paths.items()} == {
+        "/openapi/v1/bots/skills": {"get"},
+        "/openapi/v1/bots/skills/upload": {"post"},
+        "/openapi/v1/bots/skills/{skill_id}": {"get", "delete"},
+        "/openapi/v1/bots/skills/{skill_id}/activate": {"post"},
+        "/openapi/v1/bots/skills/{skill_id}/deactivate": {"post"},
+    }
     for path in (
         "/openapi/v1/bots/skills/{skill_id}/activate",
         "/openapi/v1/bots/skills/{skill_id}/deactivate",
@@ -298,10 +357,34 @@ def test_openapi_declares_exact_state_command_paths_and_response_shape():
             "application/json"
         ]["schema"]
         assert response_schema["$ref"].endswith("Envelope_SkillState_")
+    delete = schema["paths"]["/openapi/v1/bots/skills/{skill_id}"]
+    assert set(delete) == {"get", "delete"}
+    assert delete["delete"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("Envelope_Deleted_")
     state_schema = schema["components"]["schemas"]["SkillState"]
     assert state_schema["required"] == ["skill", "changed"]
     upload = schema["paths"]["/openapi/v1/bots/skills/upload"]["post"]
     assert {"200", "201", "413"} <= set(upload["responses"])
+    assert set(upload["requestBody"]["content"]) == {"application/zip"}
+    error_example = upload["responses"]["413"]["content"]["application/json"]["example"]
+    assert {**error_example, "data": error_example.get("data")} == {
+        "code": 413101,
+        "message": "Skill package is too large",
+        "request_id": "",
+        "data": None,
+    }
+    error_schema = upload["responses"]["413"]["content"]["application/json"]["schema"]
+    assert error_schema["$ref"].endswith("ErrorEnvelope")
+    assert schema["components"]["schemas"]["ErrorEnvelope"]["properties"]["data"] == {
+        "type": "null",
+        "title": "Data",
+        "description": "Always null on an error response.",
+    }
+    for path, methods in skill_paths.items():
+        for method, operation in methods.items():
+            if path != "/openapi/v1/bots/skills/upload" or method != "post":
+                assert "413" not in operation.get("responses", {})
     for status in ("200", "201"):
         assert upload["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
             "Envelope_SkillUpload_"

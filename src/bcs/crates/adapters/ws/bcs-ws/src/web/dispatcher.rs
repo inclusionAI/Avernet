@@ -573,6 +573,7 @@ async fn handle_chat_send(
             idempotency_key: params.idempotency_key,
             source_im_message_id: None,
             sender_conn_id,
+            provider_bypass_headers: Vec::new(),
         })
         .await?;
     info!(

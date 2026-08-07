@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, SenderType, SystemMessageEvent, SystemMessageEventKind};
+use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
 use bcs_protocol::{
     build_chat_inject_frame, build_chat_send_frame, now_ms, BotDeliveryKind, GroupContextInput,
     GroupContextParticipant,
@@ -182,26 +182,41 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
 
         let (bot_messages, user_message) = producer.produce(&event, group, self.registry.as_ref(), participants).await;
 
-        // Persist system messages per recipient: one record per recipient with
-        // owner_bot_id = recipient, content = the original message. Empty
-        // recipients → no record (e.g. last bot leaving). user_message is NOT
-        // persisted (frontend-only).
+        // Persist system messages according to each message's PersistMode:
+        // - PerRecipient: one record per recipient with owner_bot_id = recipient
+        //   (personalized per-bot context, readable only in that bot's view).
+        // - Public: exactly one record with owner_bot_id = None so the notice
+        //   joins the public history that human viewers read (their history
+        //   filter is owner_bot_id IS NULL); persisted even when recipients is
+        //   empty (e.g. last bot leaving) since the event is still broadcast
+        //   to human viewers via user_message.
+        // - Skip: no record.
+        // user_message is NOT persisted (frontend-only).
         if let Some(ref repo) = self.message_repo {
             let mut persisted_count = 0usize;
+            let new_record = |msg: &SystemGroupMessage, owner_bot_id: Option<String>| NewMessage {
+                group_id: group.id.clone(),
+                session_id: session_id.to_string(),
+                sender_id: "system".to_string(),
+                sender_type: SenderType::System,
+                message_type: "system".to_string(),
+                content: serde_json::Value::String(msg.message.clone()),
+                client_msg_id: None,
+                owner_bot_id,
+                created_at: now_ms(),
+                run_id: String::new(),
+            };
             for msg in &bot_messages {
-                for recipient in &msg.recipients {
-                    let new_msg = NewMessage {
-                        group_id: group.id.clone(),
-                        session_id: session_id.to_string(),
-                        sender_id: "system".to_string(),
-                        sender_type: SenderType::System,
-                        message_type: "system".to_string(),
-                        content: serde_json::Value::String(msg.message.clone()),
-                        client_msg_id: None,
-                        owner_bot_id: Some(recipient.clone()),
-                        created_at: now_ms(),
-                        run_id: String::new(),
-                    };
+                let records: Vec<NewMessage> = match msg.persist {
+                    PersistMode::Skip => vec![],
+                    PersistMode::Public => vec![new_record(msg, None)],
+                    PersistMode::PerRecipient => msg
+                        .recipients
+                        .iter()
+                        .map(|recipient| new_record(msg, Some(recipient.clone())))
+                        .collect(),
+                };
+                for new_msg in records {
                     if let Err(e) = repo.append_message(new_msg).await {
                         tracing::warn!(
                             group_id = %group.id, error = %e,
@@ -303,6 +318,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         frame,
                         delivery_kind,
                         provider_transport,
+                        provider_bypass_headers: Vec::new(),
                     },
                 });
             }

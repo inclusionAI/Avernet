@@ -166,19 +166,14 @@ def _run_case(case: EndpointCase, app: FastAPI, world: World) -> None:
     request, which is what makes the declared ``(method, path)`` the
     endpoint that was actually exercised.
 
-    A ``seed`` may need to mock a non-DB-backed seam (e.g. a service method
-    that reads device files) with ``unittest.mock.patch(...).start()``. Such a
-    seed has no teardown hook of its own, so the runner stops every active
-    patcher when the case finishes — otherwise a class-level patch would leak
-    into later, order-dependent tests. DB-backed setup should still seed real
-    rows rather than mock.
+    There is deliberately no patch teardown here. This used to call
+    ``unittest.mock.patch.stopall()`` because seeds were allowed to patch a
+    non-DB-backed seam and had no teardown of their own — a safety net that
+    also legitimised the practice. Cases now seed real state or substitute a
+    boundary through the injector, which the per-test injector discards on its
+    own; :mod:`test_no_mock_in_endpoint_tests` keeps it that way.
     """
-    from unittest.mock import patch as _patch
-
-    try:
-        _drive_case(case, app, world)
-    finally:
-        _patch.stopall()
+    _drive_case(case, app, world)
 
 
 def _drive_case(case: EndpointCase, app: FastAPI, world: World) -> None:
@@ -198,15 +193,10 @@ async def _run_case_async(case: EndpointCase, app: FastAPI, world: World) -> Non
 
     Drives the endpoint on an in-process async client (``ASGITransport``) so the
     handler's fire-and-forget ``asyncio.create_task`` work runs on the test's loop,
-    then awaits it via ``drain_background_tasks`` before checking. Same
-    seed/patch-teardown discipline as the sync runner.
+    then awaits it via ``drain_background_tasks`` before checking. Same seeding
+    discipline as the sync runner.
     """
-    from unittest.mock import patch as _patch
-
-    try:
-        await _drive_case_async(case, app, world)
-    finally:
-        _patch.stopall()
+    await _drive_case_async(case, app, world)
 
 
 async def _drive_case_async(case: EndpointCase, app: FastAPI, world: World) -> None:

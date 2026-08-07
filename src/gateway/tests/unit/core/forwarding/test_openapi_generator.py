@@ -6,6 +6,7 @@ from typing import Any
 
 from gateway.community.core.authn import RouteSecurity
 from gateway.community.core.forwarding import generate_openapi
+from gateway.community.core.forwarding._domains import PathRewrite
 
 _RULES = RouteSecurity.from_table(
     {
@@ -149,3 +150,65 @@ def test_empty_description_yields_empty_paths() -> None:
     doc = generate_openapi({"openapi": "3.1.0"}, _RULES)
     assert doc["paths"] == {}
     assert "components" not in doc
+
+
+def test_rewrite_reverse_maps_upstream_paths() -> None:
+    """Paths are reversed through the rewrite and emitted as gateway-facing."""
+    description: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/proxypass/sessions": {
+                "get": {"operationId": "list_sessions"},
+            },
+            "/proxypass/sessions/{id}": {
+                "get": {"operationId": "get_session"},
+            },
+        },
+    }
+    rewrite = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    doc = generate_openapi(description, _RULES, rewrite=rewrite)
+
+    assert doc["paths"] == {
+        "/openapi/v1/chat/sessions": {
+            "get": {
+                "operationId": "list_sessions",
+                "x-avernet-security": {"user": "required"},
+            }
+        },
+        "/openapi/v1/chat/sessions/{id}": {
+            "get": {
+                "operationId": "get_session",
+                "x-avernet-security": {"user": "required"},
+            }
+        },
+    }
+
+
+def test_rewrite_filters_against_reversed_path() -> None:
+    """Upstream paths that don't land in the namespace after reverse are dropped."""
+    description: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/proxypass/sessions": {"get": {"operationId": "list"}},
+            "/api/internal/debug": {"get": {"operationId": "debug"}},
+        },
+    }
+    rewrite = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    # /api/internal/debug → reverse is identity (not under /proxypass/) → filtered out
+    doc = generate_openapi(description, _RULES, rewrite=rewrite)
+
+    assert "/api/internal/debug" not in doc["paths"]
+    assert "/openapi/v1/chat/sessions" in doc["paths"]
+
+
+def test_rewrite_set_and_no_matching_paths_yields_empty() -> None:
+    """When rewrite is set but no upstream paths are under to_prefix, doc is empty."""
+    description: dict[str, Any] = {
+        "openapi": "3.1.0",
+        "paths": {
+            "/unrelated": {"get": {"operationId": "unrelated"}},
+        },
+    }
+    rewrite = PathRewrite(from_prefix="/openapi/v1/chat", to_prefix="/proxypass")
+    doc = generate_openapi(description, _RULES, rewrite=rewrite)
+    assert doc["paths"] == {}
