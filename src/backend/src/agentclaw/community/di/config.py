@@ -179,6 +179,7 @@ class SecretNamesConfig:
     dormant_internal_token: str = ""
     aiworkbench_repo_url: str = ""
     gateway_principal_signing_key: str = "gateway_principal_signing_key"
+    aicoding_theta_master_key: str = ""
 
 
 def _default_cors_origins() -> list[str]:
