@@ -133,7 +133,7 @@ Paths are relative to `src/backend/`.
   `tests/community/core/harness/`, `tests/community/di/`. Record what passed and
   state explicitly anything that could not run and why.
 
-- [ ] **E5. Commit** to `claude/skill-upload-http-logs-ee0m9h` with a message
+- [x] **E5. Commit** to `claude/skill-upload-http-logs-ee0m9h` with a message
   following the AGENTS.md convention, and push with
   `git push -u origin claude/skill-upload-http-logs-ee0m9h`.
 
