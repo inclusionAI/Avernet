@@ -16,11 +16,26 @@ Arguments left as ``None`` are omitted so the wire shape matches a hand-written
 """
 from __future__ import annotations
 
+import http.cookiejar
 from typing import Any, Mapping
 
 import httpx
 
 from agentclaw.community.plugin_api.http_client import HttpClient
+
+
+def _blocked_cookie_jar() -> http.cookiejar.CookieJar:
+    """A jar that stores nothing and sends nothing.
+
+    ``DefaultCookiePolicy(allowed_domains=[])`` refuses every domain in both
+    directions, so the pooled client keeps the stateless per-call behavior it
+    had when each request built its own client. Passing a ``CookieJar`` (rather
+    than an ``httpx.Cookies``) is deliberate: ``httpx`` adopts a jar as-is but
+    re-wraps a ``Cookies`` instance, which would drop the policy.
+    """
+    return http.cookiejar.CookieJar(
+        policy=http.cookiejar.DefaultCookiePolicy(allowed_domains=[])
+    )
 
 
 class HttpxClient(HttpClient):
@@ -34,7 +49,16 @@ class HttpxClient(HttpClient):
         # when reached from thread-pool workers. Timeout is deliberately not set
         # here — it is per-call, and passing it at construction would freeze
         # every caller's deadline to whoever built the client.
-        self._client = httpx.Client(base_url=base_url)
+        #
+        # The cookie jar is blocked outright. A per-call client's jar died with
+        # the call; a process-lifetime one would not. The first ``Set-Cookie``
+        # the process ever sees — an LB stickiness cookie, a gateway session —
+        # would then ride on every later request from every caller and every
+        # tenant, pinning the process to one upstream (defeating the
+        # ``device_affinity`` selection these calls exist to drive) and
+        # potentially carrying one caller's identity into another's request.
+        # Pooling connections must not also pool identity.
+        self._client = httpx.Client(base_url=base_url, cookies=_blocked_cookie_jar())
 
     def get(
         self,

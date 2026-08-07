@@ -30,7 +30,8 @@ A consumer injects the qualified key (``baas_http: Annotated[HttpClient,
 
 Impls (Rule 20/21):
 
-* ``prod`` → ``HttpxClient(base_url)`` — a real ``httpx.Client`` per call.
+* ``prod`` → ``HttpxClient(base_url)`` — one real ``httpx.Client``, built at
+  construction and reused across calls so connections stay open.
 * ``local`` → ``LocalHttpClient(base_url)`` (``MockSeam``, flavor ``MOCK``) — an
   unstubbed call **raises** so a test can never silently hit the network.
 """

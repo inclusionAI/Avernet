@@ -12,6 +12,7 @@ would be captured before the patch applies.
 """
 from __future__ import annotations
 
+import http.cookiejar
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -29,6 +30,20 @@ def _patched_httpx():
         yield ctor, inner
 
 
+def _assert_constructed_once(ctor, base_url: str) -> None:
+    """The client is built once, base_url-scoped, with cookies blocked.
+
+    The timeout is NOT set here — it is per-call, and baking it in would freeze
+    every caller's deadline to whoever built the client.
+    """
+    ctor.assert_called_once()
+    assert ctor.call_args.kwargs["base_url"] == base_url
+    assert "timeout" not in ctor.call_args.kwargs
+    jar = ctor.call_args.kwargs["cookies"]
+    assert isinstance(jar, http.cookiejar.CookieJar)
+    assert jar._policy._allowed_domains == ()
+
+
 def test_post_builds_base_url_client_and_passes_all_args():
     with _patched_httpx() as (ctor, inner):
         client = HttpxClient(base_url="http://svc.test")
@@ -39,9 +54,7 @@ def test_post_builds_base_url_client_and_passes_all_args():
             headers={"h": "v"},
             timeout=12.0,
         )
-    # Client is constructed base_url-scoped. The timeout is NOT set here — it is
-    # per-call, and baking it in would freeze every caller's deadline.
-    ctor.assert_called_once_with(base_url="http://svc.test")
+    _assert_constructed_once(ctor, "http://svc.test")
     # Request issued against the relative path with every provided arg plus the
     # per-call timeout.
     inner.request.assert_called_once_with(
@@ -86,7 +99,7 @@ def test_none_args_are_omitted_from_the_request():
     with _patched_httpx() as (ctor, inner):
         client = HttpxClient(base_url="http://svc.test")
         client.get("/ping")
-    ctor.assert_called_once_with(base_url="http://svc.test")
+    _assert_constructed_once(ctor, "http://svc.test")
     inner.request.assert_called_once_with("GET", "/ping", timeout=30.0)
 
 
@@ -113,7 +126,7 @@ def test_client_is_constructed_once_and_reused_across_calls():
         client.get("/one")
         client.get("/two")
 
-    ctor.assert_called_once_with(base_url="http://svc.test")
+    _assert_constructed_once(ctor, "http://svc.test")
     assert inner.request.call_count == 2
 
 
@@ -125,3 +138,44 @@ def test_per_call_timeouts_are_independent():
         client.get("/slow", timeout=60.0)
 
     assert [c.kwargs["timeout"] for c in inner.request.call_args_list] == [1.0, 60.0]
+
+
+def test_set_cookie_is_never_stored_or_replayed():
+    """A pooled client must stay as stateless as the per-call client it replaced.
+
+    Against a real server, because the mocked tests above cannot observe what
+    httpx does with ``Set-Cookie``. Without the blocked jar, the first cookie
+    the process ever receives — an LB stickiness cookie, a gateway session —
+    rides on every later request from every caller and every tenant.
+    """
+    import http.server
+    import socketserver
+    import threading
+
+    seen_cookie_headers: list[str | None] = []
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen_cookie_headers.append(self.headers.get("Cookie"))
+            self.send_response(200)
+            self.send_header("Set-Cookie", "SESSION=abc123; Path=/")
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = socketserver.TCPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = HttpxClient(base_url=f"http://127.0.0.1:{port}")
+        for _ in range(3):
+            client.get("/x")
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert seen_cookie_headers == [None, None, None]
