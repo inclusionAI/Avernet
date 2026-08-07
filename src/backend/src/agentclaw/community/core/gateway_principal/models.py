@@ -132,6 +132,17 @@ class UserPrincipal(BaseModel):
     type: Literal[PrincipalType.USER] = PrincipalType.USER
     subject: GatewayUser
 
+    @property
+    def tenant(self) -> None:
+        """User principals assert no isolation tenant.
+
+        Kept as a read-only compatibility attribute for callers/tests that
+        check ``principal.tenant is None``. It is intentionally not a Pydantic
+        field, so a forged ``tenant`` key on a user principal is still ignored
+        rather than honoured as an isolation claim.
+        """
+        return None
+
 
 class BotPrincipal(BaseModel):
     """A bot/agent calling as a first-class caller in its own right."""

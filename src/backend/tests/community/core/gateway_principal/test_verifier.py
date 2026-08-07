@@ -139,6 +139,7 @@ def test_user_only_token_yields_the_internal_tenant_and_the_owner():
     assert caller.tenant == DEFAULT_AVERNET_TENANT
     assert caller.user_id == "u-1"
     assert isinstance(caller.principals[0], UserPrincipal)
+    assert caller.principals[0].tenant is None
 
 
 def test_user_wins_over_app_when_both_identities_are_present():
