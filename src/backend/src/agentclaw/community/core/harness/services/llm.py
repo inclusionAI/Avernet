@@ -8,6 +8,7 @@ patch — so there is no SpawnProcess ``AsyncClient.send`` hook to work around.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -346,19 +347,29 @@ class LLM:
     async def _do_request(self, body: dict[str, Any], headers: dict[str, str]) -> str:
         """Execute the HTTP request via the injected sync ``HttpClient``.
 
+        Uses ``stream=True`` to keep long outputs inside antchat's window: a
+        non-streaming call is capped at ~90s by the spanner gateway's read
+        timeout (``RemoteProtocolError`` mid-generation for any output that
+        takes longer), while streaming extends the budget to ~1800s as long as
+        the first token and inter-token gaps stay under 90s. SSE ``data:`` lines
+        are accumulated into the full content string; the external ``chat()``
+        contract (returns str) is unchanged.
+
         The client is synchronous (``httpx.Client``, which sofa_tracer does not
-        patch); run it off the event loop via ``asyncio.to_thread`` so the
-        (potentially long) call does not block. The ``general`` client has an
-        empty base_url, so we pass the full absolute URL."""
+        patch); the stream read runs off the event loop via ``asyncio.to_thread``."""
         url = f"{self._base_url}/v1/chat/completions"
+        stream_body = {**body, "stream": True}
         try:
-            resp = await asyncio.to_thread(
-                self._http.post,
-                url,
-                json=body,
-                headers=headers,
-                timeout=self._timeout_ms / 1000.0,
+            content = await asyncio.to_thread(
+                self._stream_read, url, stream_body, headers,
             )
+        except httpx.HTTPStatusError:
+            # raise_for_status() ran inside the stream context (unlike the old
+            # post path where it ran outside this try). Pass HTTPStatusError
+            # straight to the retry layer's status-based branch (4xx no-retry /
+            # 5xx retry) — do NOT route it through _exc_detail, which may touch
+            # ``.request`` on a wrapper-shaped error and mask the status code.
+            raise
         except Exception as e:
             # The send-hook wrapper raises an opaque exception whose real cause
             # (the underlying httpx transport error) is on __cause__/__context__.
@@ -369,11 +380,37 @@ class LLM:
                 url, body.get("max_tokens"), _exc_detail(e),
             )
             raise
-        resp.raise_for_status()
-        data = resp.json()
+        return content
 
-        choices = data.get("choices", [])
-        if choices:
-            return choices[0].get("message", {}).get("content", "")
+    def _stream_read(self, url: str, body: dict[str, Any], headers: dict[str, str]) -> str:
+        """Synchronous SSE stream reader (runs off the event loop via to_thread).
 
-        return ""
+        Reads ``data:`` lines from the streaming chat completion, accumulating
+        ``delta.content`` into the full text. ``[DONE]`` or end-of-stream stops
+        reading. Any transport error (gateway ``RemoteProtocolError`` on a
+        >90s gap, read timeout, etc.) propagates so the retry layer can shrink
+        ``max_tokens`` and retry.
+        """
+        chunks: list[str] = []
+        with self._http.stream(
+            "POST", url, json=body, headers=headers,
+            timeout=self._timeout_ms / 1000.0,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[len("data:"):].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(payload)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                try:
+                    delta = obj["choices"][0]["delta"].get("content", "")
+                except (KeyError, IndexError, TypeError):
+                    continue
+                if delta:
+                    chunks.append(delta)
+        return "".join(chunks)
