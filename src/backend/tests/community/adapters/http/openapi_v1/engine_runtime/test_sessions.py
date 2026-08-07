@@ -406,7 +406,7 @@ def test_the_session_window_stays_page_sized(client, relay):
     assert relay.calls[0]["params"] == {"offset": 100, "limit": 51}
 
 
-# ── the personal-bots-only gate ──────────────────────────────────────────────
+# ── the private-bots-only gate ───────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -417,19 +417,46 @@ def test_the_session_window_stays_page_sized(client, relay):
         ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
     ],
 )
-def test_service_bot_gets_501_without_touching_the_device(
+def test_a_service_bot_is_served_and_addressed_at_its_draft_device(
     client, relay, method, suffix
 ):
-    """All seven routes, gated BEFORE the forward.
+    """All seven routes serve an unshared service bot — at its DRAFT binding.
 
-    A filter applied to what the device returned would already have fetched
-    every caller's sessions — so the assertion is that no call happened, not
-    merely that the status was 501.
+    The relay's default for a service bot is the *published* runtime, which is
+    a multi-caller device whose session collection is not scoped per caller —
+    forwarding there would hand the owner other callers' conversations. So the
+    assertion is not merely that the route answered: every forward must carry
+    ``draft_device=True``, addressing the pre-publication binding the owner
+    alone uses.
     """
     relay.set_bot_type("service")
     kwargs = {"json": {}} if method in ("post", "patch") else {}
     resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
-    body = fails(resp, 501)
+    assert resp.status_code in (200, 201), resp.json()
+    assert relay.calls, "the route never forwarded"
+    assert all(c["draft_device"] is True for c in relay.calls)
+
+
+def test_a_shared_service_bot_gets_501_without_touching_the_device(client, relay):
+    """Sharing closes the draft window too: ``ExpertChatService`` creates
+    collaborator and public callers' sessions on the bot's own draft binding,
+    so a shared service bot's draft device is multi-caller like the published
+    one."""
+    relay.set_bot_type("service")
+    relay.set_shared()
+    body = fails(client.get(_base()), 501)
+    assert body["message"] == "Not supported for this bot type"
+    assert relay.calls == []
+
+
+@pytest.mark.parametrize("bot_type", ["", "something-new"])
+def test_an_unknown_bot_type_gets_501_without_touching_the_device(
+    client, relay, bot_type
+):
+    """The gate is an allowlist — a type this build has never heard of is not
+    silently treated as the permissive case."""
+    relay.set_bot_type(bot_type)
+    body = fails(client.get(_base()), 501)
     assert body["message"] == "Not supported for this bot type"
     assert relay.calls == []
 
