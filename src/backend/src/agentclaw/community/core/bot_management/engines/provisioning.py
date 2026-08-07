@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+
 
 @dataclass(frozen=True)
 class BotProvisioningContext:
@@ -59,6 +61,16 @@ class EngineProvisioningStrategy(ABC):
     @abstractmethod
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         """Return extra env vars to inject into the runtime container."""
+
+    @abstractmethod
+    def build_extra_properties(
+        self,
+        ctx: BotProvisioningContext,
+        *,
+        secret_resolver: SecretResolver | None = None,
+        theta_master_key_secret: str = "",
+    ) -> dict[str, Any] | None:
+        """Resolve engine-owned template fields into a generic runtime envelope."""
 
     @abstractmethod
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
