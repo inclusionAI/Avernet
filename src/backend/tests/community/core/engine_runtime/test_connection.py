@@ -109,6 +109,42 @@ class _Devices:
         return self.info
 
 
+#: A routing target as the ARCA provider spells one: ``ARCA_`` + the
+#: ``@alt``-suffixed sandbox id + the engine adapter's port.
+ARCA_TARGET = "ARCA_ARCA-SANDBOX-abc123@0:20003"
+ARCA_TOKEN = "eyJhbGciOiJIUzI1NiIs"
+
+#: What the endpoint must publish for :data:`ARCA_TARGET` on an openclaw bot.
+#: Spelled out in full rather than assembled from parts, so a change to any of
+#: the four pieces — gateway origin, published prefix, target, credential
+#: parameter — has to be restated here deliberately.
+ARCA_URL = (
+    "wss://gw.example/openapi/v1/bots/messages/ws/"
+    "ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws"
+    f"?x-proxypass-token={ARCA_TOKEN}"
+)
+
+
+def _arca(**overrides):
+    """The ARCA provider's shape: a bare routing target, a signed credential,
+    and **no url** — it composes none in any mode and is never handed the
+    in-device path that would have to go into one.
+
+    ``url=""`` is the load-bearing part: ``_Devices`` otherwise synthesises a
+    BaaS-style relay URL, which would send these cases down the re-addressing
+    branch and quietly stop testing the composed one.
+    """
+    return _Devices(
+        **{
+            "type": "proxy",
+            "target": ARCA_TARGET,
+            "token": ARCA_TOKEN,
+            "url": "",
+            **overrides,
+        }
+    )
+
+
 def _gateway(base="https://gw.example"):
     """The endpoint the composition root resolved for this environment.
 
@@ -654,3 +690,181 @@ def test_the_provider_is_asked_exactly_once():
     # ...leaving the relay-mode lookup as the only provider round trip.
     assert devices.kwargs is not None
     assert devices.kwargs["binding_id"] == 42
+
+
+# ── providers that hand back a bare routing target (ARCA) ─────────────────────
+
+
+@pytest.mark.parametrize("kind", ["proxy", "arca"])
+def test_a_bare_target_provider_gets_a_composed_gateway_url(kind):
+    """The ARCA provider returns a target and a credential and no url. Composing
+    one here is what makes the endpoint answer for those bots at all — before
+    this branch existed every one of them was a 502.
+
+    Both members of ``_PROXY_TARGET_TYPES`` are exercised, and against the same
+    expected URL: the kind selects the branch and must not reach the output. The
+    provider answers ``"proxy"`` today and ``"arca"`` is the ``device_provider``
+    key the same device carries elsewhere, so a transposition in either literal
+    is a silent 502 for a whole provider — this is what fails first if one is
+    mistyped."""
+    assert _build(_svc(devices=_arca(type=kind))).sockets[0].url == ARCA_URL
+
+
+def test_a_composed_url_never_names_the_hop_behind_the_gateway():
+    """The reason this endpoint exists. Composing must not become the way the
+    engine proxy's address leaks out after re-addressing stopped leaking it."""
+    url = _build(_svc(devices=_arca())).sockets[0].url
+    # The *routing prefix*, with its slash — bare ``proxypass`` also matches the
+    # credential parameter, which is named ``x-proxypass-token`` and belongs here.
+    assert "proxypass/" not in url
+    assert "agentclawproxy" not in url
+
+
+def test_a_composed_target_segment_survives_verbatim():
+    """The credential is a signature over the target string, and the proxy
+    rejects a handshake whose url target disagrees with the claim — so
+    percent-encoding ``@`` or ``:`` here would break every ARCA connection."""
+    url = _build(_svc(devices=_arca())).sockets[0].url
+    assert f"/openapi/v1/bots/messages/ws/{ARCA_TARGET}/api/openclaw/ws" in url
+    assert "%40" not in url and "%3A" not in url
+
+
+def test_a_composed_bracketed_target_keeps_its_brackets():
+    """Same ``safe`` set as the local branch, so a target that is authority-like
+    rather than a plain segment survives either way in."""
+    devices = _arca(target="[::1]:20003")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.startswith(
+        "wss://gw.example/openapi/v1/bots/messages/ws/[::1]:20003/api/openclaw/ws"
+    )
+
+
+def test_a_composed_url_addresses_the_bots_own_engine():
+    """The provider never sees ``path`` — the base ``get_device_connection`` does
+    not forward it — so the engine path is this branch's to apply. Getting it
+    wrong is not a 404 but a socket the engine closes with 4001."""
+    devices = _arca()
+    url = _build(_svc(bots=_Bots(engine="claude_code"), devices=devices)).sockets[0].url
+    assert url.endswith(
+        f"/{ARCA_TARGET}/api/claude_code/ws?x-proxypass-token={ARCA_TOKEN}"
+    )
+
+
+def test_a_composed_url_with_no_credential_publishes_no_query_string():
+    devices = _arca(token="")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == (
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+        f"{ARCA_TARGET}/api/openclaw/ws"
+    )
+    assert "?" not in url
+
+
+def test_a_composed_credential_is_percent_encoded():
+    devices = _arca(token="a b&c=d")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.endswith("?x-proxypass-token=a%20b%26c%3Dd")
+
+
+def test_composing_and_readdressing_agree_byte_for_byte():
+    """The two branches reach the same published URL by different routes: one
+    cuts the tail out of a provider's url, the other builds it from the target
+    and path. They share a builder precisely so they cannot drift — this pins
+    that they have not."""
+    composed = _build(_svc(devices=_arca())).sockets[0].url
+    readdressed = _build(
+        _svc(
+            devices=_Devices(
+                type="baas",
+                target=ARCA_TARGET,
+                token=ARCA_TOKEN,
+                url=(
+                    "wss://agentclawproxy-prod.example.com/proxypass/"
+                    f"{ARCA_TARGET}/api/openclaw/ws"
+                ),
+            )
+        )
+    ).sockets[0].url
+    assert composed == readdressed == ARCA_URL
+
+
+def test_a_provider_url_wins_over_composing_one():
+    """Ordering, and the reason this fix is not a one-way door: a url the
+    provider issued records a routing decision it made and we did not. Should a
+    bare-target provider ever grow a relay mode, it is preferred here with no
+    change — the composed branch simply stops being reached.
+
+    The url deliberately points somewhere the composed branch never would, so
+    the assertion can tell which branch answered.
+    """
+    devices = _arca(
+        url="wss://agentclawproxy-prod.example.com/proxypass/ARCA_OTHER@1:20099/api/openclaw/ws"
+    )
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == (
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+        f"ARCA_OTHER@1:20099/api/openclaw/ws?x-proxypass-token={ARCA_TOKEN}"
+    )
+
+
+def test_a_bare_target_provider_url_of_an_unknown_shape_is_still_refused():
+    """The composed branch is not a fallback for a url that failed to parse.
+    A provider that issued a shape we cannot re-address is a fault to name, not
+    something to quietly route around by building our own."""
+    devices = _arca(url="wss://relay.example/wsrelay/6f2a")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
+
+
+def test_an_unrecognised_connection_kind_is_named():
+    """Not folded into the composed branch as a catch-all: a provider that was
+    supposed to supply a url and did not has a bug, and composing something
+    plausible for it would bury that bug in a handshake failure."""
+    devices = _Devices(type="teclaw", target="TECLAW_x@4:20003", token="tok", url="")
+    with pytest.raises(EngineUpstreamError) as excinfo:
+        _build(_svc(devices=devices))
+    assert "teclaw" in str(excinfo.value)
+
+
+def test_the_unrecognised_kind_message_does_not_carry_the_credential():
+    devices = _Devices(type="teclaw", target="t", token="secret-tok", url="")
+    with pytest.raises(EngineUpstreamError) as excinfo:
+        _build(_svc(devices=devices))
+    assert "secret-tok" not in str(excinfo.value)
+
+
+def test_a_composed_url_still_needs_a_routing_target():
+    """The target guard runs before any branching, so it covers this branch too
+    — and here it is the only thing standing between an empty target and
+    ``…/bots/messages/ws//api/openclaw/ws``."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=_arca(target="")))
+
+
+def test_an_unencodable_composed_target_is_named_rather_than_a_500():
+    """A lone surrogate survives ``json.loads``, so a provider's response can
+    carry one into this branch as easily as into the local one."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=_arca(target="ARCA_x\ud800@0:20003")))
+
+
+def test_a_composed_expiry_falls_back_to_the_requested_ttl():
+    """ARCA reports no expiry, so the computed bound is what is published — and
+    unusually it is exact rather than a guess: this endpoint asks for
+    ``CONNECTION_TTL_SECONDS`` and the provider signs for precisely that."""
+    from datetime import datetime, timedelta, timezone
+
+    result = _build(_svc(devices=_arca(expires_at="")))
+    expires = datetime.fromisoformat(result.expires_at)
+    expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
+    assert abs((expires - expected).total_seconds()) < 60
+
+
+def test_a_bare_target_provider_reporting_unavailable_is_not_ready():
+    """The availability gate sits in ``build``, before any URL is composed, so it
+    covers this branch by construction rather than by repetition. Pinned because
+    "refused exactly as today, on every provider" is a spec criterion, and a
+    future reordering could quietly compose a URL for a stopped sandbox."""
+    devices = _arca(available=False, message="sandbox stopped")
+    with pytest.raises(EngineDeviceNotReadyError):
+        _build(_svc(devices=devices))
