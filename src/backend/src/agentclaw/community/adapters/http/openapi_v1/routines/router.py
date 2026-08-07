@@ -29,6 +29,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 )
 from agentclaw.community.api.cron_relay_service import CronRelayServiceProtocol
 from agentclaw.community.core.cron.errors import CronRelayError
+from agentclaw.community.core.cron.services.cron_runtime_targets import (
+    RUNTIME_STAGE_DRAFT,
+)
 from agentclaw.community.di import Injected
 
 from .schemas import Routine, RoutineCreate, RoutineRun, RoutineUpdate, ScheduleTrigger
@@ -116,8 +119,12 @@ async def list_routines(
     owner_id = caller_owner_id(principal)
     user_id = owner_id
     nick_name = owner_id
+    # Draft only, like every other route in this group: the public surface
+    # operates a bot's pre-publication workspace, so a service bot's published
+    # verify/online runtimes are neither listed nor queried here.
     result = await factory.list_all_crons(
-        user_id=user_id, nick_name=nick_name, bot_id=bot_id
+        user_id=user_id, nick_name=nick_name, bot_id=bot_id,
+        runtime_stage=RUNTIME_STAGE_DRAFT,
     )
     data = result.get("data") if isinstance(result, dict) else None
     if isinstance(data, list):

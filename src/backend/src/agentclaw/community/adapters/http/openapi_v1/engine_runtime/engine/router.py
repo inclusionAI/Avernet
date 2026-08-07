@@ -1,5 +1,8 @@
 """Engine group (read-only) — ``/openapi/v1/bots/engine/{bot_id}``.
 
+**Private bots only** — private personal bots, and a service bot's
+pre-publication draft workspace; see ``engine_runtime/gating.py``.
+
 Three reads. ``switch`` and ``restart`` are deliberately **not** wrapped:
 wrapping ``switch`` would be a back door around the rule that a bot's engine is
 fixed at creation (``PUT /openapi/v1/bots/{bot_id}`` rejects it), and
@@ -26,6 +29,9 @@ from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
@@ -61,10 +67,12 @@ async def get_engine_status(
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/status",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET", path="/api/engine/status",
         enveloped=False,
     )
     raw = result.data if isinstance(result.data, dict) else {}
@@ -95,8 +103,10 @@ async def get_engine_capabilities(
     same request can succeed for one of your bots and be refused for another.
     """
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET",
         path="/api/engine/capabilities",
     )
     raw = result.data if isinstance(result.data, dict) else {}
@@ -125,8 +135,10 @@ async def list_available_engines(
     """Engines available on this bot, with the active one marked."""
     # Publicly a noun; the engine models the same read under a verb path.
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET", path="/api/engine/list",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET", path="/api/engine/list",
     )
     raw = result.data
     if isinstance(raw, dict):
