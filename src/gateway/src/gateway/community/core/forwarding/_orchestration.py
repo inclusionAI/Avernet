@@ -67,6 +67,13 @@ class Forwarding:
         rewrites = {
             name: domain.rewrite for name, domain in self.domain_map.domains.items()
         }
+        # A matched-child domain mounts beneath another, so its real prefix is not
+        # /openapi/v1/<name>; pass each domain's actual mount prefix so the served
+        # doc filters and emits paths against the prefix clients truly reach.
+        mount_prefixes = {
+            name: domain.mount_prefix
+            for name, domain in self.domain_map.domains.items()
+        }
         return build_served_openapi(
             list(self.domain_map.domains),
             self._describe,
@@ -75,6 +82,7 @@ class Forwarding:
             version=version,
             description=description,
             rewrites=rewrites,
+            mount_prefixes=mount_prefixes,
         )
 
     def _describe(self, domain: str) -> dict[str, Any]:

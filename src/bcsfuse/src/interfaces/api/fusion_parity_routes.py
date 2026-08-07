@@ -44,6 +44,19 @@ from src.interfaces.api.schemas.fusion_schemas import (
 
 logger = logging.getLogger(__name__)
 
+
+async def _run_fuse(service, request, group_id: str):
+    """Run the synchronous GroupFusionService.fuse() off the event loop.
+
+    The R5 fusion handler is async; calling service.fuse() inline blocks the
+    loop for the full fusion duration (up to 600s). run_in_threadpool keeps the
+    gateway's concurrent requests from serializing on it.
+    """
+    from starlette.concurrency import run_in_threadpool
+
+    return await run_in_threadpool(service.fuse, request, group_id=group_id)
+
+
 # Router for R5 fusion routes - mounted at /api/v1
 router = APIRouter()
 
@@ -320,6 +333,11 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
                 logger.info(f"[Fusion][R5] req_dict fusion_mode: {req_dict.get('fusion_mode')}")
                 logger.info(f"[Fusion][R5] req_dict options: {req_dict.get('options', {})}")
 
+                # Q1: tolerate caller-supplied session_id (not used by Avernet G9,
+                # which scopes context by group_id). Strip before domain conversion
+                # so the domain FusionRequest (extra=forbid) does not reject it.
+                req_dict.pop("session_id", None)
+
                 real_request = RealFusionRequest(**req_dict)
                 logger.info(f"[Fusion][R5] Domain request fusion_mode: {real_request.fusion_mode}")
                 logger.info(f"[Fusion][R5] Converted FusionRequest to domain model successfully")
@@ -331,7 +349,7 @@ async def fuse_group(request: Request, group_id: str, req: FusionRequest):
             logger.info(f"[Fusion][R5] Calling real LLM fusion: group_id={group_id}, participants={len(req.participants)}")
             start_time = datetime.now()
 
-            result = service.fuse(real_request, group_id=group_id)
+            result = await _run_fuse(service, real_request, group_id)
 
             latency_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             logger.info(f"[Fusion][R5] Real LLM fusion completed in {latency_ms}ms")

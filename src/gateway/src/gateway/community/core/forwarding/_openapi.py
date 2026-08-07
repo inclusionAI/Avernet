@@ -31,6 +31,7 @@ def build_served_openapi(
     description: str = "",
     base_path: str = _DEFAULT_BASE_PATH,
     rewrites: Mapping[str, PathRewrite | None] | None = None,
+    mount_prefixes: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Merge every domain's generated doc into the single served document.
 
@@ -46,7 +47,12 @@ def build_served_openapi(
     tags: list[dict[str, Any]] = []
     tag_names: set[str] = set()
     for domain in domains:
-        domain_prefix = f"{base_path.rstrip('/')}/{domain}"
+        # Default to /openapi/v1/<name>; a caller that passes mount_prefixes can
+        # name a matched-child domain whose real prefix differs from that, so its
+        # paths survive the namespace filter below.
+        domain_prefix = (mount_prefixes or {}).get(
+            domain, f"{base_path.rstrip('/')}/{domain}"
+        )
         rewrite = (rewrites or {}).get(domain)
         doc = generate_openapi(describe(domain), rules, domain_prefix, rewrite=rewrite)
         paths.update(doc.get("paths", {}))

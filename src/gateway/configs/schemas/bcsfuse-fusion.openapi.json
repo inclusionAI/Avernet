@@ -1,0 +1,9 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "bcsfuse-fusion", "version": "0.1.0"},
+  "paths": {
+    "/openapi/v1/bcsfuse/groups/{group_id}/fuse": {
+      "post": {"summary": "Fuse group participants", "responses": {"200": {"description": "Fusion result"}}}
+    }
+  }
+}

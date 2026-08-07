@@ -89,6 +89,7 @@ user_config:
     baas_server_url: https://baas.sample.com
     bcs_server_url: https://bcs.sample.com
     engine_proxy_server_url: https://engineproxy.sample.com
+    bcsfuse_server_url: https://bcsfuse.sample.com
 
   # Per-identity strategy chain (system-level config).
   # Each identity type runs its strategies in order; the first to recognise the
@@ -126,6 +127,9 @@ user_config:
     "/openapi/v1/collaboration/**":
       user: required
       app: required
+
+    "/openapi/v1/bcsfuse/**":
+      user: required
 
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
@@ -240,6 +244,32 @@ user_config:
           source: file
           path: schemas/bcn.openapi.json
           refresh_seconds: 300
+      # bcsfuse public surface: fusion + fusable worker-config queries, served
+      # under clean, version-free sub-prefixes. bcsfuse still serves its own /api/v1
+      # and /v1 prefixes directly (unchanged) for callers that reach the service
+      # without the gateway; the gateway exposes only these clean paths.
+      bcsfuse-fusion:
+        match: /openapi/v1/bcsfuse/groups/**
+        server: bcsfuse
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/bcsfuse/groups
+          to: /api/v1/groups
+        schema:
+          source: file
+          path: schemas/bcsfuse-fusion.openapi.json
+          refresh_seconds: 300
+      bcsfuse-workers:
+        match: /openapi/v1/bcsfuse/workers/**
+        server: bcsfuse
+        protocols: [http]
+        rewrite:
+          from: /openapi/v1/bcsfuse/workers
+          to: /v1/workers
+        schema:
+          source: file
+          path: schemas/bcsfuse-workers.openapi.json
+          refresh_seconds: 300
       chat:
         server: baas
         schema:
@@ -298,5 +328,7 @@ user_config:
         base_url: "${baas_server_url}"
       bcs:
         base_url: "${bcs_server_url}"
+      bcsfuse:
+        base_url: "${bcsfuse_server_url}"
       engine_proxy:
         base_url: "${engine_proxy_server_url}"

@@ -337,6 +337,23 @@ def _check_provider_availability(request: Request) -> dict:
     }
 
 
+def _trust_gateway_enabled() -> bool:
+    """True when bcsfuse sits behind the Avernet gateway and trusts its auth.
+
+    The gateway authenticates the caller (route_security user:required) and
+    forwards the request; bcsfuse then skips its own shared-Bearer check.
+    D2 lightest: bcsfuse does NOT verify X-Avernet-Principal.
+
+    Scope: this bypass is GLOBAL — when the flag is on, EVERY protected bcsfuse
+    route guarded by require_oss_auth skips the shared-Bearer check, not only the
+    endpoints exposed via the gateway. Operational precondition: when this flag is
+    enabled, bcsfuse MUST be reachable ONLY through the gateway (not dual-homed on
+    a debug/singlebox/direct port); otherwise all those routes become
+    unauthenticated. Match is case-insensitive against the literal "true".
+    """
+    return os.environ.get("BCSFUSE_TRUST_GATEWAY", "").lower() == "true"
+
+
 def require_oss_auth(request: Request) -> None:
     """
     Require authentication for protected OSS routes.
@@ -350,6 +367,9 @@ def require_oss_auth(request: Request) -> None:
     Raises:
         HTTPException: 401 if authentication fails.
     """
+    if _trust_gateway_enabled():
+        return
+
     # Get auth provider from registry (NOT global)
     registry = _get_provider_registry(request)
     auth_provider = registry.get("auth")

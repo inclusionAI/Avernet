@@ -13,6 +13,8 @@ of a surface the upstream does not serve, and nothing downstream would catch it.
 
 - `baas.openapi.json` — BaaS service OpenAPI spec
 - `bcn.openapi.json` — BCN collaboration service OpenAPI spec
+- `bcsfuse-fusion.openapi.json` — bcsfuse group-fusion endpoint served under `/openapi/v1/bcsfuse/groups/**`
+- `bcsfuse-workers.openapi.json` — bcsfuse worker-config + fusable-query endpoints served under `/openapi/v1/bcsfuse/workers/**`
 - `bots.openapi.json` — Bots service OpenAPI spec (the backend's public
   `/openapi/v1/bots` surface, narrowed to public paths and the components they
   reference)

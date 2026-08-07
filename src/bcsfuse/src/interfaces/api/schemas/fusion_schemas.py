@@ -160,6 +160,7 @@ class FusionRequest(BaseModel):
         driver_bot_id: Explicit driver bot ID
         mode: Fusion mode (backward compatible, fixed to "agent")
         fusion_mode: Fusion mode (G1/G2/G5)
+        session_id: Caller-supplied session id (accepted for compatibility, unused; context uses group_id)
         options: Fusion options
         metadata: Request metadata
     """
@@ -191,6 +192,13 @@ class FusionRequest(BaseModel):
     fusion_mode: Literal["agent", "conflict_alignment", "expert_diagnosis", "bot_profile_fuse"] = Field(
         default="agent",
         description="Fusion mode: agent (G1), conflict_alignment (G2), expert_diagnosis (G5), bot_profile_fuse (G9)",
+    )
+
+    session_id: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        description="Session identifier (accepted for caller compatibility; not "
+        "used — Avernet G9 scopes context by the path group_id).",
     )
 
     options: FuseOptions = Field(

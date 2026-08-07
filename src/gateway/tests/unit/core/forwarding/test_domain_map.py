@@ -17,6 +17,7 @@ _VARS = {
     "baas_server_url": "http://baas:9090",
     "bcs_server_url": "http://bcs:8081",
     "engine_proxy_server_url": "https://engineproxy:20003",
+    "bcsfuse_server_url": "http://bcsfuse:8765",
 }
 
 
@@ -103,6 +104,57 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
         "WEBSOCKET", "/openapi/v1/collaboration/messages/ws"
     )
     assert websocket_requirement == {}
+
+
+def test_shipped_config_routes_bcsfuse_clean_paths() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    # Clean public paths: matched children beneath /openapi/v1/bcsfuse/ hide the
+    # upstream's own /api/v1 and /v1 prefixes behind one version-free base.
+    fusion = dm.http_domain_for("/openapi/v1/bcsfuse/groups/group-1/fuse")
+    assert fusion is not None
+    assert fusion.server.name == "bcsfuse"
+    assert fusion.server.base_url == "http://bcsfuse:8765"
+    assert fusion.serves_http
+    assert fusion.rewrite is not None
+    assert (
+        fusion.upstream_path("/openapi/v1/bcsfuse/groups/group-1/fuse")
+        == "/api/v1/groups/group-1/fuse"
+    )
+    assert fusion.schema.location == "schemas/bcsfuse-fusion.openapi.json"
+
+    workers = dm.http_domain_for("/openapi/v1/bcsfuse/workers/w-1/config")
+    assert workers is not None
+    assert workers.server.name == "bcsfuse"
+    assert (
+        workers.upstream_path("/openapi/v1/bcsfuse/workers/w-1/config")
+        == "/v1/workers/w-1/config"
+    )
+    assert (
+        workers.upstream_path("/openapi/v1/bcsfuse/workers/config/batch")
+        == "/v1/workers/config/batch"
+    )
+    assert workers.schema.location == "schemas/bcsfuse-workers.openapi.json"
+
+    # The two clean surfaces are distinct domains on the one bcsfuse upstream.
+    assert fusion is not workers
+
+    # The gateway exposes only the clean sub-prefixes. bcsfuse's own /api/v1 and
+    # /v1 shapes are NOT routed through the gateway — callers that need them reach
+    # bcsfuse directly — so they resolve to nothing here.
+    assert dm.http_domain_for("/openapi/v1/bcsfuse/api/v1/groups/group-1/fuse") is None
+    assert dm.http_domain_for("/openapi/v1/bcsfuse/v1/workers/w-1/config") is None
+
+    # The one /openapi/v1/bcsfuse/** route_security rule covers the clean paths.
+    for method, path in [
+        ("POST", "/openapi/v1/bcsfuse/groups/group-1/fuse"),
+        ("GET", "/openapi/v1/bcsfuse/workers/w-1/config"),
+    ]:
+        requirement = security.resolve(method, path)
+        assert requirement is not None, path
+        assert requirement[PrincipalType.USER] is Presence.REQUIRED, path
 
 
 # ── protocols ────────────────────────────────────────────────────────────────
