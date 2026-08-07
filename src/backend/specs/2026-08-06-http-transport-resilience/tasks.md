@@ -84,27 +84,27 @@ Paths are relative to `src/backend/`.
 
 ## Group D — Connection reuse in `HttpxClient`
 
-- [ ] **D1. Hold one client.** In `src/agentclaw/community/plugins/http_client.py`,
+- [x] **D1. Hold one client.** In `src/agentclaw/community/plugins/http_client.py`,
   build `httpx.Client(base_url=base_url)` eagerly in `__init__` and store it.
   Update the module docstring: it currently states each call opens a short-lived
   client, which will no longer be true.
 
-- [ ] **D2. Reuse it per request.** `_request` drops the `with httpx.Client(...)`
+- [x] **D2. Reuse it per request.** `_request` drops the `with httpx.Client(...)`
   block and calls `self._client.request(method, path, timeout=timeout, **kwargs)`.
   Keep the `None`-omitting kwargs assembly exactly as-is. No `close()`, no
   `limits=`.
 
-- [ ] **D3. Update `tests/community/plugins/test_http_client.py`.** The five
+- [x] **D3. Update `tests/community/plugins/test_http_client.py`.** The five
   existing tests assert `httpx.Client(base_url=..., timeout=<per-call>)`; move
   the timeout assertion to `request(...)` and construct `HttpxClient` inside the
   patch context. Update the module docstring, which describes the old per-call
   construction.
 
-- [ ] **D4. Add a reuse test:** two calls on one `HttpxClient` construct
+- [x] **D4. Add a reuse test:** two calls on one `HttpxClient` construct
   `httpx.Client` exactly once and issue two requests. This is the assertion that
   pins the actual fix.
 
-- [ ] **D5. Run** `tests/community/plugins/test_http_client.py` and the
+- [x] **D5. Run** `tests/community/plugins/test_http_client.py` and the
   `tests/community/di/` HTTP-client module tests → green.
 
 ---

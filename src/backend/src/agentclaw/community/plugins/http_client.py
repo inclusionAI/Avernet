@@ -6,11 +6,13 @@ under the qualified ``HttpClient`` keys. Lives at the ``plugins/`` root rather
 than ``plugins/prod`` so the community column can bind it without importing the
 corp overlay — it carries no corp coupling (only ``httpx`` + ``plugin_api``).
 
-A ``base_url``-scoped client: every call opens a short-lived
-``httpx.Client(base_url=...)`` and issues the request against the relative path,
-returning the raw :class:`httpx.Response`. Arguments left as ``None`` are omitted
-so the wire shape matches a hand-written ``httpx`` call. Transport errors and
-``raise_for_status`` propagate unchanged (the wrapper swallows nothing).
+A ``base_url``-scoped client: one ``httpx.Client(base_url=...)`` is built at
+construction and reused for every call, so requests to the same host keep their
+connection instead of paying a fresh TCP + TLS handshake each time. Requests are
+issued against the relative path, returning the raw :class:`httpx.Response`.
+Arguments left as ``None`` are omitted so the wire shape matches a hand-written
+``httpx`` call. Transport errors and ``raise_for_status`` propagate unchanged
+(the wrapper swallows nothing).
 """
 from __future__ import annotations
 
@@ -26,6 +28,13 @@ class HttpxClient(HttpClient):
 
     def __init__(self, base_url: str):
         self._base_url = base_url
+        # Eager, not lazy: ``httpx.Client()`` opens no socket, so construction
+        # does no I/O and needs no lock. ``httpx.Client`` is itself thread-safe
+        # for requests, which is what these process-lifetime DI singletons need
+        # when reached from thread-pool workers. Timeout is deliberately not set
+        # here — it is per-call, and passing it at construction would freeze
+        # every caller's deadline to whoever built the client.
+        self._client = httpx.Client(base_url=base_url)
 
     def get(
         self,
@@ -107,5 +116,4 @@ class HttpxClient(HttpClient):
             kwargs["data"] = data
         if headers is not None:
             kwargs["headers"] = headers
-        with httpx.Client(base_url=self._base_url, timeout=timeout) as client:
-            return client.request(method, path, **kwargs)
+        return self._client.request(method, path, timeout=timeout, **kwargs)
