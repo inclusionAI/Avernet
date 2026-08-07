@@ -223,3 +223,50 @@ def test_foreign_bot_is_masked_404_without_a_device_call(engine_client, relay):
 def test_relay_errors_are_enveloped(models_client, relay, exc, status):
     relay.raises = exc
     fails(models_client.get(f"/openapi/v1/bots/models/{BOT}"), status)
+
+
+# ── the private-bots-only gate ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("client_name", "path"),
+    [
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/status"),
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
+        ("engine_client", f"/openapi/v1/bots/engine/{BOT}/available"),
+        ("models_client", f"/openapi/v1/bots/models/{BOT}"),
+        ("models_client", f"/openapi/v1/bots/models/{BOT}/openai/gpt-5.3"),
+    ],
+)
+def test_a_service_bot_is_served_at_its_draft_device(
+    request, relay, client_name, path
+):
+    """Every route serves an unshared service bot — at its DRAFT binding.
+
+    The relay's default for a service bot is the *published* runtime; these
+    groups operate a bot's pre-publication workspace, so every forward must
+    carry ``draft_device=True``.
+    """
+    client = request.getfixturevalue(client_name)
+    relay.set_bot_type("service")
+    relay.results = [EngineResult(data={"engines": [], "models": []})]
+    resp = client.get(path)
+    assert resp.status_code == 200, resp.json()
+    assert relay.calls, "the route never forwarded"
+    assert all(c["draft_device"] is True for c in relay.calls)
+
+
+def test_a_shared_bot_gets_501_without_touching_the_device(engine_client, relay):
+    relay.set_shared()
+    body = fails(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"), 501)
+    assert body["message"] == "Not supported for this bot type"
+    assert relay.calls == []
+
+
+def test_an_unknown_bot_type_gets_501_without_touching_the_device(
+    models_client, relay
+):
+    relay.set_bot_type("something-new")
+    body = fails(models_client.get(f"/openapi/v1/bots/models/{BOT}"), 501)
+    assert body["message"] == "Not supported for this bot type"
+    assert relay.calls == []

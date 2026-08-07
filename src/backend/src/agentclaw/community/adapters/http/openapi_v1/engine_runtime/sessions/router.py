@@ -2,7 +2,7 @@
 
 Wraps the engine's ``/api/sessions`` surface. **Private bots only** — private
 personal bots, and a service bot's pre-publication draft workspace. See
-:func:`_require_operable_bot`.
+``engine_runtime/gating.py``.
 """
 
 from __future__ import annotations
@@ -37,12 +37,13 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineHistoryDepthExceededError,
     EngineResourceNotFoundError,
 )
-from agentclaw.community.core.engine_runtime.gate import require_operable_bot
-from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
@@ -67,33 +68,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
-
-async def _require_operable_bot(
-    relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str
-) -> BotFacts:
-    """Resolve the caller's bot and reject anything more than one caller reaches.
-
-    Runs **before** any device call, deliberately: a filter applied to what the
-    device returned would already have fetched every caller's sessions. This
-    also performs the owner-scoped resolve, so a foreign ``bot_id`` raises
-    ``BotNotFoundError`` here — before a device is touched. The resolved facts
-    are returned so the forward can reuse them instead of resolving again.
-
-    Which bots pass is the shared gate's rule (see ``core/engine_runtime/
-    gate.py``): unshared personal bots, and a service bot's **draft** device.
-    The gate only holds together with how this group forwards — every
-    ``relay.call`` below passes ``draft_device=True``, so a service bot's
-    request reaches the pre-publication binding the owner alone uses, never
-    the published runtime, which is a multi-caller device whose session
-    collection is not scoped per caller. Refusals are a 501: what the surface
-    cannot serve, rather than something the caller may retry or fix.
-    """
-    facts = await relay.resolve_bot_off_loop(bot_id, owner_id)
-    require_operable_bot(
-        facts.bot_type, is_shared=facts.is_shared, surface="sessions"
-    )
-    return facts
 
 
 def _map_session(data: dict[str, Any]) -> Session:
@@ -330,7 +304,7 @@ async def list_sessions(
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
@@ -361,7 +335,7 @@ async def create_session(
 ) -> Envelope[Session]:
     """Create a session."""
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
         method="POST", path="/api/sessions",
@@ -394,7 +368,7 @@ async def get_session(
     # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
     # containing "/" would not be addressable, but no engine id format has one.
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
         method="GET",
@@ -419,7 +393,7 @@ async def update_session(
     # Publicly a PATCH on the resource; the engine models the same operation as
     # a POST to an /update sub-path.
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
@@ -447,7 +421,7 @@ async def delete_session(
 ) -> Envelope[Deleted]:
     """Delete a session."""
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
         method="DELETE",
@@ -476,7 +450,7 @@ async def list_session_messages(
     is never confused with the limit of what this endpoint serves.
     """
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     _require_within_depth(page)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
@@ -505,7 +479,7 @@ async def clear_session_messages(
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
     owner_id = caller_owner_id(principal)
-    facts = await _require_operable_bot(relay, bot_id, owner_id)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
         method="DELETE",

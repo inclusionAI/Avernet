@@ -100,7 +100,8 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
         self,
         user_id: str,
         nick_name: str,
-        bot_id: Optional[str] = None
+        bot_id: Optional[str] = None,
+        runtime_stage: Optional[str] = None,
     ) -> dict:
         """获取用户所有 Bots 的定时任务（平铺展示）
 
@@ -108,10 +109,16 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             user_id: 用户ID
             nick_name: 用户花名
             bot_id: 如果为 "all" 或 None，返回所有 bots 的任务；否则返回指定 bot 的任务
+            runtime_stage: 仅返回该运行态的任务；None 表示全部运行态。openapi_v1
+                传 draft——公开面只操作草稿态；内部控制台不传，保持全运行态聚合。
 
         Returns:
             {"success": True, "data": [...], "total": N}
         """
+        if runtime_stage is not None and runtime_stage not in VALID_RUNTIME_STAGES:
+            raise CronRelayError(
+                f"Invalid runtime_stage: {runtime_stage}", error_code=400
+            )
         # 1. 获取用户的所有 bots
         if bot_id and bot_id != "all":
             bot = self._bot_provider.get_bot(bot_id, user_id)
@@ -136,6 +143,13 @@ class CronRelayService(CronRuntimeOperationsMixin, CronRuntimeTargetMixin):
             bot_targets, bot_failed_targets = self._build_runtime_targets(bot, user_id)
             targets.extend(bot_targets)
             failed_targets.extend(bot_failed_targets)
+
+        if runtime_stage is not None:
+            # 过滤在取数之前：范围之外的运行态既不查询也不产生失败项。
+            targets = [t for t in targets if t.runtime_stage == runtime_stage]
+            failed_targets = [
+                t for t in failed_targets if t.get("runtime_stage") == runtime_stage
+            ]
 
         tasks = []
         for target in targets:

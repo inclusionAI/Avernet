@@ -1,12 +1,14 @@
 """The bot gate the operator surfaces share.
 
-Two public surfaces hand a caller a channel onto their bot's device: the
-sessions group (``adapters/http/openapi_v1/.../sessions/router.py``) wraps the
-engine's ``/api/sessions`` routes over HTTP, and the connection endpoint
-(:mod:`agentclaw.community.core.engine_runtime.connection`) publishes a
-WebSocket whose ``hello`` advertises the ``sessions.*`` and ``exec.approvals``
-methods and grants ``operator.admin``. Both are *operator* channels: whoever
-holds them reaches every session on the device.
+The public engine-runtime surfaces hand a caller a channel onto their bot's
+device: the sessions, engine, models and approvals groups
+(``adapters/http/openapi_v1/engine_runtime/`` — gated through
+``gating.resolve_operable_bot``) forward over HTTP, and the connection
+endpoint (:mod:`agentclaw.community.core.engine_runtime.connection`) publishes
+a WebSocket whose ``hello`` advertises the ``sessions.*`` and
+``exec.approvals`` methods and grants ``operator.admin``. These are *operator*
+channels: whoever holds them reaches device-wide state, including every
+session on the device.
 
 They must therefore agree on which bots they serve — a bot refused a session
 list but handed an operator socket is a 501 on the front door with the window
@@ -22,11 +24,11 @@ admits exactly the bots whose device only the owner reaches.
   only by default: the bot can be made public and a coding app can take
   collaborators, and ``ExpertChatService`` then creates those callers' sessions
   on this same binding.
-- A ``service`` bot — for its **draft** device, and again only unshared. Both
-  surfaces address the device by ``bot_id``: the connection service reads the
-  binding via ``get_active_by_bot_and_owner`` and the sessions group forwards
-  with ``draft_device=True``, both of which resolve ``ac_bots.binding_id`` —
-  the pre-publication draft. The verify/online runtimes publishing produces are
+- A ``service`` bot — for its **draft** device, and again only unshared. Every
+  gated surface addresses the device by ``bot_id``: the connection service
+  reads the binding via ``get_active_by_bot_and_owner`` and the HTTP groups
+  forward with ``draft_device=True``, both of which resolve
+  ``ac_bots.binding_id`` — the pre-publication draft. The verify/online runtimes publishing produces are
   bound under ``publish_bot_id`` (``source_bot_id + "pub" + version``) on the
   publish records, so a ``bot_id``-addressed call structurally cannot reach the
   multi-caller published device. The unshared draft binding holds only the
