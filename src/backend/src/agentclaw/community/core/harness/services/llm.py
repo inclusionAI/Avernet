@@ -17,6 +17,7 @@ import httpx
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.utils.retry import client_error_status, describe_exception
 
 logger = logging.getLogger(__name__)
 
@@ -88,50 +89,13 @@ def _retry_delay(attempt: int) -> float:
     return base + jitter
 
 
-def _client_error_status(exc: BaseException) -> int | None:
-    """Return a 4xx status carried on ``exc.response`` if present, else None.
-
-    The general ``HttpClient`` runs under a send-hook wrapper (outside this
-    repo) that re-wraps low-level httpx transport failures into an exception
-    type we can't subclass-match. So we classify connection-level failures by
-    *symptom* — does the exception carry a response object? — not by type:
-
-    - A 4xx (auth/usage) response almost always has ``response`` set: retrying
-      verbatim is pointless, the caller must not retry.
-    - A connection dropped during send/read never has ``response``: that is a
-      connection-level failure the caller should retry *lightly* with a
-      shrunken body.
-
-    Returns the 4xx status code, or ``None`` (treat as connection-level).
-    """
-    resp = getattr(exc, "response", None)
-    status = getattr(resp, "status_code", None)
-    if isinstance(status, int) and 400 <= status < 500:
-        return status
-    return None
-
-
-def _exc_detail(exc: BaseException) -> str:
-    """Format ``exc`` with its underlying cause for diagnostics.
-
-    The deployed ``general`` client runs under a send-hook wrapper (outside this
-    repo) that re-wraps the real httpx transport error into an opaque
-    ``HttpxCallingException('Error in httpx send hook')``. The wrapped error
-    survives on ``__cause__`` / ``__context__``; the bare ``%r`` of the wrapper
-    hides whether the underlying failure was a ``ReadError``,
-    ``RemoteProtocolError``, ``ConnectTimeout``, etc. — so we surface the cause
-    chain (and any attached request URL) here to make retry failures actionable.
-    """
-    parts: list[str] = [f"{type(exc).__name__}: {exc}"]
-    cause = exc.__cause__ or exc.__context__
-    if cause is not None and cause is not exc:
-        parts.append(f"caused by {type(cause).__name__}: {cause}")
-    req = getattr(exc, "request", None)
-    if req is not None:
-        url = getattr(req, "url", None)
-        if url is not None:
-            parts.append(f"request={url}")
-    return " | ".join(parts)
+# These two helpers moved to ``agentclaw.community.utils.retry`` — the reasoning
+# behind symptom-based classification and cause-chain unwrapping is not
+# LLM-specific, and ``BaasService`` needs the same behavior. The private names
+# survive because ``test_llm_helpers.py`` reaches them as module attributes and
+# because ``_request_with_retry`` below reads as LLM-local policy.
+_client_error_status = client_error_status
+_exc_detail = describe_exception
 
 
 class LLM:

@@ -45,7 +45,7 @@ Paths are relative to `src/backend/`.
 
 ## Group B — Deduplicate the helpers in `llm.py`
 
-- [ ] **B1. Alias the private helpers.** In
+- [x] **B1. Alias the private helpers.** In
   `src/agentclaw/community/core/harness/services/llm.py`, import
   `client_error_status` / `describe_exception` from `utils.retry` and replace the
   two function bodies with `_client_error_status = client_error_status` and
@@ -53,7 +53,7 @@ Paths are relative to `src/backend/`.
   names survive (module-attribute test access + LLM-local retry policy). Do not
   touch `_request_with_retry`, `_retry_delay`, or any LLM retry constant.
 
-- [ ] **B2. Run `test_llm_helpers.py` and `test_llm_request_retry.py`
+- [x] **B2. Run `test_llm_helpers.py` and `test_llm_request_retry.py`
   unmodified** → green. These passing without edits is the proof the extraction
   is behavior-preserving; if either needs a change, the extraction is wrong.
 
