@@ -1,0 +1,650 @@
+<!-- 历史归档 / 非实现基线：本文记录早期讨论方案，可能包含已废弃的 role、edge_id 下发、permission_profiles[] / rules_grants[] 拆分、extra_rules 等设计。实现请以 2026-08-07 final design / implementation spec 为准。 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BCS 边权限会议讨论稿 · 2026-07-27</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg:#f6f7fb; --card:#ffffff; --text:#1f2329; --muted:#667085; --border:#d9dee8;
+    --blue:#2563eb; --blue-bg:#eaf1ff; --blue-dark:#1e40af;
+    --orange:#c05621; --orange-bg:#fff3e8;
+    --purple:#7c3aed; --purple-bg:#f2ecff;
+    --green:#15803d; --green-bg:#e9fbeF;
+    --red:#c53030; --red-bg:#fff0f0;
+    --yellow:#b7791f; --yellow-bg:#fff8df;
+    --teal:#0f766e; --teal-bg:#e6fffb;
+    --gray:#475467; --gray-bg:#f2f4f7;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif;
+    line-height:1.65;
+  }
+  .wrap { max-width:1280px; margin:0 auto; padding:30px 34px 72px; }
+  header {
+    border-radius:18px; padding:34px 38px; color:white; margin-bottom:24px;
+    background:linear-gradient(135deg,#1e40af 0%,#2563eb 58%,#7c3aed 100%);
+    box-shadow:0 10px 28px rgba(37,99,235,.22);
+  }
+  header h1 { margin:0 0 8px; font-size:31px; letter-spacing:.2px; }
+  header .subtitle { font-size:17px; opacity:.94; }
+  header .meta { margin-top:18px; display:flex; gap:12px; flex-wrap:wrap; font-size:13px; }
+  header .meta span { background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.22); border-radius:999px; padding:4px 10px; }
+
+  section { background:var(--card); border:1px solid #edf0f5; border-radius:16px; padding:26px 30px; margin:20px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+  h2 { margin:0 0 18px; color:var(--blue-dark); font-size:23px; border-bottom:2px solid var(--blue-bg); padding-bottom:10px; }
+  h3 { margin:22px 0 10px; color:var(--orange); font-size:18px; }
+  h4 { margin:16px 0 8px; color:var(--blue-dark); font-size:15px; }
+  p { margin:9px 0; }
+  code { background:#eef2f7; color:#1e3a8a; border-radius:5px; padding:1px 6px; font-size:.9em; }
+  .lead { color:var(--muted); font-size:15px; }
+  .small { color:var(--muted); font-size:13px; }
+  .big-point { font-size:18px; font-weight:700; color:#111827; }
+
+  .toc { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .toc-card { border-radius:14px; padding:15px 16px; border:1px solid var(--border); background:#fff; }
+  .toc-card b { display:block; color:var(--blue-dark); margin-bottom:4px; }
+  @media(max-width:900px){ .toc{grid-template-columns:1fr;} }
+
+  .callout { border-radius:12px; padding:14px 17px; margin:14px 0; background:var(--blue-bg); border-left:5px solid var(--blue); }
+  .ok { background:var(--green-bg); border-left-color:var(--green); }
+  .warn { background:var(--yellow-bg); border-left-color:var(--yellow); }
+  .deny { background:var(--red-bg); border-left-color:var(--red); }
+  .neutral { background:var(--gray-bg); border-left-color:var(--gray); }
+
+  .mgraph { display:flex; justify-content:center; overflow-x:auto; padding:6px 0 2px; margin:8px 0; }
+  .mgraph .mermaid { min-width:720px; max-width:none; padding:6px; }
+  .mgraph.hero .mermaid { min-width:1120px; }
+  .mgraph.mid .mermaid { min-width:900px; }
+  .mgraph.seq .mermaid { min-width:784px; font-size:12px; }
+  .mgraph.graph-2 .mermaid { min-width:1129px; }
+  .mgraph.graph-3 .mermaid { min-width:1089px; }
+  .mgraph.graph-4 .mermaid { min-width:0; width:760px; font-size:10px; zoom:0.819; transform-origin:top center; }
+  .mgraph.graph-4 .mermaid svg { max-width:760px !important; height:auto !important; }
+  .mgraph.graph-5-wrap .mermaid { min-width:900px; font-size:15px; }
+  .mgraph.graph-c-seq .mermaid { min-width:900px; font-size:12px; zoom:0.665; transform-origin:top center; }
+  .mgraph.graph-c-edge .mermaid { min-width:1050px; font-size:14px; }
+  .discussion-grid .mgraph { margin:4px 0 6px; }
+  .discussion-grid .mgraph .mermaid { min-width:496px; padding:0; font-size:16.5px; }
+
+  .hero-diagram {
+    display:grid; grid-template-columns:1.15fr 260px 1.05fr; gap:18px; align-items:center;
+    margin:18px 0 12px; padding:22px; border-radius:22px;
+    background:radial-gradient(circle at 52% 50%,#ffffff 0%,#ffffff 38%,#f4f7ff 100%);
+    border:1px solid #dbe5ff;
+  }
+  .hero-col { display:flex; flex-direction:column; gap:14px; }
+  .hero-target { display:flex; justify-content:center; align-items:center; min-height:340px; }
+  .actor-card {
+    border-radius:18px; padding:14px 16px; background:#fff; border:2px solid var(--border);
+    box-shadow:0 10px 24px rgba(15,23,42,.07); position:relative;
+  }
+  .actor-card .actor { font-size:17px; font-weight:800; margin-bottom:6px; }
+  .actor-card .desc { color:var(--muted); font-size:12px; line-height:1.55; }
+  .actor-card.current { border-color:#93b4ff; background:linear-gradient(180deg,#f7faff 0%,#fff 70%); }
+  .actor-card.relay { border-color:#f5b27e; background:linear-gradient(180deg,#fff8f2 0%,#fff 70%); }
+  .actor-card.future { border-color:#d6c1ff; background:linear-gradient(180deg,#faf7ff 0%,#fff 70%); }
+  .actor-card.service { border-color:#99e7dc; background:linear-gradient(180deg,#f0fffc 0%,#fff 70%); }
+  .bot3-card {
+    width:220px; min-height:150px; border-radius:26px; display:flex; flex-direction:column; justify-content:center; align-items:center;
+    color:#4c1d95; background:linear-gradient(180deg,#f2ecff 0%,#ffffff 100%); border:3px solid #7c3aed;
+    box-shadow:0 18px 38px rgba(124,58,237,.18); text-align:center; font-weight:800;
+  }
+  .bot3-card .main { font-size:26px; }
+  .bot3-card .sub { font-size:12px; color:#6d28d9; margin-top:6px; font-weight:600; }
+  .arrow-label { font-size:12px; color:#475467; margin-top:8px; padding-top:8px; border-top:1px dashed #d0d5dd; }
+  .right-line { text-align:right; }
+  @media(max-width:980px){ .hero-diagram{grid-template-columns:1fr;} .hero-target{min-height:auto;} .right-line{text-align:left;} }
+
+  .svg-wrap { overflow-x:auto; padding:8px 0; margin:12px 0; }
+  .hero-svg { min-width:1120px; width:100%; height:auto; display:block; }
+  .svg-node { filter:drop-shadow(0 8px 14px rgba(15,23,42,.10)); }
+  .svg-label { font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif; fill:#1f2329; }
+  .svg-muted { fill:#667085; font-size:12px; }
+  .svg-title { font-weight:800; font-size:17px; }
+  .svg-small { font-size:12px; }
+  .svg-edge { fill:none; stroke-width:4; marker-end:url(#arrow); }
+  .svg-edge-dash { fill:none; stroke-width:4; stroke-dasharray:8 7; marker-end:url(#arrow); }
+
+  .legend { display:flex; gap:12px; flex-wrap:wrap; margin:10px 0 4px; color:var(--muted); font-size:13px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:13px; height:13px; border-radius:999px; display:inline-block; }
+
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media(max-width:980px){ .grid2,.grid3{grid-template-columns:1fr;} }
+  .card { border:1px solid var(--border); border-radius:14px; padding:15px 16px; background:#fff; }
+  .card h3, .card h4 { margin-top:0; }
+  .card.allow { border-color:#9bd7af; background:linear-gradient(180deg,#f4fff7 0%,#fff 78%); }
+  .card.block { border-color:#f2b8b8; background:linear-gradient(180deg,#fff6f6 0%,#fff 78%); }
+  .card.tbd { border-color:#f4d47e; background:linear-gradient(180deg,#fffaf0 0%,#fff 78%); }
+  .card.info { border-color:#b8cef8; background:linear-gradient(180deg,#f6f9ff 0%,#fff 78%); }
+
+  .tag { display:inline-block; border-radius:999px; padding:2px 9px; font-size:12px; font-weight:700; margin-right:5px; }
+  .tag-ok { color:var(--green); background:var(--green-bg); }
+  .tag-deny { color:var(--red); background:var(--red-bg); }
+  .tag-tbd { color:var(--yellow); background:var(--yellow-bg); }
+  .tag-info { color:var(--blue-dark); background:var(--blue-bg); }
+
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+  th,td { border-bottom:1px solid var(--border); padding:10px 12px; text-align:left; vertical-align:top; }
+  th { background:var(--blue-bg); color:var(--blue-dark); }
+
+  .rule {
+    background:#111827; color:#e5e7eb; border-radius:12px; padding:15px 18px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:13px;
+    white-space:pre; overflow-x:auto; line-height:1.75; margin:12px 0;
+  }
+  .footer-note { color:var(--muted); text-align:center; margin-top:22px; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>BCS 边权限会议讨论稿</h1>
+  <div class="subtitle">按 mentor 建议重排：先看一张总图，再看双层模型，最后讨论已支持场景与暂不支持场景</div>
+  <div class="meta">
+    <span>日期：2026-07-27</span>
+    <span>类型：会议 briefing HTML</span>
+    <span>主线：human 直达 / human 经 bot 中转</span>
+    <span>讨论项：bot 自启动 / service caller / task 语义</span>
+  </div>
+</header>
+
+<section>
+  <h2>阅读顺序</h2>
+  <div class="toc">
+    <div class="toc-card"><b>1. 总图</b>先把四条线放在一张图里：两条当前可用，两条未来讨论。</div>
+    <div class="toc-card"><b>2. 双层模型</b>第一层 BCS 准入；第二层再分 originator 激活与 role 权限集判断。</div>
+    <div class="toc-card"><b>3. 场景</b>围绕已可用线路 A/B/C 讲典型 case；再列模型可能不支持的 case，供会议拍板。</div>
+  </div>
+</section>
+
+<section>
+  <h2>1. 总图：四条线路统一围绕 bot3</h2>
+  <p class="big-point">先只看这一张总图：①② 是当前已经能用的 human 路线；③④ 是还没开发、需要会议讨论的 bot / service 发起路线。③④ 放在 bot3 右侧，表示它们是未来讨论线。</p>
+  <div class="mgraph hero">
+<pre class="mermaid">
+flowchart LR
+  Bob(("human<br/>Bob"))
+  Alice(("human<br/>Alice"))
+  Bot1(("bot<br/>bot1"))
+  Bot3(("bot<br/>bot3<br/>protected target"))
+  Bot2(("bot<br/>bot2"))
+  CI(("service<br/>CI"))
+
+  Bob -->|"① human直达<br/>Bob→bot3<br/>caller=originator=Bob<br/>role=bot3管理角色<br/>policy=DirectOnly"| Bot3
+  Alice -->|"② 第一跳<br/>Alice→bot1<br/>caller=originator=Alice<br/>role=bot1管理角色"| Bot1
+  Bot1 -->|"② 第二跳<br/>bot1→bot3<br/>caller=bot1<br/>originator=Alice<br/>role=Lark写入角色<br/>policy=OriginatorIn(Alice)"| Bot3
+  Bot3 -.-|"③ ← bot2发起bot<br/>edge=bot2→bot3 已可配置<br/>role=Lark写入角色<br/>policy=originator语义TBD"| Bot2
+  Bot3 -.-|"④ ← service发起bot<br/>edge=CI→bot3 已可配置<br/>role=发布通知角色<br/>policy=originator语义TBD"| CI
+
+  classDef human fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef bot fill:#f2ecff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  classDef svc fill:#e6fffb,stroke:#0f766e,stroke-width:2px,color:#134e4a
+  class Alice,Bob human
+  class Bot1,Bot2,Bot3 bot
+  class CI svc
+  linkStyle 0 stroke:#2563eb,stroke-width:4px
+  linkStyle 1 stroke:#c05621,stroke-width:4px
+  linkStyle 2 stroke:#c05621,stroke-width:4px
+  linkStyle 3 stroke:#7c3aed,stroke-width:4px,stroke-dasharray:7 5
+  linkStyle 4 stroke:#0f766e,stroke-width:4px,stroke-dasharray:7 5
+</pre>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#2563eb"></i>① human 直达：当前可用</span>
+    <span><i class="dot" style="background:#c05621"></i>② human 经 bot 中转：当前可用</span>
+    <span><i class="dot" style="background:#7c3aed"></i>③ bot 自启动：会议讨论</span>
+    <span><i class="dot" style="background:#0f766e"></i>④ service caller：未来适配</span>
+  </div>
+  <div class="callout">
+    <b>图的核心读法：</b>权限不沿路径复制。Alice 能使用 bot1，不等于 Alice 的权限会复制给 bot3；当 bot1 调 bot3 时，只看 <code>bot1→bot3</code> 这条边，并用 <code>originator=Alice</code> 判断这条边能否激活。③④ 虽然也指向 bot3，但当前只作为右侧未来讨论线：权限边可以配置，尚未确定的是 bot/service 作为发起者时的 originator 语义。
+  </div>
+</section>
+
+<section>
+  <h2>2. 双层模型：第一层看边，第二层先激活边、再鉴权 tool</h2>
+  <p>整体从左往右看：准入层只负责判断 caller 到 target 是否有 friend/owner/approved 边；第二层上层用 originator 找出当前开放的边；第二层下层再用这些边绑定的 role 权限集做 tool 鉴权。</p>
+
+  <div class="mgraph graph-2 mid">
+<pre class="mermaid">
+flowchart LR
+  Req(["请求<br/>caller a → target B"])
+  L1{"第一层: BCS 准入<br/>是否是 friend / owner<br/>或是否存在 approved 边"}
+  Reject1(["拒绝<br/>不唤醒目标 bot"])
+  L2A{"第二层上层<br/>originator 支持哪些边？<br/>originator_policy.match"}
+  Active["active_edges<br/>对当前 originator 开放的边集"]
+  Reject2(["拒绝<br/>没有可激活边"])
+  L2B{"第二层下层<br/>role 权限集鉴权<br/>Read / Edit / Bash / Tool"}
+  Verdict(["allow / deny"])
+
+  Req --> L1
+  L1 -- "无边" --> Reject1
+  L1 -- "有边" --> L2A
+  L2A -- "无 active edge" --> Reject2
+  L2A -- "有 active edge" --> Active --> L2B --> Verdict
+
+  classDef l1 fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef l2a fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  classDef l2b fill:#f2ecff,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+  classDef bad fill:#fff0f0,stroke:#c53030,stroke-width:2px,color:#7f1d1d
+  class L1 l1
+  class L2A,Active l2a
+  class L2B,Verdict l2b
+  class Reject1,Reject2 bad
+</pre>
+  </div>
+
+  <div class="grid3">
+    <div class="card info">
+      <h3>第一层：BCS 准入</h3>
+      <p><b>只看 caller→target 有没有边。</b></p>
+      <ul>
+        <li>friend / owner 本质上也是边</li>
+        <li>没有边：直接拒绝，不唤醒 bot</li>
+        <li>有边：进入第二层</li>
+      </ul>
+    </div>
+    <div class="card info">
+      <h3>第二层上层：originator 开放边筛选</h3>
+      <p><b>看哪些边对当前 originator 开放。</b></p>
+      <ul>
+        <li><code>DirectOnly</code>：只对 caller 自己作为 originator 的直达语境开放</li>
+        <li><code>OriginatorIn([Alice])</code>：只在 Alice 语境下开放</li>
+        <li>这一步不看具体 tool</li>
+      </ul>
+    </div>
+    <div class="card info">
+      <h3>第二层下层：role 权限集</h3>
+      <p><b>用 active edge 上的 role 判断 tool。</b></p>
+      <ul>
+        <li>加载 role rules</li>
+        <li>执行 Read/Edit/Bash 等鉴权</li>
+        <li>平台守卫仍是最高优先级</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="rule">EdgeGrant(a → B) = role_name + originator_policy
+
+第一层准入：a→B 有没有边？
+第二层上层：a→B 中哪些边对当前 originator 开放？
+第二层下层：激活后的 role 权限集允许哪些 tool？</div>
+</section>
+
+<section>
+  <h2>3. 当前可用线路 A：Bob → bot3，human 直达</h2>
+  <p class="lead">这是最简单的线路：caller 与 originator 是同一个 human。</p>
+
+  <div class="mgraph graph-3 mid">
+<pre class="mermaid">
+flowchart LR
+  Bob(("Bob")) --> Req["请求 bot3"]
+  Req --> L1{"第一层准入<br/>Bob→bot3 是否有 approved 边"}
+  L1 -- "否" --> Reject1(["拒绝<br/>不唤醒 bot3"])
+  L1 -- "是" --> L2A{"第二层上层<br/>DirectOnly?"}
+  L2A --> Eq["caller=Bob<br/>originator=Bob<br/>caller == originator"]
+  Eq --> Active["Bob→bot3 边激活"]
+  Active --> L2B{"第二层下层<br/>bot3管理角色 判断 tool"}
+  L2B --> Allow(["允许管理类 tool"])
+  L2B --> Deny(["拒绝写 / 危险 tool"])
+
+  classDef human fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef ok fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef bad fill:#fff0f0,stroke:#c53030,stroke-width:2px,color:#7f1d1d
+  class Bob human
+  class Active,Allow ok
+  class Reject1,Deny bad
+</pre>
+  </div>
+
+  <div class="grid3">
+    <div class="card allow">
+      <h3><span class="tag tag-ok">通过</span>Bob 管理 bot3</h3>
+      <p>存在 <code>Bob→bot3</code> 边，policy 是 <code>DirectOnly</code>，且 <code>caller=originator=Bob</code>。进入 role 后，管理类 tool 被允许。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>Bob 请求高危操作</h3>
+      <p>边可以激活，但 <code>bot3管理角色</code> 仍不允许高危 Bash / 越权写入等能力，所以在第二层下层或平台守卫处拒绝。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>Bob 没有边</h3>
+      <p>如果没有 approved 的 <code>Bob→bot3</code> 边，第一层直接拒绝，不唤醒 bot3。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>4. 当前可用线路 B：Alice → bot1 → bot3，human 经 bot 中转</h2>
+  <p class="lead">这条线路只讲权限语义，不展开 originator 如何建立 / 传递。这里先假定运行时语境已经知道当前是 <code>originator=Alice</code>；重点是 bot3 使用 <code>bot1→bot3</code> 边上的 role，而不是复制 <code>Alice→bot1</code> 的权限。</p>
+
+  <div class="mgraph graph-4 seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant A as Alice
+  participant B1 as bot1
+  participant B3 as bot3
+
+  A->>B1: 请求 bot1 执行任务
+  B1->>B1: 第一层准入: Alice→bot1 有边
+  B1->>B1: 上层: 激活对 originator=Alice 开放的 Alice→bot1 边
+  B1->>B1: 下层: bot1管理角色 鉴权 tool
+  B1->>B1: 判断需要 bot3 协作
+  B1->>B3: 请求 bot3 执行 Lark 写入协作
+  B3->>B3: 第一层准入: bot1→bot3 有边
+  B3->>B3: 上层: 激活对 originator=Alice 开放的 bot1→bot3 边
+  B3->>B3: 下层: Lark写入角色 鉴权 tool
+  B3-->>B1: 返回协作结果
+  B1-->>A: 返回最终结果
+</pre>
+  </div>
+
+  <div class="mgraph mid graph-5-wrap">
+<pre class="mermaid">
+flowchart TB
+  Step1["第一段：Alice 使用 bot1<br/><br/>Alice→bot1 边  →  不会复制权限<br/>role=bot1管理角色<br/>只决定 Alice 能怎么用 bot1"]
+  Step2["第二段：bot1 使用 bot3<br/><br/>bot1→bot3 边  →  bot3 tool 鉴权<br/>role=Lark写入角色 · policy=OriginatorIn(Alice)<br/>只看 bot1→bot3 的 active role"]
+
+  Step1 -. "权限不复制，只进入下一跳自己的边鉴权" .-> Step2
+
+  classDef step1 fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef step2 fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  class Step1 step1
+  class Step2 step2
+</pre>
+  </div>
+
+  <div class="grid3">
+    <div class="card allow">
+      <h3><span class="tag tag-ok">通过</span>Alice 经 bot1 调 bot3</h3>
+      <p><code>bot1→bot3</code> 存在 approved 边，且配置 <code>OriginatorIn([Alice])</code>。在 <code>originator=Alice</code> 语境下，这条边被激活，然后使用 <code>Lark写入角色</code> 做 tool 鉴权。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>Bob 经 bot1 调 bot3</h3>
+      <p>如果 <code>bot1→bot3</code> 只允许 <code>OriginatorIn([Alice])</code>，那么 <code>originator=Bob</code> 时不会激活这条边。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>缺少 bot1→bot3 授权边</h3>
+      <p>即使 Alice 能使用 bot1，也不会自动获得 bot3 的能力。没有 approved 的 <code>bot1→bot3</code> 边时，bot3 不进入后续 role 鉴权。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>5. 当前可用线路 C：代理链路 / originator-bound 临时边</h2>
+  <p class="lead">这条线路描述的是代理场景：Alice 找 bot1 干活，bot1 无脑代理给 bot2，bot2 发现 bot3 能干并继续代理给 bot3。关键不是“权限传递”，而是整条代理链必须保留 <code>originator=Alice</code>；bot2 到 bot3 这一跳需要向 bot3 申请一个角色权限集，并把这个权限集的上层限定为 <code>originator=Alice</code>，由 bot3 的 owner 审批后生成 <code>bot2→bot3</code> 边。</p>
+
+  <div class="mgraph seq graph-c-seq">
+<pre class="mermaid">
+sequenceDiagram
+  participant A as Alice
+  participant B1 as bot1
+  participant B2 as bot2
+  participant B3 as bot3
+  participant O as bot3 owner
+
+  A->>B1: 找 bot1 干活
+  B1->>B2: 无脑代理，保留 originator=Alice
+  B2->>B3: 发现 bot3 能干，继续代理，保留 originator=Alice
+  B2->>B3: 申请 bot3 的某个角色权限集<br/>上层限定 originator=Alice
+  B3->>O: 提交审批：bot2→bot3 + role + OriginatorIn(Alice)
+  O->>B3: 审批通过 / 拒绝
+  B3->>B3: 通过后生成 bot2→bot3 边<br/>role + OriginatorIn(Alice) + TTL
+  B3->>B3: 使用 bot2→bot3 的 active role 做 tool 鉴权
+  B3-->>B2: 返回协作结果
+  B2-->>B1: 返回代理结果
+  B1-->>A: 返回最终结果
+</pre>
+  </div>
+
+  <div class="grid2">
+    <div class="card info">
+      <h3>运行态怎么理解？</h3>
+      <div class="rule">caller = bot2
+target = bot3
+originator = Alice
+
+EdgeGrant(bot2 → bot3) = {
+  role = bot3 owner 审批开放的角色权限集,
+  originator_policy = OriginatorIn([Alice]),
+  ttl = 短期有效 / 或按审批策略,
+  audit = 必填
+}</div>
+      <p>bot3 最终不是使用 <code>Alice→bot1</code> 的权限，也不是复制 Alice 的权限；它使用的是当前本跳 <code>bot2→bot3</code> 边上、对 <code>originator=Alice</code> 开放的 active role。</p>
+    </div>
+
+    <div class="card warn">
+      <h3>为什么不需要 Alice 和 bot3 再沟通？</h3>
+      <p>因为 Alice 已经作为运行态 <code>originator</code> 被带到代理链路里；bot2 申请的是“在 <code>originator=Alice</code> 时可用的 bot3 角色权限集”，审批主体应是 bot3 owner。</p>
+      <p>也就是说，Alice 不负责给 bot3 增加能力；bot3 owner 决定 bot3 的哪些 role 可以在这条 <code>bot2→bot3</code> 边上、且仅对 Alice 这个 originator 开放。</p>
+    </div>
+  </div>
+
+  <div class="mgraph mid graph-c-edge">
+<pre class="mermaid">
+flowchart LR
+  Wrong["不是权限复制<br/>不是 Alice→bot3 权限<br/>传给 bot2"]
+  Apply["bot2 向 bot3 申请<br/>某个角色权限集<br/>上层: OriginatorIn(Alice)"]
+  Owner["bot3 owner 审批<br/>是否开放该 role"]
+  Right["生成 EdgeGrant<br/>bot2→bot3<br/>role=owner批准的role<br/>OriginatorIn(Alice)<br/>TTL + audit"]
+  Run["运行时<br/>caller=bot2<br/>originator=Alice<br/>target=bot3"]
+  Tool["bot3 用 active role<br/>做 tool 鉴权"]
+
+  Wrong -. "不走这条" .-> Apply --> Owner --> Right --> Run --> Tool
+
+  classDef wrong fill:#fff0f0,stroke:#c53030,stroke-width:2px,color:#7f1d1d
+  classDef apply fill:#fff8dc,stroke:#b7791f,stroke-width:2px,color:#744210
+  classDef owner fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+  classDef right fill:#e9fbef,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef run fill:#eaf1ff,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef tool fill:#fff3e8,stroke:#c05621,stroke-width:2px,color:#7c2d12
+  class Wrong wrong
+  class Apply apply
+  class Owner owner
+  class Right right
+  class Run run
+  class Tool tool
+</pre>
+  </div>
+
+  <div class="grid3">
+    <div class="card allow">
+      <h3><span class="tag tag-ok">通过</span>bot3 owner 审批 originator-bound 边</h3>
+      <p>bot2 申请 bot3 的某个 role，并声明上层只对 <code>originator=Alice</code> 开放。bot3 owner 审批通过后，系统生成 <code>bot2→bot3</code> 边。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>Bob 复用 Alice 的边</h3>
+      <p>这条边的上层是 <code>OriginatorIn([Alice])</code>。如果 originator 变成 Bob，即使 caller 仍然是 bot2，这条 <code>bot2→bot3</code> 边也不开放。</p>
+    </div>
+    <div class="card block">
+      <h3><span class="tag tag-deny">拒绝</span>bot2 获得无条件能力</h3>
+      <p>这条边必须带 originator_policy / purpose / audit / 有效期策略。它不是给 bot2 永久扩权，也不是把 Alice 的资源权限传递给 bot2。</p>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <b>需要会议确认：</b>这条线路可以作为代理链路的候选设计，但要明确审批语义：申请方是 bot2，审批方是 bot3 owner；审批对象是 <code>bot2→bot3</code> 的某个角色权限集，且上层限定 <code>OriginatorIn(Alice)</code>。实现上建议称为 <code>originator-bound temporary edge</code> 或 <code>originator-bound approved edge</code>，避免被理解成传统资源权限传递。
+  </div>
+</section>
+
+<section>
+  <h2>6. 当前模型可能不支持 / 需要会议讨论的场景</h2>
+  <p class="lead">下面不是要在本文强行定案，而是把模型边界摆出来，方便开会讨论。</p>
+
+  <div class="grid2 discussion-grid">
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论 ③</span>bot2 → bot3：bot 自启动</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  B2(("bot2")) -.->|"caller=bot2<br/>originator=?"| B3(("bot3"))
+  Q{"originator 应该是谁？"}
+  B3 --> Q
+  Q --> O1["originator=bot2 ?"]
+  Q --> O2["必须有上游 human ?"]
+  Q --> O3["MVP 直接拒绝 ?"]
+</pre>
+      </div>
+      <p>问题不在于边表能不能表达 <code>bot2→bot3</code>，而在于无 human 上游时 <code>originator</code> 的语义是否成立。</p>
+    </div>
+
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论 ④</span>CI → bot3：service caller</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  CI(("service CI")) -.->|"机器凭证<br/>svc principal TBD"| BCS
+  BCS -.->|"caller=svc_ci<br/>originator=?"| B3(("bot3"))
+  BCS --> Need["需要: service principal<br/>机器凭证鉴别<br/>审计与撤销<br/>originator 语义"]
+</pre>
+      </div>
+      <p>service 当前还不是 caller。即使未来启用，也需要先定义机器身份、审计、撤销与 service-originator 的策略边界。</p>
+    </div>
+
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论</span>并发 originator 如何区分</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Alice(("Alice")) -->|"task t1"| B1(("bot1"))
+  Bob(("Bob")) -->|"task t2"| B1
+  B1 -->|"dispatch A"| BCS
+  B1 -->|"dispatch B"| BCS
+  BCS -->|"用 task_id 区分<br/>t1=Alice<br/>t2=Bob"| B3(("bot3"))
+</pre>
+      </div>
+      <p>如果没有 task/context 区分，Alice 与 Bob 同时经同一批 bot 调用下游时，BCS 无法可靠判断本次 dispatch 属于哪个 originator。</p>
+    </div>
+
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论</span>bot 故意不传 task_id</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  B1(("bot1")) -->|"dispatch bot3<br/>不带 task_id"| BCS
+  BCS --> Q{"怎么处理？"}
+  Q --> R1["MVP 拒绝<br/>最安全"]
+  Q --> R2["fresh 策略<br/>originator=bot1<br/>但 bot fresh 语义未定"]
+  R1 --> B3(("bot3"))
+  R2 -.-> B3
+</pre>
+      </div>
+      <p>不能让“不带 task_id / 不带 originator”变成绕过 <code>DirectOnly</code> 或绕过 Alice 限制的手段。建议会议明确 MVP 行为。</p>
+    </div>
+
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论</span>bot 真正用 tool 时用谁的身份？</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  Human(("human<br/>Alice")) -->|"让 bot 干活"| Bot(("bot"))
+  Bot -->|"鉴权通过: 这个 tool 能不能用"| Tool["tool / resource"]
+  Tool --> Q{"实际执行身份是谁？"}
+  Q --> S1["bot 自己的身份"]
+  Q --> S2["caller 的身份"]
+  Q --> S3["originator 的身份"]
+  S2 --> Audit["若借 human 身份<br/>授权范围与审计怎么做？"]
+  S3 --> Audit
+</pre>
+      </div>
+      <p>当前模型主要回答“这条边上的 role 是否允许 bot 使用某个 tool”。但真正调用外部系统时还涉及执行身份：用 bot 自己的身份、caller 的身份，还是 originator 的身份？如果考虑用 caller / originator 身份，还需要单独定义用户授权、可见性、审计和撤销，不能出现“我让 bot 干一个活，它就用我的身份做了很多我不知道的事”。</p>
+    </div>
+
+    <div class="card tbd">
+      <h3><span class="tag tag-tbd">讨论</span>所谓“权限传递”是不是同一个问题？</h3>
+      <div class="mgraph">
+<pre class="mermaid">
+flowchart LR
+  P1["本模型: bot 能力开放<br/>tool + specifier + decision"]
+  P2["问题: 外部 caller 能让 bot 用哪些能力"]
+  R1["另一类问题: 资源 ACL 传递<br/>A 能写员工库 → B/C 也能写？"]
+  R2["这是资源权限委托<br/>不是给 bot 增加新能力"]
+  P1 --> P2
+  R1 --> R2
+  P2 -. "不是同一角度" .- R2
+</pre>
+      </div>
+      <p>我们一直说的不是“A 的资源权限传给 B，再传给 C”。本模型的出发点是：一个 bot 在合作前已经确定自己能做什么；owner 再定义一套 <code>tool / specifier / decision</code> 权限体系，决定外部 human / bot / service 让它干活时哪些能力可用、哪些不可用。资源 ACL 传递是另一个角度，需要单独讨论。</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>7. 会议建议拍板的问题</h2>
+  <table>
+    <tr><th>问题</th><th>建议默认答案</th><th>原因</th></tr>
+    <tr>
+      <td>MVP 是否只承诺 ① human 直达 与 ② human 经 bot 中转？</td>
+      <td><span class="tag tag-ok">是</span></td>
+      <td>这两条线路的 caller、originator、边激活与 role 鉴权都能讲清楚。</td>
+    </tr>
+    <tr>
+      <td><code>OriginatorIn([ids])</code> 是否作为中转主推荐？</td>
+      <td><span class="tag tag-ok">是</span></td>
+      <td>它能表达“bot1 只能代表 Alice 使用 bot3 的某个角色权限集”。</td>
+    </tr>
+    <tr>
+      <td>bot outbound 不带有效 <code>task_id</code> 时怎么处理？</td>
+      <td><span class="tag tag-info">MVP 拒绝</span></td>
+      <td>避免 bot 通过省略上下文把链路伪装成 direct/fresh，从而绕过 originator 限制。</td>
+    </tr>
+    <tr>
+      <td>bot 自启动时是否允许 <code>originator=bot</code>？</td>
+      <td><span class="tag tag-tbd">会议讨论</span></td>
+      <td>这会改变 originator 从“源 human”到“源 actor”的含义，需要单独定语义。</td>
+    </tr>
+    <tr>
+      <td>service 作为 caller 是否进入本期？</td>
+      <td><span class="tag tag-tbd">后期适配</span></td>
+      <td>service principal、机器凭证、审计与撤销链路还没定义完整。</td>
+    </tr>
+    <tr>
+      <td>bot 真正调用 tool / resource 时使用谁的执行身份？</td>
+      <td><span class="tag tag-tbd">会议讨论</span></td>
+      <td>鉴权只说明“能不能用这个 tool”，执行身份涉及外部系统授权、用户感知、审计和撤销。</td>
+    </tr>
+    <tr>
+      <td>“权限传递”是否要纳入本模型？</td>
+      <td><span class="tag tag-info">建议拆开</span></td>
+      <td>本模型是 bot 能力开放控制；资源 ACL 委托/传递是另一类问题，不应混入当前边权限主线。</td>
+    </tr>
+    <tr>
+      <td>代理链路是否采用 <code>originator-bound temporary edge</code>？</td>
+      <td><span class="tag tag-tbd">会议讨论</span></td>
+      <td>建议将 Alice 的确认解释为“本次代理链路临时开放 bot2→bot3 某个 role”，而不是权限复制。</td>
+    </tr>
+    <tr>
+      <td>代理临时边由谁最终批准？Alice、bot3 owner，还是 bot3 的策略流程？</td>
+      <td><span class="tag tag-tbd">会议讨论</span></td>
+      <td>Alice 可以确认本次代理使用，但 bot3 只能开放自己策略允许的 role；审批边界需要拍板。</td>
+    </tr>
+  </table>
+  <div class="callout ok">
+    <b>推荐会议结论：</b>本期先把 ①② 两条 human 路线闭环；③④ 只保留在模型图里，作为未来适配方向，不阻塞当前设计评审。
+  </div>
+</section>
+
+<div class="footer-note">BCS Edge Permission Briefing · 2026-07-27 · diagrams first, text second</div>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad:true,
+    securityLevel:'loose',
+    theme:'base',
+    flowchart:{ curve:'basis', htmlLabels:true },
+    sequence:{ mirrorActors:false, useMaxWidth:false },
+    themeVariables:{
+      fontFamily:'-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",Arial,sans-serif',
+      primaryColor:'#eaf1ff', primaryTextColor:'#1f2329', primaryBorderColor:'#2563eb',
+      lineColor:'#667085', tertiaryColor:'#f8fafc'
+    }
+  });
+</script>
+</body>
+</html>

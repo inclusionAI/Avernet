@@ -53,10 +53,12 @@ pub use metrics::{
 };
 pub use provider_stream_gray::ProviderStreamGrayList;
 pub use repo::{
-    BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
-    BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
-    BotControlPlanePatch, BotControlPlaneRecord, BotControlPlaneRepoPort, BotRepoPort,
+    AuthzDecisionLogRepoPort, BotCandidateReadQuery, BotCandidateReadRecord,
+    BotCandidateVisibility, BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch,
+    BotControlPlaneOwnedQuery, BotControlPlanePatch, BotControlPlaneRecord,
+    BotControlPlaneRepoPort, BotRepoPort, CapabilityCatalogRepoPort,
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
+    EdgeGrantRepoPort, PermissionProfileRepoPort, PermissionRequestRepoPort,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CreateOrganizationRecord, ListOrganizationMembersPageQuery, ListOrganizationMembersQuery,
     ListOrganizationsQuery, OrganizationCandidateReadPage, OrganizationCandidateReadPort,

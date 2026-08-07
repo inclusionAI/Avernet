@@ -11,6 +11,7 @@
 
 pub mod actor;
 pub mod attachment;
+pub mod authorization;
 pub mod channel;
 pub mod collaboration;
 pub mod friend;
@@ -33,6 +34,7 @@ pub mod task_ledger;
 
 pub use actor::{ActorKind, ActorRef, ActorStatus, EnsureHumanResult, EnsureOwnerEdgesResult, RelationEdge};
 pub use attachment::{Attachment, AttachmentType};
+pub use authorization::*;
 pub use channel::{
     BindingStatus, BindingTarget, GroupChatScope, ChannelBinding, ChannelConfig, ChannelType,
     ConversationSessionMap, HumanInputRequest, HumanInputRequestStatus, ImParticipantMap,

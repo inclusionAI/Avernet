@@ -31,6 +31,12 @@ pub use actors::{
     WorkerRecommendCommand, WorkerRecommendResult, WorkerRecommendation,
 };
 pub use application::SystemMessageService;
+pub use application::authorization::{
+    AuthorizationService, AuthorizationUseCaseError, CreatePermissionRequestCommand,
+    DecidePermissionRequestCommand, DeletePermissionProfileCommand, ListPermissionProfilesCommand,
+    ListPermissionRequestsCommand, PermissionGrantDecisionView, ResolvePermissionProfileCommand,
+    ResolveRulesGrantCommand, UpsertPermissionProfileCommand,
+};
 pub use application::channel::{
     ChannelInboundError, ChannelInboundFailureKind, ChannelService, ChannelUseCaseError,
     CreateBindingCommand, InboundMessage, OutboundMessage,
@@ -151,6 +157,8 @@ pub use application::{
     UpdateOrganizationMemberProfileCommand,
 };
 pub use port::{
+    AuthzDecisionLogRepoPort, CapabilityCatalogRepoPort, EdgeGrantRepoPort,
+    PermissionProfileRepoPort, PermissionRequestRepoPort,
     BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
     BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
     BotControlPlaneRepoPort,
@@ -192,9 +200,14 @@ pub use workbench_use_cases::{
 };
 
 pub use types::{
+    AuthzContextType, AuthzDecision, AuthzDecisionLog, AuthzGrantRef, AuthzRuntimeContext,
     BotCandidateReadQuery, BotCandidateReadRecord, BotCandidateVisibility,
     BotControlPlaneDescriptor, BotControlPlaneDescriptorPatch, BotControlPlaneOwnedQuery,
     BotControlPlanePatch, BotControlPlaneRecord,
+    Capability, CapabilitySource, CapabilityStatus, Decision, EdgeGrant, EdgeGrantStatus,
+    GrantKind, GrantRef, GrantSource, GrantStatus, PermissionProfile, PermissionProfileStatus,
+    PermissionRequest, PermissionRequestKind, PermissionRequestStatus, Rule, RuleDecision,
+    RuleEffect, RulesGrantMaterial, RuntimeContext,
     BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, CoordinationMode,
     CoordinationSurface, ProviderAuthMode, ProviderBotBinding, ProviderCoordinationConfig,
     ProviderCredential, ProviderOrganizationManagementConfig, ProviderRecord, RedactedToken,
@@ -210,6 +223,7 @@ pub use types::{
 };
 
 pub use core::{
+    AuthzContext, AuthzContextBuilderCoreService, BuildA2aAuthzContextRequest,
     ActorKind, ActorStatus, AgentCredentials, AuditEntry, BindingChannel, BindingChannels,
     BotCapabilities, BotConnectParams, BotConnectResult, BotControlPlaneCandidate,
     BotControlPlaneCoreService, BotControlPlaneProvider, BotControlPlaneView, BotDynamicStatus,

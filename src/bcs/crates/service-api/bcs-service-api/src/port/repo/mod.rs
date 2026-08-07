@@ -1,3 +1,4 @@
+pub mod authorization;
 pub mod bot;
 pub mod bot_control_plane;
 pub mod channel;
@@ -13,6 +14,7 @@ pub mod session;
 pub mod session_file;
 pub mod user_identity;
 
+pub use authorization::*;
 pub use bot::BotRepoPort;
 pub use bot_control_plane::*;
 pub use channel::{

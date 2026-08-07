@@ -23,7 +23,13 @@ pub mod principal;
 pub mod ws;
 pub mod stream;
 
-pub use a2a::A2aRunStatus;
+pub use a2a::{
+    A2aAuthzContext, A2aAuthzContextType, A2aAuthzDecision, A2aAuthzGrantKind,
+    A2aAuthzGrantRef, A2aAuthzGrantSource, A2aAuthzGrantStatus, A2aAuthzRuntimeContext,
+    A2aPermissionProfile, A2aPermissionProfileStatus, A2aPermissionRequest,
+    A2aPermissionRequestKind, A2aPermissionRequestStatus, A2aRule, A2aRuleEffect,
+    A2aRunStatus,
+};
 pub use attachment::{Attachment, AttachmentType};
 pub use delivery::{BotDeliveryKind, FrontendDeliveryKind, FrontendDeliveryTarget};
 pub use http::chat_run;

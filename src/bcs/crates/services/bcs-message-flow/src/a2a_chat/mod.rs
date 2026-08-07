@@ -11,16 +11,18 @@ use bcs_protocol::{
 };
 use bcs_service_api::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
-    ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
+    ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand, AuthzContext,
     BlockingA2aChatCommand, BlockingA2aChatOutcome,
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotRegistryCoreService, BotRunContext, BotRunContextPort, CallerContext,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BuildA2aAuthzContextRequest,
+    AuthzContextBuilderCoreService, CallerContext,
     ChatRunCancelCommand, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunQueryCommand,
     ChatRunMetricCount, DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface,
     DeliveryMetricKind, DeliveryMetricTarget, DirectChatClientKind, DirectChatRunEvent,
     DirectChatRunLifecycleHook, DirectChatRunReason, DirectChatRunSnapshotPort,
-    FriendCoreService, MetricsResult, OrganizationCoreService, RegisteredBot, ServiceError, ServiceResult,
+    FriendCoreService, MetricsResult, OrganizationCoreService, RegisteredBot, RuntimeContext,
+    ServiceError, ServiceResult,
 };
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -49,6 +51,11 @@ pub struct A2aChat {
     /// provider callbacks against `/bot/events` can authenticate the run.
     /// Left `None` for tests / minimal setups that only target WS bots.
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
+    /// Optional authorization context builder. When wired, A2A delivery fails
+    /// closed before waking the target bot unless BCS can compute an AuthzContext.
+    /// When absent, message-flow preserves the legacy pass-through path so
+    /// bootstrap can defer enforcement until a real authz repo is wired.
+    authz_context_builder: Option<Arc<dyn AuthzContextBuilderCoreService>>,
     default_timeout_ms: u64,
     /// Outbound interceptor chain (security, audit, etc.). Default empty so
     /// existing callers/tests don't need to thread a chain. Bootstrap attaches
@@ -94,6 +101,7 @@ impl A2aChat {
             chat_run_cleanup,
             run_lifecycle_hook: Arc::new(NoopDirectChatRunLifecycleHook),
             bot_run_context: None,
+            authz_context_builder: None,
             default_timeout_ms,
             interceptors: Arc::new(bcs_service_api::interceptor::InterceptorChain::new()),
             organization: None,
@@ -139,6 +147,17 @@ impl A2aChat {
         bot_run_context: Arc<dyn BotRunContextPort>,
     ) -> Self {
         self.bot_run_context = Some(bot_run_context);
+        self
+    }
+
+    /// Attach runtime authorization context construction for A2A direct chat.
+    /// The builder owns policy; this message-flow service only requests and
+    /// injects the resulting short-lived AuthzContext into the outgoing frame.
+    pub fn with_authz_context_builder(
+        mut self,
+        authz_context_builder: Arc<dyn AuthzContextBuilderCoreService>,
+    ) -> Self {
+        self.authz_context_builder = Some(authz_context_builder);
         self
     }
 
@@ -518,7 +537,7 @@ impl A2aChatService for A2aChat {
         .await;
 
         let from_bot_name = self.sender_display_name(&from_bot_id).await;
-        let frame = build_chat_send_frame(
+        let mut frame = build_chat_send_frame(
             &run_id,
             &session_key,
             &cmd.target_bot_id,
@@ -529,6 +548,42 @@ impl A2aChatService for A2aChat {
             &cmd.tags,
             cmd.caller_wait_mode.as_deref(),
         )?;
+
+        if let Some(authz_context_builder) = &self.authz_context_builder {
+            let authz_context = authz_context_builder
+                .build_a2a_authz_context(BuildA2aAuthzContextRequest {
+                    from_id: from_bot_id.clone(),
+                    to_id: cmd.target_bot_id.clone(),
+                    env: target_bot.env.clone().unwrap_or_else(|| "dev".to_string()),
+                    caller: cmd.caller.clone(),
+                    originator: Some(
+                        cmd.from_actor_id
+                            .clone()
+                            .unwrap_or_else(|| from_bot_id.clone()),
+                    ),
+                    context: runtime_context_for_direct_chat(&target_bot),
+                    task_id: None,
+                    run_id: Some(run_id.clone()),
+                    issued_at: now_ms as i64,
+                    ttl_ms: timeout_ms as i64,
+                })
+                .await;
+            match authz_context {
+                Ok(context) => inject_authz_context_into_frame(&mut frame, &context)?,
+                Err(error) => {
+                    if self.run_store.mark_failed(&run_id, error.to_string()).await {
+                        self.emit_run_lifecycle(
+                            DirectChatRunEvent::Failed,
+                            MetricsResult::Error,
+                            client_kind,
+                            DirectChatRunReason::Blocked,
+                        )
+                        .await;
+                    }
+                    return Err(error);
+                }
+            }
+        }
 
         // Outbound interceptor chain (security gateway etc.). Block here is a
         // hard refusal — the run is marked failed and the error surfaces to
@@ -1314,6 +1369,42 @@ fn build_chat_send_frame(
         "chat.send",
         Some(params),
     )))
+}
+
+fn runtime_context_for_direct_chat(target_bot: &RegisteredBot) -> RuntimeContext {
+    if target_bot.capabilities.visibility == "public" {
+        RuntimeContext::PublicChat
+    } else {
+        RuntimeContext::Direct
+    }
+}
+
+fn inject_authz_context_into_frame(
+    frame: &mut BcsFrame,
+    authz_context: &AuthzContext,
+) -> ServiceResult<()> {
+    let BcsFrame::Request(request) = frame else {
+        return Ok(());
+    };
+    let Some(params) = request.params.as_mut() else {
+        return Ok(());
+    };
+    let Some(object) = params.as_object_mut() else {
+        return Ok(());
+    };
+    let extensions = object
+        .entry("extensions".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !extensions.is_object() {
+        *extensions = serde_json::json!({});
+    }
+    if let Some(extensions) = extensions.as_object_mut() {
+        extensions.insert(
+            "authz_context".to_string(),
+            serde_json::to_value(authz_context)?,
+        );
+    }
+    Ok(())
 }
 
 fn now_ms() -> u64 {

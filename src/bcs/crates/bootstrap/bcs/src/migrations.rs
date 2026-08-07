@@ -449,6 +449,104 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE INDEX IF NOT EXISTS idx_bct_env_status_priority ON bcs_collaboration_templates(env, record_status, priority, template_id)",
     "CREATE INDEX IF NOT EXISTS idx_bct_env_visibility_priority ON bcs_collaboration_templates(env, visibility, record_status, priority, template_id)",
     "CREATE INDEX IF NOT EXISTS idx_bct_env_owner_status ON bcs_collaboration_templates(env, owner_user_id, record_status, priority, template_id)",
+
+    // ── authorization ─────────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_authz_capabilities (
+        capability_id TEXT NOT NULL,
+        bot_id TEXT NOT NULL,
+        env TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        operation TEXT DEFAULT NULL,
+        specifier_schema TEXT DEFAULT NULL,
+        description TEXT DEFAULT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        raw_metadata_json TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (capability_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_authz_capabilities_bot_env_status ON bcs_authz_capabilities(bot_id, env, status)",
+    "CREATE INDEX IF NOT EXISTS idx_authz_capabilities_env_tool ON bcs_authz_capabilities(env, tool)",
+    "CREATE TABLE IF NOT EXISTS bcs_authz_permission_profiles (
+        permission_profile_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        bot_id TEXT NOT NULL,
+        env TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT DEFAULT NULL,
+        rules_template TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        updated_by TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (permission_profile_id, revision)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_authz_permission_profiles_bot_env_status ON bcs_authz_permission_profiles(bot_id, env, status, is_default)",
+    "CREATE TABLE IF NOT EXISTS bcs_authz_edge_grants (
+        edge_id TEXT NOT NULL,
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        env TEXT NOT NULL,
+        grant_kind TEXT NOT NULL,
+        grant_ref_id TEXT NOT NULL,
+        rules TEXT DEFAULT NULL,
+        rules_revision INTEGER DEFAULT NULL,
+        rules_digest TEXT DEFAULT NULL,
+        status TEXT NOT NULL,
+        request_id TEXT DEFAULT NULL,
+        requested_by TEXT NOT NULL,
+        approved_by TEXT DEFAULT NULL,
+        revoked_by TEXT DEFAULT NULL,
+        reason TEXT DEFAULT NULL,
+        expires_at INTEGER DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        approved_at INTEGER DEFAULT NULL,
+        revoked_at INTEGER DEFAULT NULL,
+        PRIMARY KEY (edge_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_authz_edge_grants_lookup ON bcs_authz_edge_grants(from_id, to_id, env, status)",
+    "CREATE TABLE IF NOT EXISTS bcs_authz_permission_requests (
+        request_id TEXT NOT NULL,
+        env TEXT NOT NULL,
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        request_kind TEXT NOT NULL,
+        requested_ref_id TEXT DEFAULT NULL,
+        requested_rules TEXT DEFAULT NULL,
+        message TEXT DEFAULT NULL,
+        status TEXT NOT NULL,
+        decision_reason TEXT DEFAULT NULL,
+        created_by TEXT NOT NULL,
+        decided_by TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (request_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_authz_permission_requests_to_status ON bcs_authz_permission_requests(to_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_authz_permission_requests_env_from ON bcs_authz_permission_requests(env, from_id)",
+    "CREATE TABLE IF NOT EXISTS bcs_authz_decision_logs (
+        decision_id TEXT NOT NULL,
+        env TEXT NOT NULL,
+        task_id TEXT DEFAULT NULL,
+        run_id TEXT DEFAULT NULL,
+        from_id TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        originator TEXT DEFAULT NULL,
+        context_type TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        grant_refs TEXT NOT NULL,
+        context_json TEXT DEFAULT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (decision_id)
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_authz_decision_logs_lookup ON bcs_authz_decision_logs(env, from_id, to_id, created_at)",
+
     // ── collaboration_template_contents ───────────────────
     "CREATE TABLE IF NOT EXISTS bcs_collaboration_template_contents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -722,6 +820,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
     SqliteMigration {
         version: 8,
         name: "human_input_im_requests",
+    },
+    SqliteMigration {
+        version: 9,
+        name: "authorization",
     },
 ];
 
@@ -1252,7 +1354,8 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (9, "authorization".to_string(), "sqlite".to_string()),
             ]
         );
         Ok(())
@@ -1264,9 +1367,11 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 8);
+        assert_eq!(report.pending_versions.len(), 9);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
+        assert_eq!(report.pending_versions[1].version, 2);
+        assert_eq!(report.pending_versions[1].name, "channel_binding_audit_timestamps");
         assert!(report.pending_versions[0].statements.is_empty());
         assert!(report.pending_versions[0].repairs.is_empty());
         assert_eq!(report.pending_versions[1].version, 2);
@@ -1295,6 +1400,8 @@ mod tests {
             report.pending_versions[7].name,
             "human_input_im_requests"
         );
+        assert_eq!(report.pending_versions[8].version, 9);
+        assert_eq!(report.pending_versions[8].name, "authorization");
         Ok(())
     }
 
@@ -1331,7 +1438,8 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (9, "authorization".to_string(), "sqlite".to_string()),
             ]
         );
         Ok(())

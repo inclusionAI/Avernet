@@ -627,6 +627,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bcs-authorization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-authorization-store",
+ "bcs-service-api",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-authorization-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "bcs-bot"
 version = "0.1.0"
 dependencies = [
