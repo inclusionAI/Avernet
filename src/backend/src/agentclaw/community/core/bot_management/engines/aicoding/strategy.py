@@ -15,6 +15,7 @@ from agentclaw.community.core.bot_management.capabilities import (
 
 from ..provisioning import (
     BotProvisioningContext,
+    EngineExtraProperties,
     EngineProvisioningStrategy,
 )
 
