@@ -142,12 +142,17 @@ def __init__(self, base_url: str):
 
 ## Boundary declarations
 
-Both importers are boundary-significant, and prefix matching means
-`agentclaw.community.utils.env_utils` does **not** cover `...utils.retry`. Add
-one line to each:
+Both importers are boundary-significant, but only one needs a new line.
+`test_module_boundaries.py` matches a declaration against an actual import with
+`actual == d or actual.startswith(d + ".")`, so a bare entry covers every
+submodule beneath it:
 
-- `core/service_bot/README.md` → `agentclaw.community.utils.retry`
-- `core/harness/README.md` → `agentclaw.community.utils.retry`
+- `core/harness/README.md` declares only `agentclaw.community.utils.env_utils`,
+  which does **not** cover `...utils.retry` → **add**
+  `agentclaw.community.utils.retry`.
+- `core/service_bot/README.md` already declares the bare
+  `agentclaw.community.utils` (alongside `...utils.env_utils`), and that entry
+  already matches `...utils.retry` → **no change needed**.
 
 Verified by `tests/community/architecture/test_module_boundaries.py` (currently
 3 passed — must stay green).
