@@ -18,6 +18,7 @@ caller's ``max_tokens`` into the posted request body.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +60,23 @@ class _FakeResponse:
     def json(self):
         return self._payload
 
+    def iter_lines(self):
+        # llm._do_request streams; encode message.content as SSE delta + [DONE].
+        choices = self._payload.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+            if content:
+                yield "data: " + json.dumps(
+                    {"choices": [{"delta": {"content": content}}]}, ensure_ascii=False
+                )
+        yield "data: [DONE]"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
 
 class _ScriptedHttpClient:
     """Plays a scripted sequence of ``post()`` outcomes.
@@ -79,26 +97,21 @@ class _ScriptedHttpClient:
             raise outcome
         return outcome
 
+    def stream(self, method, path, *, json=None, headers=None, timeout=None, **kwargs):
+        # llm._do_request now calls stream(); mirror post() and return the
+        # outcome as a context manager (_FakeResponse supports __enter__).
+        self.calls.append({"url": path, "json": json, "timeout": timeout})
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
 
 @pytest.fixture(autouse=True)
 def _fresh_semaphore(monkeypatch):
     monkeypatch.setattr(
         llm_mod, "_SEMAPHORE", asyncio.Semaphore(llm_mod._MAX_CONCURRENT_LLM_CALLS)
     )
-
-
-@pytest.fixture(autouse=True)
-def _no_retry_backoff(monkeypatch):
-    """Collapse ``_retry_delay`` to zero for every test in this module.
-
-    ``_request_with_retry`` sleeps a real ``_RETRY_DELAYS`` backoff (2s / 5s / 10s
-    plus jitter) between attempts. What these tests assert is the *classification*
-    — how many attempts happen and with which body — never the wall-clock spacing,
-    so the sleeps are pure suite latency: they cost ~74s across this file alone.
-    Patch the delay source rather than ``asyncio.sleep`` so the retry loop's own
-    control flow stays exercised verbatim.
-    """
-    monkeypatch.setattr(llm_mod, "_retry_delay", lambda attempt: 0.0)
 
 
 def _llm(http: _ScriptedHttpClient) -> LLM:
