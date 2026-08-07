@@ -24,18 +24,27 @@ Retry is **opt-in per call site**, not built into the transport: only the caller
 knows whether repeating its request is safe. Adopt it for idempotent requests
 only — never for uploads or lifecycle mutations.
 
-Retrying on HTTP *status* is deliberately not offered. A completed 4xx/5xx
-response is an answer, not a transport failure; the thunk returns it normally
-and this module hands it back untouched. Status policy belongs to the caller.
+A completed 4xx/5xx response is an answer, not a transport failure: the thunk
+returns it normally and this module hands it back untouched. Deciding what to do
+with a status belongs to the caller.
+
+One asymmetry is worth stating plainly, because it is a policy rather than the
+absence of one: if a caller's thunk *raises* on status — ``raise_for_status()``
+inside the thunk, say — then an exception carrying a 4xx is not retried, while
+an exception carrying a 5xx **is**. That follows from classifying by "did this
+carry a client-error response", and it is the desirable default (a 5xx is often
+transient, a 4xx never is). Callers that do not want 5xx retried should keep
+status handling outside the thunk, as ``BaasService.get_http_info`` does.
 """
 from __future__ import annotations
 
-import logging
 import random
 import time
 from typing import Callable, TypeVar
 
-logger = logging.getLogger(__name__)
+from agentclaw.community.log import get_logger
+
+logger = get_logger(__name__)
 
 __all__ = [
     "DEFAULT_ATTEMPTS",
@@ -86,6 +95,21 @@ def is_transport_failure(exc: BaseException) -> bool:
     return client_error_status(exc) is None
 
 
+def _safe_getattr(obj: object, name: str) -> object | None:
+    """``getattr`` that survives a property raising something other than AttributeError.
+
+    ``httpx.HTTPError.request`` is a property that raises ``RuntimeError`` when
+    no request was ever attached, and plain ``getattr(obj, name, None)`` only
+    swallows ``AttributeError``. Since this module's formatter runs *inside*
+    ``except`` blocks, an exception escaping it would replace the very failure
+    being reported — so every attribute read here is total.
+    """
+    try:
+        return getattr(obj, name, None)
+    except Exception:
+        return None
+
+
 def describe_exception(exc: BaseException) -> str:
     """Format ``exc`` with its underlying cause and request URL.
 
@@ -93,14 +117,27 @@ def describe_exception(exc: BaseException) -> str:
     cause is attached and ``" | request=<url>"`` when the exception carries a
     request. Without the cause, a wrapped transport failure logs as the
     wrapper's own opaque message and names nothing useful.
+
+    Never raises. It is called from inside ``except`` blocks, where raising
+    would discard the original exception.
     """
-    parts: list[str] = [f"{type(exc).__name__}: {exc}"]
-    cause = exc.__cause__ or exc.__context__
+    try:
+        parts: list[str] = [f"{type(exc).__name__}: {exc}"]
+    except Exception:  # pragma: no cover - a __str__ that raises
+        return f"{type(exc).__name__}: <unprintable>"
+
+    # ``__suppress_context__`` means the author wrote ``raise X from None`` and
+    # deliberately hid the context; naming it anyway would surface something
+    # they chose to bury.
+    cause = exc.__cause__
+    if cause is None and not exc.__suppress_context__:
+        cause = exc.__context__
     if cause is not None and cause is not exc:
         parts.append(f"caused by {type(cause).__name__}: {cause}")
-    req = getattr(exc, "request", None)
+
+    req = _safe_getattr(exc, "request")
     if req is not None:
-        url = getattr(req, "url", None)
+        url = _safe_getattr(req, "url")
         if url is not None:
             parts.append(f"request={url}")
     return " | ".join(parts)
@@ -137,12 +174,16 @@ def retry_transport_call(
         backoff_seconds: Base pause before a retry; jittered.
 
     Raises:
-        ValueError: If ``attempts`` is less than 1 — a programming error rather
-            than a runtime state, so it fails loudly instead of silently
-            skipping the call.
+        ValueError: If ``attempts`` is less than 1, or ``backoff_seconds`` is
+            negative — programming errors rather than runtime states, so they
+            fail loudly up front. A negative backoff would otherwise reach
+            ``time.sleep`` *inside* the ``except`` block and replace the
+            transport failure being reported with a ``ValueError``.
     """
     if attempts < 1:
         raise ValueError(f"attempts must be >= 1, got {attempts}")
+    if backoff_seconds < 0:
+        raise ValueError(f"backoff_seconds must be >= 0, got {backoff_seconds}")
 
     for attempt in range(1, attempts + 1):
         started = time.monotonic()

@@ -114,6 +114,72 @@ class TestRetryTransportCall:
         # Base plus jitter, never below the base and never unbounded.
         assert 0.2 <= no_sleep[0] <= 0.2 * (1 + retry_mod._JITTER_FRACTION)
 
+    def test_backoff_is_actually_jittered(self, no_sleep: list[float]):
+        """Distinct delays across retries — the plan requires jitter, because
+        the failures this absorbs arrive in synchronized clusters and an
+        un-jittered backoff would re-converge every caller on one tick.
+
+        A bounds-only assertion passes for a constant delay, so pin variation.
+        """
+        for _ in range(40):
+            call = _Counter(RuntimeError("connection reset"), "payload")
+            retry_transport_call(call, operation="op", backoff_seconds=0.2)
+        assert len(set(no_sleep)) > 1
+
+    def test_negative_backoff_raises_value_error(self):
+        """Rejected up front: a negative delay would reach time.sleep inside
+        the except block and replace the failure being reported."""
+        call = _Counter("payload")
+        with pytest.raises(ValueError):
+            retry_transport_call(call, operation="op", backoff_seconds=-1.0)
+        assert call.calls == 0
+
+    def test_cause_chain_survives_the_reraise(self):
+        """``raise exc from None`` would keep object identity but wipe
+        ``__cause__`` — the chain is what makes the failure diagnosable."""
+        cause = ValueError("connect timeout")
+        try:
+            raise RuntimeError("Error in httpx send hook") from cause
+        except RuntimeError as built:
+            original = built
+        call = _Counter(original)
+        with pytest.raises(RuntimeError) as excinfo:
+            retry_transport_call(call, operation="op")
+        assert excinfo.value is original
+        assert excinfo.value.__cause__ is cause
+
+    def test_base_exception_is_not_retried(self, no_sleep: list[float]):
+        """KeyboardInterrupt / CancelledError must propagate immediately."""
+
+        class _Interrupting:
+            calls = 0
+
+            def __call__(self) -> object:
+                self.calls += 1
+                raise KeyboardInterrupt
+
+        call = _Interrupting()
+        with pytest.raises(KeyboardInterrupt):
+            retry_transport_call(call, operation="op")
+        assert call.calls == 1
+        assert no_sleep == []
+
+    def test_real_httpx_transport_error_is_retried_and_reraised(self):
+        """End-to-end with a real httpx exception, not a hand-rolled stub.
+
+        ``httpx.HTTPError.request`` is a property that *raises* when unset, so
+        formatting the exception inside the except block previously replaced
+        the ConnectError with an unrelated RuntimeError — and killed the retry.
+        """
+        import httpx
+
+        original = httpx.ConnectError("connection refused")
+        call = _Counter(original)
+        with pytest.raises(httpx.ConnectError) as excinfo:
+            retry_transport_call(call, operation="op")
+        assert excinfo.value is original
+        assert call.calls == 2
+
     def test_honours_higher_attempt_counts(self, no_sleep: list[float]):
         call = _Counter(RuntimeError("connection reset"), RuntimeError("again"), "ok")
         assert retry_transport_call(call, operation="op", attempts=3) == "ok"
@@ -179,4 +245,35 @@ class TestDescribeException:
     def test_self_referential_cause_is_not_repeated(self):
         exc = RuntimeError("boom")
         exc.__context__ = exc
+        assert describe_exception(exc) == "RuntimeError: boom"
+
+    def test_suppressed_context_is_not_surfaced(self):
+        """``raise X from None`` hides the context deliberately."""
+        try:
+            try:
+                raise ZeroDivisionError("division by zero")
+            except ZeroDivisionError:
+                raise RuntimeError("clean") from None
+        except RuntimeError as exc:
+            assert describe_exception(exc) == "RuntimeError: clean"
+
+    def test_does_not_raise_when_request_property_raises(self):
+        """``httpx.HTTPError.request`` raises RuntimeError when never set.
+
+        ``getattr(obj, name, default)`` only swallows AttributeError, so this
+        used to escape — from inside an except block, replacing the failure.
+        """
+        import httpx
+
+        detail = describe_exception(httpx.ConnectError("connection refused"))
+        assert detail == "ConnectError: connection refused"
+
+    def test_does_not_raise_when_url_access_raises(self):
+        class _Request:
+            @property
+            def url(self) -> str:
+                raise RuntimeError("no url")
+
+        exc = RuntimeError("boom")
+        exc.request = _Request()  # type: ignore[attr-defined]
         assert describe_exception(exc) == "RuntimeError: boom"
