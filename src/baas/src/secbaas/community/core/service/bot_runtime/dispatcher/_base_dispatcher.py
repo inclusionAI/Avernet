@@ -13,6 +13,7 @@ Design decisions (per design.md):
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import (
@@ -85,14 +86,20 @@ class BotBaseDispatcher:
             RuntimeError: Selected device has no provider_device_id
         """
         # 1. Look up bot by UUID
-        bot = self._bot_repo.get_active_by_bot_uuid(bot_uuid, tenant, env)
+        # Repositories are synchronous (blocking DB I/O); dispatchers run on the
+        # uvicorn event loop, so every repo call is offloaded to a worker thread.
+        # Running them inline parks the loop for the duration of the query and
+        # stalls every other request served by the same worker.
+        bot = await asyncio.to_thread(
+            self._bot_repo.get_active_by_bot_uuid, bot_uuid, tenant, env
+        )
         if not bot:
             logger.warning(f"Bot not found: bot_uuid={bot_uuid}, tenant={tenant}")
             raise BotNotFoundError(bot_uuid)
 
         # 2. Get devices associated with bot
-        devices = self._device_repo.list_by_bot_id(
-            bot_id=bot.id, tenant=tenant, env=env
+        devices = await asyncio.to_thread(
+            self._device_repo.list_by_bot_id, bot_id=bot.id, tenant=tenant, env=env
         )
         if not devices:
             logger.warning(f"No devices found for bot: bot_uuid={bot_uuid}")

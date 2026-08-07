@@ -83,6 +83,23 @@ _ENGINE_PREFIX = "/openapi/v1/bots/messages/ws"
 #: for :data:`_ENGINE_PREFIX` — see :meth:`_readdress_onto_gateway`.
 _PROXYPASS_PREFIX = "/proxypass/"
 
+#: Connection kinds whose provider returns a *bare* routing target and a signed
+#: proxypass credential, and leaves the URL for the caller to assemble.
+#:
+#: The ARCA provider answers ``"proxy"``: it composes no URL in any mode, and is
+#: never handed the in-device path to bake into one (the base
+#: ``get_device_connection`` does not forward ``path`` to
+#: ``_compose_device_conn_info``). ``"arca"`` is accepted beside it because that
+#: is the ``device_provider`` key the same device carries everywhere else, and a
+#: provider spelling one where the other was meant should not be the difference
+#: between a socket and a 502.
+#:
+#: Assembling here is the platform's normal case rather than a special one:
+#: ``DeviceService.get_device_connection_v2`` and the internal console's frontend
+#: each build ``/proxypass/{target}{path}`` for themselves out of exactly these
+#: two values. This surface builds the same thing addressed to the gateway.
+_PROXY_TARGET_TYPES = frozenset({"proxy", "arca"})
+
 #: WebSocket scheme for each scheme a gateway base url may be configured with.
 #: ``ws``/``wss`` are accepted so a deployment that spells the base out as a
 #: socket origin is not rejected for being explicit.
@@ -290,18 +307,28 @@ class EngineConnectionService:
             binding_id=binding_id,
             operator=operator,
             ttl=CONNECTION_TTL_SECONDS,
-            # Relay is the mode that yields a *finished* WebSocket URL, which is
-            # what this endpoint re-addresses onto the gateway. Leaving the mode
-            # unset makes the provider hand back a bare routing target instead,
-            # and there would be nothing to re-address. Asking once also keeps
-            # the URL and the credential describing the same mode.
+            # Both arguments below are meaningful to the BaaS provider and inert
+            # elsewhere. They are passed unconditionally because this call site
+            # does not know which provider answers it, and because getting them
+            # to BaaS is what makes its answer re-addressable at all.
+            #
+            # Relay is the mode in which BaaS yields a *finished* WebSocket URL.
+            # Left unset, it hands back a bare routing target and there would be
+            # nothing to re-address. Asking once also keeps the URL and the
+            # credential describing the same mode. A bare-target provider returns
+            # a bare target either way — the mode does not reach its decision.
             ws_conn_mode=_RELAY_MODE,
-            # The provider bakes this path *into* the relay URL, and that URL is
-            # what a caller ends up connecting to, so it has to be the bot's own
-            # engine path. The provider default is openclaw's, and the engine
-            # closes a socket whose pinned engine is not the active one (code
-            # 4001) — a claude_code bot handed the default would be rejected on
-            # connect.
+            # BaaS bakes this path *into* the relay URL, and that URL is what a
+            # caller ends up connecting to, so it has to be the bot's own engine
+            # path. Its default is openclaw's, and the engine closes a socket
+            # whose pinned engine is not the active one (code 4001) — a
+            # claude_code bot handed the default would be rejected on connect.
+            #
+            # A bare-target provider never sees this: the base
+            # ``get_device_connection`` does not forward ``path`` to
+            # ``_compose_device_conn_info``. That is why ``_compose_onto_gateway``
+            # appends the engine path itself rather than trusting the provider to
+            # have applied it.
             path=chat_path,
         )
 
@@ -321,14 +348,16 @@ class EngineConnectionService:
     def _socket_url(self, info: object, socket_path: str, token: str) -> str:
         """The finished URL for ``socket_path``.
 
-        The provider builds a finished relay URL around the engine path we ask
-        it for. That URL addresses the hop *behind* the gateway, so we re-address
-        it — swapping the origin and the routing prefix — rather than rebuilding
-        it from parts. Rebuilding would mean asserting our own grammar for a URL
-        the provider owns, and silently dropping anything it put there that we
-        did not anticipate.
+        Providers describe a connection in one of two ways, and both end at the
+        same published URL. Some build a finished relay URL around the engine
+        path we ask them for; that URL addresses the hop *behind* the gateway, so
+        we re-address it rather than rebuilding it from parts — rebuilding would
+        assert our own grammar for a URL the provider owns and silently drop
+        anything it put there that we did not anticipate. Others hand back the
+        routing target and the credential and leave the assembly to the caller,
+        which is what every other caller of those providers already does.
 
-        Two shapes:
+        Four cases, in the order they are tested:
 
         1. A local device — reached directly, with no credential. The gateway
            routes to the hop behind it, which has no path to a device on the
@@ -336,7 +365,21 @@ class EngineConnectionService:
            ``url`` is not consulted at all: the local provider fills that field
            from *http*-info (``local_device_service.py``), which was never a
            relay URL and was never published here either.
-        2. Otherwise the gateway, re-addressed from the provider's relay URL.
+        2. A provider that supplied a ``url`` — re-addressed onto the gateway.
+           Tested before the connection kind on purpose: a URL the provider went
+           to the trouble of issuing records a routing decision it made and we
+           did not, so composing our own over the top would override it in
+           silence. It is also what keeps this method's shape from being a
+           one-way door — should a bare-target provider ever start issuing relay
+           URLs, they win here with no change, and case 3 simply stops being
+           reached.
+        3. A provider of a bare-target kind (:data:`_PROXY_TARGET_TYPES`) —
+           composed onto the gateway from the target, the engine path and the
+           credential.
+        4. Anything else — refused by name. Deliberately *not* folded into case 3
+           as a catch-all: a provider that was supposed to supply a ``url`` and
+           did not has a bug, and composing a plausible-looking URL for it would
+           bury that bug in a socket that fails at handshake instead.
         """
         target = str(
             getattr(info, "ws_target", "")
@@ -346,7 +389,9 @@ class EngineConnectionService:
         if not target:
             raise EngineUpstreamError("device connection carries no routing target")
 
-        if str(getattr(info, "type", "") or "") == "local":
+        conn_type = str(getattr(info, "type", "") or "")
+
+        if conn_type == "local":
             # Composed, because there is no relay URL to re-address. This target
             # is an *authority*, so ``@``, ``:`` and the brackets of an IPv6 host
             # all have to survive — singlebox reclassifies a ``::1`` binding as
@@ -355,7 +400,36 @@ class EngineConnectionService:
             segment = _quote_or_reject(target, safe="@:[]", what="routing target")
             return f"ws://{segment}{_quote_or_reject(socket_path, safe='/', what='socket path')}"
 
-        return self._readdress_onto_gateway(info, token)
+        if str(getattr(info, "url", "") or ""):
+            return self._readdress_onto_gateway(info, token)
+
+        if conn_type in _PROXY_TARGET_TYPES:
+            return self._compose_onto_gateway(target, socket_path, token)
+
+        raise EngineUpstreamError(
+            f"device connection of kind {conn_type!r} carries no relay url and "
+            f"is not a kind this endpoint can compose one for"
+        )
+
+    def _compose_onto_gateway(
+        self, target: str, socket_path: str, token: str
+    ) -> str:
+        """The gateway URL for a provider that hands back a bare routing target.
+
+        Byte-for-byte what :meth:`_readdress_onto_gateway` produces for the same
+        target, path and credential — the provider's origin and routing prefix
+        are discarded there anyway, so the two branches differ only in where the
+        tail came from, never in what is published.
+
+        Encoded here, unlike the re-addressed branch, because these are raw
+        provider values rather than a URL something already encoded. The target
+        keeps ``@``, ``:`` and brackets: it is an authority-like segment
+        (``ARCA_{sandbox_id}@{alt}:{port}``), and the credential is a signature
+        over that exact string, so a reshaped target is a rejected handshake.
+        """
+        segment = _quote_or_reject(target, safe="@:[]", what="routing target")
+        path = _quote_or_reject(socket_path, safe="/", what="socket path")
+        return self._gateway_url(f"{segment}{path}", "", token)
 
     def _readdress_onto_gateway(self, info: object, token: str) -> str:
         """The provider's relay URL, re-pointed at the gateway.
@@ -410,8 +484,22 @@ class EngineConnectionService:
         # cannot end the path early no matter what it holds. The fragment is
         # dropped rather than carried: a browser never sends one, so keeping it
         # would publish a component that cannot reach the upstream.
-        tail = parts.path[len(_PROXYPASS_PREFIX) :]
-        query = parts.query
+        return self._gateway_url(
+            parts.path[len(_PROXYPASS_PREFIX) :], parts.query, token
+        )
+
+    def _gateway_url(self, tail: str, query: str, token: str) -> str:
+        """The gateway URL addressing ``tail``, carrying ``token`` in its query.
+
+        The one place a published socket URL is spelled out, so the callers that
+        arrive at a ``tail`` by different routes — re-addressing a provider's
+        relay URL, or composing from a bare routing target — cannot drift into
+        publishing two different grammars for the same device.
+
+        ``tail`` is everything the gateway forwards: the routing target and the
+        in-device path, already encoded by whoever produced it. ``query`` is the
+        provider's own, or empty.
+        """
         if token:
             # Appended, not assigned — a provider query would otherwise be lost,
             # and the socket would fail with nothing pointing at why. Absent

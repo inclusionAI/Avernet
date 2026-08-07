@@ -21,10 +21,6 @@ def _make_service(channel_service: object = _UNSET) -> BotBuildService:
     service = BotBuildService.__new__(BotBuildService)
     service._channel_service = MagicMock() if channel_service is _UNSET else channel_service
     service._common_whitelist_service = MagicMock()
-    # build() tests in this module isolate stage-config and path selection;
-    # artifact permission finalization has its own command-contract coverage.
-    service._prepare_artifact_for_build = MagicMock()
-    service._finalize_runtime_artifact = MagicMock()
     return service
 
 
@@ -201,7 +197,6 @@ class TestGenerateOpenClawStageConfigs:
             owner_id="owner-1",
             target_dir=target_dir,
         )
-        service._finalize_runtime_artifact.assert_called_once_with(target_dir)
 
     def test_build_marks_failure_when_openclaw_config_generation_fails(self, tmp_path: Path):
         @dataclass
@@ -252,7 +247,6 @@ class TestGenerateOpenClawStageConfigs:
 
         assert result["success"] is False
         assert result["openclaw_configs_success"] is False
-        service._finalize_runtime_artifact.assert_not_called()
 
     def test_build_skips_openclaw_config_generation_for_non_openclaw_engine(
         self, tmp_path: Path
@@ -307,9 +301,6 @@ class TestGenerateOpenClawStageConfigs:
         assert result["openclaw_configs_success"] is True
         service._generate_mcp_config.assert_called_once()
         service._generate_openclaw_stage_configs.assert_not_called()
-        service._finalize_runtime_artifact.assert_called_once_with(
-            tmp_path / "target-root" / "3" / "claude_code"
-        )
 
 
 @pytest.mark.unit

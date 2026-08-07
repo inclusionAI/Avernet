@@ -6,6 +6,7 @@ Supports both auto-selection (default) and targeted device selection via device_
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 from secbaas.community.api.bot_runtime import (
@@ -121,14 +122,18 @@ class DefaultBotHttpConnInfoDispatcher(BotBaseDispatcher, BotHttpConnInfoDispatc
         )
 
         # 1. Look up bot
-        bot = self._bot_repo.get_active_by_bot_uuid(bot_uuid, tenant, env)
+        # Sync repositories are offloaded to a worker thread so the blocking DB
+        # call does not park the event loop (see BotBaseDispatcher).
+        bot = await asyncio.to_thread(
+            self._bot_repo.get_active_by_bot_uuid, bot_uuid, tenant, env
+        )
         if not bot:
             logger.warning(f"Bot not found: bot_uuid={bot_uuid}, tenant={tenant}")
             raise BotNotFoundError(bot_uuid)
 
         # 2. List all devices for this bot and find the specific one
-        devices = self._device_repo.list_by_bot_id(
-            bot_id=bot.id, tenant=tenant, env=env
+        devices = await asyncio.to_thread(
+            self._device_repo.list_by_bot_id, bot_id=bot.id, tenant=tenant, env=env
         )
         # fmt: off
         device = next(
