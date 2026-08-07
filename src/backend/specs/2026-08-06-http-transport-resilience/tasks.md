@@ -111,7 +111,7 @@ Paths are relative to `src/backend/`.
 
 ## Group E — Boundaries, full verification, delivery
 
-- [ ] **E1. Declare the new import edge.** Add
+- [x] **E1. Declare the new import edge.** Add
   `agentclaw.community.utils.retry` to `internal_dependencies` in
   `src/agentclaw/community/core/harness/README.md`, with a short trailing
   comment — it declares only `...utils.env_utils`, which does not cover the new
@@ -120,7 +120,7 @@ Paths are relative to `src/backend/`.
   boundary test's prefix rule (`actual == d or actual.startswith(d + ".")`)
   already matches against `...utils.retry`.
 
-- [ ] **E2. Run the architecture suite** — at minimum
+- [x] **E2. Run the architecture suite** — at minimum
   `tests/community/architecture/test_module_boundaries.py` (baseline: 3 passed)
   plus `test_api_layer_is_protocols_only.py` and
   `test_core_no_concrete_plugin_imports.py`.

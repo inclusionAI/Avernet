@@ -25,6 +25,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.utils.env_utils
+  - agentclaw.community.utils.retry  # llm.py aliases its transport helpers here
 ```
 
 ### Change impact
