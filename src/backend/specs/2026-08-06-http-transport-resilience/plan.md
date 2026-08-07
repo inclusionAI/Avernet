@@ -25,8 +25,8 @@ adopt it. This is why it goes under `utils/` rather than beside either caller.
 
 `agentclaw.community.utils` is not in `BOUNDARY_SIGNIFICANT_MODULES`
 (`tests/community/architecture/test_module_boundaries.py:61-95`), so the new
-module needs no `README.md` of its own. Both *importers* are boundary-significant
-and must declare the new edge (see _Boundary declarations_).
+module needs no `README.md` of its own. Both *importers* are boundary-significant,
+though only `core/harness` needs a new declaration (see _Boundary declarations_).
 
 Alternatives rejected:
 
