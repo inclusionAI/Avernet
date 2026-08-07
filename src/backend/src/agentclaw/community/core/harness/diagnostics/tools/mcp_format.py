@@ -330,6 +330,10 @@ def _format_mcp_block(mcp: dict, *, include_guide: bool) -> str:
 _BATCH_MAX_MCPS = 3
 _BATCH_CHAR_BUDGET = 4000
 _BATCH_CONCURRENCY = 3
+# MCPs with more tools than this get a batch to themselves: a 3-large-MCP batch
+# (e.g. 27+19+19 tools) piles ~3k chars of signatures on top of the TOOLS.md
+# source and blows antchat's 90s window. Small MCPs still pack 3-per-batch.
+_LARGE_MCP_TOOL_THRESHOLD = 12
 
 _BUCKET_ORDER = ("verified", "schema", "unreachable")
 _BUCKET_HEADERS = {
@@ -383,11 +387,20 @@ def _pack_mcp_batches(items: list[tuple[str, str, dict]]) -> list[list[tuple[str
     current: list[tuple[str, str, dict]] = []
     current_chars = 0
     for item in items:
-        if current and (len(current) >= _BATCH_MAX_MCPS or current_chars + len(item[1]) > _BATCH_CHAR_BUDGET):
+        tools = (item[2].get("tools") or [])
+        is_large = len(tools) > _LARGE_MCP_TOOL_THRESHOLD
+        # Close the current batch before a large MCP (it runs alone to keep
+        # that call's output — one full spec draft, not three — inside the
+        # 90s window), or when the count/char budget would be exceeded.
+        if current and (is_large or len(current) >= _BATCH_MAX_MCPS or current_chars + len(item[1]) > _BATCH_CHAR_BUDGET):
             batches.append(current)
             current, current_chars = [], 0
         current.append(item)
         current_chars += len(item[1])
+        # A large MCP occupies its batch alone.
+        if is_large:
+            batches.append(current)
+            current, current_chars = [], 0
     if current:
         batches.append(current)
     return batches
@@ -530,11 +543,16 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - 注意事项可结合 description、工具名称和常见调用约束来写，要求具体、可执行；如果提供了内网知识库参考，必须将相关术语说明融入注意事项中
 
 ##  MCP 调用规范
-- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `params` 参数表的 MCP（据参数表转录参数规格）。
-- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成 `### XXX (server_code)` 子章节或 `mcporter call` 示例——这类 MCP 只能出现在映射表里。
-- ✅ 参数表转录要求：基于 `params` 的 name/type/required/desc 如实转录参数；不要编造参数表未提供的调用示例值、命令或业务流程。
-- 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md
-- 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，因此只补最关键、最缺失的部分即可
+- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `params` 参数表的 MCP（挑推荐工具转录）。
+- 每个 MCP 子章节格式（控制 TOOLS.md 体积，避免把所有工具的全部参数都罗列进去）：
+  1. **列出该 MCP 的全部工具名**（一行一个或逗号分隔），让 Bot 知道有哪些工具可用；
+  2. 再**只挑 2-4 个推荐工具**（据工具描述，选该 MCP 主要场景最高频/关键的）**详列必填参数**（name/type/必填；选填可略）；
+  3. 写**注意事项**：必填项提醒、类型/格式约束、易错点。
+- ❌ 不要为每个工具都罗列全部参数规格；推荐工具之外的只列工具名即可。
+- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成 `### XXX (server_code)` 子章节或调用示例——这类 MCP 只能出现在映射表里。
+- ✅ 推荐工具参数：基于 `params` 的 name/type/required 如实转录必填项；不要编造参数表未提供的调用示例值、命令或业务流程。
+- 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md。
+- 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，只补最关键、最缺失的部分。
 
 ## 内网业务知识补充
 - **此章节仅当提供了"内网知识库参考"数据时才输出**，若未提供则跳过

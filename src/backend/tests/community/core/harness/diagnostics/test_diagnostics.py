@@ -1223,6 +1223,24 @@ class TestToolsMcpFormatBatching:
         batches = _pack_mcp_batches(items)
         assert [[d["server_code"] for _, _, d in b] for b in batches] == [["mcp.a"], ["mcp.b"], ["mcp.c"]]
 
+    def test_pack_large_mcp_alone(self):
+        # A many-tool MCP (tools > _LARGE_MCP_TOOL_THRESHOLD) gets its own
+        # batch so that batch's output is one spec draft, not several —
+        # keeps the call inside the 90s window for big MCPs.
+        big = {"server_code": "mcp.big", "tools": [{} for _ in range(15)]}
+        small_a = {"server_code": "mcp.a", "tools": [{} for _ in range(3)]}
+        small_b = {"server_code": "mcp.b", "tools": [{} for _ in range(3)]}
+        items = [
+            ("schema", "a", small_a),
+            ("schema", "y", big),
+            ("schema", "b", small_b),
+        ]
+        batches = _pack_mcp_batches(items)
+        codes = [[d["server_code"] for _, _, d in b] for b in batches]
+        assert ["mcp.big"] in codes  # big sits in its own batch
+        big_batch = [b for b in batches if any(d["server_code"] == "mcp.big" for _, _, d in b)][0]
+        assert len(big_batch) == 1
+
     def test_synthesize_all_no_issue(self):
         out = _synthesize_batch_responses([("无问题", ["mcp.a"]), ("无问题", ["mcp.b"])])
         assert out == "无问题"
