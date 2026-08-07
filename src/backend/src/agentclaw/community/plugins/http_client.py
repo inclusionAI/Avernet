@@ -6,11 +6,13 @@ under the qualified ``HttpClient`` keys. Lives at the ``plugins/`` root rather
 than ``plugins/prod`` so the community column can bind it without importing the
 corp overlay — it carries no corp coupling (only ``httpx`` + ``plugin_api``).
 
-A ``base_url``-scoped client: every call opens a short-lived
-``httpx.Client(base_url=...)`` and issues the request against the relative path,
-returning the raw :class:`httpx.Response`. Arguments left as ``None`` are omitted
-so the wire shape matches a hand-written ``httpx`` call. Transport errors and
-``raise_for_status`` propagate unchanged (the wrapper swallows nothing).
+A ``base_url``-scoped client: one ``httpx.Client(base_url=...)`` is built at
+construction and reused for every call, so requests to the same host keep their
+connection instead of paying a fresh TCP + TLS handshake each time. Requests are
+issued against the relative path, returning the raw :class:`httpx.Response`.
+Arguments left as ``None`` are omitted so the wire shape matches a hand-written
+``httpx`` call. Transport errors and ``raise_for_status`` propagate unchanged
+(the wrapper swallows nothing).
 """
 from __future__ import annotations
 
@@ -28,6 +30,16 @@ class HttpxClient(HttpClient):
     def __init__(self, base_url: str, *, transport: Any | None = None):
         self._base_url = base_url
         self._transport = transport
+        # Eager, not lazy: ``httpx.Client()`` opens no socket, so construction
+        # does no I/O and needs no lock. ``httpx.Client`` is itself thread-safe
+        # for requests, which is what these process-lifetime DI singletons need
+        # when reached from thread-pool workers. Timeout is deliberately not set
+        # here — it is per-call, and passing it at construction would freeze
+        # every caller's deadline to whoever built the client.
+        client_kwargs: dict[str, Any] = {"base_url": base_url}
+        if transport is not None:
+            client_kwargs["transport"] = transport
+        self._client = httpx.Client(**client_kwargs)
 
     def get(
         self,
@@ -109,11 +121,7 @@ class HttpxClient(HttpClient):
             kwargs["data"] = data
         if headers is not None:
             kwargs["headers"] = headers
-        client_kwargs = {"base_url": self._base_url, "timeout": timeout}
-        if self._transport is not None:
-            client_kwargs["transport"] = self._transport
-        with httpx.Client(**client_kwargs) as client:
-            return client.request(method, path, **kwargs)
+        return self._client.request(method, path, timeout=timeout, **kwargs)
 
     @contextmanager
     def stream(
@@ -127,8 +135,11 @@ class HttpxClient(HttpClient):
         timeout: float = 30.0,
     ) -> Iterator[httpx.Response]:
         """Stream a request and yield a streaming ``httpx.Response`` for the
-        ``with`` block (``resp.iter_lines()`` / ``raise_for_status()``). Mirrors
-        ``post``'s short-lived-client pattern; transport errors and
+        ``with`` block (``resp.iter_lines()`` / ``raise_for_status()``). Shares
+        the pooled client with ``_request`` rather than opening a short-lived
+        one, so a stream reuses connections like every other call — and so it
+        cannot outlive the pool's lifecycle teardown. Only the *stream* is
+        closed on exit; the client stays open. Transport errors and
         ``raise_for_status`` propagate unchanged. The test-injected
         ``transport`` (``httpx.MockTransport``) makes the streaming seam
         conformance-testable without a real network.
@@ -140,9 +151,5 @@ class HttpxClient(HttpClient):
             kwargs["json"] = json
         if headers is not None:
             kwargs["headers"] = headers
-        client_kwargs = {"base_url": self._base_url, "timeout": timeout}
-        if self._transport is not None:
-            client_kwargs["transport"] = self._transport
-        with httpx.Client(**client_kwargs) as client:
-            with client.stream(method, path, **kwargs) as resp:
-                yield resp
+        with self._client.stream(method, path, timeout=timeout, **kwargs) as resp:
+            yield resp
