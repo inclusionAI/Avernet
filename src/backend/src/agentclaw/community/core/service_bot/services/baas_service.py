@@ -365,6 +365,7 @@ class BaasService:  # pragma: no cover
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
         personal_bot_template_uuid: Optional[str] = None,
+        theta_master_key_secret: str = "",
     ):
         """初始化 BaasService。
 
@@ -412,6 +413,7 @@ class BaasService:  # pragma: no cover
         self._secret_resolver = secret_resolver
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
+        self._theta_master_key_secret = theta_master_key_secret
 
     def post_bots_api(
         self,
@@ -670,8 +672,30 @@ class BaasService:  # pragma: no cover
             stage=stage,
         )
 
+        # 引擎专属模板字段在 strategy 内集中消费；下游只接收通用 dict。
+        from agentclaw.community.core.bot_management.engines import resolve_provisioning
+
+        provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=engine,
+            template_type=bot.get("template_type"),
+            template_config=template_config,
+        )
+        extra_properties = provisioning_strategy.build_extra_properties(
+            provisioning_ctx,
+            secret_resolver=self._secret_resolver,
+            theta_master_key_secret=self._theta_master_key_secret,
+        )
+
         # 构建出站操作规则
-        outbound_operation_rule = self._build_outbound_operation_rule(bot_id, owner_id, agent_pass_token)
+        outbound_operation_rule = self._build_outbound_operation_rule(
+            bot_id,
+            owner_id,
+            agent_pass_token,
+            extra_properties=extra_properties,
+        )
 
         # 从 ac_bots.ext.service_bot_config 解析沙箱规格（cpu/memory 缺一则整组不传）
         resource_spec = self._resolve_service_bot_resource_spec(bot.get("ext"))
@@ -2722,6 +2746,8 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        *,
+        extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
         """构建出站操作规则 — 委托给注入的 ``OutboundRuleProvider`` (Rule 20)。
 
@@ -2737,6 +2763,7 @@ class BaasService:  # pragma: no cover
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
             bot_type_resolver=self._resolve_bot_type,
+            extra_properties=extra_properties,
         )
 
     def _build_teclaw_outbound_operation_rule(
