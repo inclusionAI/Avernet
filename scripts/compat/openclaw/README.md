@@ -10,7 +10,7 @@ proof separate. Each compatibility run:
 1. installs an exact OpenClaw package in an isolated temporary directory;
 2. imports the real SDK subpaths and required named exports;
 3. copies plugin TypeScript sources without `src/typings/openclaw.d.ts` and
-   type-checks them against the installed real SDK;
+   records a non-blocking source type-drift diagnostic against the real SDK;
 4. starts a deterministic OpenAI-compatible HTTP model and BCS WebSocket
    simulator;
 5. starts a real OpenClaw gateway with the built plugin; and
@@ -52,7 +52,9 @@ The shared npm download cache is kept separately under
 `scripts/.dependencies/cache/openclaw-npm/` so it is not included in CI report
 artifacts. Override it with `--npm-cache` when needed.
 
-`FAIL_SDK_ABI` and `FAIL_SDK_TYPES` distinguish SDK drift from runtime/config
-failures. `FAIL_LLM_PIPELINE` means OpenClaw started but never reached the
-local model endpoint. Missing or infrastructure-failed rows make the aggregate
-report incomplete and fail the command.
+`FAIL_SDK_ABI` identifies missing runtime SDK exports. A source-only type drift
+is reported as `PASS_WITH_WARNINGS` because OpenClaw loads the built JavaScript
+plugin rather than recompiling its source. `FAIL_LLM_PIPELINE` means OpenClaw
+started but never reached the local model endpoint. Missing or
+infrastructure-failed rows make the aggregate report incomplete and fail the
+command.

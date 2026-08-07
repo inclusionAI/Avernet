@@ -96,6 +96,19 @@ class DiscoverVersionsTest(unittest.TestCase):
 
 
 class ResultStatusTest(unittest.TestCase):
+    def test_reports_source_type_drift_as_a_non_blocking_warning(self) -> None:
+        self.assertEqual(
+            status_from_phases(
+                {
+                    "install": {"ok": True},
+                    "sdk_imports": {"ok": True},
+                    "typecheck": {"ok": False},
+                    "runtime": {"ok": True, "llm_request_count": 1},
+                }
+            ),
+            "PASS_WITH_WARNINGS",
+        )
+
     def test_reports_llm_pipeline_failure_separately(self) -> None:
         self.assertEqual(
             status_from_phases(

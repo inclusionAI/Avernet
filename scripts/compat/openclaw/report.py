@@ -132,7 +132,7 @@ def markdown_report(summary: dict[str, Any]) -> str:
         )
     lines.extend(
         [
-            "| OpenClaw | Status | Install | SDK imports | Real types | Runtime | LLM calls | Duration | Detail |",
+            "| OpenClaw | Status | Install | SDK imports | Source type diagnostic | Runtime | LLM calls | Duration | Detail |",
             "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- |",
         ]
     )
@@ -230,7 +230,7 @@ def html_report(summary: dict[str, Any]) -> str:
 <style>body{font:14px system-ui;margin:2rem}table{border-collapse:collapse;width:100%%}th,td{border:1px solid #ddd;padding:.5rem;text-align:left}.pass{background:#effaf2}.fail{background:#fff0f0}code{background:#eee;padding:.1rem .3rem}</style>
 </head><body><h1>OpenClaw compatibility report</h1>
 <p>Result: <code>%s</code>; tested %s/%s; generated %s.</p>%s
-<table><thead><tr><th>OpenClaw</th><th>Status</th><th>Install</th><th>SDK imports</th><th>Real types</th><th>Runtime</th><th>Duration</th><th>Detail</th></tr></thead>
+<table><thead><tr><th>OpenClaw</th><th>Status</th><th>Install</th><th>SDK imports</th><th>Source type diagnostic</th><th>Runtime</th><th>Duration</th><th>Detail</th></tr></thead>
 <tbody>%s</tbody></table></body></html>
 """ % (
         "COMPATIBLE" if summary["compatible"] else "INCOMPATIBLE OR INCOMPLETE",

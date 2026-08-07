@@ -494,7 +494,6 @@ def status_from_phases(phases: dict[str, dict[str, Any]]) -> str:
     priority = [
         ("install", "FAIL_PACKAGE_INSTALL"),
         ("sdk_imports", "FAIL_SDK_ABI"),
-        ("typecheck", "FAIL_SDK_TYPES"),
         ("runtime", "FAIL_RUNTIME"),
     ]
     for phase, status in priority:
@@ -502,6 +501,8 @@ def status_from_phases(phases: dict[str, dict[str, Any]]) -> str:
             if phase == "runtime" and phases[phase].get("llm_request_count") == 0:
                 return "FAIL_LLM_PIPELINE"
             return status
+    if "typecheck" in phases and not phases["typecheck"].get("ok"):
+        return "PASS_WITH_WARNINGS"
     return "PASS"
 
 
