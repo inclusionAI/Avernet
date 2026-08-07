@@ -8,6 +8,8 @@ Tests the bot HTTP connection info resolution service including:
 - PaasServiceFacade integration for HTTP connection info resolution
 """
 
+import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -715,3 +717,127 @@ class TestDispatchBotHttpConnInfoWithDeviceUuid:
             )
 
         assert "nonexistent-bot" in str(exc_info.value)
+
+
+# ==================== Event Loop Blocking Regression ====================
+
+
+class TestEventLoopNotBlocked:
+    """Repository calls must not run inline on the uvicorn event loop.
+
+    The repositories are synchronous (blocking DB I/O). Calling them directly
+    from an ``async def`` dispatcher parks the worker's event loop for the
+    duration of the query, so every other request on that worker waits — the
+    head-of-line blocking behind the observed /http-info 499s.
+
+    These tests are deterministic rather than timing-based: the fake repository
+    blocks its thread until a *loop-side* coroutine releases it. If the repo
+    call ran on the loop, the releasing coroutine could never be scheduled and
+    the fake would time out.
+    """
+
+    @staticmethod
+    def _blocking(return_value, reached, release):
+        """Build a sync repo stub that blocks until the loop releases it."""
+
+        def _call(*_args, **_kwargs):
+            reached.set()
+            if not release.wait(timeout=5):
+                raise AssertionError(
+                    "event loop was blocked: the loop-side coroutine never ran "
+                    "while the synchronous repository call was in flight"
+                )
+            return return_value
+
+        return _call
+
+    @staticmethod
+    async def _release_when_reached(reached, release):
+        """Loop-side coroutine — only progresses if the loop is free."""
+        await asyncio.to_thread(reached.wait, 5)
+        release.set()
+
+    @pytest.mark.asyncio
+    async def test_auto_select_flow_yields_loop_during_bot_lookup(
+        self,
+        mock_bot,
+        mock_active_device,
+        mock_bot_repo,
+        mock_device_repo,
+        mock_paas_facade,
+    ):
+        """Auto-select flow keeps the loop responsive during the bot lookup."""
+        from secbaas.community.core.service.bot_runtime.dispatcher import (
+            DefaultBotHttpConnInfoDispatcher,
+        )
+
+        reached = threading.Event()
+        release = threading.Event()
+        mock_bot_repo.get_active_by_bot_uuid.side_effect = self._blocking(
+            mock_bot, reached, release
+        )
+        mock_device_repo.list_by_bot_id.return_value = [mock_active_device]
+
+        service = DefaultBotHttpConnInfoDispatcher(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            paas_facade=mock_paas_facade,
+        )
+
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(
+                service.dispatch_bot_http_conn_info(
+                    bot_uuid="bot-uuid-001",
+                    port=20003,
+                    path="/api/health",
+                    tenant="test_tenant",
+                ),
+                self._release_when_reached(reached, release),
+            ),
+            timeout=10,
+        )
+
+        assert result.token == "test-jwt-token"
+
+    @pytest.mark.asyncio
+    async def test_specific_device_flow_yields_loop_during_device_listing(
+        self,
+        mock_bot,
+        mock_active_device,
+        mock_bot_repo,
+        mock_device_repo,
+        mock_paas_facade,
+    ):
+        """device_uuid flow keeps the loop responsive during the device listing."""
+        from secbaas.community.core.service.bot_runtime.dispatcher import (
+            DefaultBotHttpConnInfoDispatcher,
+        )
+
+        reached = threading.Event()
+        release = threading.Event()
+        mock_bot_repo.get_active_by_bot_uuid.return_value = mock_bot
+        mock_device_repo.list_by_bot_id.side_effect = self._blocking(
+            [mock_active_device], reached, release
+        )
+
+        service = DefaultBotHttpConnInfoDispatcher(
+            bot_repo=mock_bot_repo,
+            device_repo=mock_device_repo,
+            paas_facade=mock_paas_facade,
+        )
+
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(
+                service.dispatch_bot_http_conn_info(
+                    bot_uuid="bot-uuid-001",
+                    port=20003,
+                    path="/api/health",
+                    tenant="test_tenant",
+                    device_uuid="device-uuid-001",
+                ),
+                self._release_when_reached(reached, release),
+            ),
+            timeout=10,
+        )
+
+        assert result.token == "test-jwt-token"
