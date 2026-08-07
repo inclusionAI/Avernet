@@ -189,6 +189,5 @@ bcs-cli = { workspace = true }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-test-support = { workspace = true }
 serial_test = "3"
-bcs-jwt = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["testing"] }
 jsonwebtoken = { workspace = true }

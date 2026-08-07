@@ -131,9 +131,6 @@ user_config:
     "/openapi/v1/bcsfuse/**":
       user: required
 
-    "/openapi/v1/bcsfuse/**":
-      user: required
-
     # BCN verifies the short-lived session credential carried by this exact
     # WebSocket handshake. Keep every other collaboration operation, including
     # session-token issuance, on the required User Principal boundary above.
