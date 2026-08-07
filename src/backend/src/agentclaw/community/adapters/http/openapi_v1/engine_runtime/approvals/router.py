@@ -1,4 +1,11 @@
-"""Approvals group — ``/openapi/v1/bots/approvals/{bot_id}``."""
+"""Approvals group — ``/openapi/v1/bots/approvals/{bot_id}``.
+
+**Private bots only** — private personal bots, and a service bot's
+pre-publication draft workspace; see ``engine_runtime/gating.py``.
+Approval state is session-scoped, so on a shared bot these routes
+would reach other callers' sessions — the same hazard the sessions
+group gates on.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +30,9 @@ from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
+    resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.errors import (
@@ -89,8 +99,10 @@ async def get_approval_mode(
     # Publicly a GET with a query parameter; the engine models the same read as
     # a POST with a body.
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="POST",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="POST",
         path="/api/approvals/mode/get",
         # user_id is filled from the principal; the engine uses it to route.
         body={"session_key": session_key, "user_id": owner_id},
@@ -111,8 +123,10 @@ async def set_approval_mode(
     # The enum's value is forwarded verbatim: all three are already in the
     # engine's accept-set, so no translation is needed and none is applied.
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="POST",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="POST",
         path="/api/approvals/mode/set",
         body={
             "session_key": body.session_key,
@@ -152,8 +166,10 @@ async def list_approval_modes(
     # The list is served from the public enum rather than relayed, because the
     # engine's descriptions are Chinese and this surface promises English.
     owner_id = caller_owner_id(principal)
+    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, method="GET",
+        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        method="GET",
         path="/api/engine/capabilities",
     )
     caps = result.data if isinstance(result.data, dict) else {}

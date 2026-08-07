@@ -147,3 +147,32 @@ def test_modes_serves_a_write_only_engine(client, relay):
 def test_foreign_bot_is_masked_404_without_a_device_call(client, relay):
     assert fails(client.get("/openapi/v1/bots/approvals/other/modes"), 404)
     assert relay.calls == []
+
+
+# ── the private-bots-only gate ───────────────────────────────────────────────
+
+
+def test_a_service_bot_is_served_at_its_draft_device(client, relay):
+    """Approval reads/writes on a service bot must reach the DRAFT device —
+    the published runtime is multi-caller, and approval state is
+    session-scoped."""
+    relay.set_bot_type("service")
+    relay.results = [EngineResult(data={"sessionKey": "sk", "mode": "approve"})]
+    resp = client.get(
+        f"/openapi/v1/bots/approvals/{BOT}/mode", params={"session_key": "sk"}
+    )
+    assert resp.status_code == 200, resp.json()
+    assert relay.calls and all(c["draft_device"] is True for c in relay.calls)
+
+
+def test_a_shared_bot_gets_501_without_touching_the_device(client, relay):
+    """On a shared bot these routes would reach other callers' sessions."""
+    relay.set_shared()
+    body = fails(
+        client.get(
+            f"/openapi/v1/bots/approvals/{BOT}/mode", params={"session_key": "sk"}
+        ),
+        501,
+    )
+    assert body["message"] == "Not supported for this bot type"
+    assert relay.calls == []

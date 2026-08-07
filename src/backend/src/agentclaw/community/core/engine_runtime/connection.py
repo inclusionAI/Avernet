@@ -34,10 +34,10 @@ from agentclaw.community.core.devices.repository.protocol import (
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.engine_runtime.errors import (
-    EngineBotTypeNotSupportedError,
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
+from agentclaw.community.core.engine_runtime.gate import require_operable_bot
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
 from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
 from agentclaw.community.di.config import GatewayEndpoint
@@ -103,12 +103,6 @@ _CHAT_WS_PATHS = {
 # tenant's device from v1 at any scope.
 
 
-#: The only bot type a socket is published for — the same rule, and the same
-#: reason, as the sessions group's gate. Necessary but not sufficient; the bot
-#: must also be unshared. See :func:`_require_private_personal_bot`.
-_SUPPORTED_BOT_TYPE = "personal"
-
-
 def _quote_or_reject(value: str, *, safe: str, what: str) -> str:
     """Percent-encode ``value`` for a URL, or refuse it by name.
 
@@ -126,47 +120,6 @@ def _quote_or_reject(value: str, *, safe: str, what: str) -> str:
         raise EngineUpstreamError(
             f"device connection carries an unencodable {what}"
         ) from exc
-
-
-def _require_private_personal_bot(
-    bot_type: str, bot_id: str, *, is_shared: bool
-) -> None:
-    """Reject bots more than one caller reaches, before a socket is composed.
-
-    The socket this endpoint publishes is **not** chat-scoped, however it is
-    labelled. The engine's WebSocket server answers ``hello`` by advertising
-    ``sessions.list``, ``sessions.patch``, ``sessions.delete``,
-    ``sessions.reset`` and the ``exec.approvals`` methods, grants
-    ``operator.admin``, and forwards any method it does not handle itself to
-    the active engine's relay plugin. A caller holding the returned credential
-    therefore has an operator channel, not a chat channel.
-
-    On a ``service`` bot that is the same exposure the sessions group already
-    refuses. The engine has no tenant axis and its session list is not scoped
-    per caller, so one device holds every caller's sessions; the sessions group
-    answers 501 rather than let the bot's owner enumerate them. Publishing this
-    socket for the same bot would hand the same owner the same data over a
-    different transport — a 501 on the front door with the window left open.
-
-    ``is_shared`` closes the same window on a ``personal`` bot that is public
-    or has collaborators: those are multi-caller too, and this socket's
-    ``sessions.*`` methods reach every caller's conversations on the device.
-    See :func:`~agentclaw.community.core.engine_runtime.sharing.bot_is_shared`
-    — one predicate, so this gate and the sessions gate cannot drift apart.
-
-    Gated here rather than in the router because the rule is about what may be
-    *composed*, not about how it is served: any future caller of ``build`` is
-    covered without repeating the check.
-    """
-    if bot_type != _SUPPORTED_BOT_TYPE:
-        raise EngineBotTypeNotSupportedError(
-            f"connections are not served for bot_type={bot_type!r}"
-        )
-    if is_shared:
-        raise EngineBotTypeNotSupportedError(
-            "connections are not served for a shared bot: the socket grants "
-            "operator.admin over every caller's sessions on the device"
-        )
 
 
 class EngineConnectionService:
@@ -198,15 +151,25 @@ class EngineConnectionService:
         can never widen it.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
-        _require_private_personal_bot(
+        # The socket this endpoint publishes is **not** chat-scoped, however it
+        # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
+        # ``exec.approvals`` methods and grants ``operator.admin``, so the
+        # credential is an operator channel over every session on the device.
+        # The shared gate admits exactly the bots whose device only the owner
+        # reaches — see ``gate.py`` for the full rule, including why a service
+        # bot's *draft* device (the one ``_active_binding_id`` resolves) is in
+        # that set. Gated here rather than in the router because the rule is
+        # about what may be *composed*, not about how it is served: any future
+        # caller of ``build`` is covered without repeating the check.
+        require_operable_bot(
             str(bot.get("bot_type") or ""),
-            bot_id,
             is_shared=bot_is_shared(
                 bot,
                 self._collaborator_repo,
                 bot_id=str(bot.get("bot_id") or bot_id),
                 owner_id=str(bot.get("owner_id") or owner_id),
             ),
+            surface="connections",
         )
         engine = str(bot.get("active_engine") or "")
 
@@ -274,6 +237,11 @@ class EngineConnectionService:
         Owner-scoped for the same reason ``resolve_for_bot`` was: the query is
         ``(bot_id, owner_id)``, so another owner's binding cannot be returned
         even though ownership was already established above.
+
+        For a ``service`` bot this is the **draft** binding, and that is what
+        the gate above relies on: the verify/online runtimes publishing
+        produces are bound under ``publish_bot_id`` on the publish records,
+        so a ``bot_id``-keyed read cannot select them.
         """
         binding = self._binding_repository.get_active_by_bot_and_owner(
             bot_id, owner_id

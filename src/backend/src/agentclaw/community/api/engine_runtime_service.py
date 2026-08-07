@@ -50,6 +50,7 @@ class EngineRuntimeRelayProtocol(Protocol):
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
+        draft_device: bool = False,
     ) -> EngineResult:
         """Issue ``method path`` against the caller's bot's engine adapter.
 
@@ -59,6 +60,11 @@ class EngineRuntimeRelayProtocol(Protocol):
         ``facts`` reuses a resolve a gating handler already paid for; ``None``
         resolves here. Only a value this relay returned for the same
         ``bot_id``/``owner_id`` is safe — it stands in for the ownership proof.
+
+        ``draft_device=True`` addresses a ``service`` bot's pre-publication
+        draft binding instead of its published runtime; inert for a personal
+        bot. The sessions group passes it — that surface operates the owner's
+        draft workspace, and the published runtime is a multi-caller device.
         """
         ...
 

@@ -706,6 +706,48 @@ async def test_publish_ext_is_read_when_it_arrives_as_json_text():
     assert resolver.binding_calls == [(9, OWNER, BOT)]
 
 
+@pytest.mark.asyncio
+async def test_draft_device_addresses_a_service_bots_draft_binding():
+    """``draft_device=True`` resolves the bot's own pre-publication binding.
+
+    The sessions group operates the owner's draft workspace, and the published
+    runtime is a multi-caller device whose session collection is not scoped
+    per caller — so its forwards must reach the draft binding even though the
+    bot is published. The draft lookup is the same owner-scoped
+    ``resolve_for_bot`` a personal bot uses, and the publish records are not
+    consulted at all.
+    """
+    resolver = _Resolver()
+    repo = _PublishRepo(
+        {100: [_PublishRecord({"binding": {"online": 42, "verify": 41}})]}
+    )
+    relay = _relay(
+        bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
+    )
+
+    await relay.call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        draft_device=True,
+    )
+
+    assert resolver.calls == [(BOT, OWNER)]
+    assert resolver.binding_calls == []
+    assert repo.calls == []
+
+
+@pytest.mark.asyncio
+async def test_draft_device_is_inert_for_a_personal_bot():
+    """A personal bot has only the one binding, so the flag changes nothing."""
+    resolver = _Resolver()
+    await _relay(resolver=resolver).call(
+        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
+        draft_device=True,
+    )
+
+    assert resolver.calls == [(BOT, OWNER)]
+    assert resolver.binding_calls == []
+
+
 # ── device resolution stays off the event loop ────────────────────────────────
 
 

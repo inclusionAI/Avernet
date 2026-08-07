@@ -549,24 +549,55 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
 # ── bot-type gate ─────────────────────────────────────────────────────────
 
 
-def test_a_service_bot_is_refused_before_a_device_is_touched():
-    """The published socket is an operator channel, not a chat channel.
+def test_an_unshared_service_bot_is_served_its_draft_socket():
+    """The socket a service bot gets addresses its DRAFT device, and only that.
 
-    The engine's WebSocket server advertises the ``sessions.*`` and
-    ``exec.approvals.*`` methods and grants ``operator.admin``, and one service
-    bot's device holds every caller's sessions. Serving this endpoint there
-    would hand the owner over a socket precisely what the sessions group
-    answers 501 to refuse over HTTP.
+    The published socket is an operator channel — ``sessions.*``,
+    ``exec.approvals.*``, ``operator.admin`` — so it may only reach a device
+    the owner alone uses. For an unshared service bot that is the draft
+    binding: this endpoint reads it owner-scoped by ``bot_id``, and the
+    verify/online runtimes publishing produces are bound under
+    ``publish_bot_id`` on the publish records, so they cannot be addressed
+    here at all.
     """
+    bindings, devices = _Bindings(), _Devices()
+    result = _build(
+        _svc(bots=_Bots(bot_type="service"), bindings=bindings, devices=devices)
+    )
+
+    assert [s.kind for s in result.sockets] == ["chat"]
+    # The one binding consulted is the (bot_id, owner_id) draft binding.
+    assert bindings.calls == [(BOT, OWNER)]
+
+
+def test_a_shared_service_bot_is_refused_before_a_device_is_touched():
+    """Sharing closes the draft window too: ``ExpertChatService`` creates
+    collaborator and public callers' sessions on the bot's own draft binding,
+    so a shared service bot's draft device is multi-caller — the exposure this
+    gate exists to prevent."""
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     devices = _Devices()
-    svc = _svc(bots=_Bots(bot_type="service"), bindings=bindings, devices=devices)
+    svc = _svc(
+        bots=_Bots(bot_type="service", public="1"), bindings=bindings, devices=devices
+    )
 
     with pytest.raises(EngineBotTypeNotSupportedError):
         _build(svc)
 
     # Refused at composition time — no device call was made on the way out.
     assert devices.kwargs is None
+
+
+def test_a_collaborated_service_bot_is_refused():
+    """Service bots are exactly the type that takes collaborators."""
+    bindings = _Bindings(raises=AssertionError("must not be reached"))
+    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
+    svc = _svc(
+        bots=_Bots(bot_type="service"), bindings=bindings, collaborators=collaborators
+    )
+
+    with pytest.raises(EngineBotTypeNotSupportedError):
+        _build(svc)
 
 
 def test_a_public_personal_bot_is_refused_before_a_device_is_touched():
