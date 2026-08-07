@@ -176,6 +176,7 @@ internal_dependencies:
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.task_queue
+  - agentclaw.community.core.workspace
   - agentclaw.community.core.base
   - agentclaw.community.kernel.lifecycle
   - agentclaw.community.log

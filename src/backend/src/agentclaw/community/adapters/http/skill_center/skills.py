@@ -549,7 +549,11 @@ async def upload_skill(
                 is_public=skill.get('is_public'),
                 is_builtin=skill.get('is_builtin'),
                 user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-                bot_id=skill.get('bolt_id') if skill.get('bot_id') else "default",
+                bot_id=(
+                    str(skill["bolt_id"])
+                    if skill.get("bolt_id") is not None
+                    else "default"
+                ),
                 gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
                 gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
             ),
