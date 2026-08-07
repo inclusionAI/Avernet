@@ -9,25 +9,25 @@ Paths are relative to `src/backend/`.
 
 ## Group A — The reusable retry component
 
-- [ ] **A1. Create `src/agentclaw/community/utils/retry.py`.**
+- [x] **A1. Create `src/agentclaw/community/utils/retry.py`.**
   Module docstring explains why classification is symptom-based (the
   `sofa_tracer` send-hook wrapper re-types transport errors and hides the cause
   on `__cause__`) and why retry is opt-in per call site rather than in the
   transport.
 
-- [ ] **A2. Implement `client_error_status(exc) -> int | None`.**
+- [x] **A2. Implement `client_error_status(exc) -> int | None`.**
   Reads `exc.response.status_code`; returns it when it is an `int` in `[400, 500)`,
   else `None`. Document that `None` is a meaningful answer, not a missing one.
 
-- [ ] **A3. Implement `is_transport_failure(exc) -> bool`** as
+- [x] **A3. Implement `is_transport_failure(exc) -> bool`** as
   `client_error_status(exc) is None`.
 
-- [ ] **A4. Implement `describe_exception(exc) -> str`.**
+- [x] **A4. Implement `describe_exception(exc) -> str`.**
   `"Type: msg"`, plus `" | caused by Type: msg"` when `__cause__` or
   `__context__` is set and is not `exc` itself, plus `" | request=<url>"` when
   `exc.request.url` exists.
 
-- [ ] **A5. Implement `retry_transport_call(call, *, operation, attempts=DEFAULT_ATTEMPTS, backoff_seconds=DEFAULT_BACKOFF_SECONDS)`.**
+- [x] **A5. Implement `retry_transport_call(call, *, operation, attempts=DEFAULT_ATTEMPTS, backoff_seconds=DEFAULT_BACKOFF_SECONDS)`.**
   Raise `ValueError` when `attempts < 1`. Loop: return `call()` on success; on
   exception, bare-`raise` when attempts are exhausted or the failure is not a
   transport failure (logging ERROR with elapsed ms + `describe_exception`);
