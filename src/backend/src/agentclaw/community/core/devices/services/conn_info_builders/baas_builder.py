@@ -8,8 +8,8 @@ from agentclaw.community.core.devices.repository.protocol import DeviceBindingRe
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_context import ConnInfoBuildError
 from agentclaw.community.core.devices.services.baas_conn_info import build_baas_conn_info_for_http
-from agentclaw.community.core.devices.services.baas_template_resolver import (
-    SystemConfigBaasTemplateResolver,
+from agentclaw.community.core.devices.services.effective_engine_resolver import (
+    EffectiveEngineResolverProtocol,
 )
 from agentclaw.community.log import get_logger
 
@@ -37,12 +37,14 @@ class BaasConnInfoBuilder:
         baas_service,
         bot_repository: BotRepository,
         device_binding_repository: DeviceBindingRepository,
+        effective_engine_resolver: EffectiveEngineResolverProtocol,
         sandbox_client: "SandboxRuntimeClient | None" = None,
     ):
         self._baas_service = baas_service
         self._bot_repo = bot_repository
         self._device_repo = device_binding_repository
         self._sandbox_client = sandbox_client
+        self._effective_engine_resolver = effective_engine_resolver
 
     def build(
         self,
@@ -83,7 +85,7 @@ class BaasConnInfoBuilder:
         raw_engine_type = (bot or {}).get("active_engine") or _DEFAULT_ENGINE_TYPE
         bot_type = (bot or {}).get("bot_type") or ""
         template_type = (bot or {}).get("template_type") or ""
-        engine_type = SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+        engine_type = self._effective_engine_resolver.resolve_effective_engine(
             engine_type=raw_engine_type,
             template_type=template_type,
         )

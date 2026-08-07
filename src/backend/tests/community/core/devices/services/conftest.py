@@ -293,6 +293,10 @@ def device_context_resolver(world, fake_baas_service, device_service):
     from agentclaw.community.core.devices.services.conn_info_builders.baas_builder import (
         BaasConnInfoBuilder,
     )
+    from agentclaw.community.core.devices.services.effective_engine_resolver import (
+        ConfiguredEffectiveEngineResolver,
+        ClaudeCodeTemplateEffectiveEngineResolver,
+    )
     from agentclaw.community.core.devices.services.conn_info_builders.local_builder import (
         LocalConnInfoBuilder,
     )
@@ -314,6 +318,11 @@ def device_context_resolver(world, fake_baas_service, device_service):
             baas_service=fake_baas_service,
             bot_repository=bot_repo,
             device_binding_repository=repo,
+            effective_engine_resolver=ConfiguredEffectiveEngineResolver(
+                resolvers={
+                    "claude_code": ClaudeCodeTemplateEffectiveEngineResolver(),
+                },
+            ),
         ),
         teclaw_builder=TeclawConnInfoBuilder(baas_service=fake_baas_service),
         local_builder=LocalConnInfoBuilder(device_service=device_service),

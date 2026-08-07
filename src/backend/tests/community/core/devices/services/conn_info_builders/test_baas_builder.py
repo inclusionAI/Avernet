@@ -6,6 +6,10 @@ from agentclaw.community.core.devices.services.device_context import ConnInfoBui
 from agentclaw.community.core.devices.services.conn_info_builders.baas_builder import (
     BaasConnInfoBuilder,
 )
+from agentclaw.community.core.devices.services.effective_engine_resolver import (
+    ConfiguredEffectiveEngineResolver,
+    ClaudeCodeTemplateEffectiveEngineResolver,
+)
 
 
 @pytest.fixture
@@ -60,6 +64,11 @@ def _make_builder(baas_service, bot_repo, device_repo):
         baas_service=baas_service,
         bot_repository=bot_repo,
         device_binding_repository=device_repo,
+        effective_engine_resolver=ConfiguredEffectiveEngineResolver(
+            resolvers={
+                "claude_code": ClaudeCodeTemplateEffectiveEngineResolver(),
+            },
+        ),
     )
 
 

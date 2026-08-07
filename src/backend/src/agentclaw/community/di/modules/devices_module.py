@@ -66,6 +66,11 @@ from agentclaw.community.core.devices.services.baas_publish_task_handlers import
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
+from agentclaw.community.core.devices.services.effective_engine_resolver import (
+    ClaudeCodeTemplateEffectiveEngineResolver,
+    ConfiguredEffectiveEngineResolver,
+    EffectiveEngineResolverProtocol,
+)
 from agentclaw.community.core.devices.services.conn_info_builders.arca_builder import (
     ArcaConnInfoBuilder,
 )
@@ -340,18 +345,32 @@ class DevicesModule(Module):
     @singleton
     @provider
     @inject
+    def effective_engine_resolver(
+        self,
+    ) -> EffectiveEngineResolverProtocol:
+        return ConfiguredEffectiveEngineResolver(
+            resolvers={
+                "claude_code": ClaudeCodeTemplateEffectiveEngineResolver(),
+            },
+        )
+
+    @singleton
+    @provider
+    @inject
     def baas_conn_info_builder(
         self,
         baas_service: BaasService,
         bot_repository: BotRepository,
         device_binding_repository: DeviceBindingRepository,
         sandbox_client: SandboxRuntimeClient,
+        effective_engine_resolver: EffectiveEngineResolverProtocol,
     ) -> BaasConnInfoBuilder:
         return BaasConnInfoBuilder(
             baas_service=baas_service,
             bot_repository=bot_repository,
             device_binding_repository=device_binding_repository,
             sandbox_client=sandbox_client,
+            effective_engine_resolver=effective_engine_resolver,
         )
 
     @singleton
