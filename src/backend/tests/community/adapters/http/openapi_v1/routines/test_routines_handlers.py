@@ -165,6 +165,29 @@ async def test_list_routines_returns_envelope_page():
 
 
 @pytest.mark.asyncio
+async def test_list_routines_asks_for_the_draft_stage_only():
+    """The list is draft-only, like every other route in this group.
+
+    ``list_all_crons`` fans a service bot out over draft, verify and online
+    runtimes when no stage is given — but this public surface operates a bot's
+    pre-publication workspace, so listing here must neither show nor query the
+    published runtimes' crons.
+    """
+    service = _StubCronService([_adapter_dict()])
+
+    await list_routines(
+        page=PageParams(page=1, page_size=20),
+        principal={"user_id": "u1"},
+        bot_id="bot-x",
+        status=None,
+        factory=service,
+        request=_request_without_trace(),
+    )
+
+    assert service.last_call_kwargs.get("runtime_stage") == "draft"
+
+
+@pytest.mark.asyncio
 async def test_list_routines_paginates_items():
     items = [
         _adapter_dict(id="t1"),

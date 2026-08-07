@@ -68,6 +68,7 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "converter",     # domain-model → API Response transforms
     "models",        # adapter-owned identity / response dataclasses
     "errors",        # adapter-owned error types (kept import-light on purpose)
+    "gating",        # engine-runtime resolve-and-gate helper shared by groups
     "clusters",      # public-API domain rule (engine ↔ cluster bijection)
     "principal",     # caller-identity extraction from the principal seam
     "enums",         # adapter-owned public enums (import-light by design:
@@ -238,6 +239,10 @@ _CORE_SERVICE_NAMES_OK: frozenset[str] = frozenset({
     "IdentityFileListResponse", "BotIdentityFileResponse",
     "BotIdentityFileUpdateResponse",
     "VALID_ENTITY_TYPES",
+    # Runtime-stage constant, not a service: the routines router passes it to
+    # ``list_all_crons`` so the public list stays draft-only, the same stage
+    # every other route in that group already defaults to.
+    "RUNTIME_STAGE_DRAFT",
     "is_readonly",
     "_HIDDEN_BASENAMES", "_HIDDEN_DIRNAMES",
     "_POOL_SKILLS_LOCAL_RELPATH", "_SKILLS_LOCAL_RELPATH",
