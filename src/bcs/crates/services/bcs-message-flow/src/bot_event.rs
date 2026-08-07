@@ -1224,6 +1224,7 @@ async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &V
         return;
     }
     let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
+    let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let args = data.get("args").cloned().unwrap_or(Value::Null);
     let session_id = cmd.bcs_session_id.clone().unwrap_or_default();
 
@@ -1233,7 +1234,9 @@ async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &V
             crate::message_tracker::ToolCallStartInfo {
                 run_id: cmd.run_id.clone(),
                 session_id,
+                name,
                 args,
+                created_at_ms: now_ms(),
             },
         )
         .await;
@@ -1250,23 +1253,30 @@ async fn persist_tool_result(flow: &BcsMessageFlow, cmd: &BotEventCommand, data:
     flush_chat_segment(flow, cmd, None).await;
 
     let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
-    let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let is_error = data.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
     let result = data.get("result").cloned().unwrap_or(Value::Null);
 
-    let start_info = flow.message_tracker.take_tool_call_start(tool_call_id).await;
-    let (args, run_id, session_id) = match start_info {
+    let start_info = flow.message_tracker.get_tool_call_start(tool_call_id).await;
+    let (args, run_id, session_id, start_name) = match start_info {
         Some(ref info) => (
             info.args.clone(),
             info.run_id.clone(),
             info.session_id.clone(),
+            info.name.clone(),
         ),
         None => (
             Value::Null,
             cmd.run_id.clone(),
             cmd.bcs_session_id.clone().unwrap_or_default(),
+            String::new(),
         ),
     };
+    let name = data
+        .get("name")
+        .and_then(|v| v.as_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(start_name.as_str())
+        .to_string();
 
     let content = serde_json::json!({
         "tool_call_id": tool_call_id,
