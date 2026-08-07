@@ -327,13 +327,15 @@ def _format_mcp_block(mcp: dict, *, include_guide: bool) -> str:
 # pre-batching prompt byte-for-byte. Batches run concurrently — llm.py's own
 # semaphore allows 10, so ``_BATCH_CONCURRENCY`` is the only limiter; 3 is
 # the safe default until antchat's rate limit is known (bump to 5 if clean).
-_BATCH_MAX_MCPS = 3
+_BATCH_MAX_MCPS = 5
 _BATCH_CHAR_BUDGET = 4000
 _BATCH_CONCURRENCY = 3
-# MCPs with more tools than this get a batch to themselves: a 3-large-MCP batch
-# (e.g. 27+19+19 tools) piles ~3k chars of signatures on top of the TOOLS.md
-# source and blows antchat's 90s window. Small MCPs still pack 3-per-batch.
-_LARGE_MCP_TOOL_THRESHOLD = 12
+# MCPs with more tools than this get a batch to themselves. With stream=True
+# (llm.py) antchat's ~90s output cap is gone (streaming budget ~1800s), so the
+# limiter is now first-token time: bigger batches → bigger input → slower TTFT,
+# and TTFT must stay under 90s. 5 MCPs/batch keeps TTFT comfortably under 90s
+# (measured ~46-80s); revisit up if a real bot shows TTFT headroom.
+_LARGE_MCP_TOOL_THRESHOLD = 20
 
 _BUCKET_ORDER = ("verified", "schema", "unreachable")
 _BUCKET_HEADERS = {
