@@ -188,6 +188,7 @@ class ServiceBotModule(Module):
         baas_http: Annotated[HttpClient, QUALIFIER_BAAS],
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
         secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
     ) -> BaasService:
@@ -223,6 +224,7 @@ class ServiceBotModule(Module):
             personal_bot_template_uuid=baas.personal_bot_template_uuid,
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
