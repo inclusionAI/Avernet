@@ -130,6 +130,17 @@ wider than the risk, given `env` comes from deployment config rather than
 per-call input. A test pins this as a decision so it isn't "fixed" by a
 consistency edit later.
 
+Padding on `task_type` is rejected at **two** boundaries, because neither covers
+the other. `enqueue` rejects it per row whenever a key is supplied — `enqueue`
+never consults the registry, and the worker tolerates persisted types with no
+handler, so a row can carry a type no registry ever saw. The harm there runs
+opposite to intuition: the padded row is the one that *cannot* run, but it shares
+a dedup slot with the bare type, so a live `job ` row holding `k1` makes a
+legitimate `job` enqueue for `k1` join it with `created=False` — the work
+suppressed is the work that would have run. Un-keyed enqueues are deliberately
+not validated: their `active_idempotency_key` is `NULL`, so they never enter the
+index and cannot collide.
+
 `HandlerRegistry.register` additionally rejects a task type that folds onto an
 already-registered one. That is second line of defence, not the enforcement:
 the collation settles case *across processes*, while this catches the PAD SPACE

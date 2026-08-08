@@ -862,3 +862,42 @@ def test_a_properly_released_key_is_reusable_after_the_same_terminal_state(repo)
     second = _enqueue_result(repo, idempotency_key="k1")
     assert second.created is True
     assert second.record.id != first.record.id
+
+
+# ── task_type padding at the enqueue boundary ───────────────────────────────
+
+
+@pytest.mark.parametrize("task_type", ["job ", " job", " job ", "job\t", "\njob"])
+def test_keyed_enqueue_rejects_a_padded_task_type(repo, task_type):
+    """``HandlerRegistry`` cannot cover this: ``enqueue`` never consults it, and
+    the worker tolerates persisted types with no handler, so a row can carry a
+    ``task_type`` no registry ever saw.
+
+    The harm runs opposite to intuition. The padded row is the one that cannot
+    run — the worker fails an unregistered type — but on MySQL/OceanBase it
+    shares a dedup slot with the bare type, so a *live* ``"job "`` row holding
+    ``k1`` makes a legitimate ``"job"`` enqueue for ``k1`` join it with
+    ``created=False``. The work suppressed is the work that would have run."""
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        _enqueue_result(repo, task_type=task_type, idempotency_key="k1")
+
+    assert _all_rows(repo) == []
+
+
+@pytest.mark.parametrize("task_type", ["job ", " job", "job\t"])
+def test_unkeyed_enqueue_still_accepts_any_task_type(repo, task_type):
+    """The scoping is deliberate, not an oversight. An un-keyed row has a NULL
+    ``active_idempotency_key`` and so never enters the unique index — its
+    padding cannot collide with anything. Validating it would change behaviour
+    for un-keyed callers, whom this change leaves exactly as they were."""
+    record = _enqueue(repo, task_type=task_type)
+    assert record.task_type == task_type  # stored verbatim, as before
+    assert _key_columns(repo, record.id) == (None, None)
+
+
+def test_padded_task_type_is_rejected_through_the_service_facade(repo):
+    """Adopters call the service, so the guard has to hold on that path too."""
+    service = TaskQueueService(repo)
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        service.enqueue("job ", {}, 3600, idempotency_key="k1")
+    assert _all_rows(repo) == []

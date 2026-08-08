@@ -157,6 +157,42 @@ def _validate_idempotency_key(key: str) -> None:
         )
 
 
+def _validate_keyed_task_type(task_type: str) -> None:
+    """Reject a ``task_type`` that would blur the dedup scope of a keyed row.
+
+    ``task_type`` is a scope column of the dedup unique index, so it decides
+    *which* key space a row lands in. ``utf8mb4_bin`` settles case but is PAD
+    SPACE, so ``"job "`` and ``"job"`` are one entry on MySQL/OceanBase — and a
+    padded row can therefore occupy the dedup slot belonging to the bare type.
+    The direction that matters is the one that costs real work: a live
+    ``"job "`` row holding ``k1`` makes a legitimate ``"job"`` enqueue for
+    ``k1`` take the conflict path, match that row, and return it with
+    ``created=False``. Work that *would* have run is suppressed by a row that
+    cannot run at all — the worker fails an unregistered type outright.
+
+    :class:`HandlerRegistry` already refuses to *register* such a type, but that
+    cannot cover this: ``enqueue`` never consults the registry, and the worker
+    explicitly tolerates persisted types with no handler, so a row can carry a
+    ``task_type`` no registry ever saw. The registry guard protects startup; this
+    one protects every stored row. Two boundaries, so deliberately two checks —
+    core cannot import the plugin, so they cannot share an implementation.
+
+    Only keyed enqueues are validated. An un-keyed row has a ``NULL``
+    ``active_idempotency_key`` and so never participates in the unique index at
+    all; its ``task_type`` padding cannot collide with anything. Validating it
+    would change behaviour for un-keyed callers, which this change is otherwise
+    careful to leave exactly as they were.
+    """
+    if task_type != task_type.strip():
+        raise ValueError(
+            f"task_type {task_type!r} must not have leading or trailing "
+            "whitespace when an idempotency_key is supplied; MySQL/OceanBase "
+            "compare with a PAD SPACE collation, so 'job ' and 'job' share one "
+            "dedup slot and this row could suppress a legitimate enqueue for the "
+            "unpadded type — strip it at the call site"
+        )
+
+
 def _is_active_idem_conflict(exc: IntegrityError) -> bool:
     """Is this ``IntegrityError`` a violation of the active-idempotency index?
 
@@ -359,10 +395,13 @@ class TaskQueueRepository:
         env: str,
         idempotency_key: Optional[str] = None,
     ) -> EnqueueResult:
-        # Validate before any work: a key the column cannot hold faithfully
-        # must never reach the INSERT (see _validate_idempotency_key).
+        # Validate before any work: neither a key the column cannot hold
+        # faithfully, nor a task_type that would blur the dedup scope, may reach
+        # the INSERT. Both checks are keyed-only — an un-keyed row has a NULL
+        # active key and never enters the unique index, so neither can bite it.
         if idempotency_key is not None:
             _validate_idempotency_key(idempotency_key)
+            _validate_keyed_task_type(task_type)
 
         payload_json = json.dumps(payload, ensure_ascii=False)
         insert_kwargs = dict(
