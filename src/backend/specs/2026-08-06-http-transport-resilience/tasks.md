@@ -91,8 +91,13 @@ Paths are relative to `src/backend/`.
 
 - [x] **D2. Reuse it per request.** `_request` drops the `with httpx.Client(...)`
   block and calls `self._client.request(method, path, timeout=timeout, **kwargs)`.
-  Keep the `None`-omitting kwargs assembly exactly as-is. No `close()`, no
-  `limits=`.
+  Keep the `None`-omitting kwargs assembly exactly as-is. No `limits=` tuning
+  (httpx defaults are sane; numbers without evidence are speculative).
+
+  This task originally also said "no `close()`", on the premise that there was
+  no lifecycle hook to call it from. **That premise was wrong** and review
+  caught it — see D6. Anyone backporting this change must carry D6 with it;
+  pooling without lifecycle cleanup leaks the pool.
 
 - [x] **D3. Update `tests/community/plugins/test_http_client.py`.** The five
   existing tests assert `httpx.Client(base_url=..., timeout=<per-call>)`; move
@@ -104,8 +109,29 @@ Paths are relative to `src/backend/`.
   `httpx.Client` exactly once and issue two requests. This is the assertion that
   pins the actual fix.
 
-- [x] **D5. Run** `tests/community/plugins/test_http_client.py` and the
-  `tests/community/di/` HTTP-client module tests → green.
+- [x] **D6. Participate in the lifecycle.** `HttpxClient` inherits
+  `LifecycleBase` (`agentclaw.community.kernel.lifecycle`), closes the pool in
+  `teardown()`, and rebuilds it in `bootstrap()` when it finds `is_closed`.
+  Inheriting the base rather than defining `teardown()` alone is required:
+  `Lifecycle` is `@runtime_checkable`, so `isinstance` — and therefore
+  `discover_lifecycle_participants` — succeeds only when all four hooks exist.
+  The `bootstrap()` rebuild is what keeps restart working, since the injector is
+  process-global (`get_app_injector`) and a second lifespan rediscovers the same
+  instance; without it every later request raises
+  `RuntimeError: Cannot send a request, as the client has been closed`.
+
+- [x] **D7. Pin the lifecycle behavior** in
+  `tests/community/plugins/test_http_client.py`: the `isinstance(client,
+  Lifecycle)` check that discovery itself performs, `teardown()` closing, the
+  setup hooks not closing, `bootstrap()` reusing an already-open client,
+  `bootstrap()` rebuilding a closed one (with distinct mock instances, since a
+  shared-return patch cannot tell a rebuild from a reuse), and an end-to-end
+  restart against a real local server — the mocked form cannot exercise httpx's
+  own closed-client guard.
+
+- [x] **D5. Run** `tests/community/plugins/test_http_client.py` (including the
+  D7 lifecycle cases) and the `tests/community/di/` HTTP-client module tests
+  → green.
 
 ---
 
