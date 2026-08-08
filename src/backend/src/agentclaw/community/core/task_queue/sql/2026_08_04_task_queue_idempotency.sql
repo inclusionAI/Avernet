@@ -21,8 +21,8 @@
 
 ALTER TABLE `ac_task_queue`
   ADD COLUMN `idempotency_key` varchar(190) DEFAULT NULL
-    COMMENT '调用方提供的入队去重键；NULL 表示不去重（仅审计用）',
+    COMMENT 'caller-supplied enqueue dedup key; NULL = opted out (audit only)',
   ADD COLUMN `active_idempotency_key` varchar(190) DEFAULT NULL
-    COMMENT '去重键的执行副本；进入终态时置 NULL 以释放该键',
+    COMMENT 'enforcement copy of idempotency_key; NULLed on terminal to release it',
   ADD UNIQUE KEY `uk_env_task_type_active_idem`
     (`env`, `task_type`, `active_idempotency_key`) GLOBAL;
