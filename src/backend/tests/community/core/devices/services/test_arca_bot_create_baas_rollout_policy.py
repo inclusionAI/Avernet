@@ -369,6 +369,48 @@ def test_claude_code_coding_template_uses_aicoding_bucket():
     assert decision.engine_bucket == "aicoding"
 
 
+def test_claude_code_architect_template_uses_aicoding_bucket():
+    decision = _policy(
+        ArcaBotCreateBaasRolloutConfig(
+            enabled=True,
+            rules=(
+                ArcaBotCreateBaasRolloutRule(
+                    bot_type="service",
+                    engine_bucket="aicoding",
+                    allow_user_ids=("u001",),
+                ),
+            ),
+        )
+    ).decide(
+        user_id="u001",
+        bot_type="service",
+        engine_type="claude_code",
+        template_type="architect",
+    )
+
+    assert decision.target_provider == BAAS_DEVICE_PROVIDER
+    assert decision.engine_bucket == "aicoding"
+
+
+def test_claude_code_normalcc_template_keeps_claude_code_bucket():
+    assert (
+        ArcaBotCreateBaasRolloutPolicy.normalize_engine_bucket(
+            engine_type="claude_code",
+            template_type="normalCC",
+        )
+        == "claude_code"
+    )
+
+
+def test_claude_code_missing_template_type_keeps_claude_code_bucket():
+    assert (
+        ArcaBotCreateBaasRolloutPolicy.normalize_engine_bucket(
+            engine_type="claude_code",
+            template_type="",
+        )
+        == "claude_code"
+    )
+
 def test_drm_payload_parser_accepts_rule_allow_list():
     provider = _provider()
     config = provider._parse(

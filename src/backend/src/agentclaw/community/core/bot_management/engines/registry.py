@@ -1,11 +1,60 @@
 """Composition root for engine provisioning strategies."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
-from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
+from .aicoding.strategy import (
+    AICODING_ENGINE_TYPE,
+    CLAUDE_CODE_ENGINE_TYPE,
+    AicodingBaasEngineBucketResolver,
+    AicodingProvisioningStrategy,
+    CODING_TEMPLATE_TYPES,
+)
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
+
+
+class BaasEngineBucketResolver(Protocol):
+    """Resolver that may map an engine context to a BaaS engine bucket.
+
+    Return ``None`` when the resolver does not own the input.  The routing
+    registry continues with the next resolver and eventually falls back to the
+    normalized engine type.
+    """
+
+    def resolve_baas_engine_bucket(
+        self,
+        *,
+        normalized_engine_type: str,
+        template_type: str | None,
+    ) -> str | None:
+        """Return a bucket override, or ``None`` when not applicable."""
+
+
+class BaasEngineBucketResolverRegistry:
+    """Registry for engine-contributed BaaS bucket resolvers."""
+
+    def __init__(self) -> None:
+        self._resolvers: list[BaasEngineBucketResolver] = []
+
+    def register(self, resolver: BaasEngineBucketResolver) -> None:
+        self._resolvers.append(resolver)
+
+    def resolve(
+        self,
+        *,
+        engine_type: str | None,
+        template_type: str | None,
+    ) -> str:
+        normalized_engine = normalize_engine_type(engine_type)
+        for resolver in self._resolvers:
+            engine_bucket = resolver.resolve_baas_engine_bucket(
+                normalized_engine_type=normalized_engine,
+                template_type=template_type,
+            )
+            if engine_bucket is not None:
+                return engine_bucket
+        return normalized_engine
 
 
 class EngineProvisioningRegistry:
@@ -51,7 +100,7 @@ class EngineProvisioningRegistry:
         if ctx.active_engine:
             return self.resolve(ctx.active_engine)
         if ctx.template_type in CODING_TEMPLATE_TYPES:
-            return self.resolve("aicoding")
+            return self.resolve(AICODING_ENGINE_TYPE)
         return self._default
 
 
@@ -63,8 +112,8 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     obvious and no lazy double-checked-locking is needed.
     """
     registry = EngineProvisioningRegistry()
-    registry.register(AicodingProvisioningStrategy("aicoding"))
-    registry.register(AicodingProvisioningStrategy("claude_code"))
+    registry.register(AicodingProvisioningStrategy(AICODING_ENGINE_TYPE))
+    registry.register(AicodingProvisioningStrategy(CLAUDE_CODE_ENGINE_TYPE))
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry
@@ -78,6 +127,45 @@ _REGISTRY: EngineProvisioningRegistry = _build_default_registry()
 def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
     """Return the process-wide strategy registry."""
     return _REGISTRY
+
+
+def _build_default_baas_engine_bucket_resolver_registry() -> BaasEngineBucketResolverRegistry:
+    """Assemble the process-wide BaaS bucket resolver registry."""
+    registry = BaasEngineBucketResolverRegistry()
+    registry.register(AicodingBaasEngineBucketResolver())
+    return registry
+
+
+_BAAS_ENGINE_BUCKET_RESOLVER_REGISTRY: BaasEngineBucketResolverRegistry = (
+    _build_default_baas_engine_bucket_resolver_registry()
+)
+
+
+def get_baas_engine_bucket_resolver_registry() -> BaasEngineBucketResolverRegistry:
+    """Return the process-wide BaaS bucket resolver registry."""
+    return _BAAS_ENGINE_BUCKET_RESOLVER_REGISTRY
+
+
+def normalize_engine_type(engine_type: str | None, *, default: str = "openclaw") -> str:
+    """Normalize public engine spelling to the registry key form."""
+    return (engine_type or default).strip().lower().replace("-", "_")
+
+
+def resolve_baas_engine_bucket(
+    *,
+    engine_type: str | None,
+    template_type: str | None,
+) -> str:
+    """Resolve the engine bucket used by BaaS template/rollout routing.
+
+    This public entrypoint delegates to the bucket resolver registry. Concrete
+    engine-specific overrides are contributed by registered resolvers; unclaimed
+    inputs fall back to the normalized engine type.
+    """
+    return get_baas_engine_bucket_resolver_registry().resolve(
+        engine_type=engine_type,
+        template_type=template_type,
+    )
 
 
 def resolve_provisioning(
@@ -113,8 +201,14 @@ def resolve_provisioning(
 
 
 __all__ = [
+    "AICODING_ENGINE_TYPE",
+    "BaasEngineBucketResolver",
+    "BaasEngineBucketResolverRegistry",
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
+    "get_baas_engine_bucket_resolver_registry",
     "get_engine_provisioning_registry",
+    "normalize_engine_type",
+    "resolve_baas_engine_bucket",
     "resolve_provisioning",
 ]

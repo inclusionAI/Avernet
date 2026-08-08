@@ -176,6 +176,65 @@ def test_claude_code_coding_template_maps_to_aicoding_engine():
     )
 
 
+def test_claude_code_architect_template_maps_to_aicoding_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_architect_without_template_identity_maps_to_aicoding():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_generalcc_template_maps_to_aicoding():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="generalCC",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_normalcc_template_keeps_claude_code_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="normalCC",
+        )
+        == "claude_code"
+    )
+
+
+def test_claude_code_missing_template_type_keeps_claude_code_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="",
+        )
+        == "claude_code"
+    )
+
+
+def test_claude_code_non_normalcc_template_type_maps_to_aicoding_case_insensitive():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude-code",
+            template_type=" Architect ",
+        )
+        == "aicoding"
+    )
+
 def test_resolves_personal_hermes_template_uid():
     resolver, _ = _resolver(
         {
