@@ -140,6 +140,14 @@ class TaskQueueModel(Base):
         # A NULL active key is the opt-out — both MySQL/OceanBase and SQLite
         # treat NULLs as distinct in a unique index, so un-keyed enqueues never
         # collide with each other. That property is relied upon, not incidental.
+        #
+        # Only active_idempotency_key pins a binary collation; env and task_type
+        # keep the table default, which on MySQL/OceanBase is case-insensitive
+        # and PAD SPACE. Widening their collation would mean altering columns
+        # that predate this index and are read by every other query, so the
+        # scope is kept unambiguous at the source instead: HandlerRegistry
+        # rejects two task types that fold together, and env comes from
+        # deployment config rather than per-call input.
         Index(
             "uk_env_task_type_active_idem",
             "env",

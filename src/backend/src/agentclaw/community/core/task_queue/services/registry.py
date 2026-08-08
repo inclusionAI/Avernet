@@ -47,12 +47,43 @@ class HandlerRegistry:
 
     def __init__(self) -> None:
         self._handlers: Dict[str, TaskHandler] = {}
+        #: Normalized ``task_type`` → the exact spelling registered under it.
+        #: Only used to reject near-collisions; lookup stays exact.
+        self._normalized: Dict[str, str] = {}
+
+    @staticmethod
+    def _normalize(task_type: str) -> str:
+        """Fold a ``task_type`` the way MySQL/OceanBase would compare it."""
+        return task_type.casefold().rstrip()
 
     def register(self, handler: TaskHandler) -> None:
         """Register ``handler`` under its ``task_type``.
 
         Raises :class:`ValueError` on a duplicate ``task_type`` — two handlers
         for the same type is a wiring bug, not a silent last-wins.
+
+        Also raises when a ``task_type`` differs from an already-registered one
+        *only by case or trailing whitespace*. That is not style policing: the
+        enqueue dedup index is ``UNIQUE (env, task_type, active_idempotency_key)``
+        and ``task_type`` carries the table's default collation, which on
+        MySQL/OceanBase is both case-insensitive and PAD SPACE. So ``"Job"`` and
+        ``"job"`` are two distinct registry keys (this dict compares exactly)
+        but *one* value to the index — a keyed enqueue for ``"job"`` would take
+        the conflict path against the ``"Job"`` row and be handed that task with
+        ``created=False``, silently dropping work meant for the other handler.
+        SQLite compares BINARY, so no test against the suite's engine can
+        observe it.
+
+        Rejecting the near-collision at registration removes the divergence
+        instead of relying on the collation: if no two registered task types
+        fold together, the index's looser comparison can never merge two of
+        them. This mirrors how ``idempotency_key`` handles the same engine
+        divergence — reject at the boundary rather than depend on the column
+        definition. Registration is startup-time and the error is loud, so the
+        wiring bug surfaces before any task is enqueued.
+
+        Lookup stays **exact**: rows store ``task_type`` verbatim, so the worker
+        dispatches on the spelling that was enqueued.
         """
         task_type = handler.task_type
         if task_type in self._handlers:
@@ -60,7 +91,18 @@ class HandlerRegistry:
                 f"task_type {task_type!r} already has a handler registered "
                 f"({type(self._handlers[task_type]).__name__})"
             )
+        normalized = self._normalize(task_type)
+        collides_with = self._normalized.get(normalized)
+        if collides_with is not None:
+            raise ValueError(
+                f"task_type {task_type!r} differs from the already-registered "
+                f"{collides_with!r} only by case or trailing whitespace; the two "
+                "are distinct here but equal in the enqueue dedup index under "
+                "MySQL/OceanBase collation, so one handler's keyed enqueues "
+                "would silently join the other's tasks — pick a distinct name"
+            )
         self._handlers[task_type] = handler
+        self._normalized[normalized] = task_type
 
     def get(self, task_type: str) -> Optional[TaskHandler]:
         """Return the handler for ``task_type``, or ``None`` if unregistered."""

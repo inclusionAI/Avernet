@@ -114,6 +114,16 @@ PAD SPACE collation, so the trailing-space half of the problem is closed by the
 validation rule above rather than by the collation. The two are complementary,
 and neither alone is sufficient.
 
+The *scope* columns are handled differently. `env` and `task_type` keep the
+table's default collation — case-insensitive and PAD SPACE — because widening
+them would mean altering columns that predate this index and that every other
+query reads. Instead the scope is kept unambiguous at the source: `task_type`
+is a registry key, and `HandlerRegistry.register` rejects a type that folds onto
+an already-registered one (`Job` vs `job`, `job ` vs `job`), which would
+otherwise be two handlers sharing one dedup slot; `env` comes from deployment
+config rather than per-call input. Same principle as the key rules above —
+remove the ambiguity rather than depend on the collation to preserve it.
+
 **One edge worth knowing.** A task whose deadline has passed but which no worker
 has scanned yet is still non-terminal, so it still holds its key and a duplicate
 enqueue joins it. The next claim scan retires it `TIMED_OUT` and frees the key.
