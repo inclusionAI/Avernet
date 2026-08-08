@@ -3,8 +3,8 @@
 ## 范围
 
 - Worktree / repo: `/Users/helloworld/Desktop/codes/teamclaw/Avernet` / `inclusionAI/Avernet`
-- Head / base: `rebase/REL20260806-rebase-on-dev@74fb4c4e` / `origin/dev@71f7c141`
-- PR: created this run
+- Head / base: `rebase/REL20260806-rebase-on-dev@eea67aee` / `origin/dev@71f7c141`
+- PR: https://github.com/inclusionAI/Avernet/pull/894
 - PR title: `feat(backend): integrate REL20260806 bot and Skills updates`
 - PR description sections: Problem / Solution / Validation / Compatibility and risk
 - 人工意见模式: auto
@@ -13,13 +13,13 @@
 
 | 结果 | 证据 | 说明 |
 |---|---|---|
-| READY_TO_CREATE | head 领先 `origin/dev` 70 个提交，工作区干净，且没有同 head/base 的既有 PR | 变更涉及 Local Skills、Gateway Principal、Service Bot、BaaS、Engine、BCS 和 Gateway；创建后由远端评审与门禁收敛。 |
+| OPEN | [#894](https://github.com/inclusionAI/Avernet/pull/894) 的 head/base、标题和必填说明已核验 | GitHub 要求 review；当前没有已提交的 review。 |
 
 ## 自动意见
 
 | 轮次 | 来源 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 0 | 无 | — | 待 PR 创建后查询 | 尚未有可关联 PR | — | — |
+| 1 | 无 | [#894](https://github.com/inclusionAI/Avernet/pull/894) | CLEAR | 没有 bot review、普通评论或 inline 评论 | — | 创建后首次查询 |
 
 ## ACI/CI
 
@@ -27,18 +27,20 @@
 |---|---|---|---|---|---|
 | local focused regression | PASS | Principal/Skills/Local Skills 聚焦套件 115 passed；原始 ZIP 上传 endpoint 2 passed | — | — | `git diff --check origin/dev...HEAD` 与冲突标记扫描通过 |
 | pre-push SAST | PASS | 本分支推送时的仓库 pre-push gate | — | — | Backend、BaaS、Engine 的本地 SAST/lint gate 通过 |
-| remote ACI/CI | PENDING | PR 尚未创建 | 无远端检查可读取 | — | 创建 PR 后查询 |
+| BCS e2e (coverage gated) | PENDING | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236520240/job/93049884519) | 正在运行 | — | 创建后首次查询 |
+| Singlebox coverage | PENDING | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236520223/job/93049884494) | 正在运行 | — | 创建后首次查询 |
+| BCS / Backend / Engine / BaaS / Gateway unit tests | PENDING | [workflow](https://github.com/inclusionAI/Avernet/actions/runs/31236520241) | 正在运行 | — | 创建后首次查询 |
 
 ## 人工意见
 
 | 轮次 | 作者 | 链接 | 决定 | 理由 | 修改/提交 | 验证 |
 |---|---|---|---|---|---|---|
-| 0 | 无 | — | 待 PR 创建后查询 | 尚未有可关联 PR | — | — |
+| 1 | 无 | [#894](https://github.com/inclusionAI/Avernet/pull/894) | CLEAR | 没有普通评论或 review | — | 创建后首次查询 |
 
 ## 当前结论
 
-- PR: NOT_CREATED
-- 自动意见: PENDING
+- PR: OPEN
+- 自动意见: CLEAR
 - ACI/CI: PENDING
-- 人工意见: PENDING
-- 下一步: 创建以 `dev` 为 base、当前 rebase 分支为 head 的 PR，并核验 metadata。
+- 人工意见: CLEAR
+- 下一步: 等待并核验当前 head 的远端门禁；若出现合理评审意见或确定性失败，再进行最小修复。
