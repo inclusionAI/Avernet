@@ -46,10 +46,12 @@ class TaskQueueService:
           ``created=False``. Terminal tasks release their key, so a retry or a
           later re-run of the same logical work is *not* suppressed. Omit it
           (the default) for work that should always produce a distinct row —
-          recurring polls, timers, genuine fan-out. Must be non-empty and at
-          most 190 characters (the stored column width); both raise
-          ``ValueError`` rather than risking silent truncation on a non-strict
-          MySQL/OceanBase, which would collide two distinct keys.
+          recurring polls, timers, genuine fan-out. Must be non-empty, at most
+          190 characters (the stored column width), and free of leading or
+          trailing whitespace; all three raise ``ValueError`` rather than
+          risking a silent collision of two distinct keys on MySQL/OceanBase
+          (truncation under a non-strict server, space padding under the
+          collation).
 
         See ``TaskQueueRepositoryProtocol.enqueue`` for the key convention and
         the full contract.

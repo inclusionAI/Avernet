@@ -86,6 +86,14 @@ class TaskQueueRepositoryProtocol(Protocol):
         far wider than 190, so hash the variable part rather than letting a
         long id blow the bound.
 
+        A key must also carry **no leading or trailing whitespace** (also
+        ``ValueError``). Internal spacing is untouched and keys are stored
+        verbatim; only the ends are constrained, because MySQL/OceanBase
+        compare with a PAD SPACE collation under which ``"k1"`` and ``"k1 "``
+        are the *same* index entry while SQLite keeps them apart. Rejecting
+        such keys makes the collision unreachable rather than relying on a
+        NO PAD collation being available.
+
         One edge worth knowing: a task whose deadline has passed but which no
         worker has scanned yet is still non-terminal, so it still holds its key
         and a duplicate enqueue joins it. The next claim scan retires it

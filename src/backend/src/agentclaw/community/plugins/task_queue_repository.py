@@ -106,13 +106,34 @@ def _validate_idempotency_key(key: str) -> None:
     become a single global dedup slot per ``(env, task_type)``, collapsing
     unrelated work onto one row.
 
+    Leading/trailing whitespace is rejected as a correctness rule, not
+    tidiness. ``utf8mb4_bin`` fixes case folding but is a **PAD SPACE**
+    collation on MySQL/OceanBase, so ``"k1"`` and ``"k1 "`` still compare
+    *equal* in the unique index while SQLite keeps them apart — the same
+    join-the-wrong-task failure as truncation, one layer down. Rather than
+    depend on a NO PAD collation (``utf8mb4_0900_bin`` is not available on
+    every OceanBase version) or switch to ``VARBINARY`` (which would make the
+    audit column opaque, defeating the reason it survives terminal), refuse
+    keys whose ends could be padded away: if no accepted key carries trailing
+    whitespace, PAD SPACE can never merge two accepted keys. That holds
+    whatever the engine's pad attribute turns out to be.
+
     Raising beats truncating or hashing: a hash would keep the key opaque in
     the audit column, whereas a ``ValueError`` surfaces the first time someone
-    writes the key rather than in production months later.
+    writes the key rather than in production months later. Note it rejects
+    rather than trims — silently rewriting the key is the very thing the
+    "stored verbatim" contract forbids.
     """
     if not key.strip():
         raise ValueError(
             "idempotency_key must be a non-empty string; omit it entirely to opt out of dedup"
+        )
+    if key != key.strip():
+        raise ValueError(
+            f"idempotency_key must not have leading or trailing whitespace ({key!r}); "
+            "MySQL/OceanBase PAD SPACE collations compare 'k1' and 'k1 ' as equal, so "
+            "such keys would collide in production while staying distinct on SQLite — "
+            "strip it at the call site"
         )
     if len(key) > _MAX_IDEMPOTENCY_KEY_LEN:
         raise ValueError(

@@ -573,13 +573,12 @@ def test_blank_key_is_rejected_rather_than_becoming_a_global_dedup_slot(repo, bl
 
 
 def test_key_is_stored_verbatim_without_stripping(repo):
-    """Validation rejects blank keys but never rewrites a valid one — silently
-    mutating the key would be the same class of bug as truncating it."""
-    res = _enqueue_result(repo, idempotency_key=" k1 ")
-    assert res.record.idempotency_key == " k1 "
-    assert _key_columns(repo, res.record.id) == (" k1 ", " k1 ")
-    # …and it is therefore a different key from the stripped form.
-    assert _enqueue_result(repo, idempotency_key="k1").created is True
+    """Validation never rewrites an accepted key — silently mutating it would be
+    the same class of bug as truncating it. Internal spacing survives exactly;
+    only the *ends* are constrained (see the PAD SPACE test below)."""
+    res = _enqueue_result(repo, idempotency_key="publish:a b:poll")
+    assert res.record.idempotency_key == "publish:a b:poll"
+    assert _key_columns(repo, res.record.id) == ("publish:a b:poll", "publish:a b:poll")
 
 
 def test_validation_also_applies_through_the_service_facade(repo):
@@ -601,10 +600,13 @@ def test_validation_also_applies_through_the_service_facade(repo):
 def test_key_columns_pin_binary_collation_on_mysql():
     """Keys are compared byte-for-byte, but MySQL/OceanBase default to a
     ``utf8mb4_*_ci`` collation under which 'publish:Bot-A:poll' and
-    'publish:bot-a:poll' would be the SAME key in the unique index (and
-    non-_0900 ci collations PAD SPACE, so 'k1' == 'k1 '). SQLite already
-    compares BINARY, so no behavioural test here can catch a regression —
-    assert the rendered MySQL DDL directly instead."""
+    'publish:bot-a:poll' would be the SAME key in the unique index. SQLite
+    already compares BINARY, so no behavioural test here can catch a regression
+    — assert the rendered MySQL DDL directly instead.
+
+    ``utf8mb4_bin`` closes case folding but *not* PAD SPACE; trailing-space
+    collisions are handled by rejecting such keys at validation instead (see
+    ``test_keys_with_surrounding_whitespace_are_rejected``)."""
     from sqlalchemy.dialects import mysql
     from sqlalchemy.schema import CreateTable
 
@@ -614,16 +616,31 @@ def test_key_columns_pin_binary_collation_on_mysql():
         assert "COLLATE utf8mb4_bin" in line, f"{column} lost its binary collation: {line}"
 
 
-def test_case_and_trailing_space_variants_are_distinct_keys(repo):
-    """The behaviour the collation protects, asserted on SQLite (which is
-    BINARY natively) so the intent is recorded even though only the DDL test
-    above can catch a MySQL-side regression."""
+def test_case_variants_are_distinct_keys(repo):
+    """What ``utf8mb4_bin`` buys: under the default ``_ci`` collation these two
+    would be the same key in the unique index. Asserted on SQLite (BINARY
+    natively) so the intent is recorded, even though only the DDL test above
+    can catch a MySQL-side regression."""
     a = _enqueue_result(repo, idempotency_key="publish:Bot-A:poll")
     b = _enqueue_result(repo, idempotency_key="publish:bot-a:poll")
     assert (a.created, b.created) == (True, True)
     assert a.record.id != b.record.id
 
-    c = _enqueue_result(repo, idempotency_key="k1")
-    d = _enqueue_result(repo, idempotency_key="k1 ")
-    assert (c.created, d.created) == (True, True)
-    assert c.record.id != d.record.id
+
+@pytest.mark.parametrize("key", ["k1 ", " k1", " k1 ", "k1\t", "\nk1"])
+def test_keys_with_surrounding_whitespace_are_rejected(repo, key):
+    """What ``utf8mb4_bin`` does *not* buy: it is PAD SPACE, so 'k1' and 'k1 '
+    still compare equal in the unique index on MySQL/OceanBase while staying
+    distinct here. The collation alone cannot close this.
+
+    Rejecting keys whose ends could be padded away closes it independently of
+    the engine's pad attribute: if no accepted key carries trailing whitespace,
+    PAD SPACE can never merge two accepted keys. Asserting *rejection* is the
+    point — the distinctness test this replaced passed on SQLite while encoding
+    a guarantee production does not honour."""
+    _enqueue_result(repo, idempotency_key="k1")  # the bare form is fine
+
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        _enqueue_result(repo, idempotency_key=key)
+
+    assert len(_all_rows(repo)) == 1  # nothing extra inserted

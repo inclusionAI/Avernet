@@ -12,9 +12,17 @@
 -- COLLATION IS LOAD-BEARING. Dedup keys are compared byte-for-byte, so both
 -- columns pin utf8mb4_bin. Under the usual utf8mb4_*_ci default the unique
 -- index would treat 'publish:Bot-A:poll' and 'publish:bot-a:poll' as the same
--- key (and non-_0900 ci collations PAD SPACE, so 'k1' == 'k1 '), letting one
--- caller's enqueue silently join a different caller's task. SQLite compares
--- BINARY already, so the test suite cannot observe the difference.
+-- key, letting one caller's enqueue silently join a different caller's task.
+-- SQLite compares BINARY already, so the test suite cannot observe the
+-- difference.
+--
+-- utf8mb4_bin closes case folding but NOT space padding: it is itself a PAD
+-- SPACE collation, so 'k1' and 'k1 ' would still be one index entry here while
+-- staying distinct on SQLite. That half is closed in Python instead — enqueue
+-- rejects any key with leading or trailing whitespace, which makes the
+-- collision unreachable without depending on utf8mb4_0900_bin (NO PAD) being
+-- available on every OceanBase version. Do not relax that validation on the
+-- assumption that this collation covers it.
 --
 -- NO BACKFILL IS REQUIRED. Both columns are new and nullable, so every existing
 -- row takes NULL, and NULLs are distinct in a unique index on both MySQL/

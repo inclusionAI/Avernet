@@ -83,6 +83,16 @@ so hash the variable part rather than embedding a long id directly. Empty
 string is rejected for the mirror-image reason: `None` is the opt-out, so `""`
 would otherwise be one global dedup slot per `(env, task_type)`.
 
+Leading and trailing whitespace is rejected too, for a reason the collation
+below cannot fix on its own: MySQL/OceanBase compare with a **PAD SPACE**
+collation, under which `"k1"` and `"k1 "` are the *same* entry in the unique
+index — while SQLite keeps them apart, so the suite would never see it. Rather
+than depend on a NO PAD collation being present on every OceanBase version,
+the ends are constrained so the collision is unreachable: if no accepted key
+carries trailing whitespace, padding can never merge two accepted keys.
+Internal spacing is untouched and keys are stored **verbatim** — validation
+rejects, it never trims.
+
 **Mechanism.** A second column, `active_idempotency_key`, mirrors the key while
 the task is live and is nulled by every terminal transition; the unique index is
 over `(env, task_type, active_idempotency_key)`. MySQL/OceanBase have no partial
@@ -94,11 +104,15 @@ it is covered by a test.
 Both key columns pin **`utf8mb4_bin`** on MySQL/OceanBase, and that is
 load-bearing. Keys are compared byte-for-byte, but the usual `utf8mb4_*_ci`
 default is case-insensitive — `publish:Bot-A:poll` and `publish:bot-a:poll`
-would be the *same* key in the unique index — and non-`_0900` ci collations also
-PAD SPACE, making `k1` and `k1 ` equal. Either would let one caller's enqueue
+would be the *same* key in the unique index, letting one caller's enqueue
 silently join a different caller's task. SQLite compares BINARY already, so this
 divergence is invisible to the suite; the collation is what makes the two
 engines agree with the "stored verbatim" contract.
+
+`utf8mb4_bin` closes case folding but **not** space padding — it is itself a
+PAD SPACE collation, so the trailing-space half of the problem is closed by the
+validation rule above rather than by the collation. The two are complementary,
+and neither alone is sufficient.
 
 **One edge worth knowing.** A task whose deadline has passed but which no worker
 has scanned yet is still non-terminal, so it still holds its key and a duplicate
