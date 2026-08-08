@@ -135,8 +135,20 @@ def __init__(self, base_url: str):
 - **Timeout moves from construction to the call.** Every `HttpClient` method
   already has `timeout: float = 30.0`, so a value is always passed — per-call
   timeout semantics are preserved exactly.
-- **No `close()`.** These are process-lifetime DI singletons with no lifecycle
-  hook to call it from; an uncalled method would be dead surface.
+- **Closed in `teardown()`.** This plan originally said "no `close()` — these are
+  process-lifetime DI singletons with no lifecycle hook to call it from." That
+  premise was **wrong**, and review caught it: `kernel/lifecycle.py` defines a
+  canonical `Lifecycle` Protocol whose `teardown()` phase exists precisely for
+  "shutting down thread / connection pools", and
+  `discover_lifecycle_participants` finds any DI singleton satisfying it
+  automatically. `HttpxClient` therefore inherits `LifecycleBase` and closes the
+  pool in `teardown()`. Per arch.rules.md Rule 11, a plugin holding a resource
+  must declare its cleanup behavior; before pooling there was no resource to
+  release, which is why the omission was invisible.
+  Inheriting `LifecycleBase` rather than defining `teardown()` alone is
+  load-bearing: `Lifecycle` is `@runtime_checkable`, so `isinstance` succeeds
+  only when all four hooks are present — a class defining just one would be
+  silently skipped by discovery and the pool would never close.
 - **No `limits=` tuning.** httpx defaults (100 max connections, 20 keep-alive)
   are sane; picking numbers without evidence is speculative configurability.
 

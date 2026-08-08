@@ -13,6 +13,11 @@ issued against the relative path, returning the raw :class:`httpx.Response`.
 Arguments left as ``None`` are omitted so the wire shape matches a hand-written
 ``httpx`` call. Transport errors and ``raise_for_status`` propagate unchanged
 (the wrapper swallows nothing).
+
+Because the client now outlives the call, it is a lifecycle participant: it
+implements :class:`Lifecycle` via :class:`LifecycleBase` and closes the pool in
+``teardown()``, so the connections it holds are released at process shutdown
+rather than leaked.
 """
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from typing import Any, Iterator, Mapping
 
 import httpx
 
+from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.plugin_api.http_client import HttpClient
 
 
@@ -39,8 +45,14 @@ def _blocked_cookie_jar() -> http.cookiejar.CookieJar:
     )
 
 
-class HttpxClient(HttpClient):
-    """Real ``httpx``-backed transport scoped to a single upstream ``base_url``."""
+class HttpxClient(HttpClient, LifecycleBase):
+    """Real ``httpx``-backed transport scoped to a single upstream ``base_url``.
+
+    Inherits :class:`LifecycleBase` so ``discover_lifecycle_participants`` finds
+    it — ``Lifecycle`` is ``@runtime_checkable``, so ``isinstance`` succeeds only
+    when all four hooks exist, and the base supplies the three this class does
+    not override as no-ops.
+    """
 
     def __init__(self, base_url: str, *, transport: Any | None = None):
         self._base_url = base_url
@@ -67,6 +79,20 @@ class HttpxClient(HttpClient):
         if transport is not None:
             client_kwargs["transport"] = transport
         self._client = httpx.Client(**client_kwargs)
+
+    async def teardown(self) -> None:
+        """Release the connection pool at process shutdown.
+
+        Infrastructure teardown rather than ``shutdown()``: by this phase every
+        participant's ``shutdown()`` has returned, so no service-tier code
+        should still be issuing requests through this client.
+
+        ``httpx.Client.close()`` is synchronous and only closes already-idle
+        sockets, so it does not block the loop meaningfully. Teardown failures
+        are log-and-continue per the lifecycle contract, so a raise here cannot
+        strand other participants.
+        """
+        self._client.close()
 
     def get(
         self,

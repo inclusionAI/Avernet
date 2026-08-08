@@ -19,7 +19,9 @@ def test_bcn_http_client_prod_uses_base_url(monkeypatch) -> None:
     )
 
     assert isinstance(client, HttpxClient)
-    assert client._base_url == "https://bcn.example.test"
+    # Assert the client's effective base_url, not a mirror attribute: this is
+    # what requests actually resolve against.
+    assert str(client._client.base_url) == "https://bcn.example.test"
 
 
 def test_bcn_http_client_pre_uses_base_url_pre(monkeypatch) -> None:
@@ -35,4 +37,4 @@ def test_bcn_http_client_pre_uses_base_url_pre(monkeypatch) -> None:
     )
 
     assert isinstance(client, HttpxClient)
-    assert client._base_url == "https://bcn-pre.example.test"
+    assert str(client._client.base_url) == "https://bcn-pre.example.test"

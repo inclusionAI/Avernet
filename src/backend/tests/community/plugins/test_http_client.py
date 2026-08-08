@@ -140,6 +140,49 @@ def test_per_call_timeouts_are_independent():
     assert [c.kwargs["timeout"] for c in inner.request.call_args_list] == [1.0, 60.0]
 
 
+def test_is_a_lifecycle_participant():
+    """``discover_lifecycle_participants`` finds it only if all four hooks exist.
+
+    ``Lifecycle`` is ``@runtime_checkable``, so a class missing even one hook is
+    silently skipped by discovery — the pool would then never be closed and
+    nothing would fail loudly. This pins the isinstance check that discovery
+    itself performs.
+    """
+    from agentclaw.community.kernel.lifecycle import Lifecycle
+
+    with _patched_httpx():
+        client = HttpxClient(base_url="http://svc.test")
+
+    assert isinstance(client, Lifecycle)
+
+
+@pytest.mark.asyncio
+async def test_teardown_closes_the_pooled_client():
+    """The pool is released at shutdown rather than leaked.
+
+    Before pooling, each call's client closed with the call. A process-lifetime
+    singleton holds its connections until something closes it.
+    """
+    with _patched_httpx() as (_ctor, inner):
+        client = HttpxClient(base_url="http://svc.test")
+        client.get("/x")
+        await client.teardown()
+
+    inner.close.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_other_lifecycle_hooks_are_noops():
+    """Only teardown does work; the rest must not raise or close early."""
+    with _patched_httpx() as (_ctor, inner):
+        client = HttpxClient(base_url="http://svc.test")
+        await client.bootstrap()
+        await client.startup()
+        await client.shutdown()
+
+    inner.close.assert_not_called()
+
+
 def test_set_cookie_is_never_stored_or_replayed():
     """A pooled client must stay as stateless as the per-call client it replaced.
 
