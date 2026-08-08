@@ -406,7 +406,7 @@ def test_claude_code_missing_template_type_keeps_claude_code_bucket():
     assert (
         ArcaBotCreateBaasRolloutPolicy.normalize_engine_bucket(
             engine_type="claude_code",
-            template_type=None,
+            template_type="",
         )
         == "claude_code"
     )

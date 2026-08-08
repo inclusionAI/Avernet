@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from .aicoding.strategy import AicodingProvisioningStrategy, CODING_TEMPLATE_TYPES
+from .aicoding.strategy import (
+    AICODING_ENGINE_TYPE,
+    CLAUDE_CODE_ENGINE_TYPE,
+    AicodingProvisioningStrategy,
+    CODING_TEMPLATE_TYPES,
+)
 from .default import DefaultProvisioningStrategy
 from .provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
@@ -51,7 +56,7 @@ class EngineProvisioningRegistry:
         if ctx.active_engine:
             return self.resolve(ctx.active_engine)
         if ctx.template_type in CODING_TEMPLATE_TYPES:
-            return self.resolve("aicoding")
+            return self.resolve(AICODING_ENGINE_TYPE)
         return self._default
 
 
@@ -63,8 +68,8 @@ def _build_default_registry() -> EngineProvisioningRegistry:
     obvious and no lazy double-checked-locking is needed.
     """
     registry = EngineProvisioningRegistry()
-    registry.register(AicodingProvisioningStrategy("aicoding"))
-    registry.register(AicodingProvisioningStrategy("claude_code"))
+    registry.register(AicodingProvisioningStrategy(AICODING_ENGINE_TYPE))
+    registry.register(AicodingProvisioningStrategy(CLAUDE_CODE_ENGINE_TYPE))
     for engine_type in ("openclaw", "teclaw", "hermes"):
         registry.register(DefaultProvisioningStrategy(engine_type))
     return registry
@@ -78,6 +83,32 @@ _REGISTRY: EngineProvisioningRegistry = _build_default_registry()
 def get_engine_provisioning_registry() -> EngineProvisioningRegistry:
     """Return the process-wide strategy registry."""
     return _REGISTRY
+
+
+def normalize_engine_type(engine_type: str | None, *, default: str = "openclaw") -> str:
+    """Normalize public engine spelling to the registry key form."""
+    return AicodingProvisioningStrategy.normalize_engine_type(
+        engine_type, default=default
+    )
+
+
+def resolve_baas_engine_bucket(
+    *,
+    engine_type: str | None,
+    template_type: str | None,
+) -> str:
+    """Resolve the engine bucket used by BaaS template/rollout routing.
+
+    The claude_code -> aicoding exception is owned by the aicoding provisioning
+    strategy, so device services do not duplicate engine-name policy.
+    """
+    normalized_engine = normalize_engine_type(engine_type)
+    if AicodingProvisioningStrategy.should_use_aicoding_baas_bucket(
+        active_engine=normalized_engine,
+        template_type=template_type,
+    ):
+        return AICODING_ENGINE_TYPE
+    return normalized_engine
 
 
 def resolve_provisioning(
@@ -113,8 +144,11 @@ def resolve_provisioning(
 
 
 __all__ = [
+    "AICODING_ENGINE_TYPE",
     "BotProvisioningContext",
     "EngineProvisioningRegistry",
     "get_engine_provisioning_registry",
+    "normalize_engine_type",
+    "resolve_baas_engine_bucket",
     "resolve_provisioning",
 ]
