@@ -57,25 +57,22 @@ byte-for-byte by contract.
   least precise column. That rewrite is why those two files have a separate,
   ordered first statement.
 - **SQLite** compares `TEXT` as `BINARY` natively.
-- **PostgreSQL** `varchar` equality under a deterministic collation — the
-  default — is exact and does not pad.
 
-So only the MySQL-family files carry collation clauses; the other two already
-have the required semantics and need no column rewrite.
+So only the MySQL-family files carry collation clauses; SQLite already has the
+required semantics and needs no column rewrite.
 
 `utf8mb4_bin` is itself **PAD SPACE**, so it settles case but not trailing
-spaces. That half is closed in Python for every engine: `enqueue` rejects keys
-with leading or trailing whitespace, and `HandlerRegistry.register` rejects task
-types that differ from an existing one only by case or trailing space.
+spaces. That half is closed in Python, for every engine: `enqueue` rejects keys
+with leading or trailing whitespace, and `HandlerRegistry.register` rejects any
+task type carrying it.
 
 ## Backfill
 
 None, on any engine. Both columns are new and nullable, so every existing row
-takes `NULL`, and all four engines treat `NULL`s as distinct in a unique index
-(PostgreSQL because `UNIQUE` is `NULLS DISTINCT` unless declared otherwise). No
-two existing rows can collide however many duplicate enqueues the table already
-holds, so the index can be created alongside the columns with no duplicate-scrub
-step.
+takes `NULL`, and all three engines treat `NULL`s as distinct in a unique index.
+No two existing rows can collide however many duplicate enqueues the table
+already holds, so the index can be created alongside the columns with no
+duplicate-scrub step.
 
 ## Rollback
 

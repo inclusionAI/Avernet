@@ -63,7 +63,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
-from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    TERMINAL_STATUSES,
+    EnqueueResult,
+    TaskRecord,
+    TaskStatus,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
@@ -264,9 +269,25 @@ class TaskQueueRepository:
     ) -> Optional[TaskRecord]:
         """The **live** holder of ``idempotency_key``, or ``None``.
 
-        Filters on ``active_idempotency_key``, so terminal rows — which released
-        the key — are invisible here by construction; there is no need to
-        restate the status predicate.
+        Filtering on ``active_idempotency_key`` alone *should* be enough:
+        terminal transitions null it, so terminal rows drop out by
+        construction. The status predicate is therefore redundant in a
+        consistent database — and is here precisely for when that assumption
+        does not hold.
+
+        A row can be terminal while still holding its active key if something
+        wrote the terminal status without the release: a pre-idempotency worker
+        in a mixed-version fleet, a manual DB edit, or a future transition that
+        forgets to null the column. Without this predicate that row is returned
+        as the "live holder", so the caller gets a *finished* task with
+        ``created=False`` and its work is silently dropped — permanently, since
+        nothing will ever release that key. With it, the lookup finds nothing,
+        the insert is retried, the unique index (which does not care about
+        status) rejects it again, and :meth:`enqueue` raises. A loud failure on
+        an inconsistent row beats a silent wrong answer.
+
+        This does not *fix* such a row — releasing the key is the writer's job.
+        It converts an undetectable failure into an obvious one.
         """
         with self._db.orm_session() as db:
             row = (
@@ -275,6 +296,7 @@ class TaskQueueRepository:
                     self.Model.env == env,
                     self.Model.task_type == task_type,
                     self.Model.active_idempotency_key == idempotency_key,
+                    self.Model.status.notin_([s.value for s in TERMINAL_STATUSES]),
                 )
                 .first()
             )

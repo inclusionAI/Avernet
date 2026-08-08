@@ -759,3 +759,58 @@ def test_only_the_mysql_family_migrations_carry_a_collation():
     assert "COLLATE" not in executable.upper(), (
         "the SQLite migration carries a collation clause its engine cannot honour"
     )
+
+
+# ── mixed-version writers (rollout safety) ──────────────────────────────────
+
+
+def _terminate_without_releasing_the_key(repo, task_id, status=TaskStatus.SUCCEEDED):
+    """Simulate a worker running code from *before* this change: it sets a
+    terminal status and knows nothing about ``active_idempotency_key``, so it
+    leaves the key populated. Exactly what an un-upgraded pod in a mixed-version
+    fleet would write."""
+    with repo._db.orm_session() as db:
+        db.query(TaskQueueModel).filter(TaskQueueModel.id == task_id).update(
+            {TaskQueueModel.status: status.value}, synchronize_session=False
+        )
+
+
+@pytest.mark.parametrize(
+    "terminal", [TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.TIMED_OUT]
+)
+def test_key_stranded_by_a_pre_upgrade_worker_fails_loudly_not_silently(repo, terminal):
+    """The whole point of excluding terminal rows in ``_find_active_by_key``.
+
+    A terminal row still holding its active key is unreachable through this
+    code — every terminal transition releases it — but a pre-idempotency worker,
+    a manual DB edit, or a future transition that forgets the release could
+    write one. Without the status predicate the next enqueue is handed that
+    *finished* task with ``created=False`` and its work vanishes, permanently,
+    since nothing will ever free the key.
+
+    Assert the loud failure instead: the lookup finds no live holder, the retry
+    hits the unique index again (which does not care about status), and enqueue
+    raises. An operator sees an error; they do not see silence."""
+    first = _enqueue_result(repo, idempotency_key="k1")
+    _terminate_without_releasing_the_key(repo, first.record.id, terminal)
+    assert _key_columns(repo, first.record.id) == ("k1", "k1")  # key still held
+
+    with pytest.raises(RuntimeError, match="could not insert or resolve a holder"):
+        _enqueue_result(repo, idempotency_key="k1")
+
+    # And nothing was silently joined to the finished task.
+    assert len(_all_rows(repo)) == 1
+
+
+def test_a_properly_released_key_is_reusable_after_the_same_terminal_state(repo):
+    """The contrast case, so the test above is clearly about the *stranded* key
+    and not about terminal rows generally. Released properly, the key is free
+    and a re-enqueue creates a genuinely new row."""
+    first = _enqueue_result(repo, idempotency_key="k1")
+    _claim(repo, "W")
+    assert repo.complete(task_id=first.record.id, worker_id="W") is True
+    assert _key_columns(repo, first.record.id) == ("k1", None)  # audit kept, key freed
+
+    second = _enqueue_result(repo, idempotency_key="k1")
+    assert second.created is True
+    assert second.record.id != first.record.id

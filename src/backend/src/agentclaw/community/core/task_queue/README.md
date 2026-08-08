@@ -168,6 +168,29 @@ creates it from the shared ORM metadata.
 Enqueue idempotency is available but **not yet adopted by any call site** — the
 mechanism landed first so adoption can be reviewed per call site.
 
+**Adoption must ship in a strictly later release than this mechanism, and that
+is a correctness requirement rather than a review preference.** Key release
+happens in the terminal transitions: `complete`, `fail`, the reschedule-overshoot
+timeout, and the claim-scan deadline retirement each null
+`active_idempotency_key` in the same `UPDATE` as the status change. A worker
+running code from *before* this change knows nothing about that column, so if it
+claims a keyed task it will set a terminal status and leave the key populated.
+Nothing ever releases it after that: the next enqueue with that key hits the
+unique index forever.
+
+That mixed-version window can only open if keyed rows exist while pre-change
+workers are still running — which requires adoption in the *same* release as the
+mechanism. Ship them separately and the window never exists, because by the time
+any call site can pass a key, every pod already releases it. An adoption PR that
+also had to drain the fleet first would be a far worse change than one that
+simply comes second.
+
+`_find_active_by_key` additionally excludes terminal rows, so a stale key
+produced this way (or by a manual DB edit, or by a future transition that forgets
+the release) surfaces as a raised `RuntimeError` from `enqueue` rather than as a
+finished task handed back with `created=False`. That is a loud failure on an
+inconsistent row, not a repair — see its docstring.
+
 The idempotency migration **must be applied before deploying the release that
 contains it** — not merely before the first call site passes a key. The ORM maps
 both columns unconditionally, so every `SELECT` projects them and every `INSERT`
