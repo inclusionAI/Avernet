@@ -128,7 +128,8 @@ def field(line: str, key: str) -> str:
 def test_successful_request_logs_tenant_and_caller(client, caplog):
     with caplog.at_level(logging.INFO):
         response = client.get(
-            "/openapi/v1/bots/bot-7", headers={PRINCIPAL_HEADER: mint(user_id="u-42")}
+            "/openapi/v1/bots/bot-7",
+            headers={PRINCIPAL_HEADER: mint(user_id="u-42", include_app=True)},
         )
 
     assert response.status_code == 200
@@ -141,7 +142,7 @@ def test_successful_request_logs_tenant_and_caller(client, caplog):
     assert field(line, "route") == "/openapi/v1/bots/{bot_id}"
     assert field(line, "status") == "200"
     assert field(line, "tenant") == TENANT
-    assert field(line, "caller") == "user:u-42"
+    assert field(line, "caller") == "user:u-42+app:1"
     assert float(field(line, "duration_ms")) >= 0
 
 

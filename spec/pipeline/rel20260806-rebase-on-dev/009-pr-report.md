@@ -3,7 +3,7 @@
 ## 范围
 
 - Worktree / repo: `/Users/helloworld/Desktop/codes/teamclaw/Avernet` / `inclusionAI/Avernet`
-- Head / base: `rebase/REL20260806-rebase-on-dev@eea67aee` / `origin/dev@71f7c141`
+- Head / base: `rebase/REL20260806-rebase-on-dev@715a9000` / `origin/dev@71f7c141`
 - PR: https://github.com/inclusionAI/Avernet/pull/894
 - PR title: `feat(backend): integrate REL20260806 bot and Skills updates`
 - PR description sections: Problem / Solution / Validation / Compatibility and risk
@@ -27,9 +27,9 @@
 |---|---|---|---|---|---|
 | local focused regression | PASS | Principal/Skills/Local Skills 聚焦套件 115 passed；原始 ZIP 上传 endpoint 2 passed | — | — | `git diff --check origin/dev...HEAD` 与冲突标记扫描通过 |
 | pre-push SAST | PASS | 本分支推送时的仓库 pre-push gate | — | — | Backend、BaaS、Engine 的本地 SAST/lint gate 通过 |
-| BCS e2e (coverage gated) | PENDING | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236520240/job/93049884519) | 正在运行 | — | 创建后首次查询 |
-| Singlebox coverage | PENDING | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236520223/job/93049884494) | 正在运行 | — | 创建后首次查询 |
-| BCS / Backend / Engine / BaaS / Gateway unit tests | PENDING | [workflow](https://github.com/inclusionAI/Avernet/actions/runs/31236520241) | 正在运行 | — | 创建后首次查询 |
+| BCS e2e (coverage gated) / Singlebox coverage / BCS / BaaS / Engine unit tests | PASS | [workflow](https://github.com/inclusionAI/Avernet/actions/runs/31236564713) | — | — | 715a9000 的远端门禁通过 |
+| Backend unit tests | FAIL | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236564713/job/93050025294) | tenantless user + app 的 caller 断言仍按 user-only 编写 | 已调整为显式 user+app 期望 | 本地 access-log/principal seam 27 passed，等待新 head CI |
+| Gateway unit tests | FAIL | [job](https://github.com/inclusionAI/Avernet/actions/runs/31236564713/job/93050025300) | access log 在 UserPrincipal 上读取不存在的 tenant | 已只从非 user principal 汇总 tenant | access-log/relay 聚焦回归 50 passed，Ruff 通过，等待新 head CI |
 
 ## 人工意见
 
@@ -41,6 +41,6 @@
 
 - PR: OPEN
 - 自动意见: CLEAR
-- ACI/CI: PENDING
+- ACI/CI: 本轮修复待推送
 - 人工意见: CLEAR
-- 下一步: 等待并核验当前 head 的远端门禁；若出现合理评审意见或确定性失败，再进行最小修复。
+- 下一步: 推送 tenantless-user 的最小修复并核验新 head 的远端门禁。
