@@ -12,6 +12,49 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
 from agentclaw.community.core.bot_management.engines.registry import (
     get_engine_provisioning_registry,
 )
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_baas_engine_bucket,
+)
+
+
+def test_resolve_baas_engine_bucket_routes_general_cc_by_template_type():
+    assert (
+        resolve_baas_engine_bucket(
+            engine_type="claude_code",
+            template_type="generalCC",
+        )
+        == "aicoding"
+    )
+
+
+def test_resolve_baas_engine_bucket_routes_architect_by_template_type():
+    assert (
+        resolve_baas_engine_bucket(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_resolve_baas_engine_bucket_routes_architect_without_template_config():
+    assert (
+        resolve_baas_engine_bucket(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_resolve_baas_engine_bucket_keeps_normal_cc_on_claude_code():
+    assert (
+        resolve_baas_engine_bucket(
+            engine_type="claude-code",
+            template_type="normalCC",
+        )
+        == "claude_code"
+    )
 
 
 def test_aicoding_strategy_personal_coding_model_runtime_and_token():

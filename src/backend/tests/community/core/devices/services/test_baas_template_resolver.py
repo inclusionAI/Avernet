@@ -176,7 +176,7 @@ def test_claude_code_coding_template_maps_to_aicoding_engine():
     )
 
 
-def test_claude_code_architect_template_maps_to_aicoding_engine():
+def test_claude_code_architect_template_selector_maps_to_aicoding_engine():
     resolver, _ = _resolver(
         {
             "selectors": [
@@ -207,6 +207,26 @@ def test_claude_code_architect_template_maps_to_aicoding_engine():
     )
 
 
+def test_claude_code_architect_template_maps_to_aicoding_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_generalcc_template_maps_to_aicoding():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="generalCC",
+        )
+        == "aicoding"
+    )
+
+
 def test_claude_code_normalcc_template_keeps_claude_code_engine():
     assert (
         SystemConfigBaasTemplateResolver.normalize_engine_for_template(
@@ -217,11 +237,14 @@ def test_claude_code_normalcc_template_keeps_claude_code_engine():
     )
 
 
-def test_claude_code_missing_template_type_keeps_claude_code_engine():
+@pytest.mark.parametrize("template_type", [None, ""])
+def test_claude_code_missing_template_type_keeps_claude_code_engine(
+    template_type: str | None,
+):
     assert (
         SystemConfigBaasTemplateResolver.normalize_engine_for_template(
             engine_type="claude_code",
-            template_type=None,
+            template_type=template_type,
         )
         == "claude_code"
     )

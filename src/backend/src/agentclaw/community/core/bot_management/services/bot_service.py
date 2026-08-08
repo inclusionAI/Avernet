@@ -21,7 +21,13 @@ from agentclaw.community.core.bot_management.capabilities import (
     has_declared_capabilities,
     is_template_factory_config,
 )
-from agentclaw.community.core.bot_management.engines.aicoding import CODING_TEMPLATE_TYPES
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
+    AICODING_ENGINE_TYPE,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
+    normalize_engine_type,
+    resolve_baas_engine_bucket,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -688,16 +694,15 @@ class BotService:
         if source_provider != ARCA_DEVICE_PROVIDER:
             return source_provider
 
-        active_engine = (
-            str(bot.get("active_engine") or "")
-            .strip()
-            .lower()
-            .replace("-", "_")
-        )
+        active_engine = normalize_engine_type(bot.get("active_engine"), default="")
         template_type = bot.get("template_type")
+        engine_bucket = resolve_baas_engine_bucket(
+            engine_type=active_engine,
+            template_type=template_type,
+        )
         if active_engine not in {"openclaw", "hermes", "claude_code"}:
             return source_provider
-        if active_engine == "claude_code" and template_type in CODING_TEMPLATE_TYPES:
+        if engine_bucket == AICODING_ENGINE_TYPE:
             return source_provider
 
         template_resolver = getattr(self, "_baas_template_resolver", None)

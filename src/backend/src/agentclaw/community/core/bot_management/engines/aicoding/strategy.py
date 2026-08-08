@@ -25,13 +25,33 @@ from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 # detected from active_engine + template_config snapshot, not by extending this
 # set with template keys.
 CODING_TEMPLATE_TYPES = frozenset({"applicationCoding", "personalCoding"})
-TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset({"aicoding", "claude_code"})
+AICODING_ENGINE_TYPE = "aicoding"
+CLAUDE_CODE_ENGINE_TYPE = "claude_code"
+NORMAL_CC_TEMPLATE_TYPE = "normalcc"
+TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset(
+    {AICODING_ENGINE_TYPE, CLAUDE_CODE_ENGINE_TYPE}
+)
 LEGACY_BOT_TYPE_ENV_MAP = {
     "personalCoding": "personal",
     "applicationCoding": "application",
 }
 _THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
 _ENCRYPTED_VALUE_PREFIX = "enc:v1:"
+
+
+class AicodingBaasEngineBucketResolver:
+    """BaaS bucket resolver contributed by the aicoding engine module."""
+
+    def resolve_baas_engine_bucket(
+        self,
+        *,
+        normalized_engine_type: str,
+        template_type: str | None,
+    ) -> str | None:
+        return AicodingProvisioningStrategy.resolve_baas_engine_bucket(
+            active_engine=normalized_engine_type,
+            template_type=template_type,
+        )
 
 
 class AicodingProvisioningStrategy(EngineProvisioningStrategy):
@@ -45,8 +65,58 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         return self._engine_type
 
     @staticmethod
+    def normalize_engine_type(
+        engine_type: str | None, *, default: str = "openclaw"
+    ) -> str:
+        return (engine_type or default).strip().lower().replace("-", "_")
+
+    @staticmethod
+    def normalize_template_type(template_type: str | None) -> str:
+        return (template_type or "").strip().lower()
+
+    @staticmethod
     def is_coding_template(template_type: str | None) -> bool:
         return template_type in CODING_TEMPLATE_TYPES
+
+    @classmethod
+    def should_use_aicoding_baas_bucket(
+        cls,
+        *,
+        active_engine: str | None,
+        template_type: str | None,
+    ) -> bool:
+        """Whether this context should select the aicoding BaaS bucket.
+
+        BaaS bucket routing is an image/runtime selection policy: all explicit
+        claude_code template-factory types except normalCC reuse the aicoding
+        BaaS template bucket. It only depends on active_engine + template_type;
+        caller/create routing may only have template_type available.
+        """
+        if (
+            cls.normalize_engine_type(active_engine, default="")
+            != CLAUDE_CODE_ENGINE_TYPE
+        ):
+            return False
+        normalized_template_type = cls.normalize_template_type(template_type)
+        return bool(
+            normalized_template_type
+            and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
+        )
+
+    @classmethod
+    def resolve_baas_engine_bucket(
+        cls,
+        *,
+        active_engine: str | None,
+        template_type: str | None,
+    ) -> str | None:
+        """Return the aicoding BaaS bucket override, if this engine owns it."""
+        if cls.should_use_aicoding_baas_bucket(
+            active_engine=active_engine,
+            template_type=template_type,
+        ):
+            return AICODING_ENGINE_TYPE
+        return None
 
     has_template_factory_config = staticmethod(is_template_factory_config)
 
@@ -71,7 +141,8 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         has_template_identity = isinstance(template_config, dict) and bool(
             template_config.get("template_key") and template_config.get("template_uid")
         )
-        return active_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES and has_template_identity
+        normalized_engine = cls.normalize_engine_type(active_engine, default="")
+        return normalized_engine in TEMPLATE_CONFIG_CONSUMING_ENGINES and has_template_identity
 
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
