@@ -137,8 +137,8 @@ else
   if [[ "$check_only" -eq 1 ]]; then
     missing=1
   else
-    echo "  → cargo install cargo-llvm-cov --locked ..."
-    cargo install cargo-llvm-cov --locked --quiet
+    echo "  → installing cargo-llvm-cov (prebuilt binary) ..."
+    bash "${script_dir}/install_cargo_test_tools.sh" llvm-cov
     have cargo-llvm-cov && echo "  ✓ cargo-llvm-cov installed" || { echo "  ✗ cargo-llvm-cov install failed" >&2; exit 1; }
   fi
 fi
