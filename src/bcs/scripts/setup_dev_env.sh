@@ -78,8 +78,8 @@ else
   if [[ "$check_only" -eq 1 ]]; then
     missing=1
   else
-    echo "  → cargo install cargo-nextest --locked ..."
-    cargo install cargo-nextest --locked --quiet
+    echo "  → installing cargo-nextest (prebuilt binary) ..."
+    bash "${script_dir}/install_cargo_test_tools.sh" nextest
     have cargo-nextest && echo "  ✓ cargo-nextest installed" || { echo "  ✗ cargo-nextest install failed" >&2; exit 1; }
   fi
 fi

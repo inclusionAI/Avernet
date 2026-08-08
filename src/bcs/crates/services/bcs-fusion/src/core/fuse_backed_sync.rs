@@ -72,8 +72,12 @@ pub fn build_sync_request(
 
 /// Sync worker with inline retry (3 attempts, exponential backoff).
 ///
+/// The backoff between attempts is `config.sync_retry_base_ms * 2^attempt`; the
+/// last attempt is not followed by a wait, since there is nothing left to retry.
+///
 /// Designed to be called inside `tokio::spawn` — never panics, only logs.
 pub async fn sync_worker_with_retry(
+    config: &BcsFuseConfig,
     client: &FuseClient,
     bot_id: &str,
     sync_req: &SyncWorkerRequest,
@@ -104,7 +108,11 @@ pub async fn sync_worker_with_retry(
                     error = %e,
                     "Worker sync failed, retrying"
                 );
-                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                // No point waiting after the final attempt — the loop is done.
+                if attempt + 1 < MAX_SYNC_RETRIES {
+                    let backoff = config.sync_retry_base_ms.saturating_mul(2u64.pow(attempt));
+                    tokio::time::sleep(Duration::from_millis(backoff)).await;
+                }
             }
         }
     }
@@ -207,5 +215,36 @@ mod tests {
         let ctx = make_context(None, None, None, None);
         let contents = build_contents_from_context(&ctx);
         assert!(contents.is_empty());
+    }
+
+    /// The retry backoff must come from config, and the loop must not wait after
+    /// the attempt it has no intention of following up on.
+    ///
+    /// With the default 1s base this sequence sleeps 1s + 2s between the three
+    /// attempts (and used to sleep a further 4s after the last one, for nothing).
+    /// At `sync_retry_base_ms = 0` it should sleep not at all, leaving only three
+    /// connection refusals against a dead port.
+    #[tokio::test]
+    async fn sync_retry_backoff_honours_config_and_skips_the_final_wait() {
+        let config = BcsFuseConfig {
+            enabled: true,
+            // Nothing listens here, so every attempt fails fast with a refusal.
+            url: "http://127.0.0.1:19998".to_string(),
+            sync_timeout_ms: 500,
+            sync_retry_base_ms: 0,
+            ..Default::default()
+        };
+        let client = FuseClient::new(&config).expect("client builds");
+        let ctx = make_context(None, None, None, None);
+        let req = build_sync_request(&config, "bot1", "Bot One", None, &[], &[], &ctx, "public");
+
+        let started = std::time::Instant::now();
+        sync_worker_with_retry(&config, &client, "bot1", &req).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "zero backoff should add no sleep; took {elapsed:?}"
+        );
     }
 }
