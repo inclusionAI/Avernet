@@ -55,9 +55,10 @@ The shared npm download cache is kept separately under
 artifacts. Override it with `--npm-cache` when needed.
 
 `FAIL_SDK_ABI` identifies missing runtime SDK exports. A source-only type drift
-is reported as `PASS_WITH_WARNINGS` because OpenClaw loads the built JavaScript
-plugin rather than recompiling its source. `FAIL_LLM_PIPELINE` means OpenClaw
-started but never reached the local model endpoint. Missing or
+is listed in the report's `Warnings` column while the compatibility status
+remains `PASS`, because OpenClaw loads the built JavaScript plugin rather than
+recompiling its source. `FAIL_LLM_PIPELINE` means OpenClaw started but never
+reached the local model endpoint. Missing or
 infrastructure-failed rows make the aggregate report incomplete and fail the
 command.
 

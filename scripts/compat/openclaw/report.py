@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-PASSING_STATUSES = {"PASS", "PASS_WITH_WARNINGS"}
+PASSING_STATUSES = {"PASS"}
 
 
 def version_key(result: dict[str, Any]) -> tuple[int, int, int, int]:
@@ -39,6 +39,11 @@ def collect_results(results_dir: Path) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for path in sorted(results_dir.glob("*/result.json")):
         result = read_json(path)
+        if result.get("status") == "PASS_WITH_WARNINGS":
+            result["status"] = "PASS"
+        warnings = warning_details(result)
+        if warnings:
+            result["warnings"] = warnings
         result.setdefault("result_file", str(path))
         results.append(result)
     return sorted(results, key=version_key)
@@ -58,10 +63,24 @@ def phase_mark(result: dict[str, Any], name: str) -> str:
     return "✅" if value else "❌"
 
 
+def warning_details(result: dict[str, Any]) -> list[str]:
+    warnings = result.get("warnings")
+    if isinstance(warnings, list):
+        values = [str(warning) for warning in warnings if str(warning).strip()]
+        if values:
+            return values
+    elif isinstance(warnings, str) and warnings.strip():
+        return [warnings]
+
+    if phase_ok(result, "typecheck") is False:
+        return ["typecheck failed"]
+    return []
+
+
 def failure_detail(result: dict[str, Any]) -> str:
     if isinstance(result.get("error"), str):
         return result["error"]
-    for phase in ("install", "sdk_imports", "typecheck", "runtime"):
+    for phase in ("install", "sdk_imports", "runtime"):
         payload = result.get("phases", {}).get(phase)
         if not isinstance(payload, dict) or payload.get("ok") is not False:
             continue
@@ -73,6 +92,8 @@ def failure_detail(result: dict[str, Any]) -> str:
         if isinstance(bcs, dict) and isinstance(bcs.get("reason"), str):
             return bcs["reason"]
         return f"{phase} failed"
+    if "runtime" in result.get("skipped_phases", []):
+        return "runtime skipped"
     return ""
 
 
@@ -132,16 +153,17 @@ def markdown_report(summary: dict[str, Any]) -> str:
         )
     lines.extend(
         [
-            "| OpenClaw | Status | Install | SDK imports | Source type diagnostic | Runtime | LLM calls | Duration | Detail |",
-            "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- |",
+            "| OpenClaw | Status | Install | SDK imports | Source type diagnostic | Runtime | LLM calls | Duration | Warnings | Detail |",
+            "| --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |",
         ]
     )
     for result in summary["results"]:
         runtime = result.get("phases", {}).get("runtime", {})
         llm_calls = runtime.get("llm_request_count", "—") if isinstance(runtime, dict) else "—"
+        warnings = "; ".join(warning_details(result)).replace("|", "\\|").replace("\n", " ")[:240]
         detail = failure_detail(result).replace("|", "\\|").replace("\n", " ")[:240]
         lines.append(
-            "| {version} | {status} | {install} | {sdk} | {types} | {runtime} | {llm} | {duration:.1f}s | {detail} |".format(
+            "| {version} | {status} | {install} | {sdk} | {types} | {runtime} | {llm} | {duration:.1f}s | {warnings} | {detail} |".format(
                 version=result.get("openclaw_version", "unknown"),
                 status=result.get("status", "UNKNOWN"),
                 install=phase_mark(result, "install"),
@@ -150,6 +172,7 @@ def markdown_report(summary: dict[str, Any]) -> str:
                 runtime=phase_mark(result, "runtime"),
                 llm=llm_calls,
                 duration=float(result.get("duration_seconds", 0)),
+                warnings=warnings,
                 detail=detail,
             )
         )
@@ -182,6 +205,10 @@ def junit_report(summary: dict[str, Any]) -> ET.ElementTree:
             },
         )
         status = str(result.get("status", "UNKNOWN"))
+        warnings = warning_details(result)
+        if warnings:
+            output = ET.SubElement(case, "system-out")
+            output.text = "Warnings: " + "; ".join(warnings)
         if status not in PASSING_STATUSES:
             failure = ET.SubElement(case, "failure", {"type": status, "message": failure_detail(result)})
             failure.text = json.dumps(result.get("phases", {}), ensure_ascii=False, indent=2)
@@ -208,9 +235,11 @@ def html_report(summary: dict[str, Any]) -> str:
     for result in summary["results"]:
         status = str(result.get("status", "UNKNOWN"))
         css = "pass" if status in PASSING_STATUSES else "fail"
+        warnings = "; ".join(warning_details(result))
         rows.append(
             "<tr class='{css}'><td>{version}</td><td>{status}</td><td>{install}</td>"
-            "<td>{sdk}</td><td>{types}</td><td>{runtime}</td><td>{duration:.1f}s</td><td>{detail}</td></tr>".format(
+            "<td>{sdk}</td><td>{types}</td><td>{runtime}</td><td>{duration:.1f}s</td>"
+            "<td>{warnings}</td><td>{detail}</td></tr>".format(
                 css=css,
                 version=html.escape(str(result.get("openclaw_version", "unknown"))),
                 status=html.escape(status),
@@ -219,6 +248,7 @@ def html_report(summary: dict[str, Any]) -> str:
                 types=phase_mark(result, "typecheck"),
                 runtime=phase_mark(result, "runtime"),
                 duration=float(result.get("duration_seconds", 0)),
+                warnings=html.escape(warnings),
                 detail=html.escape(failure_detail(result)[:500]),
             )
         )
@@ -230,7 +260,7 @@ def html_report(summary: dict[str, Any]) -> str:
 <style>body{font:14px system-ui;margin:2rem}table{border-collapse:collapse;width:100%%}th,td{border:1px solid #ddd;padding:.5rem;text-align:left}.pass{background:#effaf2}.fail{background:#fff0f0}code{background:#eee;padding:.1rem .3rem}</style>
 </head><body><h1>OpenClaw compatibility report</h1>
 <p>Result: <code>%s</code>; tested %s/%s; generated %s.</p>%s
-<table><thead><tr><th>OpenClaw</th><th>Status</th><th>Install</th><th>SDK imports</th><th>Source type diagnostic</th><th>Runtime</th><th>Duration</th><th>Detail</th></tr></thead>
+<table><thead><tr><th>OpenClaw</th><th>Status</th><th>Install</th><th>SDK imports</th><th>Source type diagnostic</th><th>Runtime</th><th>Duration</th><th>Warnings</th><th>Detail</th></tr></thead>
 <tbody>%s</tbody></table></body></html>
 """ % (
         "COMPATIBLE" if summary["compatible"] else "INCOMPATIBLE OR INCOMPLETE",

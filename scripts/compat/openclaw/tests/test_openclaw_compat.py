@@ -24,6 +24,7 @@ from run_one import (  # noqa: E402
     resolve_runtime_sdk,
     stage_runtime_plugin,
     status_from_phases,
+    warnings_from_phases,
 )
 
 
@@ -103,7 +104,7 @@ class DiscoverVersionsTest(unittest.TestCase):
 class ResultStatusTest(unittest.TestCase):
     def test_skipped_runtime_is_incomplete(self) -> None:
         self.assertEqual(
-            apply_skipped_phase_status("PASS_WITH_WARNINGS", ["runtime"]),
+            apply_skipped_phase_status("PASS", ["runtime"]),
             "INCOMPLETE_SKIPPED_RUNTIME",
         )
 
@@ -113,18 +114,18 @@ class ResultStatusTest(unittest.TestCase):
             "PASS",
         )
 
-    def test_reports_source_type_drift_as_a_non_blocking_warning(self) -> None:
+    def test_source_type_drift_remains_pass_and_is_reported_as_a_warning(self) -> None:
+        phases = {
+            "install": {"ok": True},
+            "sdk_imports": {"ok": True},
+            "typecheck": {"ok": False},
+            "runtime": {"ok": True, "llm_request_count": 1},
+        }
         self.assertEqual(
-            status_from_phases(
-                {
-                    "install": {"ok": True},
-                    "sdk_imports": {"ok": True},
-                    "typecheck": {"ok": False},
-                    "runtime": {"ok": True, "llm_request_count": 1},
-                }
-            ),
-            "PASS_WITH_WARNINGS",
+            status_from_phases(phases),
+            "PASS",
         )
+        self.assertEqual(warnings_from_phases(phases), ["typecheck failed"])
 
     def test_reports_llm_pipeline_failure_separately(self) -> None:
         self.assertEqual(
@@ -147,7 +148,8 @@ class ReportTest(unittest.TestCase):
             results = root / "results"
             reports = root / "reports"
             discovery = root / "discovery.json"
-            for version, status in (("2026.3.28", "PASS"), ("2026.4.1", "FAIL_RUNTIME")):
+            for version, status in (("2026.3.28", "PASS_WITH_WARNINGS"), ("2026.4.1", "FAIL_RUNTIME")):
+                runtime_ok = status == "PASS_WITH_WARNINGS"
                 target = results / version
                 target.mkdir(parents=True)
                 (target / "result.json").write_text(
@@ -159,8 +161,11 @@ class ReportTest(unittest.TestCase):
                             "phases": {
                                 "install": {"ok": True},
                                 "sdk_imports": {"ok": True},
-                                "typecheck": {"ok": True},
-                                "runtime": {"ok": status == "PASS", "error": "boom"},
+                                "typecheck": {"ok": False},
+                                "runtime": {
+                                    "ok": runtime_ok,
+                                    **({} if runtime_ok else {"error": "gateway crashed"}),
+                                },
                             },
                         }
                     ),
@@ -186,6 +191,16 @@ class ReportTest(unittest.TestCase):
             self.assertFalse(summary["compatible"])
             self.assertEqual(summary["tested_count"], 2)
             self.assertEqual(summary["status_counts"], {"FAIL_RUNTIME": 1, "PASS": 1})
+            markdown = (reports / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("| Warnings | Detail |", markdown)
+            rows: dict[str, list[str]] = {}
+            for line in markdown.splitlines():
+                if line.startswith("| 2026."):
+                    cells = [cell.strip() for cell in line.strip("|").split("|")]
+                    rows[cells[0]] = cells
+            self.assertEqual(rows["2026.3.28"][1], "PASS")
+            self.assertEqual(rows["2026.3.28"][8:], ["typecheck failed", ""])
+            self.assertEqual(rows["2026.4.1"][8:], ["typecheck failed", "gateway crashed"])
             for artifact in ("summary.json", "summary.md", "junit.xml", "report.html"):
                 self.assertTrue((reports / artifact).is_file(), artifact)
 

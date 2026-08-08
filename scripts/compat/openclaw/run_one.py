@@ -555,13 +555,18 @@ def status_from_phases(phases: dict[str, dict[str, Any]]) -> str:
             if phase == "runtime" and phases[phase].get("llm_request_count") == 0:
                 return "FAIL_LLM_PIPELINE"
             return status
-    if "typecheck" in phases and not phases["typecheck"].get("ok"):
-        return "PASS_WITH_WARNINGS"
     return "PASS"
 
 
+def warnings_from_phases(phases: dict[str, dict[str, Any]]) -> list[str]:
+    typecheck = phases.get("typecheck")
+    if isinstance(typecheck, dict) and typecheck.get("ok") is False:
+        return ["typecheck failed"]
+    return []
+
+
 def apply_skipped_phase_status(status: str, skipped_phases: list[str]) -> str:
-    if status not in {"PASS", "PASS_WITH_WARNINGS"}:
+    if status != "PASS":
         return status
     if "runtime" in skipped_phases:
         return "INCOMPLETE_SKIPPED_RUNTIME"
@@ -677,6 +682,9 @@ def main() -> int:
     finally:
         result["finished_at"] = utc_now()
         result["duration_seconds"] = round(time.monotonic() - started, 3)
+        warnings = warnings_from_phases(result["phases"])
+        if warnings:
+            result["warnings"] = warnings
         if args.keep_workdir:
             result["work_dir"] = str(work_dir)
         else:
@@ -684,7 +692,7 @@ def main() -> int:
         write_json(args.output_dir / "result.json", result)
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["status"] in {"PASS", "PASS_WITH_WARNINGS"} else 1
+    return 0 if result["status"] == "PASS" else 1
 
 
 if __name__ == "__main__":
