@@ -611,9 +611,26 @@ def test_key_columns_pin_binary_collation_on_mysql():
     from sqlalchemy.schema import CreateTable
 
     ddl = str(CreateTable(TaskQueueModel.__table__).compile(dialect=mysql.dialect()))
-    for column in ("idempotency_key", "active_idempotency_key"):
+    # task_type is in the same unique index, and an index is only as precise as
+    # its least precise column — leaving it _ci would reopen the hole one column
+    # over, with 'Job' and 'job' as a single dedup slot.
+    for column in ("idempotency_key", "active_idempotency_key", "task_type"):
         line = next(ln for ln in ddl.splitlines() if ln.strip().startswith(column))
         assert "COLLATE utf8mb4_bin" in line, f"{column} lost its binary collation: {line}"
+
+
+def test_env_deliberately_keeps_the_default_collation():
+    """The counterpart to the test above: env is scoped by the same index but is
+    intentionally NOT pinned, because it is also compared by the claim/reclaim
+    eligibility filter and carries two other indexes, so altering it would
+    change pre-existing behaviour. Pinned as a decision, so flipping it is a
+    deliberate act rather than a drive-by consistency edit."""
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.schema import CreateTable
+
+    ddl = str(CreateTable(TaskQueueModel.__table__).compile(dialect=mysql.dialect()))
+    line = next(ln for ln in ddl.splitlines() if ln.strip().startswith("env "))
+    assert "COLLATE" not in line, f"env collation changed deliberately? {line}"
 
 
 def test_case_variants_are_distinct_keys(repo):

@@ -114,15 +114,30 @@ PAD SPACE collation, so the trailing-space half of the problem is closed by the
 validation rule above rather than by the collation. The two are complementary,
 and neither alone is sufficient.
 
-The *scope* columns are handled differently. `env` and `task_type` keep the
-table's default collation — case-insensitive and PAD SPACE — because widening
-them would mean altering columns that predate this index and that every other
-query reads. Instead the scope is kept unambiguous at the source: `task_type`
-is a registry key, and `HandlerRegistry.register` rejects a type that folds onto
-an already-registered one (`Job` vs `job`, `job ` vs `job`), which would
-otherwise be two handlers sharing one dedup slot; `env` comes from deployment
-config rather than per-call input. Same principle as the key rules above —
-remove the ambiguity rather than depend on the collation to preserve it.
+**`task_type` pins the same collation**, because a unique index is only as
+precise as its least precise column. Left on the default, `Job` and `job` would
+be one index entry — two registered handlers sharing a single dedup slot, so a
+keyed enqueue for one joins the other's live task. Pinning it costs nothing
+elsewhere: on this table `task_type` is compared in SQL only by the dedup
+lookup and appears in no other index. Note this requires a `MODIFY COLUMN` on
+an existing column, so unlike the new columns it rewrites data — see the DDL.
+
+**`env` deliberately does not.** It is scoped by the same index, but unlike
+`task_type` it is compared by the claim/reclaim eligibility filter and carries
+`idx_env_status_run_at` and `idx_env_lease_expires_at`, so changing its
+collation would alter pre-existing behaviour and rebuild those indexes — far
+wider than the risk, given `env` comes from deployment config rather than
+per-call input. A test pins this as a decision so it isn't "fixed" by a
+consistency edit later.
+
+`HandlerRegistry.register` additionally rejects a task type that folds onto an
+already-registered one. That is second line of defence, not the enforcement:
+the collation settles case *across processes*, while this catches the PAD SPACE
+half (`job ` vs `job`, which `utf8mb4_bin` still merges) and fails loudly at
+startup instead of at the first keyed enqueue in production. It cannot see
+outside its own process — a rolling deploy renaming a type by case alone has
+each version holding only its own spelling — which is exactly why the scope is
+enforced in the schema as well.
 
 **One edge worth knowing.** A task whose deadline has passed but which no worker
 has scanned yet is still non-terminal, so it still holds its key and a duplicate

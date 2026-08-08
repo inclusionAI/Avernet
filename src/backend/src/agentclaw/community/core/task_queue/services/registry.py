@@ -64,23 +64,29 @@ class HandlerRegistry:
 
         Also raises when a ``task_type`` differs from an already-registered one
         *only by case or trailing whitespace*. That is not style policing: the
-        enqueue dedup index is ``UNIQUE (env, task_type, active_idempotency_key)``
-        and ``task_type`` carries the table's default collation, which on
-        MySQL/OceanBase is both case-insensitive and PAD SPACE. So ``"Job"`` and
-        ``"job"`` are two distinct registry keys (this dict compares exactly)
-        but *one* value to the index — a keyed enqueue for ``"job"`` would take
-        the conflict path against the ``"Job"`` row and be handed that task with
-        ``created=False``, silently dropping work meant for the other handler.
-        SQLite compares BINARY, so no test against the suite's engine can
-        observe it.
+        enqueue dedup index is ``UNIQUE (env, task_type, active_idempotency_key)``,
+        so two task types the index cannot tell apart share one dedup slot, and
+        a keyed enqueue for ``"job"`` would be handed the live ``"Job"`` task
+        with ``created=False`` — silently dropping work meant for the other
+        handler.
 
-        Rejecting the near-collision at registration removes the divergence
-        instead of relying on the collation: if no two registered task types
-        fold together, the index's looser comparison can never merge two of
-        them. This mirrors how ``idempotency_key`` handles the same engine
-        divergence — reject at the boundary rather than depend on the column
-        definition. Registration is startup-time and the error is loud, so the
-        wiring bug surfaces before any task is enqueued.
+        **This check is a second line of defence, not the enforcement.**
+        ``task_type`` pins ``utf8mb4_bin`` in the schema, which settles the case
+        half in the database, where it holds across processes. This check exists
+        for what the collation cannot cover:
+
+        - ``utf8mb4_bin`` is **PAD SPACE**, so ``"job "`` and ``"job"`` are
+          still one index entry; only this check separates them.
+        - It fails at **startup**, with a message naming both spellings, rather
+          than at the first keyed enqueue in production.
+
+        What it cannot do is see outside its own process — a rolling deploy
+        renaming a task type by case alone would have each version's registry
+        holding only its own spelling. That case is covered by the collation,
+        which is precisely why the scope is enforced in the schema too rather
+        than here alone.
+
+        Lookup is unaffected: it stays exact, matching the collation.
 
         Lookup stays **exact**: rows store ``task_type`` verbatim, so the worker
         dispatches on the spelling that was enqueued.

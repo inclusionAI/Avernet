@@ -30,18 +30,40 @@ from agentclaw.community.utils.env_utils import get_current_env
 # with_variant() keeps BIGINT on MySQL/OceanBase but uses INTEGER on SQLite.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
-#: Dedup keys are compared **byte-for-byte**, so the collation must be binary.
-#: MySQL/OceanBase default to a ``utf8mb4_*_ci`` collation, under which
-#: ``publish:Bot-A:poll`` and ``publish:bot-a:poll`` are *equal* in the unique
-#: index — and non-``_0900`` ci collations also PAD SPACE, making ``"k1"`` and
-#: ``"k1 "`` equal. Either would let one caller's key silently join a different
-#: caller's task. SQLite already compares BINARY, so the divergence is invisible
-#: to the test suite; pinning ``utf8mb4_bin`` on the MySQL variant makes both
-#: engines agree with the documented "stored verbatim" key contract.
-#: with_variant() leaves SQLite's plain VARCHAR alone (it has no such collation).
-IdempotencyKeyString = String(190).with_variant(
-    mysql.VARCHAR(190, collation="utf8mb4_bin"), "mysql"
-)
+def _binary_string(length: int):
+    """``VARCHAR(length)`` that compares **byte-for-byte** on MySQL/OceanBase.
+
+    Both engines default to a ``utf8mb4_*_ci`` collation, under which
+    ``publish:Bot-A:poll`` and ``publish:bot-a:poll`` are *equal* in a unique
+    index — letting one caller's row silently absorb another's. SQLite already
+    compares BINARY, so the divergence is invisible to the test suite; pinning
+    ``utf8mb4_bin`` on the MySQL variant makes the two engines agree.
+    ``with_variant`` leaves SQLite's plain ``VARCHAR`` alone (it has no such
+    collation and would reject the DDL).
+
+    Note ``utf8mb4_bin`` is itself **PAD SPACE**: it settles case but not
+    trailing spaces. Every column using this type therefore also rejects
+    trailing whitespace in Python — see ``_validate_idempotency_key`` for keys
+    and ``HandlerRegistry.register`` for task types.
+    """
+    return String(length).with_variant(
+        mysql.VARCHAR(length, collation="utf8mb4_bin"), "mysql"
+    )
+
+
+#: Dedup keys are caller-supplied and stored verbatim, so they must compare
+#: byte-for-byte.
+IdempotencyKeyString = _binary_string(190)
+
+#: ``task_type`` is the third column of the dedup unique index, so its collation
+#: decides key scope just as much as the key column's does. It is a registry key
+#: matched exactly in Python, and the database must agree: otherwise ``Job`` and
+#: ``job`` are two handlers but one index entry, and a keyed enqueue for one
+#: joins the other's live task. ``HandlerRegistry`` also refuses to register two
+#: types that fold together, but that check is process-local — it cannot see a
+#: row written by another version during a rolling deploy, which is why the
+#: scope is enforced in the schema rather than only in the application.
+TaskTypeString = _binary_string(100)
 
 
 class TaskQueueModel(Base):
@@ -57,7 +79,7 @@ class TaskQueueModel(Base):
     )
 
     # ── identity / payload ──────────────────────────────────────────────
-    task_type = Column(String(100), nullable=False, comment="handler registry key")
+    task_type = Column(TaskTypeString, nullable=False, comment="handler registry key")
     payload = Column(Text, nullable=False, comment="JSON string; deserialized in to_record()")
 
     # ── scheduling / claim state ────────────────────────────────────────
@@ -141,13 +163,21 @@ class TaskQueueModel(Base):
         # treat NULLs as distinct in a unique index, so un-keyed enqueues never
         # collide with each other. That property is relied upon, not incidental.
         #
-        # Only active_idempotency_key pins a binary collation; env and task_type
-        # keep the table default, which on MySQL/OceanBase is case-insensitive
-        # and PAD SPACE. Widening their collation would mean altering columns
-        # that predate this index and are read by every other query, so the
-        # scope is kept unambiguous at the source instead: HandlerRegistry
-        # rejects two task types that fold together, and env comes from
-        # deployment config rather than per-call input.
+        # task_type and active_idempotency_key both pin utf8mb4_bin, because a
+        # unique index is only as precise as its least precise column: under the
+        # default ci collation 'Job' and 'job' would be one entry, so a keyed
+        # enqueue for one would join the other's live task.
+        #
+        # env deliberately keeps the table default. Unlike task_type it is
+        # compared by _eligible() and carries two other indexes, so altering it
+        # would change pre-existing claim/reclaim behaviour — a far wider change
+        # than the risk, given env comes from deployment config rather than
+        # per-call input. task_type is compared in SQL only by
+        # _find_active_by_key and appears in no other index, so pinning it costs
+        # nothing elsewhere.
+        #
+        # utf8mb4_bin is PAD SPACE, so it settles case but not trailing spaces;
+        # HandlerRegistry.register rejects task types that differ only that way.
         Index(
             "uk_env_task_type_active_idem",
             "env",

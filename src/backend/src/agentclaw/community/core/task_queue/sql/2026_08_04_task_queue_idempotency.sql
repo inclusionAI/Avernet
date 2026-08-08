@@ -24,6 +24,21 @@
 -- available on every OceanBase version. Do not relax that validation on the
 -- assumption that this collation covers it.
 --
+-- THE SAME APPLIES TO task_type, WHICH IS WHY STATEMENT 1 EXISTS. A unique
+-- index is only as precise as its least precise column: with task_type left on
+-- the default ci collation, 'Job' and 'job' are one entry, so a keyed enqueue
+-- for one handler joins the other's live task. The application also refuses to
+-- register two task types that fold together, but that check is process-local
+-- and cannot see a row written by another version mid-rolling-deploy, so the
+-- scope is enforced here rather than only in code.
+--
+-- env is deliberately NOT modified. Unlike task_type it is compared by the
+-- claim/reclaim eligibility filter and carries idx_env_status_run_at and
+-- idx_env_lease_expires_at, so changing its collation would alter pre-existing
+-- behaviour and rebuild those indexes — much wider than the risk, given env
+-- comes from deployment config rather than per-call input. task_type is
+-- compared in SQL only by the dedup lookup and is in no other index.
+--
 -- NO BACKFILL IS REQUIRED. Both columns are new and nullable, so every existing
 -- row takes NULL, and NULLs are distinct in a unique index on both MySQL/
 -- OceanBase and SQLite. No two existing rows can collide regardless of how many
@@ -38,6 +53,21 @@
 -- so nulling a plain column is the portable way to scope uniqueness to live
 -- rows only.
 
+-- STATEMENT 1 — run this FIRST, before statement 2, so the unique index is
+-- built against the binary collation instead of being built and then rebuilt.
+--
+-- OPERATOR NOTE: this one differs in kind from statement 2. task_type already
+-- exists and holds data, and a collation change rewrites the column, so expect
+-- a table rebuild rather than an instant metadata-only change — schedule it
+-- accordingly. MODIFY COLUMN also restates the whole definition, so confirm the
+-- live column matches varchar(100) NOT NULL with this comment before running;
+-- anything omitted here would be silently dropped. All 14 shipped task types
+-- are lowercase dotted names, so no existing row changes value or collides.
+ALTER TABLE `ac_task_queue`
+  MODIFY COLUMN `task_type` varchar(100) COLLATE utf8mb4_bin NOT NULL
+    COMMENT 'handler registry key';
+
+-- STATEMENT 2 — the new columns and the dedup index.
 ALTER TABLE `ac_task_queue`
   ADD COLUMN `idempotency_key` varchar(190) COLLATE utf8mb4_bin DEFAULT NULL
     COMMENT 'caller-supplied enqueue dedup key; NULL = opted out (audit only)',
