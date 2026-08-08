@@ -67,6 +67,16 @@ class TaskQueueRepositoryProtocol(Protocol):
         ``created=False``; otherwise a new row is created with ``created=True``.
         Never raises for a plain duplicate.
 
+        Nor for the race around one: if the holder goes terminal between the
+        insert losing and the holder being looked up, the key is free again and
+        the insert is simply retried. Losing that race repeatedly is bad luck
+        rather than an error, and the retry budget is sized so it is not
+        mistaken for one. Two cases *do* raise ``RuntimeError`` — both mean the
+        enqueue could not be honoured, so neither can be reported as a
+        duplicate: a key held by a **terminal** row that never released it
+        (an inconsistent row; the message names it), and the key being taken and
+        released by other callers on every attempt (sustained churn).
+
         A terminal transition (``SUCCEEDED`` / ``FAILED`` / ``TIMED_OUT``)
         **releases** the key, so the same key may legitimately be re-enqueued
         afterwards — which is what makes retry, re-poll, and repeated restart

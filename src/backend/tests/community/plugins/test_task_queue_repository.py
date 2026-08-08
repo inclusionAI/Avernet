@@ -23,6 +23,7 @@ from agentclaw.community.core.task_queue.types import TaskStatus
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugins.task_queue_repository import (
     _ACTIVE_IDEM_INDEX,
+    _KEYED_INSERT_ATTEMPTS,
     _MAX_IDEMPOTENCY_KEY_LEN,
     TaskQueueRepository,
     _is_active_idem_conflict,
@@ -511,13 +512,56 @@ def test_holder_going_terminal_between_insert_and_lookup_is_retried(repo):
 
 
 def test_enqueue_raises_when_it_can_neither_insert_nor_resolve_a_holder(repo):
-    """Two consecutive losses surface rather than looping forever."""
+    """Losing every attempt surfaces rather than looping forever. The holder here
+    stays non-terminal, so this is the *contention* path, not the stranded-key
+    one — the key looks free on every retry and another caller keeps winning."""
     _enqueue_result(repo, idempotency_key="k1")
     # A holder that is never found: every attempt conflicts, every lookup misses.
     repo._find_active_by_key = lambda **_kwargs: None
 
-    with pytest.raises(RuntimeError, match="could not insert or resolve a holder"):
+    with pytest.raises(RuntimeError, match="taken and released by other callers"):
         _enqueue_result(repo, idempotency_key="k1")
+
+
+def test_three_consecutive_benign_races_still_enqueue(repo):
+    """A caller that loses the insert repeatedly, while the key is genuinely free
+    each time, must not be handed an error — nothing is wrong, it is just
+    unlucky. Under the old ceiling of 2 a *third* consecutive loss produced a
+    ``RuntimeError`` and the caller's task was never enqueued.
+
+    The loss count is a literal 3, deliberately: expressing it as
+    ``_KEYED_INSERT_ATTEMPTS - 1`` would track the constant and pass at any
+    bound, including the one this is meant to rule out."""
+    first = _enqueue_result(repo, idempotency_key="k1")
+    _claim(repo, "W")
+    repo.complete(task_id=first.record.id, worker_id="W")  # key genuinely free
+
+    real_insert = repo._insert
+    losses = {"n": 0}
+
+    def lose_three_times_then_succeed(**kwargs):
+        if losses["n"] < 3:
+            losses["n"] += 1
+            raise IntegrityError(
+                "INSERT ...",
+                {},
+                Exception(f"Duplicate entry 'x' for key '{_ACTIVE_IDEM_INDEX}'"),
+            )
+        return real_insert(**kwargs)
+
+    repo._insert = lose_three_times_then_succeed
+    result = _enqueue_result(repo, idempotency_key="k1")
+
+    assert losses["n"] == 3  # it really did lose three times
+    assert result.created is True
+    assert result.record.id != first.record.id
+
+
+def test_the_attempt_bound_leaves_room_for_repeated_benign_races():
+    """Guards the reason the bound was raised. The stranded-key case no longer
+    consumes this budget (it raises on its own), so the whole of it is available
+    for genuine races — but only if it is actually larger than the old ceiling."""
+    assert _KEYED_INSERT_ATTEMPTS > 3
 
 
 # ── enqueue idempotency: key validation ─────────────────────────────────────
@@ -788,14 +832,18 @@ def test_key_stranded_by_a_pre_upgrade_worker_fails_loudly_not_silently(repo, te
     *finished* task with ``created=False`` and its work vanishes, permanently,
     since nothing will ever free the key.
 
-    Assert the loud failure instead: the lookup finds no live holder, the retry
-    hits the unique index again (which does not care about status), and enqueue
-    raises. An operator sees an error; they do not see silence."""
+    Assert the loud failure instead: no live holder is found, the stranded row
+    is identified, and enqueue raises naming the row to clear. An operator sees
+    an actionable error; they do not see silence.
+
+    It raises *immediately* rather than after exhausting the retry budget —
+    retrying a permanently held key can never succeed, and spending the budget
+    on it would report a fixable fault as if it were contention."""
     first = _enqueue_result(repo, idempotency_key="k1")
     _terminate_without_releasing_the_key(repo, first.record.id, terminal)
     assert _key_columns(repo, first.record.id) == ("k1", "k1")  # key still held
 
-    with pytest.raises(RuntimeError, match="could not insert or resolve a holder"):
+    with pytest.raises(RuntimeError, match="is terminal but never released it"):
         _enqueue_result(repo, idempotency_key="k1")
 
     # And nothing was silently joined to the finished task.

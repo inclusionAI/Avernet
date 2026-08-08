@@ -80,10 +80,19 @@ logger = get_logger()
 _ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idem"
 
 #: How many times :meth:`TaskQueueRepository.enqueue` will try to insert a keyed
-#: task. A second attempt is only ever reached when the conflicting row went
-#: terminal (releasing the key) between the failed INSERT and the re-SELECT, so
-#: two is enough to cover the race without risking an unbounded loop.
-_KEYED_INSERT_ATTEMPTS = 2
+#: task. A further attempt is only ever reached when the conflicting row went
+#: terminal — releasing the key — between the failed INSERT and the re-SELECT,
+#: i.e. when the key really is free again and the insert deserves another go.
+#:
+#: This was 2, which conflated two failures: a *permanently* held key burned the
+#: same budget as a genuine race, and a caller unlucky enough to lose twice in a
+#: row got an error even though nothing was wrong. The permanent case now raises
+#: on its own (see ``_find_stranded_key_holder``), leaving this bound to cover
+#: only repeated benign races — each needing another caller to claim *and*
+#: release the key inside one microsecond-wide window. A handful of attempts
+#: makes that vanishingly unlikely; a bound is still kept so pathological churn
+#: cannot spin forever.
+_KEYED_INSERT_ATTEMPTS = 5
 
 #: Read off the column itself so the limit and the schema cannot drift apart.
 _MAX_IDEMPOTENCY_KEY_LEN = TaskQueueModel.__table__.c.idempotency_key.type.length
@@ -302,6 +311,44 @@ class TaskQueueRepository:
             )
             return row.to_record() if row else None
 
+    def _find_stranded_key_holder(
+        self, *, env: str, task_type: str, idempotency_key: str
+    ) -> Optional[int]:
+        """Id of a **terminal** row still holding ``idempotency_key``, or ``None``.
+
+        This should always be ``None``: every terminal transition releases the
+        key in the same ``UPDATE`` as the status change, so a terminal row
+        holding one is an inconsistent row — written by a worker predating this
+        feature, by hand, or by a future transition that forgets the release.
+
+        It exists to tell two conflicts apart that are otherwise identical from
+        the caller's side, and which want opposite responses. Both present as
+        "the index rejected the insert, but there is no live holder":
+
+        - **The key is genuinely free** — its holder went terminal inside the
+          window between our INSERT and the lookup. Retrying is correct and
+          will normally succeed.
+        - **The key is stranded** — a terminal row still holds it. Retrying can
+          *never* succeed, because the unique index does not care about status.
+
+        Without the distinction both burn the same retry budget and end in the
+        same generic error, so a permanent, actionable fault is reported as if
+        it were bad luck. Told apart, the stranded case fails immediately and
+        names the row to clear.
+        """
+        with self._db.orm_session() as db:
+            row = (
+                db.query(self.Model.id)
+                .filter(
+                    self.Model.env == env,
+                    self.Model.task_type == task_type,
+                    self.Model.active_idempotency_key == idempotency_key,
+                    self.Model.status.in_([s.value for s in TERMINAL_STATUSES]),
+                )
+                .first()
+            )
+            return row[0] if row else None
+
     def enqueue(
         self,
         *,
@@ -355,16 +402,39 @@ class TaskQueueRepository:
                         idempotency_key,
                     )
                     return EnqueueResult(existing, False)
-                # The holder reached a terminal state between our INSERT and
-                # this lookup, releasing the key — it is free again, so retry.
+                # No live holder, yet the index rejected us. Two very different
+                # situations, and retrying is right for only one of them.
+                stranded_id = self._find_stranded_key_holder(
+                    env=env, task_type=task_type, idempotency_key=idempotency_key
+                )
+                if stranded_id is not None:
+                    raise RuntimeError(
+                        f"[task_queue.enqueue] key={idempotency_key!r} "
+                        f"type={task_type} env={env} is held by task id="
+                        f"{stranded_id}, which is terminal but never released "
+                        "it. Retrying cannot help — the key is occupied "
+                        "forever. Most likely a worker running code from "
+                        "before enqueue idempotency wrote the terminal status "
+                        "without clearing active_idempotency_key; clear that "
+                        "column on the row to free the key"
+                    )
+                # Otherwise the holder reached a terminal state between our
+                # INSERT and this lookup, releasing the key — it is free again,
+                # so retry.
                 continue
             self._log_enqueued(record, delay_seconds, deadline_seconds, created=True)
             return EnqueueResult(record, True)
 
+        # Every attempt lost the insert *and* found the key free again straight
+        # after — i.e. a fresh holder claimed and released it inside each
+        # window. That is contention, not corruption (the permanent case raises
+        # above), so reaching here means the key is being churned faster than
+        # this loop can win rather than that anything is wrong.
         raise RuntimeError(
             "[task_queue.enqueue] could not insert or resolve a holder for "
             f"key={idempotency_key!r} type={task_type} env={env} after "
-            f"{_KEYED_INSERT_ATTEMPTS} attempts"
+            f"{_KEYED_INSERT_ATTEMPTS} attempts; the key was taken and released "
+            "by other callers on every attempt"
         )
 
     @staticmethod
