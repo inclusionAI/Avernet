@@ -149,6 +149,15 @@ def __init__(self, base_url: str):
   load-bearing: `Lifecycle` is `@runtime_checkable`, so `isinstance` succeeds
   only when all four hooks are present — a class defining just one would be
   silently skipped by discovery and the pool would never close.
+- **Rebuilt in `bootstrap()`.** A destructive `teardown()` needs a matching
+  setup path, which the first attempt at the above omitted — review caught it.
+  The injector is process-global (`get_app_injector`), so a second lifespan in
+  the same process rediscovers *the same instance*; without a rebuild its client
+  is still closed and every request raises `RuntimeError: Cannot send a request,
+  as the client has been closed`. Rule 11's required checks name restart
+  behavior explicitly. `bootstrap()` is guarded on `is_closed` so the first
+  lifespan reuses the client built in `__init__` rather than discarding it for
+  an identical one, and `_base_url` is retained to make the rebuild possible.
 - **No `limits=` tuning.** httpx defaults (100 max connections, 20 keep-alive)
   are sane; picking numbers without evidence is speculative configurability.
 

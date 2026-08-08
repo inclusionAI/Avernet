@@ -55,6 +55,10 @@ class HttpxClient(HttpClient, LifecycleBase):
     """
 
     def __init__(self, base_url: str, *, transport: Any | None = None):
+        # Both retained so ``bootstrap()`` can rebuild the client after a prior
+        # lifespan's ``teardown()`` closed it. (Review earlier flagged
+        # ``_base_url`` as dead and it was — until ``teardown()`` made the
+        # client re-creatable, which is what gives it a reader again.)
         self._base_url = base_url
         self._transport = transport
         # Eager, not lazy: ``httpx.Client()`` opens no socket, so construction
@@ -72,13 +76,37 @@ class HttpxClient(HttpClient, LifecycleBase):
         # ``device_affinity`` selection these calls exist to drive) and
         # potentially carrying one caller's identity into another's request.
         # Pooling connections must not also pool identity.
+        self._client = self._new_client()
+
+    def _new_client(self) -> httpx.Client:
         client_kwargs: dict[str, Any] = {
-            "base_url": base_url,
+            "base_url": self._base_url,
             "cookies": _blocked_cookie_jar(),
         }
-        if transport is not None:
-            client_kwargs["transport"] = transport
-        self._client = httpx.Client(**client_kwargs)
+        # Carried through the rebuild so a test-injected MockTransport survives
+        # a lifespan restart rather than silently reverting to real network I/O.
+        if self._transport is not None:
+            client_kwargs["transport"] = self._transport
+        return httpx.Client(**client_kwargs)
+
+    async def bootstrap(self) -> None:
+        """Restore the pool if a previous lifespan tore it down.
+
+        The injector is process-global (`get_app_injector`), so a second
+        lifespan in the same process — two sequential ``TestClient(app)``
+        contexts, say — rediscovers *this same instance*. Without this hook the
+        client stays closed and every later request raises
+        ``RuntimeError: Cannot send a request, as the client has been closed``.
+
+        ``teardown()`` is destructive, so the lifecycle contract's
+        ``bootstrap()``/``teardown()`` symmetry has to be honoured for restart
+        to work — arch.rules.md Rule 11 names restart behavior explicitly.
+
+        Guarded on ``is_closed`` so the first lifespan reuses the client built
+        in ``__init__`` instead of discarding it for an identical one.
+        """
+        if self._client.is_closed:
+            self._client = self._new_client()
 
     async def teardown(self) -> None:
         """Release the connection pool at process shutdown.

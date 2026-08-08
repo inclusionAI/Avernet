@@ -172,15 +172,96 @@ async def test_teardown_closes_the_pooled_client():
 
 
 @pytest.mark.asyncio
-async def test_other_lifecycle_hooks_are_noops():
-    """Only teardown does work; the rest must not raise or close early."""
+async def test_setup_hooks_do_not_close_the_client():
+    """The setup direction must never tear the pool down."""
     with _patched_httpx() as (_ctor, inner):
+        inner.is_closed = False
         client = HttpxClient(base_url="http://svc.test")
         await client.bootstrap()
         await client.startup()
         await client.shutdown()
 
     inner.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_reuses_an_open_client():
+    """First lifespan keeps the client built in __init__ — no churn."""
+    with _patched_httpx() as (ctor, inner):
+        inner.is_closed = False
+        client = HttpxClient(base_url="http://svc.test")
+        await client.bootstrap()
+
+    assert ctor.call_count == 1
+    assert client._client is inner
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rebuilds_a_torn_down_client():
+    """Restart path: a second lifespan on the same singleton must work.
+
+    The injector is process-global, so a second lifespan rediscovers this same
+    instance. Without the rebuild, every later request would raise
+    ``RuntimeError: Cannot send a request, as the client has been closed``.
+    """
+    # Distinct instances per construction, so "was it actually rebuilt?" is
+    # observable — the shared-mock fixture above returns one object for every
+    # call and could not tell a rebuild from a reuse.
+    first = MagicMock(name="client_1")
+    first.is_closed = False
+    second = MagicMock(name="client_2")
+    second.is_closed = False
+
+    with patch("httpx.Client", side_effect=[first, second]) as ctor:
+        client = HttpxClient(base_url="http://svc.test")
+        await client.bootstrap()
+        assert client._client is first
+
+        await client.teardown()
+        first.close.assert_called_once_with()
+
+        # Second lifespan: the discovered instance now holds a closed client.
+        first.is_closed = True
+        await client.bootstrap()
+
+    assert ctor.call_count == 2
+    assert client._client is second
+
+
+@pytest.mark.asyncio
+async def test_restart_against_a_real_server():
+    """End-to-end restart, because the mocked test cannot catch httpx's own
+    closed-client guard."""
+    import http.server
+    import socketserver
+    import threading
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = socketserver.TCPServer(("127.0.0.1", 0), _Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        client = HttpxClient(base_url=f"http://127.0.0.1:{port}")
+        await client.bootstrap()
+        assert client.get("/x").status_code == 200
+        await client.teardown()
+
+        # Second lifespan on the same instance.
+        await client.bootstrap()
+        assert client.get("/x").status_code == 200
+        await client.teardown()
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 def test_set_cookie_is_never_stored_or_replayed():
