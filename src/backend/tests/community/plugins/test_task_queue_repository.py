@@ -593,3 +593,37 @@ def test_validation_also_applies_through_the_service_facade(repo):
     with pytest.raises(ValueError, match="non-empty"):
         service.enqueue("demo", {}, 3600, idempotency_key="")
     assert _all_rows(repo) == []
+
+
+# ── enqueue idempotency: key comparison is byte-for-byte ────────────────────
+
+
+def test_key_columns_pin_binary_collation_on_mysql():
+    """Keys are compared byte-for-byte, but MySQL/OceanBase default to a
+    ``utf8mb4_*_ci`` collation under which 'publish:Bot-A:poll' and
+    'publish:bot-a:poll' would be the SAME key in the unique index (and
+    non-_0900 ci collations PAD SPACE, so 'k1' == 'k1 '). SQLite already
+    compares BINARY, so no behavioural test here can catch a regression —
+    assert the rendered MySQL DDL directly instead."""
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.schema import CreateTable
+
+    ddl = str(CreateTable(TaskQueueModel.__table__).compile(dialect=mysql.dialect()))
+    for column in ("idempotency_key", "active_idempotency_key"):
+        line = next(ln for ln in ddl.splitlines() if ln.strip().startswith(column))
+        assert "COLLATE utf8mb4_bin" in line, f"{column} lost its binary collation: {line}"
+
+
+def test_case_and_trailing_space_variants_are_distinct_keys(repo):
+    """The behaviour the collation protects, asserted on SQLite (which is
+    BINARY natively) so the intent is recorded even though only the DDL test
+    above can catch a MySQL-side regression."""
+    a = _enqueue_result(repo, idempotency_key="publish:Bot-A:poll")
+    b = _enqueue_result(repo, idempotency_key="publish:bot-a:poll")
+    assert (a.created, b.created) == (True, True)
+    assert a.record.id != b.record.id
+
+    c = _enqueue_result(repo, idempotency_key="k1")
+    d = _enqueue_result(repo, idempotency_key="k1 ")
+    assert (c.created, d.created) == (True, True)
+    assert c.record.id != d.record.id

@@ -272,8 +272,10 @@ None. `IntegrityError` comes from `sqlalchemy.exc`, already a dependency.
   **Mitigation:** `_is_active_idem_conflict` matches the specific constraint on both engines; anything else re-raises. Test (7) pins it.
 - **Risk:** Low-cardinality `(env, task_type)` index prefix clusters inserts on the same leaves under OceanBase.
   **Mitigation:** Accepted, and reasoned in spec (d) — multiple `NULL`s never conflict, so there is no lock contention, only leaf-page contention, at an enqueue rate in the single digits per second. The existing hot `idx_env_status_run_at` has the same prefix shape.
-- **Risk:** The DDL ships after code that writes the columns → `Unknown column` in prod.
-  **Mitigation:** Rollout ordering below; the columns are write-only-if-present nowhere — there is no fallback path, so ordering is mandatory, not best-effort.
+- **Risk:** The DDL ships after the release containing this change → `Unknown column` in prod, breaking the *entire* queue rather than just keyed callers. The ORM maps both columns unconditionally, so every `SELECT` projects them and every `INSERT` writes them even for an un-keyed enqueue.
+  **Mitigation:** Rollout ordering below states "before this release", not "before the first keyed caller"; there is no fallback path, so ordering is mandatory, not best-effort.
+- **Risk:** A case-insensitive default collation on MySQL/OceanBase makes `publish:Bot-A:poll` and `publish:bot-a:poll` the same key in the unique index (non-`_0900` ci collations also PAD SPACE, so `k1` == `k1 `), silently joining one caller's enqueue to another's task.
+  **Mitigation:** Both key columns pin `utf8mb4_bin` via `with_variant`, in the ORM and in the DDL. SQLite is BINARY natively, so no behavioural test can catch a regression — a test asserts the rendered MySQL `CREATE TABLE` carries the collation.
 
 ## Alternatives Considered
 

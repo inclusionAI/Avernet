@@ -91,6 +91,15 @@ rows only". The opt-out works because **both engines treat NULLs as distinct in
 a unique index** — that is a *relied-upon* property, not an incidental one, and
 it is covered by a test.
 
+Both key columns pin **`utf8mb4_bin`** on MySQL/OceanBase, and that is
+load-bearing. Keys are compared byte-for-byte, but the usual `utf8mb4_*_ci`
+default is case-insensitive — `publish:Bot-A:poll` and `publish:bot-a:poll`
+would be the *same* key in the unique index — and non-`_0900` ci collations also
+PAD SPACE, making `k1` and `k1 ` equal. Either would let one caller's enqueue
+silently join a different caller's task. SQLite compares BINARY already, so this
+divergence is invisible to the suite; the collation is what makes the two
+engines agree with the "stored verbatim" contract.
+
 **One edge worth knowing.** A task whose deadline has passed but which no worker
 has scanned yet is still non-terminal, so it still holds its key and a duplicate
 enqueue joins it. The next claim scan retires it `TIMED_OUT` and frees the key.
@@ -118,9 +127,15 @@ provisioned before enabling the worker; local and test SQLite schema bootstrap
 creates it from the shared ORM metadata.
 
 Enqueue idempotency is available but **not yet adopted by any call site** — the
-mechanism landed first so adoption can be reviewed per call site. Its DDL is
-`sql/2026_08_04_task_queue_idempotency.sql`, which must be applied to prod
-before deploying code that passes a key.
+mechanism landed first so adoption can be reviewed per call site.
+
+`sql/2026_08_04_task_queue_idempotency.sql` **must be applied to prod before
+deploying the release that contains it** — not merely before the first call site
+passes a key. The ORM maps both columns unconditionally, so every `SELECT`
+projects them and every `INSERT` writes them even for an un-keyed enqueue;
+against a table without the columns the whole queue fails with "unknown
+column". The DDL also pins `utf8mb4_bin` on both columns, which is load-bearing
+rather than cosmetic — see "How idempotency works" above.
 
 ## Context Boundary
 

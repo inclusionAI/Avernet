@@ -219,7 +219,18 @@ must mirror the ORM definition. So:
    `core/task_queue/sql/2026_08_04_task_queue_idempotency.sql`, following the
    per-module `sql/` convention already used by `core/session_resources/sql/`
    and `core/service_bot/sql/`.
-2. Only then ship code that writes the columns.
+2. Only then deploy **the release containing this change** — not merely the
+   later change that starts passing a key. The ORM maps both columns
+   unconditionally, so every `SELECT` projects them and every `INSERT` writes
+   them even for an un-keyed enqueue; against a table without the columns the
+   whole queue fails with "unknown column".
+
+Both columns pin `utf8mb4_bin`. Keys are compared byte-for-byte, and the usual
+`utf8mb4_*_ci` default would make `publish:Bot-A:poll` and `publish:bot-a:poll`
+the same key in the unique index (non-`_0900` ci collations also PAD SPACE, so
+`k1` == `k1 `), silently joining one caller's enqueue to another's task. SQLite
+compares BINARY already, so no behavioural test can catch a regression here —
+the rendered MySQL DDL is asserted directly instead.
 
 Local and test SQLite get the columns free from `create_all`.
 

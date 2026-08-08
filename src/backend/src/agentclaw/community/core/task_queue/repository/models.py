@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.sql import func
 
 from agentclaw.community.core.base import Base
@@ -28,6 +29,19 @@ from agentclaw.community.utils.env_utils import get_current_env
 # KEY". BigInteger renders as "BIGINT" on SQLite, which breaks autoincrement.
 # with_variant() keeps BIGINT on MySQL/OceanBase but uses INTEGER on SQLite.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
+
+#: Dedup keys are compared **byte-for-byte**, so the collation must be binary.
+#: MySQL/OceanBase default to a ``utf8mb4_*_ci`` collation, under which
+#: ``publish:Bot-A:poll`` and ``publish:bot-a:poll`` are *equal* in the unique
+#: index — and non-``_0900`` ci collations also PAD SPACE, making ``"k1"`` and
+#: ``"k1 "`` equal. Either would let one caller's key silently join a different
+#: caller's task. SQLite already compares BINARY, so the divergence is invisible
+#: to the test suite; pinning ``utf8mb4_bin`` on the MySQL variant makes both
+#: engines agree with the documented "stored verbatim" key contract.
+#: with_variant() leaves SQLite's plain VARCHAR alone (it has no such collation).
+IdempotencyKeyString = String(190).with_variant(
+    mysql.VARCHAR(190, collation="utf8mb4_bin"), "mysql"
+)
 
 
 class TaskQueueModel(Base):
@@ -90,12 +104,12 @@ class TaskQueueModel(Base):
     # indexes, so nulling a plain column is the portable way to express
     # "unique among live rows only".
     idempotency_key = Column(
-        String(190),
+        IdempotencyKeyString,
         nullable=True,
         comment="caller-supplied enqueue dedup key; NULL = opted out. Audit only",
     )
     active_idempotency_key = Column(
-        String(190),
+        IdempotencyKeyString,
         nullable=True,
         comment="enforcement copy of idempotency_key; NULLed on terminal transitions",
     )
