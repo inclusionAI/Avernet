@@ -11,6 +11,8 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
 )
 from agentclaw.community.core.bot_management.engines.registry import (
     get_engine_provisioning_registry,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
     resolve_baas_engine_bucket,
 )
 

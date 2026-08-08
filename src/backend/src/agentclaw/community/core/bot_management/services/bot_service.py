@@ -21,8 +21,10 @@ from agentclaw.community.core.bot_management.capabilities import (
     has_declared_capabilities,
     is_template_factory_config,
 )
-from agentclaw.community.core.bot_management.engines.registry import (
+from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
+)
+from agentclaw.community.core.bot_management.engines.registry import (
     normalize_engine_type,
     resolve_baas_engine_bucket,
 )

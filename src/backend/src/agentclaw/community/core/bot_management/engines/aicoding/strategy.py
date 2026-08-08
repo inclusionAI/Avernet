@@ -34,6 +34,21 @@ LEGACY_BOT_TYPE_ENV_MAP = {
 }
 
 
+class AicodingBaasEngineBucketResolver:
+    """BaaS bucket resolver contributed by the aicoding engine module."""
+
+    def resolve_baas_engine_bucket(
+        self,
+        *,
+        normalized_engine_type: str,
+        template_type: str | None,
+    ) -> str | None:
+        return AicodingProvisioningStrategy.resolve_baas_engine_bucket(
+            active_engine=normalized_engine_type,
+            template_type=template_type,
+        )
+
+
 class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     """Provisioning strategy shared by ``aicoding`` and ``claude_code`` engines."""
 
@@ -82,6 +97,21 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             normalized_template_type
             and normalized_template_type != NORMAL_CC_TEMPLATE_TYPE
         )
+
+    @classmethod
+    def resolve_baas_engine_bucket(
+        cls,
+        *,
+        active_engine: str | None,
+        template_type: str | None,
+    ) -> str | None:
+        """Return the aicoding BaaS bucket override, if this engine owns it."""
+        if cls.should_use_aicoding_baas_bucket(
+            active_engine=active_engine,
+            template_type=template_type,
+        ):
+            return AICODING_ENGINE_TYPE
+        return None
 
     has_template_factory_config = staticmethod(is_template_factory_config)
 
