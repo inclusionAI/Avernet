@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -106,7 +107,11 @@ def remove_existing_file(path: Path) -> None:
 
 def clear_selected_results(results_dir: Path, versions: list[str]) -> None:
     for version in versions:
-        remove_existing_file(results_dir / version_slug(version) / "result.json")
+        result_dir = results_dir / version_slug(version)
+        if result_dir.is_symlink() or result_dir.is_file():
+            result_dir.unlink()
+        elif result_dir.is_dir():
+            shutil.rmtree(result_dir)
 
 
 def parse_args() -> argparse.Namespace:

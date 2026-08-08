@@ -18,7 +18,7 @@ sys.path.insert(0, str(TOOL_DIR))
 
 from discover_versions import discover, select_versions  # noqa: E402
 from report import write_reports  # noqa: E402
-from run_matrix import selected_versions  # noqa: E402
+from run_matrix import clear_selected_results, selected_versions  # noqa: E402
 from run_one import (  # noqa: E402
     apply_skipped_phase_status,
     resolve_runtime_sdk,
@@ -210,6 +210,31 @@ class ReportTest(unittest.TestCase):
 
 
 class MatrixSetupArtifactTest(unittest.TestCase):
+    def test_selected_version_cleanup_removes_all_previous_run_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results = Path(temporary) / "results"
+            selected = results / "2026.4.21"
+            selected.mkdir(parents=True)
+            for filename in (
+                "result.json",
+                "mock-llm-ready.json",
+                "mock-llm-requests.jsonl",
+                "mock-bcs-ready.json",
+                "mock-bcs-result.json",
+                "mock-bcs-frames.jsonl",
+                "runner.log",
+            ):
+                (selected / filename).write_text("stale\n", encoding="utf-8")
+
+            unselected = results / "2026.3.28"
+            unselected.mkdir()
+            (unselected / "result.json").write_text("preserved\n", encoding="utf-8")
+
+            clear_selected_results(results, ["2026.4.21"])
+
+            self.assertFalse(selected.exists())
+            self.assertTrue((unselected / "result.json").is_file())
+
     def test_discovery_failure_does_not_reuse_previous_metadata_or_results(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
