@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from secbaas.community.api.paas import PaasServiceFactory as PaasServiceFactoryProtocol
 from secbaas.community.api.template_manage import DeviceTemplateManageService
@@ -25,4 +25,7 @@ _paas_service_factory: PaasServiceFactoryProtocol = PaasServiceFactory(
     local_user_machine_repository=MagicMock(spec=LocalUserMachineRepository),
     paas_sandbox_plugins=MagicMock(spec=PaasSandboxPlugins),
     secret_plugin=MagicMock(spec=SecretStorePlugin),
+    callback_handler=MagicMock(
+        handle=AsyncMock(return_value={"status": "ok"}),
+    ),
 )

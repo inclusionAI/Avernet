@@ -78,6 +78,7 @@ def service(mock_repo, mock_paas_facade, mock_device_template_service, mock_env)
         repository=mock_repo,
         device_template_service=mock_device_template_service,
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
     yield svc
 
@@ -240,6 +241,7 @@ class TestDefaultDeviceServiceInit:
             repository=MagicMock(),
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
         assert svc._paas_facade is facade
 
@@ -252,6 +254,7 @@ class TestDefaultDeviceServiceInit:
             repository=repo,
             device_template_service=tpl_svc,
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
         assert svc._paas_facade is facade
 
@@ -2306,6 +2309,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2343,6 +2347,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2387,6 +2392,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2411,6 +2417,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(
@@ -2458,6 +2465,7 @@ class TestStopDeviceByUuid:
             repository=mock_repo,
             device_template_service=MagicMock(),
             secret_plugin=MagicMock(),
+            callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
         )
 
         result = await service.stop_device_by_uuid(

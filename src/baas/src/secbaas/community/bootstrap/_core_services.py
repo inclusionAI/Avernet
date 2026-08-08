@@ -200,6 +200,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
     ws_relay_session_repo = providers.Dependency()
     ticket_repository = providers.Dependency()
     session_ticket_repository = providers.Dependency()
+    device_callback_handler = providers.Dependency()
 
     # ── Auth service ──────────────────────────────────────────────────────────
 
@@ -283,6 +284,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         local_user_machine_repository=local_user_machine_repo,
         paas_sandbox_plugins=paas_sandbox_plugins,
         secret_plugin=secret_plugin,
+        callback_handler=device_callback_handler,
         ws_relay_session_repository=ws_relay_session_repo,
     )
 
@@ -453,6 +455,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         repository=device_repo,
         device_template_service=device_template_service,
         secret_plugin=secret_plugin,
+        callback_handler=device_callback_handler,
     )
 
     session_service = providers.Singleton(

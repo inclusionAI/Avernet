@@ -1,5 +1,7 @@
 """Device lifecycle management service package."""
 
+from secbaas.community.core.service.paas import dispatch_start_hook
+
 from ._device_service import (
     DefaultDeviceService,
     common_sm4_decrypt,
@@ -7,7 +9,6 @@ from ._device_service import (
     device_record_to_response,
     get_current_env,
 )
-from ._start_hook_dispatcher import dispatch_start_hook
 
 __all__ = [
     "DefaultDeviceService",

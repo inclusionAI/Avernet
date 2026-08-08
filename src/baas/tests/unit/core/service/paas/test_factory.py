@@ -1,6 +1,6 @@
 """Tests for PaasServiceFactory - using new template-based resolution."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -122,6 +122,7 @@ def factory():
             ),
         ),
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
 
