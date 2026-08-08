@@ -1,4 +1,5 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
+import copy
 import threading
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
@@ -8,6 +9,7 @@ from agentclaw.community.core.service_bot.repository.publish_operation_repositor
     PublishOperationRepository,
 )
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
@@ -24,8 +26,19 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
     PublishStatusInvalidError,
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    copy_image_pin_to_ext,
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    apply_image_pin_to_ext,
+    clear_image_policy_from_ext,
+    copy_image_policy_to_ext,
+    has_explicit_image_policy,
+    resolve_current_arca_image,
+    apply_runtime_kind_to_ext,
+    runtime_kind_from_provider,
+    RUNTIME_KIND_ARCA,
+    RUNTIME_KIND_TECLAW,
+    PublishImagePolicyResolver,
+    ServiceBotImagePin,
+    resolve_publish_runtime_kind,
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
@@ -57,6 +70,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ):
         self._repo = bot_publish_repo
         self._bot_repo = bot_repo
@@ -69,6 +83,12 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self._publish_operation_repo = publish_operation_repo
         self._task_queue_service = task_queue_service
         self._bot_process_registry = bot_process_registry
+        self._common_config_service = common_config_service
+        self._image_policy_resolver = PublishImagePolicyResolver(
+            publish_repository=bot_publish_repo,
+            binding_repository=device_binding_repo,
+            common_config_service=common_config_service,
+        )
         self._env = get_current_env()
 
     def create_device_binding(
@@ -217,7 +237,42 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         source_bot_ext = (
             source_bot.get("ext") if isinstance(source_bot, dict) else None
         )
-        ext = copy_image_pin_to_ext(source_bot_ext, ext)
+        ext = copy_image_policy_to_ext(source_bot_ext, ext)
+        image_policy_image: str | None = None
+        if isinstance(source_bot, dict) and source_bot.get("bot_type") == "service":
+            runtime_kind = None
+            binding_id = source_bot.get("binding_id")
+            if isinstance(binding_id, int):
+                binding = self._device_binding_repo.get_by_id(binding_id)
+                runtime_kind = runtime_kind_from_provider(
+                    getattr(binding, "device_provider", None)
+                )
+            if runtime_kind is None:
+                runtime_kind = (
+                    RUNTIME_KIND_TECLAW
+                    if self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+                    else RUNTIME_KIND_ARCA
+                )
+            ext = apply_runtime_kind_to_ext(ext, runtime_kind)
+            if runtime_kind == RUNTIME_KIND_ARCA:
+                image_policy_image = resolve_current_arca_image(
+                    self._common_config_service, env=self._env
+                )
+            if image_policy_image is None:
+                ext = clear_image_policy_from_ext(ext)
+
+        # A new/default Bot carries an explicit marker and never consumes the
+        # legacy Pin switch. A pre-feature ARCA Bot has no policy marker; when
+        # protection is enabled, freeze the configured image on the new publish
+        # record so all published operations remain reproducible.
+        is_legacy_arca_service = (
+            isinstance(source_bot, dict)
+            and source_bot.get("bot_type") == "service"
+            and not self._bot_service.is_teclaw_bot(source_bot.get("active_engine"))
+            and not has_explicit_image_policy(source_bot_ext)
+        )
+        if is_legacy_arca_service and image_policy_image:
+            ext = apply_image_pin_to_ext(ext, image_policy_image)
 
         record = self._repo.insert({
             "source_bot_pk": source_bot_pk,
@@ -294,6 +349,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         target_status: str,
         ext: Dict[str, Any],
         source_status: str,
+        expected_ext: Optional[Dict[str, Any]],
     ) -> BotPublishRecord:
         """更新发布记录状态和扩展字段（乐观锁）。
 
@@ -309,7 +365,13 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Raises:
             PublishNotFoundError: 发布记录不存在或源状态不匹配
         """
-        record = self._repo.update_status_with_ext(publish_id, target_status, ext, source_status)
+        record = self._repo.compare_and_set_status_with_ext(
+            publish_id=publish_id,
+            source_status=source_status,
+            target_status=target_status,
+            expected_ext=expected_ext,
+            ext=ext,
+        )
         if not record:
             raise PublishNotFoundError(
                 f"Publish record not found or source status mismatch: "
@@ -322,11 +384,13 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         self,
         publish_id: int,
         ext: Dict[str, Any],
+        *,
+        expected_ext: Optional[Dict[str, Any]],
     ) -> BotPublishRecord:
         """仅更新发布记录的扩展字段（不更新状态）。
 
-        使用乐观锁：先读取当前状态，再以该状态作为 source_status 更新。
-        如果期间状态被并发修改，更新会失败并抛出异常。
+        使用调用方读取到的完整 ``expected_ext`` 做 compare-and-set；如果
+        期间任意并发写入改变了 ext，更新失败并抛出异常。
 
         Args:
             publish_id: 发布记录 ID
@@ -338,25 +402,58 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         Raises:
             PublishNotFoundError: 发布记录不存在或状态已被并发修改
         """
-        record = self._repo.get_by_id(publish_id)
-        if not record:
-            raise PublishNotFoundError(f"Publish record not found: {publish_id}")
-
-        current_status = record.status
-        updated_record = self._repo.update_status_with_ext(
+        updated_record = self._repo.compare_and_set_ext(
             publish_id=publish_id,
-            target_status=current_status,
+            expected_ext=expected_ext,
             ext=ext,
-            source_status=current_status,
         )
         if not updated_record:
             raise PublishNotFoundError(
-                f"Publish record not found or status changed concurrently: "
-                f"publish_id={publish_id}, expected source_status={current_status}"
+                f"Publish record not found or ext changed concurrently: "
+                f"publish_id={publish_id}"
             )
 
         logger.info(f"[update_publish_ext] id={publish_id}, ext updated")
         return updated_record
+
+    def mutate_publish_ext(
+        self,
+        publish_id: int,
+        mutator: Callable[[Dict[str, Any]], None],
+        *,
+        max_cas_attempts: int = 3,
+    ) -> BotPublishRecord:
+        """Apply a mutation to the latest ext and retry bounded CAS conflicts."""
+        for _attempt in range(max_cas_attempts):
+            record = self._repo.get_by_id(publish_id)
+            if record is None:
+                raise PublishNotFoundError(f"Publish record not found: {publish_id}")
+            expected_ext = copy.deepcopy(record.ext)
+            updated_ext = copy.deepcopy(record.ext or {})
+            mutator(updated_ext)
+            updated = self._repo.compare_and_set_ext(
+                publish_id=publish_id,
+                expected_ext=expected_ext,
+                ext=updated_ext,
+            )
+            if updated is not None:
+                return updated
+        raise BotPublishServiceError(
+            f"Publish ext CAS conflicted repeatedly: publish_id={publish_id}"
+        )
+
+    def resolve_publish_image_pin(
+        self, publish_record: BotPublishRecord
+    ) -> ServiceBotImagePin:
+        """Resolve image policy through the shared persisted-CAS seam."""
+        return self._image_policy_resolver.resolve(publish_record)
+
+    def resolve_publish_runtime_kind(self, publish_record: BotPublishRecord) -> str:
+        """Resolve provider identity only from Publish-owned persisted facts."""
+        return resolve_publish_runtime_kind(
+            publish_record,
+            binding_repository=self._device_binding_repo,
+        )
 
     def record_draft_artifact(
         self, *, bot_id: str, artifact: Dict[str, Any]
@@ -370,8 +467,9 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         )
         if not record:
             return False
-        self.update_publish_ext(
-            record.id, {**(record.ext or {}), "config_artifact": artifact}
+        self.mutate_publish_ext(
+            record.id,
+            lambda ext: ext.__setitem__("config_artifact", artifact),
         )
         return True
 

@@ -691,7 +691,7 @@ class BaasBotService(BotService):
         """
         try:
             conn_info = await self._resolve_ws_connection_for_binding(
-                binding_info, context
+                binding_info, context=context
             )
         except Exception as e:
             logger.warning("Failed to resolve WS connection: %s", e)

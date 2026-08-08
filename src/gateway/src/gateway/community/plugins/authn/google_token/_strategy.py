@@ -48,12 +48,10 @@ class GoogleUserStrategy:
         self,
         *,
         token_header: str,
-        default_tenant: str | None = None,
         userinfo_url: str = GOOGLE_USERINFO_URL,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._token_header = token_header
-        self._default_tenant = default_tenant
         self._userinfo_url = userinfo_url
         self._transport = transport
 
@@ -82,4 +80,10 @@ class GoogleUserStrategy:
             display_name=body.get("name"),
         )
         logger.debug("google token resolved: sub=%s", sub)
-        return UserPrincipal(tenant=self._default_tenant, subject=subject)
+        # No tenant: a Google token authenticates a person, and a person is not
+        # registered to a tenant the way an app or an access key is. The
+        # ``default_tenant`` this used to pass came from gateway config, so it
+        # asserted a deployment default as though the credential had proven it —
+        # and left unset (the shipped default) it asserted ``null``, which the
+        # backend rightly refused. See ``UserPrincipal`` for the full argument.
+        return UserPrincipal(subject=subject)

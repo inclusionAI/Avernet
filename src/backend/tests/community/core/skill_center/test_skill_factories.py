@@ -25,6 +25,7 @@ from agentclaw.community.core.skill_center.services.skill_parameter_service impo
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     ActivateResult,
+    DeactivateResult,
     SkillSetActivator,
     SkillSetActivatorFactory,
     SkillSetService,
@@ -362,6 +363,7 @@ def test_pool_active_factory_scopes_skill_writes_to_canonical_pool(test_injector
 
     assert str(svc.skill_service.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.skill_service.repo_dir).endswith("/skills-pool/skills-repo")
+    assert svc.skill_service.runtime_uses_pool_paths is True
     assert str(svc.local_dir).endswith("/skills-pool/skills-local")
     assert str(svc.repo_dir).endswith("/skills-pool/skills-repo")
     assert svc.skill_service._local_skill_path_adapter(
@@ -398,6 +400,32 @@ def test_skill_set_factory_uses_owner_for_pool_lookup_and_entity_for_paths(
     assert svc.entity_id == "project-42"
     assert str(svc.local_dir) == "/pool/local"
     assert str(svc.skill_service.local_dir) == "/pool/local"
+
+
+def test_skill_set_mapping_uses_owner_for_pool_lookup(test_injector):
+    factory = test_injector.get(SkillSetServiceFactory)
+    pool_resolution_calls = []
+
+    def resolve_pool_paths(owner_id, bot_id, engine_type):
+        pool_resolution_calls.append((owner_id, bot_id, engine_type))
+        return ("/pool/active", "/pool/local", "/pool/repo")
+
+    factory._pool_layout_paths = resolve_pool_paths
+    svc = factory.create(
+        user_id="owner-7",
+        entity_id="project-42",
+        bot_id="bot-1",
+        engine_type="hermes",
+        entity_type="proj",
+    )
+    svc.get_active_skills = lambda **_: []
+
+    mappings = svc.get_symlink_mappings(additional_skill_paths=["local://handmade"])
+
+    assert pool_resolution_calls == [("owner-7", "bot-1", "hermes")] * 3
+    assert [(mapping.source, mapping.target) for mapping in mappings] == [
+        ("/pool/local/handmade", "/pool/active/handmade")
+    ]
 
 
 def test_desktop_pool_active_factory_uses_the_same_canonical_paths(
@@ -685,14 +713,95 @@ async def test_bot_skill_set_activation_uses_entity_id_for_the_layout_edit_lease
 
 
 @pytest.mark.asyncio
+async def test_bot_skill_set_deactivation_holds_the_layout_edit_lease(test_injector):
+    from unittest.mock import AsyncMock
+
+    activator = test_injector.get(SkillSetActivatorFactory).create()
+    activator.skill_set_service.user_id = "owner"
+    activator.skill_set_service.bot_id = "bot"
+
+    class _Guard:
+        def __init__(self):
+            self.events = []
+
+        async def acquire_for_edit_wait(self, *, scope):
+            self.events.append(("acquire", scope))
+            return "lease"
+
+        def release(self, lease):
+            self.events.append(("release", lease))
+
+    guard = _Guard()
+    activator._edit_guard = guard
+    activator.skill_set_service._bot_repo.get_by_id_and_owner = lambda *_: {
+        "env": "dev", "entity_id": "owner",
+    }
+    unlocked = AsyncMock(return_value=DeactivateResult(success=True, message="ok"))
+    activator._deactivate_skill_set_unlocked = unlocked
+
+    result = await activator.deactivate_skill_set("7", user_id="owner")
+
+    assert result.success is True
+    assert guard.events[0][0] == "acquire"
+    assert guard.events[0][1].env == "dev"
+    assert guard.events[0][1].entity_id == "owner"
+    assert guard.events[0][1].bot_id == "bot"
+    assert guard.events[1] == ("release", "lease")
+    unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
+
+
+@pytest.mark.asyncio
+async def test_bot_skill_set_lease_uses_owner_lookup_and_entity_scope(test_injector):
+    from unittest.mock import AsyncMock
+
+    activator = test_injector.get(SkillSetActivatorFactory).create()
+    activator.skill_set_service.user_id = "owner"
+    activator.skill_set_service.entity_id = "project-42"
+    activator.skill_set_service.bot_id = "bot"
+
+    class _Guard:
+        def __init__(self):
+            self.events = []
+
+        async def acquire_for_edit_wait(self, *, scope):
+            self.events.append(("acquire", scope))
+            return "lease"
+
+        def release(self, lease):
+            self.events.append(("release", lease))
+
+    guard = _Guard()
+    activator._edit_guard = guard
+    owner_lookups = []
+
+    def get_by_id_and_owner(bot_id, owner_id):
+        owner_lookups.append((bot_id, owner_id))
+        if owner_id != "owner":
+            return None
+        return {"env": "dev", "entity_id": "project-42"}
+
+    activator.skill_set_service._bot_repo.get_by_id_and_owner = get_by_id_and_owner
+    unlocked = AsyncMock(return_value=ActivateResult(success=True, message="ok"))
+    activator._activate_skill_set_unlocked = unlocked
+
+    result = await activator.activate_skill_set("7", user_id="owner")
+
+    assert result.success is True
+    assert owner_lookups == [("bot", "owner")]
+    assert guard.events[0][1].entity_id == "project-42"
+    assert guard.events[1] == ("release", "lease")
+    unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
+
+
+@pytest.mark.asyncio
 async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
     test_injector,
 ):
     from unittest.mock import AsyncMock
 
     switcher = test_injector.get(SkillSetSwitcherFactory).create()
-    switcher.skill_set_service.user_id = "viewer"
-    switcher.skill_set_service.entity_id = "owner"
+    switcher.skill_set_service.user_id = "owner"
+    switcher.skill_set_service.entity_id = "project-42"
     switcher.skill_set_service.bot_id = "bot"
 
     class _Guard:
@@ -714,7 +823,7 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
         owner_lookups.append((bot_id, owner_id))
         if owner_id != "owner":
             return None
-        return {"env": "dev", "entity_id": "owner"}
+        return {"env": "dev", "entity_id": "project-42"}
 
     switcher.skill_set_service._bot_repo.get_by_id_and_owner = get_by_id_and_owner
     switch_unlocked = AsyncMock(
@@ -724,18 +833,18 @@ async def test_bot_skill_set_switch_and_sync_use_the_resolved_owner_edit_lease(
     switcher._switch_to_skill_set_unlocked = switch_unlocked
     switcher._sync_skill_set_to_active_unlocked = sync_unlocked
 
-    assert (await switcher.switch_to_skill_set("7", user_id="viewer")).success
-    assert (await switcher.sync_skill_set_to_active("8", user_id="viewer")).success
+    assert (await switcher.switch_to_skill_set("7", user_id="owner")).success
+    assert (await switcher.sync_skill_set_to_active("8", user_id="owner")).success
 
     assert [event[0] for event in guard.events] == [
         "acquire", "release", "acquire", "release"
     ]
     assert owner_lookups == [("bot", "owner"), ("bot", "owner")]
     assert [event[1].entity_id for event in guard.events if event[0] == "acquire"] == [
-        "owner", "owner"
+        "project-42", "project-42"
     ]
-    switch_unlocked.assert_awaited_once_with("7", user_id="viewer", proxy_token=None)
-    sync_unlocked.assert_awaited_once_with("8", "viewer")
+    switch_unlocked.assert_awaited_once_with("7", user_id="owner", proxy_token=None)
+    sync_unlocked.assert_awaited_once_with("8", "owner")
 
 
 def test_pool_paths_propagate_to_switcher_and_activator(test_injector):

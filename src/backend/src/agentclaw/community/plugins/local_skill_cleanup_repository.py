@@ -50,6 +50,13 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                 db.flush()
             elif row.package_locator != package_locator:
                 raise ValueError("Local Skill cleanup package locator hash collision")
+            elif row.status in ("cancelled", "cleaned"):
+                row.skill_id = int(skill_id)
+                row.requires_runtime_restore = False
+                row.status = "preparing"
+                row.attempts = 0
+                row.last_error = None
+                row.cleaned_at = None
             elif row.status != "preparing":
                 raise ValueError("Local Skill cleanup locator is already in use")
             return int(row.id)
@@ -145,6 +152,30 @@ class SqlLocalSkillCleanupRepository(LocalSkillCleanupRepository):
                     "skill_id": str(row.skill_id),
                     "package_locator": row.package_locator,
                     "requires_runtime_restore": bool(row.requires_runtime_restore),
+                }
+                for row in rows
+            ]
+
+    def list_repair_required(
+        self,
+        *,
+        env: str,
+        owner_id: str,
+        bot_id: str,
+        skill_id: str,
+    ) -> list[dict]:
+        with self._db.orm_session() as db:
+            rows = db.query(LocalSkillCleanupWorkModel).filter(
+                LocalSkillCleanupWorkModel.env == env,
+                LocalSkillCleanupWorkModel.owner_id == owner_id,
+                LocalSkillCleanupWorkModel.bot_id == bot_id,
+                LocalSkillCleanupWorkModel.skill_id == int(skill_id),
+                LocalSkillCleanupWorkModel.status == "repair_required",
+            ).order_by(LocalSkillCleanupWorkModel.id.asc()).all()
+            return [
+                {
+                    "id": row.id,
+                    "package_locator": row.package_locator,
                 }
                 for row in rows
             ]

@@ -13,6 +13,9 @@ from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
 )
 
+from agentclaw.community.plugin_api.secret_resolver import SecretResolver
+from agentclaw.community.utils import secret_utils
+
 from ..provisioning import BotProvisioningContext, EngineProvisioningStrategy
 
 
@@ -32,6 +35,8 @@ LEGACY_BOT_TYPE_ENV_MAP = {
     "personalCoding": "personal",
     "applicationCoding": "application",
 }
+_THETA_KEY_PATH = ("bot_template_config", "ext_config", "thetaKey")
+_ENCRYPTED_VALUE_PREFIX = "enc:v1:"
 
 
 class AicodingBaasEngineBucketResolver:
@@ -201,6 +206,62 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             envs["RELAY_DEFAULT_RUNTIME"] = runtime.strip()
 
         return envs or None
+
+    @staticmethod
+    def _get_template_value(
+        template_config: dict[str, Any] | None,
+        path: tuple[str, ...],
+    ) -> Any | None:
+        value: Any = template_config
+        for key in path:
+            if not isinstance(value, dict):
+                return None
+            value = value.get(key)
+        return value
+
+    def build_extra_properties(
+        self,
+        ctx: BotProvisioningContext,
+        *,
+        secret_resolver: SecretResolver | None = None,
+        theta_master_key_secret: str = "",
+    ) -> dict[str, Any] | None:
+        """Resolve AICoding-owned template fields into a generic runtime envelope.
+
+        ``theta_master_key_secret`` is the deployment-configured secret-registry
+        name (neutral default empty): without it (community / singlebox /
+        unconfigured env) the hook is a no-op so downstream keeps the legacy
+        egress-rule fallback.
+        """
+        if (
+            ctx.active_engine not in TEMPLATE_CONFIG_CONSUMING_ENGINES
+            and ctx.template_type not in CODING_TEMPLATE_TYPES
+        ):
+            return None
+
+        stored = self._get_template_value(ctx.template_config, _THETA_KEY_PATH)
+        if (
+            secret_resolver is None
+            or not theta_master_key_secret
+            or not isinstance(stored, str)
+            or not stored.startswith(_ENCRYPTED_VALUE_PREFIX)
+        ):
+            return None
+        ciphertext = stored[len(_ENCRYPTED_VALUE_PREFIX):]
+        if not ciphertext:
+            return None
+
+        try:
+            secret = secret_resolver.get_secret(theta_master_key_secret)
+            master_key = getattr(secret, "secret_value", secret) if secret else None
+            if not master_key:
+                return None
+            api_key = secret_utils.symmetric_decrypt(ciphertext, str(master_key))
+        except Exception:
+            return None
+        if not isinstance(api_key, str) or not api_key:
+            return None
+        return {"outbound_api_key": api_key}
 
     def should_encrypt_template_token(self, ctx: BotProvisioningContext) -> bool:
         return self.consumes_template_config(

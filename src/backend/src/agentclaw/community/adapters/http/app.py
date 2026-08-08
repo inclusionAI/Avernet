@@ -323,6 +323,9 @@ from agentclaw.community.core.errors import (  # noqa: E402
     Unauthorized,
     ValidationError,
 )
+from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
+    params_suffix,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
     MissingPrincipalError,
 )
@@ -413,13 +416,30 @@ def _public_mapped_error(request: Request, exc: Exception) -> JSONResponse | Non
 @app.exception_handler(DomainError)
 async def _domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
     status = _DOMAIN_ERROR_STATUS_MAP.get(type(exc), 500)
-    # 4xx/3xx are expected client-side flow (bad input, missing auth) — logging
-    # every one would be noise. 5xx means a core service signalled an internal
-    # failure; emit a full traceback so the cause is recoverable from logs.
+    # 5xx means a core service signalled an internal failure; emit a full
+    # traceback so the cause is recoverable from logs. 4xx is expected
+    # client-side flow (bad input, missing auth), so it gets one compact line
+    # without a traceback: enough to see that the request was refused and with
+    # what arguments, without a per-401 stack in the log file. It used to get
+    # nothing at all, which is why a refused request could not be traced.
+    #
+    # 3xx stays silent: the only one is ``LoginRedirectRequired``, an ordinary
+    # step in the login flow rather than a failure to diagnose.
+    #
+    # ``params_suffix`` is empty unless the public surface's ``@envelope_errors``
+    # captured the handler's arguments on the way past, so the message shape is
+    # unchanged for internal routes that never had them.
     if status >= 500:
         logger.exception(
-            "[DomainError 5xx] %s on %s %s: %s",
+            "[DomainError 5xx] %s on %s %s: %s%s",
             type(exc).__name__, request.method, request.url.path, exc.detail,
+            params_suffix(request),
+        )
+    elif status >= 400:
+        logger.warning(
+            "[DomainError %s] %s on %s %s: %s%s",
+            status, type(exc).__name__, request.method, request.url.path,
+            exc.detail, params_suffix(request),
         )
     if _is_public_api(request):
         return _public_error_envelope(status, request)
@@ -452,6 +472,25 @@ async def _http_exception_handler(
     they got it wrong but not what would be right.
     """
     if _is_public_api(request):
+        # The public response is the bare reason phrase — ``exc.detail`` is
+        # replaced, not returned — so this line is the only place the raised
+        # detail survives. It also covers an ``HTTPException`` raised *inside* a
+        # public handler: ``@envelope_errors`` does not map that type, so it
+        # arrives here with the handler's arguments already stashed.
+        #
+        # 5xx carries the traceback like every other 5xx path here, because a
+        # handler-raised one ("Upload storage failed", "cron service returned no
+        # data") is diagnosed by its raise site. 4xx does not: the common case is
+        # Starlette's own routing 404/405, raised before any handler, whose stack
+        # is framework internals rather than anything we would read.
+        is_server_error = exc.status_code >= 500
+        log = logger.error if is_server_error else logger.warning
+        log(
+            "[Public %s] HTTPException on %s %s: %s%s",
+            exc.status_code, request.method, request.url.path, exc.detail,
+            params_suffix(request),
+            exc_info=exc if is_server_error else None,
+        )
         return _public_error_envelope(exc.status_code, request, exc.headers)
     return await http_exception_handler(request, exc)
 
@@ -475,6 +514,18 @@ async def _validation_error_handler(
     from agentclaw.community.adapters.http.openapi_v1.responses import error_response
 
     if request.url.path.startswith(PUBLIC_API_PREFIX):
+        # "Invalid request" is all the caller gets, so which field failed is
+        # only knowable from here. ``loc``/``type``/``msg`` only — the ``input``
+        # each error carries is the caller's raw value, which is exactly the
+        # payload this surface must not copy into a log file.
+        logger.warning(
+            "[Public 422] validation failed on %s %s: %s",
+            request.method, request.url.path,
+            [
+                {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+                for e in exc.errors()
+            ],
+        )
         return error_response(422, "Invalid request", request)
     return await request_validation_exception_handler(request, exc)
 
@@ -494,8 +545,9 @@ async def _data_proxy_error_handler(
     detail: dict[str, object] = {"error": exc.message, "op": exc.op}
     if status >= 500:
         logger.exception(
-            "[DataProxyError 5xx] %s on %s %s: %s",
+            "[DataProxyError 5xx] %s on %s %s: %s%s",
             type(exc).__name__, request.method, request.url.path, exc.message,
+            params_suffix(request),
         )
     return JSONResponse(
         status_code=status,
@@ -536,8 +588,9 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     # "Unauthorized" the table gives every failure here, so a forger still
     # cannot tell which part of a token was rejected.
     logger.warning(
-        "[Public 401] %s on %s %s: %s",
+        "[Public 401] %s on %s %s: %s%s",
         type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
     )
     mapped = _public_mapped_error(request, exc)
     if mapped is not None:
@@ -580,21 +633,22 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
         # treats 4xx.
         if mapped.status_code < 500:
             logger.warning(
-                "[Public %s] %s on %s %s",
+                "[Public %s] %s on %s %s%s",
                 mapped.status_code, type(exc).__name__, request.method,
-                request.url.path,
+                request.url.path, params_suffix(request),
             )
             return mapped
         logger.exception(
-            "[Public %s] %s on %s %s",
+            "[Public %s] %s on %s %s%s",
             mapped.status_code, type(exc).__name__, request.method,
-            request.url.path,
+            request.url.path, params_suffix(request),
         )
         return mapped
 
     logger.exception(
-        "[Unhandled exception] %s on %s %s",
+        "[Unhandled exception] %s on %s %s%s",
         type(exc).__name__, request.method, request.url.path,
+        params_suffix(request),
     )
     # The public surface guarantees the Envelope on every response, including
     # the ones nobody anticipated. Enumerating each new escapee in

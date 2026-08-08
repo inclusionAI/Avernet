@@ -444,6 +444,31 @@ wrong half of the system.
 - The gateway's tenant id **is** the `avernet_tenant` value — no mapping table.
   So a real external tenant reads an empty dataset until it has data; that is
   isolation working, not a bug.
+- **Only the machine principals carry a tenant.** _Changed 2026-08-05._ A
+  `user` principal has no `tenant` field: nothing in a user credential proves
+  which tenant a person acts for, and the gateway's google chain used to fill it
+  from a config default — which, left unset as it shipped, sent `null` and 401'd
+  every request. `app`, `bot` and `access_key` are each registered to a tenant,
+  and that registration is what their principal asserts.
+  - An identity set that asserts **no** tenant — a user and nothing else —
+    resolves to `DEFAULT_AVERNET_TENANT`. A first-party caller on our own
+    frontend *is* an internal caller, which is the scope `teamclaw` names, and
+    it is the same tenant every other path in this component resolves to.
+  - That fallback is **ours**, decided from the absence of a claim; it is not a
+    value the token supplied. A token may *also* name `teamclaw` on a machine
+    principal — _changed 2026-08-05_, see below — and both routes reach the same
+    scope. A `tenant` smuggled onto a `user` entry is still neither: unknown
+    fields are dropped, not honoured, so it never becomes a scope.
+  - ⚠️ **Consequence for the public surface.** `route_security` declares
+    `user: required` and nothing else for every `/openapi/v1` path, so the
+    gateway resolves a user-only set and **every public request now scopes to
+    `teamclaw`** — the internal tenant. Nothing gates *which* Google account
+    that is (`AuthPlugin.is_allowed` exists in the gateway SPI but no authn
+    strategy calls it), so serving real data on this surface needs either that
+    whitelist wired up or a route requiring an identity that carries a
+    registered tenant. Until then the surface reads internal data for any
+    authenticated Google user, which is a widening of what the 401 used to
+    prevent by accident.
 
 **Two things you inherit if you own a Track B category:**
 
@@ -521,6 +546,30 @@ rebuild it. Everything below is category-agnostic and lives in
   - Add *your* category's errors to `ENVELOPE_ERRORS`. Anything unmapped escapes
     to the app 500 handler — which now envelopes it too, but with a generic
     message.
+  - **Every converted failure is logged, with its traceback and the handler's
+    arguments** — see the next bullet. You inherit this; do not add per-handler
+    `try/except: logger.error(...)` around a mapped error.
+- **`error_logging.py`** (`adapters/http/`) — the diagnostics half of the fixed
+  message rule. Because the response says only "Not found", the log line is the
+  *only* record of what actually happened, so `@envelope_errors` emits one per
+  failure: exception type, the internal message, the concrete path plus the route
+  template, and the arguments the handler was called with. Level follows status
+  (`4xx` → warning, `5xx` → error); both carry the traceback, because an error
+  reaching this path was raised inside a handler and the trace is a short chain
+  of our own frames pointing at the check that refused the request. What you need
+  to know when adding a category:
+  - **Capture is lazy** — a successful request pays nothing.
+  - **Values are summarized, not dumped**: strings truncated, collections capped,
+    bytes reduced to a size, request bodies rendered from `model_dump()`, and
+    injected services dropped rather than rendered.
+  - **Names that look like credentials are redacted** (`token`, `password`,
+    `secret`, `authorization`, `api_key`, `signature`, `cookie`, …), at any
+    nesting depth. `Request` and `Headers` are opaque by type — `Request` is a
+    `Mapping` over its ASGI scope, so walking it would put the raw header list
+    in the log. **If your category adds a body field holding a credential whose
+    name is not on that list, add the substring to `_SENSITIVE_NAME_PARTS`.**
+  - An **unmapped** error is re-raised, and the arguments are stashed on the
+    request scope so `app.py`'s handler logs the same detail from further out.
 - **`contracts.py`** — `Envelope[T]` / `Page[T]` / `Deleted` / `NameCheck` plus
   `ErrorEnvelope` and `ERROR_RESPONSES`. `ERROR_RESPONSES` is attached **once**
   in `openapi_v1/__init__.py::build_public_router()`, so every route on every
@@ -1175,3 +1224,73 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   owner-versus-collaborator semantics, offline reads, ready-Bot mutation gating,
   and compensation on runtime synchronization failure. Skill Center publication
   and reusable tenant-level Skills remain a later contract.
+- **2026-08-05** — **`tenant` removed from the `user` principal; a user-only
+  caller is an internal caller.** The public surface was answering `401` on every
+  request: the gateway declared `UserPrincipal.tenant` as `str | None` and filled
+  it from `authn.google.default_tenant`, a config key that appears nowhere in
+  `configs/application.yaml`, so it signed `tenant: null` — and this side
+  declared the field required, so the payload never parsed. The fix removes the
+  field on both halves rather than making it required, because the field was
+  asserting something no user credential proves.
+  1. **A tenant is a property of the calling program, not of a person.** `app`,
+     `bot` and `access_key` are each *registered* to a tenant, and their
+     principals assert that registration. A Google token proves a `sub` and an
+     email; the tenant that used to ride alongside it was a deployment default
+     dressed up as an authenticated fact.
+  2. **A set that asserts no tenant resolves to `DEFAULT_AVERNET_TENANT`.**
+     `VerifiedCaller.tenant` reads only the machine principals, so a user-only
+     caller — a first-party human on our own frontend — scopes to `teamclaw`,
+     the same tenant every non-public path in this component already resolves
+     to. `_reject_contradictory_tenant` likewise vets only what was claimed.
+  3. **The internal-tenant guard got sharper, not weaker.** The fallback is
+     decided *here*, from the absence of a claim; it is never a value the token
+     supplied. A token that names `teamclaw` is still refused, and a `tenant`
+     smuggled onto a `user` entry is dropped by the DTO rather than honoured —
+     both pinned by tests. Nobody can talk their way into the internal tenant.
+
+     _Superseded 2026-08-05:_ the first of those two — refusing a token that
+     names `teamclaw` — was removed once a `teamclaw` tenant was registered on
+     the gateway as a first-party path onto this surface. See
+     `core/gateway_principal/README.md` § Change impact for what still holds the
+     boundary. The second half stands: a `tenant` on a `user` entry is still
+     dropped, so a caller cannot assert a scope the gateway did not sign.
+  4. ⚠️ **What this leaves open.** `route_security` declares `user: required`
+     and nothing else for the whole public surface, so *every* public request is
+     now a user-only set and scopes to `teamclaw`. Nothing gates which Google
+     account that is — `AuthPlugin.is_allowed` exists in the gateway SPI and no
+     authn strategy calls it. Before this surface serves real data, either wire
+     that whitelist up or have a route require an identity carrying a registered
+     tenant. Tests that meant to exercise external-tenant isolation now mint
+     `user` + `app` so they keep testing isolation instead of the internal
+     default.
+
+  Backend suite 10535 passed / 3 skipped; gateway suite green except the
+  pre-existing markdown-formatting and live-server failures. Gateway half:
+  `spi/authn/_models.py`, the `google` strategy (its `default_tenant` argument
+  and DI wiring are gone), and a dated amendment in
+  `src/gateway/docs/2026-07-21-auth-design.md` §4.6, whose original text made
+  `tenant` mandatory on every principal.
+- **2026-08-05** — **Every error this surface converts now leaves a log record.**
+  `@envelope_errors` mapped a domain error to its status and fixed message and
+  logged *nothing*, so a caller's report of a 404 or a 409 could not be traced to
+  a raise site: the fixed-message rule keeps the diagnosis out of the response,
+  and there was nowhere else it went. The decorator now emits one line per
+  failure — exception type and its internal message, method, concrete path, route
+  template, and the handler's own arguments — with the traceback attached.
+  4xx logs at warning, 5xx at error; both carry the trace, because these errors
+  are raised *inside* a handler, so the trace is a short chain of our own frames,
+  not an ASGI stack. Routine unauthenticated traffic is unaffected: the auth
+  seam raises in a dependency, which `app.py` still answers and logs without one.
+  New `adapters/http/error_logging.py` owns the capture — lazy (a successful
+  request pays nothing), bounded (strings, collections and nesting all capped;
+  bytes reduced to a size), and redacting by *name* at any depth, with `Request`
+  and `Headers` opaque by type since `Request` is a `Mapping` over its ASGI scope
+  and walking it would log the raw `Authorization` header. Unmapped errors are
+  still re-raised, with the arguments stashed on the request scope so `app.py`
+  logs the same detail from further out; the `DomainError` handler additionally
+  logs 4xx (one compact line, no traceback) where it previously logged nothing,
+  and the public 422 handler now records which field failed validation — `loc` /
+  `type` / `msg` only, never the caller's `input` value. **If your category adds
+  a body field holding a credential, add its name substring to
+  `_SENSITIVE_NAME_PARTS`.** No status code, response body, or envelope shape
+  changed.

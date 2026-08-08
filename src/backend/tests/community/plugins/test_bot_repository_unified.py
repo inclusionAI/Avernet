@@ -186,6 +186,7 @@ def test_get_env_scoped(repo, db):
     assert repo.get_by_id_and_owner("bot-1", "emp1") is None
     assert repo.count_by_owner("emp1") == 0
     assert repo.exists_by_owner_and_bot_id("emp1", "bot-1") is False
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
 
 
 def test_explicit_env_default_bot_read_and_ext_update_are_isolated(repo, db):
@@ -239,6 +240,42 @@ def test_explicit_env_ext_update_rolls_back_when_multiple_rows_match(repo, db):
     assert [row["ext"] for row in rows] == [{"row": 1}, {"row": 2}]
 
 
+def test_compare_and_set_ext_preserves_concurrent_bot_metadata(repo):
+    repo.insert(_data(ext={"owner": "first", "中文": "值"}))
+
+    updated = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext={"owner": "first", "中文": "值"},
+        ext={"owner": "first", "中文": "值", "sbot_use_default_image": True},
+    )
+    assert updated is not None
+    assert updated["ext"]["sbot_use_default_image"] is True
+
+    stale = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext={"owner": "first", "中文": "值"},
+        ext={"sbot_pin_image": True, "sbot_docker_image": "arca:v1"},
+    )
+    assert stale is None
+    assert repo.get_by_id_and_owner("bot-1", "emp1")["ext"] == updated["ext"]
+
+
+def test_compare_and_set_ext_supports_null_bot_ext(repo):
+    repo.insert(_data(ext=None))
+
+    updated = repo.compare_and_set_ext(
+        bot_id="bot-1",
+        owner_id="emp1",
+        expected_ext=None,
+        ext={"sbot_runtime_kind": "arca"},
+    )
+
+    assert updated is not None
+    assert updated["ext"] == {"sbot_runtime_kind": "arca"}
+
+
 def test_list_and_count(repo):
     repo.insert(_data(bot_id="b1"))
     repo.insert(_data(bot_id="b2"))
@@ -287,6 +324,19 @@ def test_count_by_owner_excludes_desktop(repo):
     repo.insert(_data(bot_id="b3", bot_type="desktop"))
     assert repo.count_by_owner("emp1") == 3
     assert repo.count_by_owner("emp1", exclude_bot_type="desktop") == 1
+
+
+def test_exists_by_owner_and_bot_type_only_matches_live_requested_type(repo):
+    repo.insert(_data(bot_id="service", bot_type="service"))
+    repo.insert(_data(bot_id="deleted-personal", bot_type="personal", is_delete=1))
+
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is False
+    assert repo.exists_by_owner_and_bot_type("emp1", "service") is True
+
+    repo.insert(_data(bot_id="live-personal", bot_type="personal"))
+
+    assert repo.exists_by_owner_and_bot_type("emp1", "personal") is True
+    assert repo.exists_by_owner_and_bot_type("other-owner", "personal") is False
 
 
 # ── update_by_owner allowlist (adopt prod) ──────────────────────────

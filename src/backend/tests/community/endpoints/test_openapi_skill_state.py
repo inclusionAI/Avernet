@@ -85,8 +85,17 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": _TENANT,
                     "subject": {"id": _OWNER, "username": "state@example.test"},
+                },
+                {
+                    "type": "app",
+                    "tenant": _TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "State Test App",
+                        "owners": "state-org",
+                        "tenant": _TENANT,
+                    },
                 }
             ],
         },

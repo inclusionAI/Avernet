@@ -168,7 +168,11 @@ def _seed_published_service_bot(world) -> None:
         "status": PublishStatus.SUCCESS,
         "version": 1,
         "env": env,
-        "ext": {"migration_path": "/nas/migration/path"},
+        "ext": {
+            "migration_path": "/nas/migration/path",
+            "sbot_use_default_image": True,
+            "sbot_runtime_kind": "arca",
+        },
     })
 
 

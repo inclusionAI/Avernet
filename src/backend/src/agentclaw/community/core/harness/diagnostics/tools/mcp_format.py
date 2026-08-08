@@ -3,6 +3,7 @@
 针对用户配置的 MCP 进行独立检查，判断是否声明了具体 MCP 的调用规范，
 对应文档中"三、场景与工具映射速查"和"四、高频 MCP 调用规范"。
 """
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -13,6 +14,12 @@ import requests
 from agentclaw.community.core.harness.diagnostics.base import Diagnostic, DiagnosticContext
 from agentclaw.community.core.harness.models import Finding, Severity, score_to_result
 from agentclaw.community.core.harness.services.llm import DIAGNOSTIC_MAX_TOKENS
+from agentclaw.community.core.harness.services.llm_response_parser import (
+    _LLM_DISABLED_MARKER,
+    _NO_ISSUE_MARKERS,
+    _extract_score,
+    _extract_summary_and_message,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.di.config import KbConfig
@@ -218,6 +225,256 @@ def _load_verified_guide(server_code: str) -> str | None:
         return None
 
 
+# ── prompt budget guard ───────────────────────────────────────
+# #717 handed the diagnostic LLM each tool's *full* ``inputSchema`` (nested JSON
+# Schema: ``$schema``/deep ``properties``/long per-param descriptions) for every
+# configured MCP tool. A bot with many MCPs — e.g. ~88 tools across 10 MCPs —
+# produced a 50–100k-token user message that antchat's gateway couldn't process
+# inside its ~90s window → ``RemoteProtocolError`` on every retry → the
+# ``[llm disabled]`` sentinel → a spurious "LLM执行异常(请重试)". We compress
+# each tool to a flat param table (name/type/required/one-line desc) and cap the
+# number of tools per MCP in the prompt so the message stays small enough to
+# finish inside the window. The full ``inputSchema`` is still read for bucketing
+# (verified/schema/unreachable) and the ``has_recoverable`` advisory check —
+# only the *prompt payload* is slimmed.
+_MAX_TOOLS_PER_MCP_IN_PROMPT = 20
+_PARAM_DESC_MAX_CHARS = 120
+_TOOL_DESC_MAX_CHARS = 200
+
+
+def _compact_tool_for_prompt(tool: dict) -> str:
+    """Render one MCP tool as a single prompt line.
+
+    Drops the nested ``inputSchema`` JSON and emits a flat one-liner the
+    diagnostic LLM can transcribe a non-fabricated call spec from:
+    ``name(param:type*=required, …) — one-line desc``. Tools with no schema
+    render as ``name — desc``. One line per tool keeps an 88-tool MCP list to
+    a few KB instead of tens of KB of indented JSON.
+    """
+    schema = tool.get("inputSchema")
+    params: list[str] = []
+    if isinstance(schema, dict):
+        props = schema.get("properties")
+        required = schema.get("required") or []
+        required_set = set(required) if isinstance(required, (list, tuple)) else set()
+        if isinstance(props, dict):
+            for pname, pdef in props.items():
+                if not isinstance(pdef, dict):
+                    continue
+                ptype = pdef.get("type", "") or ""
+                star = "*" if pname in required_set else ""
+                params.append(f"{pname}:{ptype}{star}")
+    name = tool.get("name", "")
+    sig = f"{name}({', '.join(params)})" if params else name
+    t_desc = (tool.get("description") or "").strip()
+    t_desc = t_desc.split("\n", 1)[0][:_TOOL_DESC_MAX_CHARS]
+    return f"{sig} — {t_desc}" if t_desc else sig
+
+
+def _compact_mcp_tools_for_prompt(mcp: dict) -> tuple[list[str], int]:
+    """Return ``(one-line tool strings, count of named tools omitted past the cap)``.
+
+    Caps each MCP's tools at ``_MAX_TOOLS_PER_MCP_IN_PROMPT`` so a 27-tool MCP
+    doesn't dominate the message; the omitted count is surfaced separately so
+    the caller can annotate it (``…另N个``). Tools without a name are dropped.
+    Reads the *original* tools list — not a pre-slimmed copy — so the bucketing
+    and ``has_recoverable`` checks that run against ``mcp_details`` still see
+    the unredacted ``inputSchema``.
+    """
+    tools = mcp.get("tools") or []
+    if not isinstance(tools, list):
+        return [], 0
+    named = [t for t in tools if isinstance(t, dict) and t.get("name")]
+    kept = named[:_MAX_TOOLS_PER_MCP_IN_PROMPT]
+    compacted = [_compact_tool_for_prompt(t) for t in kept]
+    return compacted, len(named) - len(kept)
+
+
+def _format_mcp_block(mcp: dict, *, include_guide: bool) -> str:
+    """Render one MCP as a compact text block for the prompt.
+
+    Single ``## server_code (name): description`` header plus a ``tools:``
+    list of one-line tool strings, and (when ``include_guide``) the verbatim
+    ``verified_guide``. Far smaller than the previous indented-JSON dump while
+    keeping every param name/type/required the LLM needs to transcribe a call
+    spec.
+    """
+    server_code = mcp.get("server_code", "")
+    name = mcp.get("name", "")
+    desc = (mcp.get("description") or "").strip().split("\n", 1)[0]
+    header = f"## {server_code} ({name}): {desc}" if desc else f"## {server_code} ({name})"
+    lines = [header]
+    guide = mcp.get("verified_guide") if include_guide else None
+    if guide:
+        lines.append(f"verified_guide:\n{guide}")
+    compacted, omitted = _compact_mcp_tools_for_prompt(mcp)
+    if compacted:
+        lines.append("tools:")
+        lines.extend(f"- {t}" for t in compacted)
+        if omitted:
+            lines.append(f"- …另{omitted}个未列出")
+    return "\n".join(lines)
+
+
+# ── batched prompt mode ───────────────────────────────────────
+# Even with the compact rendering above, one LLM call carrying *every*
+# configured MCP grows with bot complexity, while antchat's gateway kills any
+# request it can't answer inside ~90s (88-tool bot: 5×90s
+# ``RemoteProtocolError`` on a ~19k-char prompt, while D-TOOLS-001-scale
+# prompts of a few KB succeed). Batching decouples prompt size from MCP
+# count: each call carries at most ``_BATCH_MAX_MCPS`` MCPs /
+# ``_BATCH_CHAR_BUDGET`` chars of MCP data. Single-batch bots keep the
+# pre-batching prompt byte-for-byte. Batches run concurrently — llm.py's own
+# semaphore allows 10, so ``_BATCH_CONCURRENCY`` is the only limiter; 3 is
+# the safe default until antchat's rate limit is known (bump to 5 if clean).
+_BATCH_MAX_MCPS = 3
+_BATCH_CHAR_BUDGET = 4000
+_BATCH_CONCURRENCY = 3
+# MCPs with more tools than this get a batch to themselves: a 3-large-MCP batch
+# (e.g. 27+19+19 tools) piles ~3k chars of signatures on top of the TOOLS.md
+# source and blows antchat's 90s window. Small MCPs still pack 3-per-batch.
+_LARGE_MCP_TOOL_THRESHOLD = 12
+
+_BUCKET_ORDER = ("verified", "schema", "unreachable")
+_BUCKET_HEADERS = {
+    "verified": "✅ 已验证 MCP（verified_guide 不为空，引用原文生成调用规范）",
+    "schema": "🛠 可据参数表转录 MCP（无 verified_guide，但工具含 params 参数表：可据参数表转录调用规范，禁止编造示例/命令）",
+    "unreachable": "⛔ 无 schema MCP（既无 verified_guide 又无 inputSchema，仅写入映射表，禁止生成调用规范/示例）",
+}
+
+
+def _render_bucketed_blocks(mcp_details: list[dict]) -> list[tuple[str, str, dict]]:
+    """Render each enriched MCP as ``(bucket, block_text, mcp_detail)``.
+
+    Bucketing is unchanged from #717: verified → guide verbatim; schema →
+    transcribe from params; unreachable → mapping-table row only.
+    """
+    rendered: list[tuple[str, str, dict]] = []
+    for mcp in mcp_details:
+        tools = mcp.get("tools") or []
+        has_schema = any(
+            isinstance(t, dict) and t.get("inputSchema")
+            for t in (tools if isinstance(tools, list) else [])
+        )
+        if mcp.get("verified_guide"):
+            rendered.append(("verified", _format_mcp_block(mcp, include_guide=True), mcp))
+        elif has_schema:
+            rendered.append(("schema", _format_mcp_block(mcp, include_guide=False), mcp))
+        else:
+            # Unreachable: mapping-table row only (no tools, no schema).
+            server_code = mcp["server_code"]
+            name = mcp.get("name", "")
+            desc = (mcp.get("description") or "").strip().split("\n", 1)[0]
+            header = f"## {server_code} ({name}): {desc}" if desc else f"## {server_code} ({name})"
+            rendered.append((
+                "unreachable",
+                header + "\n注意: 该 MCP 既无人工校验调用规范也无工具 inputSchema，"
+                "只能在「场景与工具映射速查」表格中列出，注意事项写「调用规范由平台补全中」；"
+                "禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例",
+                mcp,
+            ))
+    return rendered
+
+
+def _pack_mcp_batches(items: list[tuple[str, str, dict]]) -> list[list[tuple[str, str, dict]]]:
+    """Greedy-pack rendered MCP blocks into LLM-call batches.
+
+    A batch closes when it already holds an item and adding the next would
+    exceed ``_BATCH_MAX_MCPS`` or ``_BATCH_CHAR_BUDGET``; a block larger than
+    the budget gets a batch to itself.
+    """
+    batches: list[list[tuple[str, str, dict]]] = []
+    current: list[tuple[str, str, dict]] = []
+    current_chars = 0
+    for item in items:
+        tools = (item[2].get("tools") or [])
+        is_large = len(tools) > _LARGE_MCP_TOOL_THRESHOLD
+        # Close the current batch before a large MCP (it runs alone to keep
+        # that call's output — one full spec draft, not three — inside the
+        # 90s window), or when the count/char budget would be exceeded.
+        if current and (is_large or len(current) >= _BATCH_MAX_MCPS or current_chars + len(item[1]) > _BATCH_CHAR_BUDGET):
+            batches.append(current)
+            current, current_chars = [], 0
+        current.append(item)
+        current_chars += len(item[1])
+        # A large MCP occupies its batch alone.
+        if is_large:
+            batches.append(current)
+            current, current_chars = [], 0
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _render_mcp_sections(batch: list[tuple[str, str, dict]]) -> str:
+    """Render one batch's blocks under their bucket section headers (fixed order)."""
+    out = ""
+    for kind in _BUCKET_ORDER:
+        blocks = [block for bucket, block, _ in batch if bucket == kind]
+        if blocks:
+            out += f"\n--- {_BUCKET_HEADERS[kind]} ---\n" + "\n\n".join(blocks) + "\n"
+    return out
+
+
+def _fetch_kb_quiet(mcp_details: list[dict], kb_config: "KbConfig | None", bot_id: str) -> str:
+    """KB context for the given MCPs; ``""`` when unconfigured or on failure."""
+    try:
+        return _fetch_kb_context_for_mcps(mcp_details, kb_config) or ""
+    except Exception:
+        logger.warning("[D-TOOLS-002] KB context fetch failed for bot=%s", bot_id, exc_info=True)
+        return ""
+
+
+def _synthesize_batch_responses(results: list[tuple[str | None, list[str]]]) -> str:
+    """Merge per-batch LLM responses into one response text for the parser.
+
+    ``results`` holds ``(response_or_None, server_codes)`` per batch; ``None``
+    marks a batch whose LLM call raised. Behaviour:
+
+    - every batch failed (raise / empty / sentinel) → return the sentinel so
+      the run degrades to the usual LLM01 finding, as an oversized single
+      call did before batching;
+    - all healthy batches answered no-issue (and nothing failed) → ``无问题``;
+    - otherwise: distinct batch summaries joined by "；", drafts concatenated,
+      failed batches' server_codes noted as undiagnosed, and an aggregate
+      ``max(10, 100 − Σ(100 − batch_score))``. The aggregate re-counts the
+      rubric's global section-missing deductions once per batch — biased low
+      (conservative for a health check), never inventing a pass.
+    """
+
+    def _usable(resp: str | None) -> bool:
+        return bool(resp and resp.strip()) and resp.strip() != _LLM_DISABLED_MARKER
+
+    failed_codes = [c for resp, codes in results if not _usable(resp) for c in codes]
+    ok_resps = [resp.strip() for resp, _ in results if _usable(resp)]
+    if not ok_resps:
+        return _LLM_DISABLED_MARKER
+
+    summaries: list[str] = []
+    drafts: list[str] = []
+    deductions = 0
+    for resp in ok_resps:
+        if resp.lower() in _NO_ISSUE_MARKERS:
+            continue
+        score, body = _extract_score(resp)
+        summary, message = _extract_summary_and_message(body)
+        deductions += 100 - score
+        if summary and summary not in summaries:
+            summaries.append(summary)
+        if message:
+            drafts.append(message)
+
+    if failed_codes:
+        drafts.append("（以下 MCP 本次未完成诊断（LLM 调用失败），请稍后重试：" + "、".join(failed_codes) + "）")
+    if not summaries and not drafts:
+        return "无问题"
+    if not summaries:
+        # Only failures, nothing diagnosed — surface as check-failed, not pass.
+        return "\n".join(["部分 MCP 诊断失败", "\n\n".join(drafts), "[SCORE:0]"])
+    total = max(10, 100 - deductions)
+    return "\n".join(["；".join(summaries), "\n\n".join(drafts), f"[SCORE:{total}]"])
+
+
 class ToolsMcpFormatDiagnostic(Diagnostic):
     id = "D-TOOLS-002"
     name = "各项 MCP 调用规范诊断"
@@ -253,14 +510,14 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - `server_code`: MCP 服务器全称
 - `name`: MCP 名称
 - `description`: 该 MCP 的功能描述
-- `tools`: 该 MCP 提供的工具列表，每项含 `name`、`description`、`inputSchema`（JSON Schema：参数 properties/required/types 等）
+- `tools`: 该 MCP 提供的工具列表（每个 MCP 最多展示前 20 个工具，超出部分以 `tools_omitted` 标注数量），每项含 `name`（工具名）、`desc`（工具一句话描述）、`params`（参数表：每项含 `name`/`type`/`required`/`desc`，其中 `desc` 为该参数的说明）
 - `verified_guide`（可选）：人工校验过的调用规范全文，可直接用于 TOOLS.md
 - `kb_context`（可选）：从内网知识库检索到的与 MCP 相关的术语与服务说明，可帮助更准确地理解 MCP 的定位和用途。**必须在"场景与工具映射速查"表格的"注意事项"列中充分利用这些信息**，例如将术语解释作为注意事项的一部分，帮助 Bot 更好地理解和使用该 MCP
 
 **关键规则：按"是否有可落地的调用规范来源"决定调用规范章节**
 - `verified_guide` 不为空 → 调用规范已经过人工验证，内容准确可用。修复建议中应直接引用 verified_guide 原文，建议用户粘贴到 TOOLS.md；同时在"场景与工具映射速查"表格中列出该 MCP。
-- `verified_guide` 为空、但该 MCP 的工具提供了 `inputSchema` → **可基于 `inputSchema` 转录**该工具的参数规格（参数名/类型/必填/格式/描述）写入"## MCP 调用规范"子章节。**仅转录 schema 明确给出的内容，禁止编造**调用示例值、`mcporter call` 命令、业务工作流或易错点等 schema 未提供的信息。同时仍在映射表中列出该 MCP。
-- `verified_guide` 为空、且工具也没有 `inputSchema`（取不到该 MCP 的工具 schema） → **只**在"场景与工具映射速查"表格列出该 MCP 的映射行，**不得**为其生成"##  MCP 调用规范"子章节，注意事项写"调用规范由平台补全中"。
+- `verified_guide` 为空、但该 MCP 的工具提供了 `params` 参数表 → **可基于 `params` 转录**该工具的参数规格（参数名/类型/必填/描述）写入"## MCP 调用规范"子章节。**仅转录参数表明确给出的内容，禁止编造**调用示例值、`mcporter call` 命令、业务工作流或易错点等参数表未提供的信息。同时仍在映射表中列出该 MCP。
+- `verified_guide` 为空、且工具也没有 `params` 参数表（取不到该 MCP 的工具 schema） → **只**在"场景与工具映射速查"表格列出该 MCP 的映射行，**不得**为其生成"##  MCP 调用规范"子章节，注意事项写"调用规范由平台补全中"。
 
 请充分利用这些信息，在修复建议中引用对应 MCP 的 description 和 tools，帮助用户快速补齐文档。
 
@@ -286,11 +543,16 @@ class ToolsMcpFormatDiagnostic(Diagnostic):
 - 注意事项可结合 description、工具名称和常见调用约束来写，要求具体、可执行；如果提供了内网知识库参考，必须将相关术语说明融入注意事项中
 
 ##  MCP 调用规范
-- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `inputSchema` 的 MCP（据 schema 转录参数规格）。
-- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成 `### XXX (server_code)` 子章节或 `mcporter call` 示例——这类 MCP 只能出现在映射表里。
-- ✅ schema 转录要求：基于 `inputSchema` 的 properties/required/types/description 如实转录参数；不要编造 schema 未提供的调用示例值、命令或业务流程。
-- 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md
-- 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，因此只补最关键、最缺失的部分即可
+- 本章节允许包含：`verified_guide` 不为空的 MCP（直接引用原文），**以及** `verified_guide` 为空但其工具提供了 `params` 参数表的 MCP（挑推荐工具转录）。
+- 每个 MCP 子章节格式（控制 TOOLS.md 体积，避免把所有工具的全部参数都罗列进去）：
+  1. **列出该 MCP 的全部工具名**（一行一个或逗号分隔），让 Bot 知道有哪些工具可用；
+  2. 再**只挑 2-4 个推荐工具**（据工具描述，选该 MCP 主要场景最高频/关键的）**详列必填参数**（name/type/必填；选填可略）；
+  3. 写**注意事项**：必填项提醒、类型/格式约束、易错点。
+- ❌ 不要为每个工具都罗列全部参数规格；推荐工具之外的只列工具名即可。
+- ❌ 严格禁止：为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成 `### XXX (server_code)` 子章节或调用示例——这类 MCP 只能出现在映射表里。
+- ✅ 推荐工具参数：基于 `params` 的 name/type/required 如实转录必填项；不要编造参数表未提供的调用示例值、命令或业务流程。
+- 如果 MCP 列表中提供了 verified_guide，请直接引用该内容，用户可原样粘贴到 TOOLS.md。
+- 输出是"诊断 + 修复建议"，不是完整重写整份 TOOLS.md，只补最关键、最缺失的部分。
 
 ## 内网业务知识补充
 - **此章节仅当提供了"内网知识库参考"数据时才输出**，若未提供则跳过
@@ -322,8 +584,8 @@ XX 为 0-100 的整数
 - 不得评价行为边界
 - 不得脱离已提供的 MCP 列表空泛发挥
 - 不得编造未出现在 tools 列表中的工具名称
-- **禁止为"既无 `verified_guide` 又无工具 `inputSchema`"的 MCP 生成"MCP 调用规范"子章节**；这类 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏写"调用规范由平台补全中"
-- **禁止编造 `mcporter call` 示例、调用示例值或业务工作流**——仅有 inputSchema 时只转录 schema 给出的参数规格，不得生成 schema 未提供的命令/示例
+- **禁止为"既无 `verified_guide` 又无工具 `params`"的 MCP 生成"MCP 调用规范"子章节**；这类 MCP 只能出现在"场景与工具映射速查"表格中，注意事项栏写"调用规范由平台补全中"
+- **禁止编造 `mcporter call` 示例、调用示例值或业务工作流**——仅有 `params` 参数表时只转录参数表给出的参数规格，不得生成参数表未提供的命令/示例
 
 【额外要求】
 如果发现问题，你的修复建议中应尽量让用户一眼就能复制到 TOOLS.md：
@@ -468,69 +730,37 @@ XX 为 0-100 的整数
                     ctx.bot_id, len(mcp_details),
                 )
 
-        user_msg = (
+        intro_msg = (
             "请检查下面的 TOOLS.md 是否已经为已配置 MCP 提供了充分的调用规范。"
             "如果缺失或不完整，请输出诊断结论，并优先给出可直接补充到 TOOLS.md 中的"
             "`## 场景与工具映射速查` 和 `##  MCP 调用规范` 草案。\n\n"
             f"--- TOOLS.md MCP 调用规范诊断 ---\n{content}\n"
         )
-        kb_included = False
-        if mcp_details:
-            # Bucket each MCP by what call-spec source is available:
-            #   verified    → verified_guide (human-verified, paste verbatim)
-            #   schema      → no verified_guide, but tools expose inputSchema (transcribe params)
-            #   unreachable → neither (platform must author; mapping-table row only, advisory)
-            verified_mcps: list[dict] = []
-            schema_mcps: list[dict] = []
-            unreachable_mcps: list[dict] = []
-            for mcp in mcp_details:
-                tools = mcp.get("tools") or []
-                has_schema = any(
-                    isinstance(t, dict) and t.get("inputSchema")
-                    for t in (tools if isinstance(tools, list) else [])
+        if not mcp_details:
+            response = await ctx.llm.chat(
+                system=self.system_prompt, user=intro_msg + "--- end ---",
+                max_tokens=DIAGNOSTIC_MAX_TOKENS,
+            )
+            logger.info("[D-TOOLS-002] LLM response received: bot=%s response_len=%d", ctx.bot_id, len(response))
+        else:
+            batches = _pack_mcp_batches(_render_bucketed_blocks(mcp_details))
+            if len(batches) == 1:
+                # Single batch → prompt identical to the pre-batching path.
+                user_msg = intro_msg + _render_mcp_sections(batches[0])
+                kb_context = _fetch_kb_quiet(mcp_details, ctx.kb_config, ctx.bot_id)
+                logger.info(
+                    "[D-TOOLS-002] KB context fetched: bot=%s kb_included=%s",
+                    ctx.bot_id, bool(kb_context),
                 )
-                if mcp.get("verified_guide"):
-                    verified_mcps.append(mcp)
-                elif has_schema:
-                    schema_mcps.append(mcp)
-                else:
-                    unreachable_mcps.append({
-                        "server_code": mcp["server_code"],
-                        "name": mcp.get("name", ""),
-                        "description": mcp.get("description", ""),
-                        "verified_guide": None,
-                        "注意": "该 MCP 既无人工校验调用规范也无工具 inputSchema，只能在「场景与工具映射速查」表格中列出，注意事项写「调用规范由平台补全中」；禁止为其生成「MCP 调用规范」子章节或 mcporter call 示例",
-                    })
-
-            if verified_mcps:
-                user_msg += (
-                    "\n--- ✅ 已验证 MCP（verified_guide 不为空，引用原文生成调用规范） ---\n"
-                    f"{json.dumps(verified_mcps, ensure_ascii=False, indent=2)}\n"
-                )
-            if schema_mcps:
-                user_msg += (
-                    "\n--- 🛠 可据 schema 转录 MCP（无 verified_guide，但工具含 inputSchema：可据参数 schema 转录调用规范，禁止编造示例/命令） ---\n"
-                    f"{json.dumps(schema_mcps, ensure_ascii=False, indent=2)}\n"
-                )
-            if unreachable_mcps:
-                user_msg += (
-                    "\n--- ⛔ 无 schema MCP（既无 verified_guide 又无 inputSchema，仅写入映射表，禁止生成调用规范/示例） ---\n"
-                    f"{json.dumps(unreachable_mcps, ensure_ascii=False, indent=2)}\n"
-                )
-
-            # 查询内网知识库补充 MCP 上下文
-            try:
-                kb_context = _fetch_kb_context_for_mcps(mcp_details, ctx.kb_config)
                 if kb_context:
                     user_msg += f"\n{kb_context}"
-                    kb_included = True
-                logger.info("[D-TOOLS-002] KB context fetched: bot=%s kb_included=%s", ctx.bot_id, kb_included)
-            except Exception:
-                logger.warning("[D-TOOLS-002] KB context fetch failed for bot=%s", ctx.bot_id, exc_info=True)
-        user_msg += "--- end ---"
-
-        response = await ctx.llm.chat(system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS)
-        logger.info("[D-TOOLS-002] LLM response received: bot=%s response_len=%d", ctx.bot_id, len(response))
+                user_msg += "--- end ---"
+                response = await ctx.llm.chat(
+                    system=self.system_prompt, user=user_msg, max_tokens=DIAGNOSTIC_MAX_TOKENS,
+                )
+                logger.info("[D-TOOLS-002] LLM response received: bot=%s response_len=%d", ctx.bot_id, len(response))
+            else:
+                response = await self._chat_in_batches(ctx, intro_msg, batches)
         findings = self._analyze_response(response, ctx.bot_id)
 
         # Decide whether this run produced any concrete, patchable call-spec
@@ -565,3 +795,56 @@ XX 为 0-100 的整数
                     )
 
         return findings
+
+    async def _chat_in_batches(
+        self,
+        ctx: DiagnosticContext,
+        intro_msg: str,
+        batches: list[list[tuple[str, str, dict]]],
+    ) -> str:
+        """Run one bounded-size LLM call per MCP batch, concurrently, and merge.
+
+        Each batch call carries only its own MCPs' blocks plus the batch note,
+        so prompt size is decoupled from the bot's total MCP count. At most
+        ``_BATCH_CONCURRENCY`` calls run at once. A batch whose call raises is
+        reported as undiagnosed in the merged response instead of failing the
+        whole scan.
+        """
+        total = len(batches)
+        sem = asyncio.Semaphore(_BATCH_CONCURRENCY)
+        logger.info(
+            "[D-TOOLS-002] batched prompt: bot=%s batches=%d max_mcps=%d char_budget=%d concurrency=%d",
+            ctx.bot_id, total, _BATCH_MAX_MCPS, _BATCH_CHAR_BUDGET, _BATCH_CONCURRENCY,
+        )
+
+        async def run_one(idx: int, batch: list[tuple[str, str, dict]]) -> tuple[str | None, list[str]]:
+            async with sem:
+                codes = [d.get("server_code", "") for _, _, d in batch]
+                note = (
+                    f"注意：本次仅诊断已配置 MCP 的一部分（第 {idx + 1}/{total} 批，"
+                    f"本批 {len(batch)} 个 MCP）；请只评估本批 MCP 的覆盖与质量，"
+                    "草案与评分仅针对本批。\n\n"
+                )
+                msg = note + intro_msg + _render_mcp_sections(batch)
+                kb_context = _fetch_kb_quiet([d for _, _, d in batch], ctx.kb_config, ctx.bot_id)
+                if kb_context:
+                    msg += f"\n{kb_context}"
+                msg += "--- end ---"
+                try:
+                    resp = await ctx.llm.chat(
+                        system=self.system_prompt, user=msg, max_tokens=DIAGNOSTIC_MAX_TOKENS,
+                    )
+                except Exception:
+                    logger.warning(
+                        "[D-TOOLS-002] batch %d/%d chat raised: bot=%s",
+                        idx + 1, total, ctx.bot_id, exc_info=True,
+                    )
+                    return None, codes
+                logger.info(
+                    "[D-TOOLS-002] batch %d/%d LLM response received: bot=%s response_len=%d",
+                    idx + 1, total, ctx.bot_id, len(resp or ""),
+                )
+                return resp, codes
+
+        results = await asyncio.gather(*(run_one(i, b) for i, b in enumerate(batches)))
+        return _synthesize_batch_responses(results)

@@ -121,6 +121,18 @@ class SkillSymlinkListener(LifecycleBase):
                 )
                 return
 
+            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
+            if ctx.binding_id != event.binding_id:
+                logger.info(
+                    "[skill_symlink_listener] activated binding is no longer "
+                    "current, skipping: bot_id=%s event_binding_id=%s "
+                    "current_binding_id=%s",
+                    bot_id,
+                    event.binding_id,
+                    ctx.binding_id,
+                )
+                return
+
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
             service = self._skill_set_factory.create(
@@ -132,7 +144,6 @@ class SkillSymlinkListener(LifecycleBase):
             mappings = service.get_symlink_mappings(user_id=owner_id, bolt_id=bot_id)
             symlinks = [sm.to_dict() for sm in mappings]
 
-            ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
             logger.info(
                 "[skill_symlink_listener] syncing symlinks: plugin=%s count=%d "

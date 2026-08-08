@@ -43,11 +43,16 @@ _RETRY_JITTER = 0.4
 # read-timeout / broken-connection retry we shrink further so the model can finish
 # within the window instead of verbatim-repeating the same heavy request.
 _DEFAULT_MAX_TOKENS = 32768
-# Diagnostic calls only emit a short summary + message + ``[SCORE:xx]`` — far
-# smaller than a full-file patch rewrite — so a tighter budget keeps the first
-# request light and avoids pushing GLM into the slow-reasoning path that
-# exceeds antchat's ~90s gateway window.
-DIAGNOSTIC_MAX_TOKENS = 32768
+# Diagnostics emit a short summary + a patchable draft (mapping table + a few
+# MCP call specs) + ``[SCORE:xx]`` — far smaller than a full-file patch
+# rewrite. 8k covers that with headroom while keeping GLM out of the
+# slow-reasoning path that #307 lowered the old 256k to escape: a 32k budget
+# lets the model stall past antchat's ~90s gateway window even when the prompt
+# is small. (The matching *input*-side guard lives in mcp_format.py, which
+# renders each MCP as a compact text block instead of dumping the nested
+# inputSchema JSON.) 8k still leaves the trailing ``[SCORE:xx]`` room, since
+# the draft body is only a few KB.
+DIAGNOSTIC_MAX_TOKENS = 8192
 # Connection-level failures (gateway dropped mid send/read, or the send-hook
 # wrapper re-raised) get more retries than before — these are transient blips,
 # not "request too heavy" stalls, so giving up after one retry was premature.

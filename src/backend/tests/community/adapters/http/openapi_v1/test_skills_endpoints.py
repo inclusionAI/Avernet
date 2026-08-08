@@ -468,6 +468,10 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
     now = int(time.time())
 
     def token(tenant: str) -> str:
+        # The tenant rides on the ``app`` principal: a ``user`` principal carries
+        # none, because nothing in a user credential proves which tenant the
+        # person acts for. A user-only token would scope to the internal
+        # default and this pair of requests would stop testing isolation at all.
         return jwt.encode(
             {
                 "iss": "gateway",
@@ -477,9 +481,18 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                 "principals": [
                     {
                         "type": "user",
-                        "tenant": tenant,
                         "subject": {"id": "owner", "username": "owner@example.com"},
-                    }
+                    },
+                    {
+                        "type": "app",
+                        "tenant": tenant,
+                        "app": {
+                            "app_id": 1,
+                            "app_name": "Partner App",
+                            "owners": "partner-org",
+                            "tenant": tenant,
+                        },
+                    },
                 ],
             },
             key,

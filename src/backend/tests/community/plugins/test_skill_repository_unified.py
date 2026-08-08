@@ -259,6 +259,106 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
             assert session.query(DefaultSkillsetSkillExclusion).count() == 0
 
 
+def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills, db):
+    from agentclaw.community.plugins.local_skill_cleanup_repository import (
+        SqlLocalSkillCleanupRepository,
+    )
+
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+        cleanup_work_id = SqlLocalSkillCleanupRepository(db).record_preparing(
+            env="dev",
+            owner_id="owner",
+            bot_id="bot",
+            skill_id=skill["id"],
+            package_locator="/skills/local",
+        )
+
+        assert skills.replace_bot_local_skill(
+            skill_id=skill["id"],
+            owner_id="owner",
+            bot_id="bot",
+            old_locator="/skills/local",
+            new_locator="/skills/.local.replacement-1",
+            description="new",
+            requires_runtime_restore=True,
+            cleanup_work_id=cleanup_work_id,
+        ) == cleanup_work_id
+
+        with db.orm_session() as session:
+            persisted = session.query(Skill).one()
+            cleanup = session.query(LocalSkillCleanupWorkModel).one()
+            assert persisted.git_path == "local:///skills/.local.replacement-1"
+            assert persisted.description == "new"
+            assert cleanup.status == "pending"
+            assert cleanup.requires_runtime_restore == 1
+
+
+def test_public_local_replace_rolls_back_locator_when_cleanup_commit_fails(
+    skills, db
+):
+    from agentclaw.community.plugins.local_skill_cleanup_repository import (
+        SqlLocalSkillCleanupRepository,
+    )
+
+    with avernet_tenant_scope("tenant-a"):
+        skill = skills.create(
+            {
+                "name": "local",
+                "description": "old",
+                "git_path": "local:///skills/local",
+                "user_id": "owner",
+                "bolt_id": "bot",
+            }
+        )
+        cleanup_work_id = SqlLocalSkillCleanupRepository(db).record_preparing(
+            env="dev",
+            owner_id="owner",
+            bot_id="bot",
+            skill_id=skill["id"],
+            package_locator="/skills/local",
+        )
+
+        def fail_cleanup_update(
+            _conn, _cursor, statement, _parameters, _context, _executemany
+        ):
+            if statement.lstrip().lower().startswith(
+                "update ac_local_skill_cleanup_work"
+            ):
+                raise RuntimeError("injected cleanup commit failure")
+
+        event.listen(db.engine, "before_cursor_execute", fail_cleanup_update)
+        try:
+            with pytest.raises(RuntimeError, match="injected cleanup commit failure"):
+                skills.replace_bot_local_skill(
+                    skill_id=skill["id"],
+                    owner_id="owner",
+                    bot_id="bot",
+                    old_locator="/skills/local",
+                    new_locator="/skills/.local.replacement-1",
+                    description="new",
+                    requires_runtime_restore=False,
+                    cleanup_work_id=cleanup_work_id,
+                )
+        finally:
+            event.remove(db.engine, "before_cursor_execute", fail_cleanup_update)
+
+        with db.orm_session() as session:
+            persisted = session.query(Skill).one()
+            cleanup = session.query(LocalSkillCleanupWorkModel).one()
+            assert persisted.git_path == "local:///skills/local"
+            assert persisted.description == "old"
+            assert cleanup.status == "preparing"
+
+
 def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skills, sets, db):
     from agentclaw.community.plugins.local_skill_cleanup_repository import (
         SqlLocalSkillCleanupRepository,
@@ -811,6 +911,17 @@ def test_remove_default_skill_exclusion(sets, db):
     assert sets.get_excluded_skills("u1", "bot1", 7) == []
     # Removing non-existent returns False
     assert sets.remove_default_skill_exclusion("u1", "bot1", 7, 42) is False
+
+
+def test_remove_all_default_skill_exclusions_clears_prior_default_sets(sets, db):
+    sets.add_default_skill_exclusion("u1", "bot1", 7, 42)
+    sets.add_default_skill_exclusion("u1", "bot1", 8, 42)
+    sets.add_default_skill_exclusion("u1", "bot1", 8, 99)
+
+    assert sets.remove_all_default_skill_exclusions("u1", "bot1", 42) is True
+    assert sets.get_excluded_skills("u1", "bot1", 7) == []
+    assert sets.get_excluded_skills("u1", "bot1", 8) == [99]
+    assert sets.remove_all_default_skill_exclusions("u1", "bot1", 42) is False
 
 
 def test_get_excluded_skills_filters_by_set(sets, db):

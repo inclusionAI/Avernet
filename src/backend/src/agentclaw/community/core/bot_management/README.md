@@ -39,6 +39,7 @@ internal_dependencies:
   - agentclaw.community.core.desktop_bot
   - agentclaw.community.core.mcp
   - agentclaw.community.core.devices
+  - agentclaw.community.core.events
   - agentclaw.community.core.resources
   - agentclaw.community.core.service_bot
   - agentclaw.community.core.skill_center
@@ -52,7 +53,9 @@ internal_dependencies:
   - agentclaw.community.plugin_api.drm
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.passport
+  - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.auth_relationship
+  - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
   - agentclaw.community.utils.secret_utils

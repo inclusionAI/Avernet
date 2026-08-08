@@ -16,6 +16,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotPermissionError,
     DeviceAllocationError,
     BotNameExistsError,
@@ -834,6 +835,22 @@ class TestRestartBot:
         assert resp.json()["success"] is False
         assert resp.json()["error_code"] == 409
 
+    def test_rejects_teclaw_bot(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+            "teclaw 类型的 Bot 不支持重启"
+        )
+
+        resp = tc.post("/api/bots/default/restart")
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "teclaw 类型的 Bot 不支持重启",
+            "error_code": 400,
+            "data": None,
+        }
+
     def test_activation_in_progress_returns_accepted(self, client):
         tc, svc, _ = client
         svc.restart_bot.return_value = {
@@ -938,6 +955,25 @@ class TestRestartScheduler:
         assert resp.status_code == 409
         assert resp.json()["error_code"] == 409
 
+    def test_rejects_teclaw_bot(self, client):
+        tc, svc, _ = client
+        svc.restart_bot.side_effect = BotOperationNotAllowedError(
+            "teclaw 类型的 Bot 不支持重启"
+        )
+
+        resp = tc.post(
+            "/api/bots/restart-scheduler",
+            json={"user_id": "test_user", "bot_id": "default"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "success": False,
+            "message": "teclaw 类型的 Bot 不支持重启",
+            "error_code": 400,
+            "data": None,
+        }
+
     def test_activation_in_progress_returns_accepted(self, client):
         tc, svc, _ = client
         svc.restart_bot.return_value = {
@@ -1007,6 +1043,18 @@ class TestRestartForOthers:
         tc, svc, _, _ = admin_client
         resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "default"})
         assert resp.json()["success"] is True
+
+    def test_rejects_teclaw_bot(self, admin_client):
+        tc, svc, _, _ = admin_client
+        svc.restart_bot.side_effect = BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
+
+        resp = tc.post("/api/bots/restart-for-others", json={"target_user_id": "u1", "target_bot_id": "default"})
+
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == 400
+        assert data["message"] == "teclaw 类型的 Bot 不支持重启"
+        svc.restart_bot.assert_called_once()
 
     def test_missing_target_user(self, admin_client):
         tc, svc, _, _ = admin_client

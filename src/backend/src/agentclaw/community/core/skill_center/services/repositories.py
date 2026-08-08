@@ -57,6 +57,12 @@ class SkillRepository(Protocol):
         """
         ...
 
+    def get_bot_local_by_locator(
+        self, *, bot_id: str, user_id: str, locator: str
+    ) -> dict | None:
+        """Return the current exact Bot-owned Local Skill for one locator."""
+        ...
+
     def list_bot_local_skills(
         self,
         *,
@@ -82,6 +88,21 @@ class SkillRepository(Protocol):
     def update(self, skill_id: str, skill_data: dict) -> dict | None:
         ...
 
+    def replace_bot_local_skill(
+        self,
+        *,
+        skill_id: str,
+        owner_id: str,
+        bot_id: str,
+        old_locator: str,
+        new_locator: str,
+        description: str,
+        requires_runtime_restore: bool,
+        cleanup_work_id: int,
+    ) -> int | None:
+        """Atomically switch package authority and commit old-package cleanup."""
+        ...
+
     def delete(self, skill_id: str) -> bool:
         ...
 
@@ -100,6 +121,12 @@ class SkillRepository(Protocol):
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:
+        ...
+
+    def remove_all_default_skill_exclusions(
+        self, user_id: str, bot_id: str, skill_id: int
+    ) -> bool:
+        """Clear every default-set exclusion for one Bot-owned Skill."""
         ...
 
     def delete_bot_local_skill(
@@ -192,7 +219,9 @@ class SkillSetRepository(Protocol):
     def delete(self, skill_set_id: str) -> bool:
         ...
 
-    def add_skill_to_set(self, skill_set_id: str, skill_id: str) -> bool:
+    def add_skill_to_set(
+        self, skill_set_id: str, skill_id: str, user_id: str | None = None
+    ) -> bool:
         ...
 
     def get_skills_in_set(self, skill_set_id: str) -> list[dict]:
@@ -223,6 +252,12 @@ class SkillSetRepository(Protocol):
     def remove_default_skill_exclusion(
         self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
     ) -> bool:
+        ...
+
+    def remove_all_default_skill_exclusions(
+        self, user_id: str, bot_id: str, skill_id: int
+    ) -> bool:
+        """Clear every default-set exclusion for one Bot-owned Skill."""
         ...
 
     def add_mcp_to_set(self, skill_set_id: str, server_code: str, name: str,

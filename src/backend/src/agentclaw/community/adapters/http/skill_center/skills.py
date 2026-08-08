@@ -9,6 +9,7 @@ import json
 import os
 import time
 import zipfile
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -103,6 +104,11 @@ from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol
 from agentclaw.community.api.skill_parameter_service_factory import SkillParameterServiceFactoryProtocol
 from agentclaw.community.api.skill_publish_service import SkillPublishServiceProtocol
+from agentclaw.community.api.runtime_layout_probe_service import (
+    RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeServiceProtocol,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_activator_factory import SkillSetActivatorFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
@@ -153,6 +159,43 @@ _BOT_RUNTIME_UNAVAILABLE_MARKERS = (
     "agentclawproxy",
     "sandbox id is required",
 )
+_FILESYSTEM_LAYOUT_ENGINES = frozenset(
+    {"openclaw", "claude_code", "aicoding", "hermes"}
+)
+
+
+def _desktop_active_root_from_probe(
+    probe: RuntimeLayoutProbeResult,
+    *,
+    legacy_fallback: Path,
+) -> Path:
+    """Use the Engine-owned active root, with one old-image fallback."""
+    if probe.status is RuntimeLayoutProbeStatus.READY:
+        resolved_layout = probe.evidence.get("resolved_layout")
+        active_root = (
+            resolved_layout.get("active_root")
+            if isinstance(resolved_layout, dict)
+            else None
+        )
+        if (
+            not isinstance(active_root, str)
+            or not active_root
+            or not Path(active_root).is_absolute()
+            or ".." in Path(active_root).parts
+        ):
+            raise RuntimeError("runtime layout probe omitted a valid active root")
+        return Path(active_root)
+
+    if (
+        probe.status is RuntimeLayoutProbeStatus.NOT_CAPABLE
+        and probe.evidence.get("reason") == "runtime_layout_probe_endpoint_absent"
+    ):
+        return legacy_fallback
+
+    raise RuntimeError(
+        "runtime layout probe did not resolve an authoritative active root: "
+        f"status={probe.status.value} reason={probe.evidence.get('reason')}"
+    )
 
 
 def _normalize_upload_error_message(error_msg: str) -> str:
@@ -506,7 +549,11 @@ async def upload_skill(
                 is_public=skill.get('is_public'),
                 is_builtin=skill.get('is_builtin'),
                 user_id=str(skill.get('user_id')) if skill.get('user_id') is not None else None,
-                bot_id=skill.get('bolt_id') if skill.get('bot_id') else "default",
+                bot_id=(
+                    str(skill["bolt_id"])
+                    if skill.get("bolt_id") is not None
+                    else "default"
+                ),
                 gmt_created=skill.get('gmt_created') if skill.get('gmt_created') else "",
                 gmt_modified=skill.get('gmt_modified') if skill.get('gmt_modified') else ""
             ),
@@ -673,6 +720,7 @@ async def get_active_skills(
     bot_repo: BotRepository = Injected(BotRepository),
     path_factory: WorkspacePathFactory = Injected(WorkspacePathFactory),
     skill_service_factory: SkillServiceFactoryProtocol = Injected(SkillServiceFactoryProtocol),
+    runtime_layout_probe: RuntimeLayoutProbeServiceProtocol = Injected(RuntimeLayoutProbeServiceProtocol),
 ) -> ActiveSkillsResponse:
     """Get list of currently active skills (symlinked in skills directory)."""
     logger.info(f"[skills.get_active_skills] Request: user_id={ctx.user_id}, bot_id={ctx.bot_id}, entity_id={entity_id}")
@@ -682,6 +730,17 @@ async def get_active_skills(
 
     # Get user-specific paths using new directory structure
     skills_dir = path_factory.get_bot_skills_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
+    runtime_skills_dir = skills_dir
+    if is_desktop and effective_engine in _FILESYSTEM_LAYOUT_ENGINES:
+        probe = await runtime_layout_probe.probe_bot(
+            bot_id=effective_bot_id,
+            user_id=effective_entity_id,
+            engine=effective_engine,
+        )
+        runtime_skills_dir = _desktop_active_root_from_probe(
+            probe,
+            legacy_fallback=skills_dir,
+        )
     local_dir = path_factory.get_bot_skills_local_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
     path_factory.get_bot_engine_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type)
     repo_dir = path_factory.get_bot_skills_repo_dir(effective_entity_id, effective_bot_id, effective_engine, effective_entity_type, is_desktop=is_desktop)
@@ -696,7 +755,14 @@ async def get_active_skills(
         engine_type=effective_engine,
     )
 
-    active_skills = service.get_active_skills()
+    if is_desktop:
+        active_skills = await service.get_active_skills_from_device(
+            bot_id=effective_bot_id,
+            owner_id=effective_entity_id,
+            active_dir=runtime_skills_dir,
+        )
+    else:
+        active_skills = service.get_active_skills()
     logger.info(f"[skills.get_active_skills] Found {len(active_skills)} active skills")
     return ActiveSkillsResponse(
         success=True,
@@ -1015,10 +1081,13 @@ async def activate_skill(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
-        symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
-            bolt_id=effective_bot_id
-        )
+        mapping_kwargs: dict[str, Any] = {
+            "user_id": ctx.user_id,
+            "bolt_id": effective_bot_id,
+        }
+        if service.runtime_uses_pool_paths:
+            mapping_kwargs["additional_skill_paths"] = [actual_skill_id]
+        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
@@ -1101,7 +1170,7 @@ async def deactivate_skill(
         )
         symlinks = skill_set_service.get_symlink_mappings(
             user_id=ctx.user_id,
-            bolt_id=effective_bot_id
+            bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
@@ -1592,10 +1661,15 @@ async def activate_skills_batch(
             engine_type=effective_engine,
             entity_type=effective_entity_type,
         )
-        symlinks = skill_set_service.get_symlink_mappings(
-            user_id=ctx.user_id,
-            bolt_id=effective_bot_id
-        )
+        mapping_kwargs: dict[str, Any] = {
+            "user_id": ctx.user_id,
+            "bolt_id": effective_bot_id,
+        }
+        if service.runtime_uses_pool_paths:
+            mapping_kwargs["additional_skill_paths"] = [
+                item["path"] for item in results["success"]
+            ]
+        symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
         sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")
@@ -2382,8 +2456,9 @@ def _resolve_parameter_bot(
     The requested Bot ID is used only as a lookup key; ownership always comes
     from the Bot row. Historical ``Skill.user_id`` values may contain a
     collaborator, so they must never participate in device-owner resolution.
-    Bot-private Skills are scoped by ``bolt_id``; shared Git market Skills have
-    no Bot binding and remain usable across Bots.
+    Bot-private Skills are scoped by ``bolt_id``. Shared market Skills are
+    identified by their trusted source scheme (``git://`` or ``center://``)
+    and remain usable across Bots regardless of historical ``bolt_id`` values.
     """
 
     bot = bot_repo.get_by_id_and_entity(requested_bot_id, requested_entity_id)
@@ -2397,11 +2472,9 @@ def _resolve_parameter_bot(
         )
 
     skill_bot_id = str(skill.get("bolt_id") or "")
-    is_shared_git_skill = (
-        str(skill.get("git_path") or "").startswith("git://")
-        and not skill_bot_id
-    )
-    if is_shared_git_skill:
+    git_path = str(skill.get("git_path") or "")
+    is_shared_market_skill = git_path.startswith(("git://", "center://"))
+    if is_shared_market_skill:
         return bot
 
     if not skill_bot_id:

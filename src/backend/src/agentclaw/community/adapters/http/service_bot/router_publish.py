@@ -5,6 +5,7 @@
 - 调用 core/service_bot/services/ 中的业务逻辑
 - Request/Response 类型来自同级 schemas.py
 """
+import copy
 import json
 
 from fastapi import APIRouter, Depends, Request
@@ -627,7 +628,8 @@ async def update_publish_status(
 
         publish_record = publish_service.get_publish_by_id(publish_id)
 
-        ext = publish_record.ext or {}
+        expected_ext = copy.deepcopy(publish_record.ext)
+        ext = copy.deepcopy(publish_record.ext or {})
         ext["source_status"] = request.failed_status
 
         record = publish_service.update_publish_status_with_ext(
@@ -635,6 +637,7 @@ async def update_publish_status(
             target_status=request.target_status,
             ext=ext,
             source_status=request.source_status,
+            expected_ext=expected_ext,
         )
 
         return ApiResponse(

@@ -363,6 +363,77 @@ class BotPublishRepository:
             return None
         return self.get_by_id(publish_id)
 
+    def compare_and_set_ext(
+        self,
+        *,
+        publish_id: int,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+    ) -> Optional[BotPublishRecord]:
+        """Whole-column ext CAS using the exact serialized DB value.
+
+        ``get_by_id`` transparently re-inlines offloaded config artifacts, so both
+        the expected and replacement values pass through ``prepare`` to recover
+        the canonical representation stored in the TEXT column.
+        """
+        env = get_current_env()
+        expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
+        ext_json, pending = self._offload.prepare(ext, publish_id, env)
+        with self._db.orm_session() as db:
+            query = db.query(self.Model).filter(self.Model.id == publish_id)
+            if expected_json is None:
+                query = query.filter(self.Model.ext.is_(None))
+            else:
+                query = query.filter(self.Model.ext == expected_json)
+            affected = query.update(
+                {
+                    self.Model.ext: ext_json,
+                    self.Model.gmt_modified: func.now(),
+                },
+                synchronize_session=False,
+            )
+            if affected > 0:
+                self._offload.upload(pending)
+        if affected == 0:
+            return None
+        return self.get_by_id(publish_id)
+
+    def compare_and_set_status_with_ext(
+        self,
+        *,
+        publish_id: int,
+        source_status: str,
+        target_status: str,
+        expected_ext: Optional[Dict[str, Any]],
+        ext: Dict[str, Any],
+    ) -> Optional[BotPublishRecord]:
+        """CAS status and the exact serialized ext snapshot in one UPDATE."""
+        env = get_current_env()
+        expected_json, _ = self._offload.prepare(expected_ext, publish_id, env)
+        ext_json, pending = self._offload.prepare(ext, publish_id, env)
+        with self._db.orm_session() as db:
+            query = db.query(self.Model).filter(
+                self.Model.id == publish_id,
+                self.Model.status == source_status,
+            )
+            if expected_json is None:
+                query = query.filter(self.Model.ext.is_(None))
+            else:
+                query = query.filter(self.Model.ext == expected_json)
+            affected = query.update(
+                {
+                    self.Model.status: target_status,
+                    self.Model.ext: ext_json,
+                    self.Model.gmt_modified: func.now(),
+                },
+                synchronize_session=False,
+            )
+            if affected > 0:
+                self._offload.upload(pending)
+        if affected == 0:
+            return None
+        return self.get_by_id(publish_id)
+
     def rollback_flip(
         self,
         *,

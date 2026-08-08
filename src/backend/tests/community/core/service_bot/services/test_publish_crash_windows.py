@@ -10,6 +10,7 @@ ledger, and follow-up steps (binding) are not duplicated.
 Group B lands the release-leg cases (first release); later groups extend this file
 per operation.
 """
+import copy
 from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, Mock
@@ -37,6 +38,12 @@ from agentclaw.community.core.service_bot.services.publish_flow.operation_runner
     to_baas_request_id,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
+
+
+def _apply_ext_mutation(ext, mutator):
+    updated = copy.deepcopy(ext or {})
+    mutator(updated)
+    return updated
 
 
 # ── ledger + fakes ────────────────────────────────────────────────────────────
@@ -141,13 +148,15 @@ def _arca_router(build_service):
 def _flow(*, ledger, baas, build_service, publish_service=None):
     reader = Mock()
     reader.overrides_for_stage.return_value = {}
+    common_config_service = Mock()
+    common_config_service.get_value.return_value = None
     svc = PublishFlowService(
         publish_service or Mock(),
         build_service,
         baas,
         Mock(),  # bot_service
         _arca_router(build_service),
-        Mock(),  # common_config_service
+        common_config_service,
         resolver=Mock(),
         device_fs_dispatcher=Mock(),
         teclaw_file_promotion=Mock(),
@@ -943,7 +952,9 @@ def _recreate_restart_flow(ledger, baas, build_service, *, record, bot_uuid="BOT
         return_value=Mock(device_id=bot_uuid)
     )
     svc._publish_service.create_device_binding = Mock(return_value=55)
-    svc._publish_service.update_publish_ext = Mock()
+    svc._publish_service.mutate_publish_ext = Mock(
+        side_effect=lambda _publish_id, mutator: Mock(ext=_apply_ext_mutation(record.ext, mutator))
+    )
     svc._bot_service.get_bot = Mock(return_value={"bot_id": "b2", "entity_id": "u1"})
     svc.refresh_publish_handle = Mock()
     return svc
@@ -996,8 +1007,9 @@ async def test_restart_bot_not_found_recreates_with_fresh_op_and_binding():
     binding_kwargs = svc._publish_service.create_device_binding.call_args.kwargs
     assert binding_kwargs["device_id"] == "BOT-new"
 
-    # One ext write carrying all three read handles for the stage.
-    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    # One CAS mutation carries all three read handles for the stage.
+    mutator = svc._publish_service.mutate_publish_ext.call_args.args[1]
+    ext = _apply_ext_mutation(_restart_record().ext, mutator)
     assert ext["binding"]["online"] == 55
     assert ext["publish"]["online"] == 901
     assert ext["restart"]["online"] == 901
@@ -1106,7 +1118,8 @@ async def test_verify_stage_restart_bot_not_found_gets_same_recreate():
         PublishOperationState.ABANDONED.value
     fr = ledger.get_latest_by_kind(1, "first_release", "verify")
     assert fr.state == PublishOperationState.COMPLETED.value
-    ext = svc._publish_service.update_publish_ext.call_args.kwargs["ext"]
+    mutator = svc._publish_service.mutate_publish_ext.call_args.args[1]
+    ext = _apply_ext_mutation(_restart_record(stage="verify").ext, mutator)
     assert ext["restart"]["verify"] == 901
     assert ext["binding"]["verify"] == 55
 

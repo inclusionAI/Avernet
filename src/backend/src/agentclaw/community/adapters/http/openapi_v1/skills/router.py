@@ -50,7 +50,6 @@ router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
 PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
-
 def _tags(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(tag) for tag in value]

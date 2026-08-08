@@ -22,6 +22,9 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
     BotWsConnectionInfoResponse,
 )
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    ImagePolicyState,
+)
 from agentclaw.community.core.service_bot.types import PublishStage
 
 
@@ -42,12 +45,18 @@ class MockPublishRecord:
     id: int = 123
     name: str = "Test Bot"
     owner_id: str = OWNER_ID
+    status: str = "success"
     version: int = 1
+    env: str = "pre"
     ext: dict = None
 
     def __post_init__(self):
         if self.ext is None:
-            self.ext = {"migration_path": "/nas/migration/path"}
+            self.ext = {
+                "migration_path": "/nas/migration/path",
+                "sbot_use_default_image": True,
+                "sbot_runtime_kind": "arca",
+            }
 
 
 def _make_ws_info():
@@ -76,6 +85,7 @@ def _make_service(
     caller_identity=None,
     token_provider=None,
     runtime_updater=None,
+    common_config_service=None,
 ):
     """Construct ExpertChatInstanceService with mocks."""
     instance_repo = instance_repo or MagicMock()
@@ -87,6 +97,8 @@ def _make_service(
     caller_identity = caller_identity or MagicMock()
     token_provider = token_provider or MagicMock()
     runtime_updater = runtime_updater or MagicMock()
+    common_config_service = common_config_service or MagicMock()
+    common_config_service.get_value.return_value = None
 
     svc = ExpertChatInstanceService(
         instance_repo=instance_repo,
@@ -98,15 +110,18 @@ def _make_service(
         caller_identity=caller_identity,
         token_provider=token_provider,
         runtime_updater=runtime_updater,
+        common_config_service=common_config_service,
     )
     return svc, instance_repo, baas, publish_repo, bot_repo, binding_repo, bot_build_service, caller_identity, token_provider, runtime_updater
 
 
 def _wire_publish(publish_repo, record=None):
     """Wire publish_repo to return a success publish record."""
+    publish_record = record or MockPublishRecord()
     publish_repo.get_by_publish_bot_id = MagicMock(
-        return_value=record or MockPublishRecord()
+        return_value=publish_record
     )
+    publish_repo.get_by_id = MagicMock(return_value=publish_record)
 
 
 def _wire_bot_repo(bot_repo, bot_info=None):
@@ -132,6 +147,97 @@ def _wire_bot_build_service_async(bot_build_service, create_result=None, upgrade
         bot_build_service.release_async = AsyncMock(return_value=create_result)
     if upgrade_result is not None:
         bot_build_service.upgrade_async = AsyncMock(return_value=upgrade_result)
+
+
+class TestResolvePublishImagePin:
+    def test_teclaw_skips_arca_policy_resolution(self):
+        svc, _, baas, _, bot_repo, *_ = _make_service()
+        record = MockPublishRecord(
+            ext={"migration_path": "/nas/path", "sbot_runtime_kind": "teclaw"}
+        )
+        publish_repo = svc._publish_repo
+        publish_repo.get_by_id.return_value = record
+
+        resolved = svc._resolve_publish_image_pin(
+            record,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+        )
+
+        assert resolved.state == ImagePolicyState.LEGACY
+        assert resolved.docker_image is None
+        svc._common_config_service.get_value.assert_not_called()
+
+    def test_legacy_publish_persists_pin_and_refreshes_record(self):
+        common_config = MagicMock()
+        svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
+            common_config_service=common_config
+        )
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
+        record = MockPublishRecord(ext={"migration_path": "/nas/path"})
+        latest = MockPublishRecord(
+            ext={"migration_path": "/nas/path", "unrelated": "preserved"}
+        )
+        publish_repo.get_by_id.return_value = latest
+
+        def compare_and_set_ext(**kwargs):
+            latest.ext = kwargs["ext"]
+            return latest
+
+        publish_repo.compare_and_set_ext.side_effect = compare_and_set_ext
+
+        resolved = svc._resolve_publish_image_pin(
+            record,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+        )
+
+        assert resolved.state == ImagePolicyState.PINNED
+        assert resolved.docker_image == "registry/arca:v2"
+        assert latest.ext["unrelated"] == "preserved"
+        assert latest.ext["sbot_pin_image"] is True
+        assert latest.ext["sbot_docker_image"] == "registry/arca:v2"
+        assert record.ext == latest.ext
+
+    def test_concurrent_explicit_policy_is_not_overwritten(self):
+        common_config = MagicMock()
+        svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
+            common_config_service=common_config
+        )
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
+        record = MockPublishRecord(ext={"migration_path": "/nas/path"})
+        latest = MockPublishRecord(
+            ext={"migration_path": "/nas/path", "sbot_use_default_image": True}
+        )
+        publish_repo.get_by_id.return_value = latest
+
+        resolved = svc._resolve_publish_image_pin(
+            record,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+        )
+
+        assert resolved.state == ImagePolicyState.DEFAULT
+        publish_repo.compare_and_set_ext.assert_not_called()
+        assert record.ext == latest.ext
+
+    def test_failed_policy_persistence_raises_connection_error(self):
+        common_config = MagicMock()
+        svc, _, baas, publish_repo, bot_repo, *_ = _make_service(
+            common_config_service=common_config
+        )
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
+        record = MockPublishRecord(ext={"migration_path": "/nas/path"})
+        latest = MockPublishRecord(ext={"migration_path": "/nas/path"})
+        publish_repo.get_by_id.return_value = latest
+        publish_repo.compare_and_set_ext.return_value = None
+
+        with pytest.raises(RuntimeError, match="CAS conflicted repeatedly"):
+            svc._resolve_publish_image_pin(
+                record,
+                bot_id=BOT_ID,
+                owner_id=OWNER_ID,
+            )
 
 
 class TestResolveBuildArtifact:
@@ -276,7 +382,7 @@ class TestCreateContainer:
             USER_ID,
             migration_path="/nas/path",
             version=2,
-            docker_image="registry/arka:v2",
+            docker_image="registry/arca:v2",
         )
 
         bot_build_service.release_async.assert_called_once()
@@ -287,7 +393,7 @@ class TestCreateContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "2"
-        assert call_kwargs["docker_image"] == "registry/arka:v2"
+        assert call_kwargs["docker_image"] == "registry/arca:v2"
 
 
 class TestUpgradeContainer:
@@ -349,7 +455,7 @@ class TestUpgradeContainer:
             OWNER_ID,
             migration_path="/nas/path",
             version=3,
-            docker_image="registry/arka:v2",
+            docker_image="registry/arca:v2",
         )
 
         bot_build_service.upgrade_async.assert_called_once()
@@ -361,7 +467,7 @@ class TestUpgradeContainer:
         assert call_kwargs["device_count"] == 1
         assert call_kwargs["publish_stage"] == PublishStage.ONLINE
         assert call_kwargs["version"] == "3"
-        assert call_kwargs["docker_image"] == "registry/arka:v2"
+        assert call_kwargs["docker_image"] == "registry/arca:v2"
 
 
 class TestBuildConnection:
@@ -1101,9 +1207,18 @@ class TestGetCallerConnectionEdgeCases:
             return_value={"id": 1, "status": "success", "ext": existing_ext}
         )
         # publish_version is None, defaults to 1, which is less than 2
-        record = MockPublishRecord(id=123, version=None, ext={"migration_path": "/path"})
+        record = MockPublishRecord(
+            id=123,
+            version=None,
+            ext={
+                "migration_path": "/path",
+                "sbot_use_default_image": True,
+                "sbot_runtime_kind": "arca",
+            },
+        )
         record.version = None
         publish_repo.get_by_publish_bot_id = MagicMock(return_value=record)
+        publish_repo.get_by_id = MagicMock(return_value=record)
         ws_info = _make_ws_info()
         baas.get_ws_info_by_bot_uuid = MagicMock(return_value=ws_info)
 

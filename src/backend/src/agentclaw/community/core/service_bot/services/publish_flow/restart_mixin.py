@@ -9,9 +9,6 @@ from agentclaw.community.core.service_bot.repository.models import (
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     service_skills_env_from_ext,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    resolve_publish_image_pin,
-)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -306,7 +303,7 @@ class RestartMixin:
         # so restarting a non-latest stage never delivers another stage's channels.
         delivery = self._ext_state.compose_stored(publish_record.ext or {}, stage_enum)
         skills_env = service_skills_env_from_ext(publish_record.ext, bot)
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self.resolve_publish_image_pin(publish_record)
 
         # A prior recreate that crashed between its ext write and its
         # complete_operation left a dangling op. That crashed leg IS this restart
@@ -404,6 +401,7 @@ class RestartMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=image_pin.docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
             )
         # NOTE: transient errors out of the atom are NOT caught + failed here. A
         # genuine crash leaves the op non-terminal so the durable task retry
@@ -583,6 +581,7 @@ class RestartMixin:
                 delivery=delivery,
                 extra_envs=skills_env,
                 docker_image=docker_image,
+                runtime_kind=self.resolve_publish_runtime_kind(publish_record),
             )
 
         op = await acquire_deploy_workflow(

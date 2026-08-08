@@ -85,20 +85,28 @@ def signing_key():
 
 def mint(
     *,
-    tenant: str = TENANT,
+    tenant: str | None = TENANT,
     user_id: str = "u-1",
-    include_app: bool = False,
+    include_app: bool | None = None,
     **overrides,
 ) -> str:
+    """A signed token for a caller, optionally belonging to a tenant.
+
+    ``tenant=None`` mints the **user-only** set: a first-party caller, which
+    asserts no tenant and so scopes to the internal default. Any other value
+    mints the user alongside an ``app`` principal registered to that tenant,
+    because a user principal cannot carry one — see ``gateway_principal/models``.
+    """
     now = int(time.time())
-    principals = [
+    principals: list[dict] = [
         {
             "type": "user",
-            "tenant": tenant,
             "subject": {"id": user_id, "username": "alice@example.com"},
         }
     ]
-    if include_app:
+    if include_app is None:
+        include_app = tenant is not None
+    if include_app and tenant is not None:
         principals.append(
             {
                 "type": "app",
@@ -184,6 +192,47 @@ def test_verified_caller_scopes_owner_and_tenant(client):
     assert response.json()["data"] == {"owner_id": "u-1", "tenant": TENANT}
 
 
+def test_a_first_party_user_scopes_to_the_internal_tenant(client):
+    """A caller naming only a user asserts no tenant, so the internal one applies.
+
+    This is the shape the google chain produces, and the shape ``route_security``
+    asks for on the whole public surface today: ``user: required`` and nothing
+    else. Until an identity that carries a registered tenant is required
+    alongside it, every request through this seam lands here.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe", headers={PRINCIPAL_HEADER: mint(tenant=None)}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
+
+
+def test_a_token_naming_the_internal_tenant_is_scoped_to_it(client):
+    """A claimed ``teamclaw`` binds ``teamclaw``. *Changed 2026-08-05.*
+
+    The seam used to answer ``401`` here: no gateway tenant was spelled
+    ``teamclaw``, so a token naming it could only be an attempt to reach internal
+    rows. Now that a tenant registered under that name is a supported
+    first-party path, the claim is honoured and the middleware binds it like any
+    other — which is what makes this worth asserting through the probe rather
+    than at the verifier: the tenant a handler *observes* is the internal one.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "owner_id": "u-1",
+        "tenant": DEFAULT_AVERNET_TENANT,
+    }
+
+
 def test_each_caller_gets_their_own_tenant(client):
     """The tenant is per-request state, never sticky across requests."""
     first = client.get(
@@ -215,11 +264,11 @@ def test_verification_runs_once_per_request(client):
 def test_bot_logs_requires_user_and_app(client):
     user_only = client.get(
         "/openapi/v1/bots/logs/_probe",
-        headers={PRINCIPAL_HEADER: mint()},
+        headers={PRINCIPAL_HEADER: mint(tenant=None)},
     )
     user_and_app = client.get(
         "/openapi/v1/bots/logs/_probe",
-        headers={PRINCIPAL_HEADER: mint(include_app=True)},
+        headers={PRINCIPAL_HEADER: mint()},
     )
 
     assert user_only.status_code == 401
@@ -283,16 +332,6 @@ def test_rejected_caller_never_binds_the_internal_tenant_to_a_handler(client):
     assert response.status_code == 401
     assert "data" in response.json()
     assert response.json()["data"] is None
-
-
-def test_internal_tenant_cannot_be_claimed_over_the_wire(client):
-    """A token naming ``teamclaw`` would otherwise read every internal row."""
-    response = client.get(
-        "/openapi/v1/bots/_probe",
-        headers={PRINCIPAL_HEADER: mint(tenant=DEFAULT_AVERNET_TENANT)},
-    )
-
-    assert response.status_code == 401
 
 
 # ── the property that makes the tenant fallback safe ─────────────────────────

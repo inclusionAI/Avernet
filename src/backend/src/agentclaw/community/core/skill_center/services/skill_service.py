@@ -477,6 +477,101 @@ class SkillService:
         skills.sort(key=lambda s: s.name)
         return skills
 
+    async def get_active_skills_from_device(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        active_dir: Path | None = None,
+    ) -> list[SkillInfo]:
+        """Read active Skill entries from a Bot's live device filesystem.
+
+        Desktop active roots are local to the user's device and therefore cannot
+        be observed through ``Path.iterdir()`` on the Backend host.  The runtime
+        entry itself remains authoritative: list its direct children, then read
+        ``SKILL.md`` through each entry so dangling links and unrelated folders
+        are not reported as active Skills.
+
+        Device I/O errors deliberately propagate.  Returning an empty list for
+        an unavailable runtime would make a transport failure indistinguishable
+        from a Bot with no active Skills.
+        """
+        active_root = active_dir or self.active_dir
+        device_fs = self._device_fs_factory(bot_id, owner_id)
+        entries = await device_fs.list_dir(str(active_root), recursive=False)
+        if entries is None:
+            return []
+
+        skills: list[SkillInfo] = []
+        for entry in entries:
+            name = entry.get("name")
+            if (
+                not isinstance(name, str)
+                or not name
+                or name in {".", ".."}
+                or Path(name).name != name
+                or name in self.RESERVED_SKILL_NAMES
+            ):
+                continue
+
+            active_path = active_root / name
+            content = None
+            skill_file = active_path / "SKILL.md"
+            if await device_fs.exists(str(skill_file)):
+                content = await device_fs.read_file(str(skill_file))
+            else:
+                readme_file = active_path / "README.md"
+                if await device_fs.exists(str(readme_file)):
+                    content = await device_fs.read_file(str(readme_file))
+            if content is None:
+                continue
+
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                text = content.decode("gbk", errors="replace")
+            skill_info = SkillParser.parse_content(text)
+            if not skill_info:
+                continue
+
+            source_path = str(active_path)
+            skill_record = self.get_skill_by_link_name(name, bolt_id=bot_id)
+            locator = skill_record.get("git_path") if skill_record else None
+            if locator and locator.startswith(("git://", "local://")):
+                try:
+                    _, resolved_source = self.parse_skill_path(locator)
+                    source_path = str(resolved_source)
+                except ValueError:
+                    logger.warning(
+                        "[get_active_skills_from_device] Invalid locator for %s: %s",
+                        name,
+                        locator,
+                    )
+
+            skills.append(
+                SkillInfo(
+                    id=name,
+                    name=skill_info.get("name") or name,
+                    description=skill_info.get("description", ""),
+                    version=skill_info.get("version", "1.0.0"),
+                    category=skill_info.get("category", "general"),
+                    icon=self._get_icon_for_category(
+                        skill_info.get("category", "general")
+                    ),
+                    path=str(active_path),
+                    source_path=source_path,
+                    is_active=True,
+                    is_installed=True,
+                    capabilities=skill_info.get("capabilities", []),
+                    author=skill_info.get("author", ""),
+                    created_at=skill_info.get("created_at", ""),
+                    updated_at=skill_info.get("updated_at", ""),
+                )
+            )
+
+        skills.sort(key=lambda skill: skill.name)
+        return skills
+
     def get_active_skill(self, skill_id: str) -> SkillInfo | None:
         """获取单个已激活技能"""
         active_path = self.active_dir / skill_id
@@ -604,7 +699,10 @@ class SkillService:
             source_relative = source.resolve()
             logger.debug(f"[SkillService.activate_skill] Using absolute path (relative calculation failed): {target_link} -> {source_relative}")
 
-        if target_link.exists() or target_link.is_symlink():
+        if (
+            not self.runtime_uses_pool_paths
+            and (target_link.exists() or target_link.is_symlink())
+        ):
             # Phase 4: engine-view path — 让 engine 在 VM 内删，不要宿主机 shutil.rmtree
             success = await self._delete_active_entry(device_fs, target_link)
             if not success:
@@ -612,6 +710,12 @@ class SkillService:
                     f"[SkillService.activate_skill] Failed to remove existing link at {target_link}"
                 )
                 return False
+
+        # Pool bindpath validates every source before replacing targets. Keep an
+        # existing runtime link in place until that single authoritative publish
+        # succeeds; eagerly deleting it here would create a gap and would violate
+        # fail-before-mutation when the requested mapping conflicts with an active
+        # SkillSet mapping.
 
         # R2 修复: 不再 pathlib 本地写软链。
         # 软链建立由 device_sync (调 adapter bindpath) 单方面负责,跟线上 Arca 行为对齐。
@@ -648,14 +752,23 @@ class SkillService:
             target_path = self.active_dir / link_name
             logger.info(f"[SkillService.deactivate_skill] Trying link name: {link_name}, new target: {target_path}")
 
+        # ``active_dir`` is an engine-view path. For desktop and BaaS Bots it
+        # normally does not exist on the backend host, so host-side absence
+        # cannot prove that the remote runtime link is already gone.
+        device_fs = self._device_fs_factory(bolt_id, user_id)
+
         # 检查是否存在（文件、目录、或断开的软链接）
         if not target_path.exists() and not target_path.is_symlink():
-            # 幂等成功：技能已不存在，无需停用
-            logger.debug(f"[SkillService.deactivate_skill] Skill not found (already deactivated): {skill_id}")
-            return False
+            success = await self._delete_active_entry(device_fs, target_path)
+            if success:
+                logger.debug(
+                    "[SkillService.deactivate_skill] Skill not found on host; "
+                    "remote runtime cleanup completed: %s",
+                    skill_id,
+                )
+            return success
 
         # Phase 4: engine-view path — 让 engine 在 VM 内删
-        device_fs = self._device_fs_factory(bolt_id, user_id)
         success = await self._delete_active_entry(device_fs, target_path)
         if success:
             logger.info(f"[SkillService.deactivate_skill] Success: removed {skill_id}")

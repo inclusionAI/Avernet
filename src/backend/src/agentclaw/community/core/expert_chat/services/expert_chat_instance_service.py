@@ -34,6 +34,7 @@ from typing import Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.core.caller_identity.protocols import (
     CallerIdentityTokenExchangeProtocol,
@@ -56,8 +57,8 @@ from agentclaw.community.core.service_bot.services.baas_service import (
     BaasServiceError,
 )
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    resolve_publish_image_pin,
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    PublishImagePolicyResolver,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
@@ -91,6 +92,7 @@ class ExpertChatInstanceService:
         caller_identity: CallerIdentityTokenExchangeProtocol,
         token_provider: CallerTokenProviderProtocol,
         runtime_updater: CallerRuntimeUpdaterProtocol,
+        common_config_service: CommonConfigService,
     ) -> None:
         self._instance_repo = instance_repo
         self._baas = baas_service
@@ -101,6 +103,18 @@ class ExpertChatInstanceService:
         self._caller_identity = caller_identity
         self._token_provider = token_provider
         self._runtime_updater = runtime_updater
+        self._common_config_service = common_config_service
+        self._image_policy_resolver = PublishImagePolicyResolver(
+            publish_repository=bot_publish_repo,
+            binding_repository=binding_repo,
+            common_config_service=common_config_service,
+        )
+
+    def _resolve_publish_image_pin(
+        self, publish_record, *, bot_id: str | None = None, owner_id: str | None = None
+    ):
+        """Resolve through the shared seam; legacy caller args are ignored."""
+        return self._image_policy_resolver.resolve(publish_record)
 
     # ------------------------------------------------------------------
     # Public entry
@@ -140,7 +154,7 @@ class ExpertChatInstanceService:
             bot_id, owner_id
         )
         version = publish_record.version or 1
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self._resolve_publish_image_pin(publish_record)
 
         # --- Step 1: look up / create instance row ---
         instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)

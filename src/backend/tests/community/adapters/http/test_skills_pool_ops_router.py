@@ -259,6 +259,39 @@ async def test_rollback_route_supplies_a_unique_lease_owner() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rollback_route_rejects_service_bot_rollback() -> None:
+    scope = BotSkillLayoutScope("pre", "entity-1", "service-bot-1")
+
+    class Query:
+        def get_bot(self, **_: object):
+            return SimpleNamespace(scope=scope)
+
+    class RollbackService:
+        async def rollback(self, **_: object) -> SkillsPoolRollbackResult:
+            return SkillsPoolRollbackResult(
+                SkillsPoolRollbackOutcome.SERVICE_BOT_UNSUPPORTED,
+                evidence={"reason": "service_draft_pool_rollback_disabled"},
+                retryable=False,
+            )
+
+    with pytest.raises(HTTPException) as captured:
+        await rollback_bot(
+            bot_id="service-bot-1",
+            request=RollbackRequest(
+                owner_id="owner-1",
+                rollback_generation="rollback-1",
+                note="must remain closed",
+            ),
+            user=SimpleNamespace(staffId="freddie"),
+            service=RollbackService(),
+            query=Query(),
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail == "Service Bot Skills Pool rollback is disabled"
+
+
+@pytest.mark.asyncio
 async def test_invalid_rollout_config_is_an_explicit_operator_conflict() -> None:
     class InvalidConfig:
         def get_snapshot(self, **_: object):

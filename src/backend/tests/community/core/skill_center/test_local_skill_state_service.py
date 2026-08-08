@@ -46,14 +46,30 @@ class _Skills:
 
 
 class _Sets:
-    def __init__(self, skills: _Skills) -> None:
+    def __init__(self, skills: _Skills, *, associated: bool = True) -> None:
         self.skills = skills
         self.events: list[str] = []
+        self.associated = associated
+        self.remove_all_calls = 0
 
     def get_default(self, **kwargs):
         return {"id": "4"}
 
+    def get_skills_in_set(self, _skill_set_id: str):
+        return [{"id": "9"}] if self.associated else []
+
+    def add_skill_to_set(self, *_args, **_kwargs):
+        self.events.append("associate")
+        self.associated = True
+        return True
+
     def remove_default_skill_exclusion(self, *args):
+        self.events.append("remove")
+        self.skills.active = True
+        return True
+
+    def remove_all_default_skill_exclusions(self, *args):
+        self.remove_all_calls += 1
         self.events.append("remove")
         self.skills.active = True
         return True
@@ -130,11 +146,12 @@ def _service(
     git_path: str = "local://one",
     status: str = "ACTIVE",
     entity_id: str = "owner",
+    associated: bool = True,
     collaborators=None,
     on_acquire=None,
 ):
     skills = _Skills(active=active, git_path=git_path)
-    sets = _Sets(skills)
+    sets = _Sets(skills, associated=associated)
     guard = _Guard(on_acquire)
     runtime = _Runtime(sync_success)
     factory = _Factory(runtime)
@@ -167,6 +184,31 @@ async def test_activate_changes_desired_state_then_reconciles_under_bot_layout_l
 
 
 @pytest.mark.asyncio
+async def test_activate_repairs_missing_default_set_membership_before_runtime_sync():
+    service, _skills, sets, _guard, runtime, _factory = _service(associated=False)
+
+    result = await service.set_local_skill_active(
+        skill_id="9", actor_id="owner", active=True
+    )
+
+    assert result["active"] is True
+    assert sets.associated is True
+    assert sets.events == ["associate", "remove"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_activate_clears_stale_exclusions_from_prior_default_sets():
+    service, _skills, sets, _guard, runtime, _factory = _service()
+
+    await service.set_local_skill_active(skill_id="9", actor_id="owner", active=True)
+
+    assert sets.remove_all_calls == 1
+    assert sets.events == ["remove"]
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
     service, _skills, _sets, _guard, _runtime, factory = _service(
         entity_id="project-entity"
@@ -178,7 +220,7 @@ async def test_runtime_sync_uses_the_bot_entity_for_skill_paths():
 
 
 @pytest.mark.asyncio
-async def test_idempotent_deactivate_still_reconciles_without_mutating_database():
+async def test_idempotent_deactivate_normalizes_current_default_exclusion():
     service, _skills, sets, _guard, runtime, _factory = _service(active=False)
 
     result = await service.set_local_skill_active(
@@ -187,7 +229,7 @@ async def test_idempotent_deactivate_still_reconciles_without_mutating_database(
 
     assert result["active"] is False
     assert result["changed"] is False
-    assert sets.events == []
+    assert sets.events == ["add"]
     assert runtime.calls == 1
 
 
@@ -205,7 +247,7 @@ async def test_deactivate_removes_stale_runtime_link_before_sync():
 
 @pytest.mark.asyncio
 async def test_deactivate_treats_false_stale_link_cleanup_as_storage_failure():
-    service, _skills, _sets, _guard, runtime, _factory = _service(active=True)
+    service, skills, sets, _guard, runtime, _factory = _service(active=True)
     runtime.skill_service.deactivate_skill.return_value = False
 
     with pytest.raises(LocalSkillStorageError):
@@ -214,7 +256,9 @@ async def test_deactivate_treats_false_stale_link_cleanup_as_storage_failure():
     runtime.skill_service.deactivate_skill.assert_awaited_once_with(
         "one", bolt_id="bot", user_id="owner"
     )
-    assert runtime.calls == 0
+    assert sets.events == ["add", "remove"]
+    assert skills.active is True
+    assert runtime.calls == 1
 
 
 @pytest.mark.asyncio
@@ -265,8 +309,28 @@ async def test_runtime_failure_restores_previous_desired_state_before_fixed_fail
 
     assert skills.active is False
     assert sets.events == ["remove", "add"]
-    assert runtime.calls == 1
+    assert runtime.calls == 2
     assert guard.events[-1] == "release"
+
+
+@pytest.mark.asyncio
+async def test_runtime_failure_republishes_the_rolled_back_desired_state():
+    service, skills, sets, _guard, runtime, _factory = _service(active=False)
+    outcomes = iter([False, True])
+
+    def sync_with_recovery():
+        runtime.calls += 1
+        return next(outcomes)
+
+    runtime.sync_runtime = sync_with_recovery
+    with pytest.raises(LocalSkillRuntimeSyncError):
+        await service.set_local_skill_active(
+            skill_id="9", actor_id="owner", active=True
+        )
+
+    assert skills.active is False
+    assert sets.events == ["remove", "add"]
+    assert runtime.calls == 2
 
 
 @pytest.mark.asyncio

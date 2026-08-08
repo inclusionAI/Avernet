@@ -402,11 +402,14 @@ def test_claude_code_normalcc_template_keeps_claude_code_bucket():
     )
 
 
-def test_claude_code_missing_template_type_keeps_claude_code_bucket():
+@pytest.mark.parametrize("template_type", [None, ""])
+def test_claude_code_missing_template_type_keeps_claude_code_bucket(
+    template_type: str | None,
+):
     assert (
         ArcaBotCreateBaasRolloutPolicy.normalize_engine_bucket(
             engine_type="claude_code",
-            template_type="",
+            template_type=template_type,
         )
         == "claude_code"
     )

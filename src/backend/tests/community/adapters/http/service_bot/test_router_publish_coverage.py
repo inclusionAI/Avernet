@@ -309,6 +309,7 @@ async def test_update_publish_status_success_and_errors():
         target_status="built",
         ext={"old": "value", "source_status": "building"},
         source_status="draft",
+        expected_ext={"old": "value"},
     )
 
     service.get_publish_by_id.return_value = Record(ext=None)

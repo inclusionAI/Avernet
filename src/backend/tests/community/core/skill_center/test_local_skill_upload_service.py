@@ -51,6 +51,12 @@ class _Repo:
     def list_bot_local_by_name(self, **kwargs):
         return []
 
+    def get_bot_local_by_locator(self, **_kwargs):
+        return None
+
+    def get_by_id(self, _skill_id):
+        return None
+
     def create(self, row):
         row = {
             **row,
@@ -92,6 +98,13 @@ class _Sets:
             raise RuntimeError("association")
         self.associations.append(args)
         return True
+
+    def get_skills_in_set(self, skill_set_id):
+        return [
+            {"id": skill_id}
+            for set_id, skill_id, *_rest in self.associations
+            if str(set_id) == str(skill_set_id)
+        ]
 
     def remove_skill_from_set(self, *args):
         self.associations.remove(args)
@@ -254,13 +267,27 @@ class _Guard:
 class _Cleanup:
     def __init__(self):
         self.rows = []
+        self.preparing = []
         self.cancelled: list[int] = []
+
+    def record_preparing(self, **kwargs):
+        self.preparing.append(kwargs)
+        return len(self.preparing)
+
+    def commit_preparing(self, work_id, *, requires_runtime_restore):
+        row = self.preparing[work_id - 1]
+        self.rows.append(
+            {**row, "requires_runtime_restore": requires_runtime_restore}
+        )
 
     def record_pending(self, **kwargs):
         self.rows.append(kwargs)
         return len(self.rows)
 
     def list_pending(self, **_kwargs):
+        return []
+
+    def list_repair_required(self, **_kwargs):
         return []
 
     def mark_cleaned(self, **_kwargs):
@@ -275,7 +302,7 @@ class _Cleanup:
 
 
 class _CleanupRecordFailure(_Cleanup):
-    def record_pending(self, **_kwargs):
+    def record_preparing(self, **_kwargs):
         return None
 
 
@@ -329,9 +356,23 @@ class _ReplacementRepo(_Repo):
         super().__init__()
         self.rows = rows
         self.updates = []
+        self.atomic_replacements = []
+        self.cleanup = None
 
     def list_bot_local_by_name(self, **_kwargs):
         return self.rows
+
+    def get_bot_local_by_locator(self, *, bot_id, user_id, locator):
+        return next(
+            (
+                row
+                for row in self.rows
+                if row["bolt_id"] == bot_id
+                and row["user_id"] == user_id
+                and row["git_path"] == f"local://{locator}"
+            ),
+            None,
+        )
 
     def get_bot_local_skill(self, *, skill_id, **_kwargs):
         return next(
@@ -343,6 +384,34 @@ class _ReplacementRepo(_Repo):
         row = next(row for row in self.rows if row["id"] == skill_id)
         row.update(values)
         return row
+
+    def replace_bot_local_skill(self, **kwargs):
+        self.atomic_replacements.append(kwargs)
+        row = next(
+            (
+                row
+                for row in self.rows
+                if str(row["id"]) == str(kwargs["skill_id"])
+                and row["user_id"] == kwargs["owner_id"]
+                and row["bolt_id"] == kwargs["bot_id"]
+                and row["git_path"] == f"local://{kwargs['old_locator']}"
+            ),
+            None,
+        )
+        if row is None:
+            return None
+        row.update(
+            {
+                "description": kwargs["description"],
+                "git_path": f"local://{kwargs['new_locator']}",
+                "user_id": kwargs["owner_id"],
+            }
+        )
+        self.cleanup.commit_preparing(
+            kwargs["cleanup_work_id"],
+            requires_runtime_restore=kwargs["requires_runtime_restore"],
+        )
+        return kwargs["cleanup_work_id"]
 
 
 class _ConcurrentRepo(_ReplacementRepo):
@@ -393,18 +462,20 @@ class _DeviceResolver:
 
 
 def _replacement_service(
-    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local"
+    filesystem, repo, runtime, cleanup=None, guard=None, *, provider="local", sets=None
 ):
+    cleanup = cleanup or _Cleanup()
+    repo.cleanup = cleanup
     return LocalSkillUploadService(
         repo,
-        _Sets(),
+        sets or _Sets(),
         _Bot(),
         _Collaborators(),
         _ReplacementFactory(filesystem),
         runtime,
         _Audit(),
         guard or _Guard(),
-        cleanup or _Cleanup(),
+        cleanup,
         lambda: _DeviceResolver(provider),
     )
 
@@ -466,6 +537,29 @@ async def test_upload_keeps_bot_owner_when_collaborator_is_actor():
         "bolt_id": "bot",
         "engine_type": "moltis",
     }
+
+
+@pytest.mark.asyncio
+async def test_invalid_upload_is_rejected_before_device_or_cleanup_side_effects():
+    class _UnavailableDeviceResolver:
+        def resolve_for_bot(self, *_args):
+            raise RuntimeError("device context unavailable")
+
+    class _CleanupMustNotBeRead(_Cleanup):
+        def list_pending(self, **_kwargs):
+            raise AssertionError("invalid package must not retry cleanup")
+
+    service = _service(_Filesystem())
+    service._device_context_resolver_provider = lambda: _UnavailableDeviceResolver()
+    service._cleanup_repo = _CleanupMustNotBeRead()
+
+    with pytest.raises(LocalSkillInvalidPackageError):
+        await service.upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=b"not a zip archive",
+        )
 
 
 @pytest.mark.asyncio
@@ -804,8 +898,10 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     repo = _ReplacementRepo([_existing_skill(active=False)])
+    sets = _Sets()
+    runtime = _ReplacementRuntime([True])
     result = await _replacement_service(
-        filesystem, repo, _ReplacementRuntime([True])
+        filesystem, repo, runtime, sets=sets
     ).upload_local_skill(
         bot_id="bot",
         owner_id="owner",
@@ -819,8 +915,45 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert result["skill"]["user_id"] == "owner"
     assert result["skill"]["active"] is False
     assert result["skill"]["git_path"] != "local:///private/skills-local/upload-skill"
+    assert sets.exclusions == [("owner", "bot", 4, 9)]
+    assert runtime.calls == 1
     assert "/private/skills-local/upload-skill" in filesystem.deleted
     assert any("replacement-" in path for path in filesystem.files)
+
+
+@pytest.mark.asyncio
+async def test_replacement_is_blocked_while_the_same_skill_has_delete_repair_work():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+
+    class _RepairRequiredCleanup(_Cleanup):
+        def list_repair_required(self, **kwargs):
+            assert kwargs == {
+                "env": "test",
+                "owner_id": "owner",
+                "bot_id": "bot",
+                "skill_id": "9",
+            }
+            return [{"id": 12, "status": "repair_required"}]
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem,
+            repo,
+            _ReplacementRuntime([True]),
+            _RepairRequiredCleanup(),
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+
+    assert repo.atomic_replacements == []
+    assert filesystem.files == {"/private/skills-local/upload-skill/SKILL.md": b"old"}
 
 
 @pytest.mark.asyncio
@@ -844,6 +977,27 @@ async def test_replacement_reads_desired_state_from_exact_local_skill_query():
     )
 
     assert result["operation"] == "updated"
+    assert runtime.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_active_replacement_repairs_missing_default_set_membership_before_sync():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
+    repo = _ReplacementRepo([_existing_skill(active=True)])
+    sets = _Sets()
+    runtime = _ReplacementRuntime([True])
+
+    await _replacement_service(filesystem, repo, runtime, sets=sets).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip(
+            {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+        ),
+    )
+
+    assert sets.associations == [("4", "9")]
     assert runtime.calls == 1
 
 
@@ -988,7 +1142,7 @@ async def test_post_switch_obsolete_cleanup_failure_is_recorded_without_undoing_
             "bot_id": "bot",
             "skill_id": "9",
             "package_locator": "/private/skills-local/upload-skill",
-            "requires_runtime_restore": False,
+            "requires_runtime_restore": True,
         }
     ]
 
@@ -1043,6 +1197,36 @@ async def test_later_serialized_upload_retries_durable_cleanup_work():
 
 
 @pytest.mark.asyncio
+async def test_cleanup_skips_a_locator_reused_by_a_current_local_skill():
+    filesystem = _Filesystem()
+    locator = "/private/skills-local/upload-skill"
+    filesystem.files[f"{locator}/SKILL.md"] = b"authoritative"
+
+    class _ReusedLocatorCleanup(_PendingCleanup):
+        def list_pending(self, **_kwargs):
+            return [{"id": 12, "skill_id": "stale", "package_locator": locator}]
+
+    cleanup = _ReusedLocatorCleanup()
+    service = _replacement_service(
+        filesystem,
+        _ReplacementRepo([_existing_skill(active=False)]),
+        _ReplacementRuntime([True]),
+        cleanup,
+    )
+
+    await service._retry_pending_cleanup(
+        bot={"env": "dev", "entity_id": "owner", "active_engine": "moltis"},
+        owner_id="owner",
+        bot_id="bot",
+        is_teclaw=False,
+    )
+
+    assert cleanup.cancelled == [12]
+    assert cleanup.completed == []
+    assert filesystem.files[f"{locator}/SKILL.md"] == b"authoritative"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("cleanup_results", [None, [False]])
 async def test_cleanup_progress_write_failure_blocks_the_next_replacement(
     cleanup_results,
@@ -1072,7 +1256,7 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"
     cleanup = _RuntimeRestoreCleanup()
-    runtime = _ReplacementRuntime([True])
+    runtime = _ReplacementRuntime([True, True])
     await _replacement_service(
         filesystem,
         _ReplacementRepo([_existing_skill(active=False)]),
@@ -1086,9 +1270,35 @@ async def test_runtime_restore_work_keeps_staged_bytes_until_old_mapping_is_rest
             {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
         ),
     )
-    assert runtime.calls == 1
+    assert runtime.calls == 2
     assert 12 in cleanup.completed
     assert "/private/skills-local/staged/SKILL.md" not in filesystem.files
+
+
+@pytest.mark.asyncio
+async def test_runtime_restore_failure_blocks_the_next_local_skill_mutation():
+    filesystem = _Filesystem()
+    filesystem.files["/private/skills-local/staged/SKILL.md"] = b"staged"
+    cleanup = _RuntimeRestoreCleanup()
+    runtime = _ReplacementRuntime([False])
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+
+    with pytest.raises(LocalSkillStorageError):
+        await _replacement_service(
+            filesystem, repo, runtime, cleanup
+        ).upload_local_skill(
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip(
+                {"SKILL.md": b"name: upload-skill\ndescription: new description\n"}
+            ),
+        )
+
+    assert runtime.calls == 1
+    assert cleanup.failed == [(12, "runtime restore before cleanup failed")]
+    assert repo.updates == []
+    assert "/private/skills-local/staged/SKILL.md" in filesystem.files
 
 
 class _LockingCache:

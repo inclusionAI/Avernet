@@ -163,6 +163,7 @@ class BotManageService(Protocol):
         bot_desc: str | None = None,
         bot_config: BotConfig | None = None,
         request_id: str | None = None,
+        template_uuid: str | None = None,
     ) -> UpdateBotResponse:
         """Update Bot metadata and config."""
         ...

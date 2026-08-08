@@ -188,6 +188,7 @@ class ServiceBotModule(Module):
         baas_http: Annotated[HttpClient, QUALIFIER_BAAS],
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
         secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
     ) -> BaasService:
@@ -223,6 +224,7 @@ class ServiceBotModule(Module):
             personal_bot_template_uuid=baas.personal_bot_template_uuid,
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
@@ -293,6 +295,7 @@ class ServiceBotModule(Module):
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -312,6 +315,7 @@ class ServiceBotModule(Module):
             publish_operation_repo=publish_operation_repo,
             task_queue_service=task_queue_service,
             bot_process_registry=bot_process_registry,
+            common_config_service=common_config_service,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 

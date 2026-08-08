@@ -101,6 +101,15 @@ class LocalSkillPackageStorage:
     async def cleanup(self) -> bool:
         return await self._filesystem.delete_tree(self._device_directory)
 
+    async def exists(self) -> bool:
+        """Whether this storage currently has an authoritative package."""
+        return await self._filesystem.exists(self._device_directory)
+
+    async def verify(self) -> bool:
+        """Read and validate every package file without changing storage."""
+        await self._read_package_files()
+        return True
+
     async def quarantine_to(self, quarantine: "LocalSkillPackageStorage") -> None:
         """Copy, verify, then remove this authoritative package.
 
@@ -121,7 +130,14 @@ class LocalSkillPackageStorage:
             )
             if copied != content:
                 raise OSError("Local Skill quarantine verification failed")
-        if not await self.cleanup():
+        try:
+            source_cleaned = await self.cleanup()
+        except Exception:
+            # A device backend can raise after partially deleting source
+            # bytes. Treat that exactly like a failed cleanup so the verified
+            # quarantine copy is used to restore the authoritative package.
+            source_cleaned = False
+        if not source_cleaned:
             try:
                 restored = await self._restore_contents(files)
             except Exception as exc:
@@ -137,10 +153,17 @@ class LocalSkillPackageStorage:
     async def restore_from(
         self, quarantine: "LocalSkillPackageStorage"
     ) -> tuple[bool, bool]:
-        """Restore the package and report source repair and quarantine purge separately."""
-        if await self._filesystem.exists(self.directory):
-            return False, False
+        """Verify or restore the package before purging its quarantine copy."""
         files = await quarantine._read_package_files()
+        if await self._filesystem.exists(self.directory):
+            try:
+                source_files = await self._read_package_files()
+            except OSError:
+                source_files = []
+            if source_files == files:
+                return True, await quarantine.cleanup()
+            if not await self.cleanup():
+                return False, False
         if not await self._restore_contents(files):
             return False, False
         return True, await quarantine.cleanup()
@@ -242,8 +265,10 @@ class SkillServiceFactory:
         bot_owner_id: str | None = None,
         bot_id: str | None = None,
         engine_type: str | None = None,
+        runtime_uses_pool_paths: bool = False,
+        device_owner_id: str | None = None,
     ) -> SkillService:
-        uses_pool_paths = False
+        uses_pool_paths = runtime_uses_pool_paths
         if entity_id is not None and bot_id is not None:
             # Paths are scoped by the Bot entity, while Bot lookup and device
             # binding are owned by ac_bots.owner_id.  They differ for project
@@ -278,7 +303,7 @@ class SkillServiceFactory:
             local_skill_path_adapter=local_skill_path_adapter,
             local_skill_locator_adapter=local_skill_locator_adapter,
             runtime_uses_pool_paths=uses_pool_paths,
-            device_owner_id=bot_owner_id or entity_id,
+            device_owner_id=device_owner_id or bot_owner_id or entity_id,
         )
 
     def local_skill_package_storage(
@@ -495,6 +520,11 @@ class SkillSetServiceFactory:
             repo_dir=resolved_repo,
             local_dir=resolved_local,
             local_skill_path_adapter=local_skill_path_adapter,
+            # The resolved directories alone are insufficient: SkillService
+            # needs this flag to retain Pool-specific activation and cleanup
+            # semantics without resolving the same layout a second time.
+            runtime_uses_pool_paths=local_skill_path_adapter is not None,
+            device_owner_id=effective_owner,
         )
 
         return SkillSetService(

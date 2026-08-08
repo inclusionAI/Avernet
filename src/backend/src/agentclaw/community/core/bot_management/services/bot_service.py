@@ -63,7 +63,10 @@ from agentclaw.community.core.bot_management.repository.protocol import (
     BotRepository,
     BotRestartLockRepositoryProtocol,
 )
-from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DEFAULT_IMAGE_POLICY_VALUE,
+    IMAGE_POLICY_ON_ACTIVE_KEY,
+)
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
 from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
@@ -74,11 +77,12 @@ from agentclaw.community.core.workspace.path_factory import (
 )
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    apply_image_pin_to_ext,
-    copy_image_pin_to_ext,
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    apply_default_image_to_ext,
+    clear_image_policy_from_ext,
     overlay_image_pin_on_template_config,
-    resolve_current_arka_image,
+    persist_default_image_policy,
+    resolve_current_arca_image,
 )
 from agentclaw.community.utils.avernet_tenant import (
     bind_current_avernet_tenant,
@@ -376,59 +380,54 @@ class BotService:
         self._task_queue_service = task_queue_service
         self._common_config_service = common_config_service
 
-    def _resolve_service_bot_arka_image_pin(
+    def _service_bot_image_policy_enabled(self) -> bool:
+        """Whether draft create/restart should opt into image policy."""
+        return (
+            resolve_current_arca_image(
+                getattr(self, "_common_config_service", None),
+                env=get_current_env(),
+            )
+            is not None
+        )
+
+    def _mark_service_bot_default_image(
         self,
         bot: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Resolve draft ARKA Pin in memory without changing persistent state."""
+        """Apply the draft ARCA image policy only when fully configured."""
         if bot.get("bot_type") != "service" or self.is_teclaw_bot(
             bot.get("active_engine")
         ):
             return bot
-        image = resolve_current_arka_image(
-            getattr(self, "_common_config_service", None),
-            env=get_current_env(),
-        )
-        updated_ext = apply_image_pin_to_ext(bot.get("ext"), image)
-        if updated_ext == (bot.get("ext") or {}):
-            return bot
         updated_bot = dict(bot)
-        updated_bot["ext"] = updated_ext
+        if self._service_bot_image_policy_enabled():
+            updated_bot["ext"] = apply_default_image_to_ext(bot.get("ext"))
+        else:
+            updated_bot["ext"] = clear_image_policy_from_ext(bot.get("ext"))
         return updated_bot
 
-    def _persist_service_bot_arka_image_pin(
+    def _persist_service_bot_default_image(
         self,
         bot: Dict[str, Any],
         *,
         user_id: str,
     ) -> None:
-        """Persist an accepted draft restart's Pin snapshot to Bot and Draft."""
-        if bot.get("bot_type") != "service" or self.is_teclaw_bot(
-            bot.get("active_engine")
+        """Persist an accepted draft restart's default policy to Bot and Draft."""
+        if (
+            bot.get("bot_type") != "service"
+            or self.is_teclaw_bot(bot.get("active_engine"))
+            or not self._service_bot_image_policy_enabled()
         ):
             return
 
-        bot_id = str(bot["bot_id"])
-        updated_ext = dict(bot.get("ext") or {})
-        self._repository.update_by_owner(bot_id, user_id, {"ext": updated_ext})
-
-        draft = self._bot_publish_repo.get_draft_by_publish_bot_id(
-            publish_bot_id=bot_id,
+        persist_default_image_policy(
+            bot_repository=self._repository,
+            publish_repository=self._bot_publish_repo,
+            bot_id=str(bot["bot_id"]),
+            owner_id=user_id,
             env=get_current_env(),
+            common_config_service=self._common_config_service,
         )
-        if draft is None:
-            return
-        draft_ext = copy_image_pin_to_ext(updated_ext, draft.ext) or {}
-        updated_draft = self._bot_publish_repo.update_status_with_ext(
-            publish_id=draft.id,
-            target_status=draft.status,
-            ext=draft_ext,
-            source_status=draft.status,
-        )
-        if updated_draft is None:
-            raise BotServiceError(
-                f"Draft publish {draft.id} image Pin persistence conflicted"
-            )
 
     def _build_engine_extra_envs(
         self,
@@ -952,6 +951,12 @@ class BotService:
         """First bot iff the owner has zero bots (current env; tenant enforced by guard)."""
         return self._repository.count_by_owner(user_id) == 0
 
+    def is_first_personal_bot(self, user_id: str) -> bool:
+        """Return whether the owner has no live personal Bot in the current scope."""
+        return not self._repository.exists_by_owner_and_bot_type(
+            user_id, "personal"
+        )
+
     def _check_bot_count_limit(self, owner_id: str) -> None:
         """Enforce the per-owner bot count limit.
 
@@ -1322,13 +1327,13 @@ class BotService:
         if resolved_bot_type == "service" and not self.is_teclaw_bot(
             resolved_active_engine
         ):
-            ext = apply_image_pin_to_ext(
-                ext,
-                resolve_current_arka_image(
-                    getattr(self, "_common_config_service", None),
-                    env=get_current_env(),
-                ),
-            ) or None
+            # The CommonConfig record is the master switch. Missing, disabled,
+            # or lacking a valid image preserves the pre-feature behavior and
+            # removes any caller-supplied image-policy fields.
+            if self._service_bot_image_policy_enabled():
+                ext = apply_default_image_to_ext(ext)
+            else:
+                ext = clear_image_policy_from_ext(ext)
 
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
@@ -1837,6 +1842,10 @@ class BotService:
                 # can still apply the create-time rollout policy.
                 if device_provider is not None:
                     apply_kwargs["device_provider"] = device_provider
+                if bot_ext_override is not None:
+                    apply_kwargs["device_props_extra"] = {
+                        IMAGE_POLICY_ON_ACTIVE_KEY: DEFAULT_IMAGE_POLICY_VALUE
+                    }
 
                 device_result = service.apply_device(**apply_kwargs)
 
@@ -1870,14 +1879,15 @@ class BotService:
                     "device_id": device_id,
                     "status": final_status,
                 }
-                if bot_ext_override is not None:
-                    bot_update["ext"] = bot_ext_override
                 updated = self._repository.update_by_owner(bot_id, user_id, bot_update)
                 if not updated:
                     logger.error(f"[bot_service._allocate_device_async] Failed to update bot {bot_id} for user {user_id}: bot not found or not owner")
                     return
-                if bot_ext_override is not None:
-                    self._persist_service_bot_arka_image_pin(
+                if (
+                    bot_ext_override is not None
+                    and device_status == DeviceBindingStatus.ACTIVE.value
+                ):
+                    self._persist_service_bot_default_image(
                         {**(bot_record or {}), "bot_id": bot_id, "ext": bot_ext_override},
                         user_id=user_id,
                     )
@@ -3875,6 +3885,15 @@ class BotService:
         if not bot:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+        if self.is_teclaw_bot(bot.get("active_engine")):
+            logger.warning(
+                "[bot_service.restart_bot] reject restart for teclaw bot: "
+                "bot_id=%s user_id=%s",
+                bot_id,
+                user_id,
+            )
+            raise BotOperationNotAllowedError("teclaw 类型的 Bot 不支持重启")
+
         if bot.get("bot_type") == "desktop":
             raise BotServiceError(
                 f"Desktop bot {bot_id} cannot be stopped via BotService.stop_bot, "
@@ -4048,7 +4067,7 @@ class BotService:
             if bot.get("bot_type") == "service" and not self.is_teclaw_bot(
                 bot.get("active_engine")
             ):
-                bot = self._resolve_service_bot_arka_image_pin(bot)
+                bot = self._mark_service_bot_default_image(bot)
             if (
                 binding_id
                 and current_device_provider == BAAS_DEVICE_PROVIDER
@@ -4094,6 +4113,7 @@ class BotService:
                     bot.get("ext")
                     if bot.get("bot_type") == "service"
                     and not self.is_teclaw_bot(bot.get("active_engine"))
+                    and (bot.get("ext") or {}).get("sbot_use_default_image") is True
                     else None
                 ),
             )
@@ -4134,6 +4154,48 @@ class BotService:
         )
         if not bot_uuid:
             raise BotServiceError(f"Bot {bot_id} binding {binding_id} missing bot_uuid; cannot baas restart")
+
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            RESTART_IMAGE_POLICY_ON_SUCCESS_KEY,
+            RESTART_REQUEST_ID_KEY,
+            RESTART_WORKFLOW_BASELINE_KEY,
+        )
+
+        raw_binding_props = (
+            binding.get("device_props", {})
+            if isinstance(binding, dict)
+            else (getattr(binding, "device_props", None) or {})
+        )
+        binding_props = raw_binding_props if isinstance(raw_binding_props, dict) else {}
+        restart_request_id = binding_props.get(RESTART_REQUEST_ID_KEY)
+        restart_workflow_baseline = binding_props.get(RESTART_WORKFLOW_BASELINE_KEY)
+        has_durable_recovery_intent = (
+            isinstance(restart_request_id, str)
+            and bool(restart_request_id)
+            and isinstance(restart_workflow_baseline, int)
+            and not isinstance(restart_workflow_baseline, bool)
+            and restart_workflow_baseline >= 0
+        )
+        if has_durable_recovery_intent:
+            logger.info(
+                "[bot_service._restart_bot_baas] restart already has a durable "
+                "recovery intent: bot_id=%s binding_id=%s request_id=%s baseline=%s",
+                bot_id,
+                binding_id,
+                restart_request_id,
+                restart_workflow_baseline,
+            )
+            return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or bot)
+        if restart_request_id:
+            logger.warning(
+                "[bot_service._restart_bot_baas] ignoring legacy restart intent "
+                "without a valid workflow baseline: bot_id=%s binding_id=%s "
+                "request_id=%s baseline=%r",
+                bot_id,
+                binding_id,
+                restart_request_id,
+                restart_workflow_baseline,
+            )
 
         active_engine = (bot.get("active_engine") or "").strip()
         bot_type = bot.get("bot_type") or "personal"
@@ -4247,72 +4309,136 @@ class BotService:
             upgrade_kwargs["stage"] = restart_stage
         if template_uuid is not None:
             upgrade_kwargs["template_uuid"] = template_uuid
-        result = self._baas_service_provider().upgrade_bot(**upgrade_kwargs)
-        self._persist_service_bot_arka_image_pin(bot, user_id=user_id)
-
-        # 取 publish_id；置 bot/binding 双 PENDING；通过 durable queue 持久化轮询。
-        # publish_id 缺失 / enqueue 异常仅 log，不影响重启返回（前端轮 status 自然
-        # 收敛或下次操作触发）。
-        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
-
+        image_policy_on_success = (
+            DEFAULT_IMAGE_POLICY_VALUE
+            if bot_type == "service"
+            and not self.is_teclaw_bot(active_engine)
+            and (bot.get("ext") or {}).get("sbot_use_default_image") is True
+            else None
+        )
+        baas_service = self._baas_service_provider()
         try:
-            update_data: Dict[str, Any] = {"status": "PENDING"}
-            if publish_id is not None:
-                restart_publish_id = str(publish_id)
-                ext = clear_baas_publish_failure_ext(bot.get("ext"))
-                ext["restart_publish_id"] = restart_publish_id
-                update_data["ext"] = ext
+            workflows = baas_service.list_bot_publishes(bot_uuid)
+            workflow_baseline = max(
+                (
+                    int(workflow["id"])
+                    for workflow in (workflows or [])
+                    if isinstance(workflow, dict)
+                    and str(workflow.get("id", "")).isdigit()
+                ),
+                default=0,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                f"Failed to snapshot BaaS restart workflow baseline: {e}"
+            ) from e
+
+        from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
+            BAAS_RESTART_PUBLISH_POLL_TASK,
+            build_restart_publish_poll_payload,
+        )
+
+        # The durable task is the operation intent and must exist before the
+        # external BaaS mutation. If enqueue fails, no remote side effect has
+        # happened. The handler can adopt the workflow by baseline if the
+        # process exits after BaaS accepts but before publish_id is persisted.
+        task_queue_service = self._task_queue_service
+        if task_queue_service is None:
+            raise BotServiceError("BaaS restart task queue service is unavailable")
+        started_at_epoch_s = time.time()
+        try:
+            task_queue_service.enqueue(
+                BAAS_RESTART_PUBLISH_POLL_TASK,
+                build_restart_publish_poll_payload(
+                    binding_id=binding_id,
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    publish_id=None,
+                    started_at_epoch_s=started_at_epoch_s,
+                    bot_uuid=bot_uuid,
+                    image_policy_on_success=image_policy_on_success,
+                    request_id=request_id,
+                    workflow_baseline=workflow_baseline,
+                ),
+                deadline_seconds=86400,
+                delay_seconds=2,
+            )
+        except Exception as e:
+            raise BotServiceError(
+                "BaaS restart was not submitted because its durable task "
+                f"could not be persisted: {e}"
+            ) from e
+
+        previous_binding_status = (
+            binding.get("status")
+            if isinstance(binding, dict)
+            else getattr(binding, "status", DeviceBindingStatus.ACTIVE.value)
+        )
+        previous_bot_status = bot.get("status") or DeviceBindingStatus.ACTIVE.value
+        try:
+            self._device_binding_repo.update_device_props(
+                binding_id=binding_id,
+                props={
+                    RESTART_REQUEST_ID_KEY: request_id,
+                    RESTART_WORKFLOW_BASELINE_KEY: workflow_baseline,
+                    "restart_publish_id": None,
+                    RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: image_policy_on_success,
+                },
+            )
+            self._device_binding_repo.update_status(
+                binding_id=binding_id, status=DeviceBindingStatus.PENDING
+            )
+            if self._repository.update_by_owner(
+                bot_id, user_id, {"status": DeviceBindingStatus.PENDING.value}
+            ) is None:
+                raise BotServiceError(f"Bot not found while preparing restart: {bot_id}")
+        except Exception as e:
+            # No BaaS call has happened yet. Invalidate the queued task's request
+            # identity and restore the previous visible lifecycle state.
+            try:
+                self._device_binding_repo.update_device_props(
+                    binding_id=binding_id,
+                    props={
+                        RESTART_REQUEST_ID_KEY: None,
+                        RESTART_WORKFLOW_BASELINE_KEY: None,
+                        RESTART_IMAGE_POLICY_ON_SUCCESS_KEY: None,
+                    },
+                )
+                self._device_binding_repo.update_status(
+                    binding_id=binding_id,
+                    status=previous_binding_status or DeviceBindingStatus.ACTIVE.value,
+                )
+                self._repository.update_by_owner(
+                    bot_id, user_id, {"status": previous_bot_status}
+                )
+            except Exception:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] failed to roll back restart preparation"
+                )
+            raise BotServiceError(f"Failed to prepare durable BaaS restart: {e}") from e
+
+        # From this point on, every ambiguous failure is recoverable by the
+        # pre-existing task. It either reads the stored publish id or adopts the
+        # single workflow issued after workflow_baseline.
+        result = baas_service.upgrade_bot(**upgrade_kwargs)
+        publish_id = (result or {}).get("publish_id") if isinstance(result, dict) else None
+        if publish_id is not None:
+            restart_publish_id = str(publish_id)
+            try:
                 self._device_binding_repo.update_device_props(
                     binding_id=binding_id,
                     props={
                         "publish_id": restart_publish_id,
                         "restart_publish_id": restart_publish_id,
-                        "restart_request_id": request_id,
                     },
                 )
-            self._repository.update_by_owner(bot_id, user_id, update_data)
-            self._device_binding_repo.update_status(
-                binding_id=binding_id, status=DeviceBindingStatus.PENDING
-            )
-        except Exception as e:
-            logger.warning(
-                "[bot_service._restart_bot_baas] failed to mark PENDING "
-                "for bot_id=%s binding_id=%s: %s",
-                bot_id, binding_id, e,
-            )
-
-        task_queue_service = self._task_queue_service
-        if publish_id is not None and task_queue_service is not None:
-            try:
-                from agentclaw.community.core.devices.services.baas_publish_task_handlers import (
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload,
+            except Exception:
+                logger.exception(
+                    "[bot_service._restart_bot_baas] publish_id persistence failed; "
+                    "durable task will adopt by baseline: bot_id=%s publish_id=%s",
+                    bot_id,
+                    publish_id,
                 )
-
-                task_queue_service.enqueue(
-                    BAAS_RESTART_PUBLISH_POLL_TASK,
-                    build_restart_publish_poll_payload(
-                        binding_id=binding_id,
-                        bot_id=bot_id,
-                        owner_id=user_id,
-                        publish_id=publish_id,
-                        started_at_epoch_s=time.time(),
-                        bot_uuid=bot_uuid,
-                    ),
-                    deadline_seconds=86400,
-                )
-            except Exception as e:
-                logger.warning(
-                    "[bot_service._restart_bot_baas] restart poll enqueue failed "
-                    "for bot_id=%s publish_id=%s: %s",
-                    bot_id, publish_id, e,
-                )
-        else:
-            logger.info(
-                "[bot_service._restart_bot_baas] no publish_id or task queue service; "
-                "skipping restart poll enqueue for bot_id=%s publish_id=%s",
-                bot_id, publish_id,
-            )
 
         return dict(self._repository.get_by_id_and_owner(bot_id, user_id) or {})
 

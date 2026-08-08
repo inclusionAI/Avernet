@@ -20,9 +20,7 @@ from gateway.community.spi.authn import PrincipalType
 
 def _pool():
     return {
-        "google": GoogleUserStrategy(
-            token_header="x-google-token", default_tenant="default"
-        ),
+        "google": GoogleUserStrategy(token_header="x-google-token"),
         "bot_token": BotTokenStrategy(registry=None),
         "app_token": AppTokenStrategy(registry=None),
         "access_key_token": AccessKeyTokenStrategy(registry=None),

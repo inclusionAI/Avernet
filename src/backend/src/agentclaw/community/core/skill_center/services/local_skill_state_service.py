@@ -72,6 +72,12 @@ class LocalSkillStateService:
             )
             if default_set is None:
                 raise LocalSkillNotFoundError()
+            if active:
+                self._ensure_default_set_membership(
+                    default_set=default_set,
+                    skill_id=skill_id,
+                    owner_id=owner_id,
+                )
             changed = bool(skill["active"]) != active
             if changed:
                 self._write_desired_state(
@@ -82,12 +88,41 @@ class LocalSkillStateService:
                     skill_id=int(skill_id),
                 )
                 if not active:
-                    await self._cleanup_runtime_link(
-                        bot=bot,
-                        owner_id=owner_id,
-                        bot_id=bot_id,
-                        skill_name=str(skill["name"]),
-                    )
+                    try:
+                        await self._cleanup_runtime_link(
+                            bot=bot,
+                            owner_id=owner_id,
+                            bot_id=bot_id,
+                            skill_name=str(skill["name"]),
+                        )
+                    except LocalSkillStorageError:
+                        try:
+                            self._write_desired_state(
+                                active=True,
+                                owner_id=owner_id,
+                                bot_id=bot_id,
+                                skill_set_id=int(default_set["id"]),
+                                skill_id=int(skill_id),
+                            )
+                        except Exception as exc:
+                            raise LocalSkillStorageError() from exc
+                        if not self._sync_runtime(
+                            bot=bot, owner_id=owner_id, bot_id=bot_id
+                        ):
+                            raise LocalSkillRuntimeSyncError()
+                        raise
+            elif not active:
+                # ``get_bot_local_skill`` treats an exclusion from any former
+                # default set as inactive, while runtime mapping filters the
+                # current default set. Mirror that inactive desired state into
+                # the current set before publishing an idempotent deactivate.
+                self._write_desired_state(
+                    active=False,
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_set_id=int(default_set["id"]),
+                    skill_id=int(skill_id),
+                )
             if not self._sync_runtime(bot=bot, owner_id=owner_id, bot_id=bot_id):
                 if changed:
                     try:
@@ -100,6 +135,10 @@ class LocalSkillStateService:
                         )
                     except Exception as exc:
                         raise LocalSkillStorageError() from exc
+                    if not self._sync_runtime(
+                        bot=bot, owner_id=owner_id, bot_id=bot_id
+                    ):
+                        raise LocalSkillRuntimeSyncError()
                 raise LocalSkillRuntimeSyncError()
             return {**skill, "active": active, "changed": changed}
         finally:
@@ -172,14 +211,31 @@ class LocalSkillStateService:
         skill_id: int,
     ) -> None:
         if active:
-            changed = self._skill_set_repo.remove_default_skill_exclusion(
-                owner_id, bot_id, skill_set_id, skill_id
+            changed = self._skill_set_repo.remove_all_default_skill_exclusions(
+                owner_id, bot_id, skill_id
             )
         else:
             changed = self._skill_set_repo.add_default_skill_exclusion(
                 owner_id, bot_id, skill_set_id, skill_id
             )
         if not changed:
+            raise LocalSkillStorageError()
+
+    def _ensure_default_set_membership(
+        self,
+        *,
+        default_set: dict[str, Any],
+        skill_id: str,
+        owner_id: str,
+    ) -> None:
+        """Repair legacy Local Skills before making an active state visible."""
+        default_set_id = str(default_set["id"])
+        members = self._skill_set_repo.get_skills_in_set(default_set_id)
+        if any(str(member.get("id")) == skill_id for member in members):
+            return
+        if not self._skill_set_repo.add_skill_to_set(
+            default_set_id, skill_id, user_id=owner_id
+        ):
             raise LocalSkillStorageError()
 
     def _sync_runtime(self, *, bot: dict[str, Any], owner_id: str, bot_id: str) -> bool:

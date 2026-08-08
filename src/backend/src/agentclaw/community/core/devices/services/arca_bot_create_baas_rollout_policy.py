@@ -56,7 +56,7 @@ class ArcaBotCreateBaasRolloutPolicy:
         user_id: str,
         bot_type: str,
         engine_type: str,
-        template_type: str,
+        template_type: str | None,
     ) -> ArcaBotCreateBaasRolloutDecision:
         engine_bucket = self.normalize_engine_bucket(
             engine_type=engine_type,
@@ -197,7 +197,7 @@ class ArcaBotCreateBaasRolloutPolicy:
         cls,
         *,
         engine_type: str,
-        template_type: str,
+        template_type: str | None,
     ) -> str:
         return resolve_baas_engine_bucket(
             engine_type=engine_type,

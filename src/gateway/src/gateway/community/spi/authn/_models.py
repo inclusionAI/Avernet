@@ -65,16 +65,31 @@ class Bot(BaseModel):
 
 
 class UserPrincipal(BaseModel):
-    """A first-party authenticated user, produced by the gateway."""
+    """A first-party authenticated user, produced by the gateway.
+
+    Carries **no tenant**, and that is the design rather than an omission. A
+    tenant is a property of the calling *program*: an app, a bot and an access
+    key are each registered to one, and their principals assert the tenant that
+    registration recorded. No user credential says anything of the kind — the
+    google chain authenticates a person and learns their ``sub`` and email, never
+    which of our tenants they are acting for. The field this model used to carry
+    was filled from gateway configuration, which dressed a deployment default up
+    as an authenticated fact and made every unconfigured deploy send ``null``.
+
+    So a request naming only a user is a first-party call, and the upstream
+    scopes it to its own internal default — a decision the upstream makes
+    locally, never one the token asserts. A user request that genuinely belongs
+    to a tenant carries the machine identity that says so (``user`` alongside
+    ``app``), and *that* principal's tenant is the authoritative one.
+
+    ``subject.tenant_id`` is untouched by this: it is whatever the identity
+    provider said about the person, carried for attribution. It is not an
+    isolation key, and nothing downstream scopes by it.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     type: Literal[PrincipalType.USER] = PrincipalType.USER
-    tenant: str | None = Field(
-        default=None,
-        description="Tenant id the caller belongs to, if any; None when the "
-        "user has no tenant (the gateway does not fabricate a default).",
-    )
     subject: AuthenticatedUser = Field(description="The authenticated end user.")
 
 

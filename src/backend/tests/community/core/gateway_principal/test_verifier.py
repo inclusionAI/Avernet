@@ -39,16 +39,21 @@ CONFIG = PrincipalVerifierConfig(signing_key=KEY, audience=AUDIENCE, issuer=ISSU
 # ── payload builders (mirroring the gateway's model_dump(mode="json")) ────────
 
 
-def user_principal(tenant: str = TENANT, user_id: str = "u-1") -> dict:
+def user_principal(user_id: str = "u-1", subject_tenant: str = TENANT) -> dict:
+    """A ``user`` principal as the gateway serializes it — with no tenant.
+
+    ``subject.tenant_id`` is the identity provider's claim about the person and
+    is carried for attribution only; nothing scopes by it. The principal itself
+    asserts no tenant, because nothing in a user credential proves one.
+    """
     return {
         "type": "user",
-        "tenant": tenant,
         "subject": {
             "id": user_id,
             "username": "alice@example.com",
             "display_name": "Alice",
             "full_name": None,
-            "tenant_id": tenant,
+            "tenant_id": subject_tenant,
         },
     }
 
@@ -122,10 +127,16 @@ def mint(
 # ── happy paths ──────────────────────────────────────────────────────────────
 
 
-def test_user_token_yields_tenant_and_owner():
+def test_user_only_token_yields_the_internal_tenant_and_the_owner():
+    """A caller presenting nothing but a first-party user identity is internal.
+
+    The user principal asserts no tenant, so there is nothing to scope by off
+    the wire and the internal default applies — the same tenant every non-public
+    path in this component resolves to.
+    """
     caller = verify_principal_token(mint([user_principal()]), CONFIG)
 
-    assert caller.tenant == TENANT
+    assert caller.tenant == DEFAULT_AVERNET_TENANT
     assert caller.user_id == "u-1"
     assert isinstance(caller.principals[0], UserPrincipal)
 
@@ -416,25 +427,93 @@ def test_renamed_contract_field_fails_closed():
 
 def test_contradictory_tenants_are_rejected():
     """One request cannot belong to two tenants; picking one would invent an answer."""
-    token = mint([user_principal(tenant="tenant-a"), app_principal(tenant="tenant-b")])
+    token = mint(
+        [
+            user_principal(),
+            app_principal(tenant="tenant-a"),
+            bot_principal(tenant="tenant-b"),
+        ]
+    )
 
     with pytest.raises(PrincipalVerificationError):
         verify_principal_token(token, CONFIG)
 
 
 def test_empty_tenant_is_rejected():
+    token = mint([user_principal(), app_principal(tenant="")])
+
     with pytest.raises(PrincipalVerificationError):
-        verify_principal_token(mint([user_principal(tenant="")]), CONFIG)
-
-
-def test_internal_tenant_off_the_wire_is_rejected():
-    """``teamclaw`` owns every internal row and must not be reachable publicly."""
-    token = mint([user_principal(tenant=DEFAULT_AVERNET_TENANT)])
-
-    with pytest.raises(PrincipalVerificationError) as exc:
         verify_principal_token(token, CONFIG)
 
-    assert "internal tenant" in str(exc.value)
+
+def test_internal_tenant_named_on_the_wire_is_honoured():
+    """``teamclaw`` is a routable tenant claim. *Changed 2026-08-05.*
+
+    Verification used to refuse a token whose machine principal named the
+    internal tenant, on the reasoning that no gateway tenant was spelled that way
+    and honouring one would scope an external caller to every pre-existing
+    internal row. An app registered to ``teamclaw`` is now a deliberate
+    first-party path through the gateway, so the claim is treated like any other
+    tenant's: the gateway vouched for the registration, and this component
+    believes what it vouches for.
+
+    The tenant a request scopes to is still decided by one rule, not two — a
+    named ``teamclaw`` and the user-only fallback
+    (:func:`test_user_only_token_yields_the_internal_tenant_and_the_owner`) land
+    on the same value by different routes.
+    """
+    token = mint([user_principal(), app_principal(tenant=DEFAULT_AVERNET_TENANT)])
+
+    caller = verify_principal_token(token, CONFIG)
+
+    assert caller.tenant == DEFAULT_AVERNET_TENANT
+    assert caller.user_id == "u-1"
+
+
+def test_internal_tenant_still_cannot_be_mixed_with_another():
+    """Honouring ``teamclaw`` did not exempt it from the one-tenant rule.
+
+    The contradiction guard judges tenants by count, not by name, so a set that
+    pairs the internal tenant with an external one is refused for the same reason
+    any other mixed set is: picking one would invent an answer the gateway never
+    gave.
+    """
+    token = mint(
+        [
+            user_principal(),
+            app_principal(tenant=DEFAULT_AVERNET_TENANT),
+            bot_principal(tenant="acme-partner"),
+        ]
+    )
+
+    with pytest.raises(PrincipalVerificationError):
+        verify_principal_token(token, CONFIG)
+
+
+def test_a_tenant_claimed_on_a_user_principal_is_ignored():
+    """An old-contract or forged token cannot scope itself by naming a tenant.
+
+    The DTO ignores unknown fields so the gateway can add one without breaking
+    us, which means a ``tenant`` on a ``user`` entry is dropped rather than
+    rejected. Dropping is the safe direction: the claim buys nothing, and the
+    caller lands on the internal default like any other user-only request.
+    """
+    payload = user_principal()
+    payload["tenant"] = "tenant-the-caller-would-like"
+
+    caller = verify_principal_token(mint([payload]), CONFIG)
+
+    assert caller.tenant == DEFAULT_AVERNET_TENANT
+
+
+def test_a_user_alongside_an_app_takes_the_apps_tenant():
+    """The machine identity is the one that carries a registered tenant."""
+    caller = verify_principal_token(
+        mint([user_principal(), app_principal(tenant="acme-partner")]), CONFIG
+    )
+
+    assert caller.tenant == "acme-partner"
+    assert caller.user_id == "u-1"
 
 
 # ── operator diagnostics ─────────────────────────────────────────────────────

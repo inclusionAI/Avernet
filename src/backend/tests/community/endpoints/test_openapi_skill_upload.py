@@ -117,6 +117,12 @@ def _package() -> bytes:
 
 
 def _principal() -> str:
+    """A caller in ``_TENANT`` — the tenant asserted by the ``app`` principal.
+
+    A ``user`` principal carries no tenant (nothing in a user credential proves
+    one), so a user-only token would scope to the internal default and this file
+    would seed one tenant while the request read another.
+    """
     now = int(time.time())
     return jwt.encode(
         {
@@ -127,9 +133,18 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": _TENANT,
                     "subject": {"id": _OWNER, "username": "upload@example.test"},
-                }
+                },
+                {
+                    "type": "app",
+                    "tenant": _TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "Partner App",
+                        "owners": "partner-org",
+                        "tenant": _TENANT,
+                    },
+                },
             ],
         },
         _KEY,
