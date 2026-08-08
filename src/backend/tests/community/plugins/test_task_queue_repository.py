@@ -5,11 +5,13 @@ lease reclaim, holder-guarded transitions, and deadline timeout are all
 exercised against a real database here. Timing is DB-owned (no injected
 ``now``), so the few time-sensitive cases use short real sleeps.
 """
+import re
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import MetaData, create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -20,6 +22,7 @@ from agentclaw.community.core.task_queue.repository.models import TaskQueueModel
 from agentclaw.community.core.task_queue.types import TaskStatus
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugins.task_queue_repository import (
+    _ACTIVE_IDEM_INDEX,
     _MAX_IDEMPOTENCY_KEY_LEN,
     TaskQueueRepository,
     _is_active_idem_conflict,
@@ -661,3 +664,90 @@ def test_keys_with_surrounding_whitespace_are_rejected(repo, key):
         _enqueue_result(repo, idempotency_key=key)
 
     assert len(_all_rows(repo)) == 1  # nothing extra inserted
+
+
+# ── checked-in migrations ───────────────────────────────────────────────────
+
+_SQL_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "src/agentclaw/community/core/task_queue/sql"
+)
+_MIGRATION_STEM = "2026_08_04_task_queue_idempotency"
+
+
+def _pre_migration_table():
+    """``ac_task_queue`` as it looked before this change: the two key columns
+    and the dedup index removed, everything else identical to the ORM."""
+    live = TaskQueueModel.__table__
+    pre = live.to_metadata(MetaData())
+    for column in ("idempotency_key", "active_idempotency_key"):
+        pre._columns.remove(pre.c[column])
+    pre.indexes = {i for i in pre.indexes if i.name != _ACTIVE_IDEM_INDEX}
+    return pre
+
+
+def _statements(path):
+    """Split a migration file into executable statements, dropping comments."""
+    body = re.sub(r"(?m)^--.*$", "", path.read_text())
+    return [s.strip() for s in body.split(";") if s.strip()]
+
+
+def test_checked_in_sqlite_migration_upgrades_a_pre_migration_table(tmp_path):
+    """The community profile never runs ``create_all`` — an operator applies
+    these files by hand — so a broken one is only discovered in their
+    production. Build the *old* table, run the checked-in SQLite migration
+    against it, then drive real keyed enqueues through the repository: proof the
+    file actually lands the schema the ORM requires, not just that it parses."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    _pre_migration_table().create(engine)
+    assert "idempotency_key" not in {
+        c["name"] for c in inspect(engine).get_columns("ac_task_queue")
+    }
+
+    with engine.begin() as conn:
+        for statement in _statements(_SQL_DIR / f"{_MIGRATION_STEM}.sqlite.sql"):
+            conn.execute(text(statement))
+
+    repo = TaskQueueRepository(InMemorySqliteDB(engine))
+    first = _enqueue_result(repo, idempotency_key="k1")
+    second = _enqueue_result(repo, idempotency_key="k1")
+    assert first.created is True and second.created is False
+    assert second.record.id == first.record.id  # dedup, via the migrated index
+
+    # And the opt-out still works, which is what the index's NULL handling buys.
+    assert _enqueue_result(repo).created is True
+    assert _enqueue_result(repo).created is True
+
+
+def test_every_dialect_migration_agrees_on_the_names_it_creates():
+    """Four files, one migration. A rename in one and not the others would leave
+    some store's index named differently from ``_ACTIVE_IDEM_INDEX``, which is
+    how the repository recognises a duplicate-key error."""
+    variants = ["sql", "mysql.sql", "postgres.sql", "sqlite.sql"]
+    for variant in variants:
+        path = _SQL_DIR / f"{_MIGRATION_STEM}.{variant}"
+        body = path.read_text()
+        for name in ("idempotency_key", "active_idempotency_key", _ACTIVE_IDEM_INDEX):
+            assert name in body, f"{path.name} never mentions {name}"
+
+
+def test_only_the_mysql_family_migrations_carry_a_collation():
+    """SQLite compares BINARY and PostgreSQL varchar equality is exact under a
+    deterministic collation, so those two need no COLLATE — and must not carry
+    one, since neither engine would accept ``utf8mb4_bin``. The MySQL-family
+    files must, because their server default would merge case variants."""
+    for variant in ("sql", "mysql.sql"):
+        body = (_SQL_DIR / f"{_MIGRATION_STEM}.{variant}").read_text()
+        assert body.count("COLLATE utf8mb4_bin") == 3, (
+            f"{variant}: expected both key columns plus task_type to pin the collation"
+        )
+    for variant in ("postgres.sql", "sqlite.sql"):
+        body = (_SQL_DIR / f"{_MIGRATION_STEM}.{variant}").read_text()
+        executable = re.sub(r"(?m)^--.*$", "", body)
+        assert "COLLATE" not in executable.upper(), (
+            f"{variant} carries a collation clause its engine cannot honour"
+        )

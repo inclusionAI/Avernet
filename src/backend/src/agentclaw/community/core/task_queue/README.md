@@ -168,13 +168,36 @@ creates it from the shared ORM metadata.
 Enqueue idempotency is available but **not yet adopted by any call site** — the
 mechanism landed first so adoption can be reviewed per call site.
 
-`sql/2026_08_04_task_queue_idempotency.sql` **must be applied to prod before
-deploying the release that contains it** — not merely before the first call site
-passes a key. The ORM maps both columns unconditionally, so every `SELECT`
-projects them and every `INSERT` writes them even for an un-keyed enqueue;
-against a table without the columns the whole queue fails with "unknown
-column". The DDL also pins `utf8mb4_bin` on both columns, which is load-bearing
-rather than cosmetic — see "How idempotency works" above.
+The idempotency migration **must be applied before deploying the release that
+contains it** — not merely before the first call site passes a key. The ORM maps
+both columns unconditionally, so every `SELECT` projects them and every `INSERT`
+writes them even for an un-keyed enqueue; against a table without the columns the
+whole queue fails with "unknown column".
+
+That applies to **any** deployment that has provisioned `ac_task_queue`, not just
+prod. `CommunityDatabase` is a pure connection provider and never runs
+`create_all`, so a community schema is operator-provisioned and does not pick the
+columns up automatically. The engines need different DDL, so the migration ships
+as one file per store, with `sql/2026_08_04_task_queue_idempotency.README.md` as
+the index of which to run:
+
+| Store | File |
+| --- | --- |
+| OceanBase (prod) | `sql/2026_08_04_task_queue_idempotency.sql` |
+| MySQL (stock) | `sql/2026_08_04_task_queue_idempotency.mysql.sql` |
+| PostgreSQL | `sql/2026_08_04_task_queue_idempotency.postgres.sql` |
+| SQLite (persistent file) | `sql/2026_08_04_task_queue_idempotency.sqlite.sql` |
+
+Only the MySQL-family files carry `COLLATE utf8mb4_bin` and the `task_type`
+rewrite; SQLite and PostgreSQL already compare exactly, so they need neither.
+That collation is load-bearing rather than cosmetic — see "How idempotency works"
+above. Deployments that never provisioned the table need nothing: the worker is
+disabled by default and nothing reads it. The local/test profile needs nothing
+either, since its schema is rebuilt from the ORM metadata on every start.
+
+The SQLite file is executed by a test that builds a pre-migration table, applies
+it, and then runs real keyed enqueues through the repository, so it is verified
+rather than merely written down.
 
 ## Context Boundary
 
