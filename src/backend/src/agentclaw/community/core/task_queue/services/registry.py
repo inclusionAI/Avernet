@@ -53,8 +53,12 @@ class HandlerRegistry:
 
     @staticmethod
     def _normalize(task_type: str) -> str:
-        """Fold a ``task_type`` the way MySQL/OceanBase would compare it."""
-        return task_type.casefold().rstrip()
+        """Fold a ``task_type`` the way MySQL/OceanBase would compare it.
+
+        Only case folding: padding is handled by rejecting surrounding
+        whitespace outright, so no registered type can carry any.
+        """
+        return task_type.casefold()
 
     def register(self, handler: TaskHandler) -> None:
         """Register ``handler`` under its ``task_type``.
@@ -62,36 +66,43 @@ class HandlerRegistry:
         Raises :class:`ValueError` on a duplicate ``task_type`` — two handlers
         for the same type is a wiring bug, not a silent last-wins.
 
-        Also raises when a ``task_type`` differs from an already-registered one
-        *only by case or trailing whitespace*. That is not style policing: the
-        enqueue dedup index is ``UNIQUE (env, task_type, active_idempotency_key)``,
-        so two task types the index cannot tell apart share one dedup slot, and
-        a keyed enqueue for ``"job"`` would be handed the live ``"Job"`` task
-        with ``created=False`` — silently dropping work meant for the other
-        handler.
+        Two further rules exist because ``task_type`` is a scope column of
+        ``UNIQUE (env, task_type, active_idempotency_key)``: two task types the
+        index cannot tell apart share one dedup slot, so a keyed enqueue for one
+        is handed the *other's* live task with ``created=False``, silently
+        dropping work. The two rules differ in kind, and the difference matters:
 
-        **This check is a second line of defence, not the enforcement.**
-        ``task_type`` pins ``utf8mb4_bin`` in the schema, which settles the case
-        half in the database, where it holds across processes. This check exists
-        for what the collation cannot cover:
+        **1. No leading or trailing whitespace — an absolute rule.** ``"job "``
+        and ``"job"`` are one entry in the index because ``utf8mb4_bin`` is a
+        PAD SPACE collation, and pinning the collation does not fix this. It
+        must be an absolute property of every accepted type rather than a
+        comparison against what is already registered, because a *pairwise*
+        check is blind across processes: a rolling deploy renaming ``job`` to
+        ``job `` has each version's registry holding only its own spelling, so
+        neither sees a collision while the index merges them. Forbidding the
+        padding outright holds regardless of what any other process registered,
+        which a pairwise check cannot.
 
-        - ``utf8mb4_bin`` is **PAD SPACE**, so ``"job "`` and ``"job"`` are
-          still one index entry; only this check separates them.
-        - It fails at **startup**, with a message naming both spellings, rather
-          than at the first keyed enqueue in production.
-
-        What it cannot do is see outside its own process — a rolling deploy
-        renaming a task type by case alone would have each version's registry
-        holding only its own spelling. That case is covered by the collation,
-        which is precisely why the scope is enforced in the schema too rather
-        than here alone.
-
-        Lookup is unaffected: it stays exact, matching the collation.
+        **2. No two registered types differing only by case — a pairwise
+        check, and a second line of defence.** The schema already settles this:
+        ``task_type`` pins ``utf8mb4_bin``, which holds across processes. This
+        check adds a loud failure at **startup**, naming both spellings, rather
+        than a silent wrong-task join at the first keyed enqueue in production.
+        Being pairwise, it has the cross-process blind spot described above —
+        which is exactly why the collation, not this check, is the enforcement.
 
         Lookup stays **exact**: rows store ``task_type`` verbatim, so the worker
         dispatches on the spelling that was enqueued.
         """
         task_type = handler.task_type
+        if task_type != task_type.strip():
+            raise ValueError(
+                f"task_type {task_type!r} must not have leading or trailing "
+                "whitespace; MySQL/OceanBase compare with a PAD SPACE collation, "
+                "so 'job ' and 'job' are one entry in the enqueue dedup index and "
+                "one handler's keyed enqueues would silently join the other's "
+                "tasks — strip it"
+            )
         if task_type in self._handlers:
             raise ValueError(
                 f"task_type {task_type!r} already has a handler registered "
@@ -102,10 +113,10 @@ class HandlerRegistry:
         if collides_with is not None:
             raise ValueError(
                 f"task_type {task_type!r} differs from the already-registered "
-                f"{collides_with!r} only by case or trailing whitespace; the two "
-                "are distinct here but equal in the enqueue dedup index under "
-                "MySQL/OceanBase collation, so one handler's keyed enqueues "
-                "would silently join the other's tasks — pick a distinct name"
+                f"{collides_with!r} only by case; the two are distinct here but "
+                "equal in the enqueue dedup index under MySQL/OceanBase "
+                "collation, so one handler's keyed enqueues would silently join "
+                "the other's tasks — pick a distinct name"
             )
         self._handlers[task_type] = handler
         self._normalized[normalized] = task_type

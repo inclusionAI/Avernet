@@ -1,14 +1,28 @@
 # Enqueue idempotency migration — which file to run
 
-One migration, four files, because the supported stores do not share a dialect.
+One migration, three files, because the supported stores do not share a dialect.
 Run exactly one; they are alternatives, not steps.
 
 | Your store | File |
 | --- | --- |
 | OceanBase (prod) | `2026_08_04_task_queue_idempotency.sql` |
 | MySQL (stock) | `2026_08_04_task_queue_idempotency.mysql.sql` |
-| PostgreSQL | `2026_08_04_task_queue_idempotency.postgres.sql` |
 | SQLite (persistent file) | `2026_08_04_task_queue_idempotency.sqlite.sql` |
+
+## PostgreSQL is not supported by this component
+
+`CommunityDatabase` will happily connect to PostgreSQL, but **the task queue does
+not run on it**, with or without this migration. `TaskQueueRepository._now_plus`
+branches on SQLite and treats every other dialect as MySQL, emitting
+`date_add(now(), INTERVAL n SECOND)` — a function PostgreSQL does not have, so
+the first enqueue with a non-zero delay fails. All the repository's timing is
+DB-side, so this is not a corner case.
+
+No PostgreSQL DDL is shipped deliberately: applying one would produce a table
+that still cannot be used, which is worse than an honest gap because it looks
+like a supported path. Making the component work on PostgreSQL means teaching
+`_now_plus` (and a test matrix) about a third dialect — a change to the
+component, not to this migration.
 
 ## Do I need to run anything?
 

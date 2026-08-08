@@ -727,7 +727,7 @@ def test_every_dialect_migration_agrees_on_the_names_it_creates():
     """Four files, one migration. A rename in one and not the others would leave
     some store's index named differently from ``_ACTIVE_IDEM_INDEX``, which is
     how the repository recognises a duplicate-key error."""
-    variants = ["sql", "mysql.sql", "postgres.sql", "sqlite.sql"]
+    variants = ["sql", "mysql.sql", "sqlite.sql"]
     for variant in variants:
         path = _SQL_DIR / f"{_MIGRATION_STEM}.{variant}"
         body = path.read_text()
@@ -735,19 +735,27 @@ def test_every_dialect_migration_agrees_on_the_names_it_creates():
             assert name in body, f"{path.name} never mentions {name}"
 
 
+def test_no_postgres_migration_is_shipped():
+    """PostgreSQL DDL would advertise a path the component cannot run:
+    ``_now_plus`` treats every non-SQLite dialect as MySQL and emits
+    ``date_add(now(), INTERVAL n SECOND)``, which PostgreSQL has no function
+    for. A migrated-but-unusable table is worse than an honest gap, so the
+    absence is deliberate — and asserted, so re-adding one has to be a decision
+    that also fixes the dialect handling."""
+    assert not (_SQL_DIR / f"{_MIGRATION_STEM}.postgres.sql").exists()
+
+
 def test_only_the_mysql_family_migrations_carry_a_collation():
-    """SQLite compares BINARY and PostgreSQL varchar equality is exact under a
-    deterministic collation, so those two need no COLLATE — and must not carry
-    one, since neither engine would accept ``utf8mb4_bin``. The MySQL-family
-    files must, because their server default would merge case variants."""
+    """SQLite compares BINARY natively, so it needs no COLLATE — and must not
+    carry one, since it would reject ``utf8mb4_bin``. The MySQL-family files
+    must, because their server default would merge case variants."""
     for variant in ("sql", "mysql.sql"):
         body = (_SQL_DIR / f"{_MIGRATION_STEM}.{variant}").read_text()
         assert body.count("COLLATE utf8mb4_bin") == 3, (
             f"{variant}: expected both key columns plus task_type to pin the collation"
         )
-    for variant in ("postgres.sql", "sqlite.sql"):
-        body = (_SQL_DIR / f"{_MIGRATION_STEM}.{variant}").read_text()
-        executable = re.sub(r"(?m)^--.*$", "", body)
-        assert "COLLATE" not in executable.upper(), (
-            f"{variant} carries a collation clause its engine cannot honour"
-        )
+    body = (_SQL_DIR / f"{_MIGRATION_STEM}.sqlite.sql").read_text()
+    executable = re.sub(r"(?m)^--.*$", "", body)
+    assert "COLLATE" not in executable.upper(), (
+        "the SQLite migration carries a collation clause its engine cannot honour"
+    )

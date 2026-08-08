@@ -185,11 +185,18 @@ the index of which to run:
 | --- | --- |
 | OceanBase (prod) | `sql/2026_08_04_task_queue_idempotency.sql` |
 | MySQL (stock) | `sql/2026_08_04_task_queue_idempotency.mysql.sql` |
-| PostgreSQL | `sql/2026_08_04_task_queue_idempotency.postgres.sql` |
 | SQLite (persistent file) | `sql/2026_08_04_task_queue_idempotency.sqlite.sql` |
 
+**PostgreSQL is not a supported store for this component**, and no PostgreSQL
+DDL is shipped. `CommunityDatabase` will connect to it, but `_now_plus` branches
+on SQLite and treats every other dialect as MySQL, emitting `date_add(now(),
+INTERVAL n SECOND)` — which PostgreSQL does not have. Since all the repository's
+timing is DB-side, the queue does not work there at all, so shipping DDL for it
+would produce a table that still cannot be used while looking like a supported
+path. Supporting it means teaching `_now_plus` a third dialect.
+
 Only the MySQL-family files carry `COLLATE utf8mb4_bin` and the `task_type`
-rewrite; SQLite and PostgreSQL already compare exactly, so they need neither.
+rewrite; SQLite already compares BINARY, so it needs neither.
 That collation is load-bearing rather than cosmetic — see "How idempotency works"
 above. Deployments that never provisioned the table need nothing: the worker is
 disabled by default and nothing reads it. The local/test profile needs nothing

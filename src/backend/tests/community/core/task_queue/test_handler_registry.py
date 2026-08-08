@@ -45,19 +45,37 @@ def test_distinct_task_types_coexist():
     assert reg.get("a") is a and reg.get("b") is b
 
 
-@pytest.mark.parametrize("variant", ["Job", "JOB", "jOb", "job ", "job\t"])
-def test_task_type_colliding_only_by_case_or_trailing_space_is_rejected(variant):
-    """The dedup index is UNIQUE (env, task_type, active_idempotency_key) and
-    ``task_type`` carries the table's default collation — case-insensitive and
-    PAD SPACE on MySQL/OceanBase. So these pairs are two registry keys but one
-    index value, and a keyed enqueue for one would silently join the other's
-    task. SQLite compares BINARY, so only rejecting at registration keeps the
-    two engines agreeing."""
+@pytest.mark.parametrize("variant", ["Job", "JOB", "jOb"])
+def test_task_type_colliding_only_by_case_is_rejected(variant):
+    """``task_type`` is a scope column of the dedup index, so two types the
+    index cannot separate share one dedup slot and a keyed enqueue for one would
+    silently join the other's task. The schema pins ``utf8mb4_bin`` to settle
+    this across processes; the registry check adds a loud startup failure."""
     reg = HandlerRegistry()
     reg.register(_Handler("job"))
-    with pytest.raises(ValueError, match="only by case or trailing whitespace"):
+    with pytest.raises(ValueError, match="only by case"):
         reg.register(_Handler(variant))
     assert reg.get(variant) is None  # and it was not registered
+
+
+@pytest.mark.parametrize("task_type", ["job ", " job", " job ", "job\t", "\njob"])
+def test_task_type_with_surrounding_whitespace_is_rejected_outright(task_type):
+    """Absolute, not pairwise — and that distinction is the whole point.
+
+    ``utf8mb4_bin`` is PAD SPACE, so 'job ' and 'job' are one index entry and
+    the collation cannot fix it. A *pairwise* check ("does this fold onto
+    something already registered?") is blind across processes: a rolling deploy
+    renaming ``job`` to ``job `` leaves each version's registry holding only its
+    own spelling, so neither sees a collision while the index merges them.
+
+    Rejecting the padding outright holds no matter what any other process
+    registered — hence no prior ``register`` call here. This test would pass
+    vacuously against a pairwise implementation, so the empty registry is
+    load-bearing."""
+    reg = HandlerRegistry()
+    with pytest.raises(ValueError, match="leading or trailing whitespace"):
+        reg.register(_Handler(task_type))
+    assert reg.get(task_type) is None
 
 
 def test_exact_duplicate_still_reports_as_a_duplicate_not_a_near_collision():
@@ -69,13 +87,13 @@ def test_exact_duplicate_still_reports_as_a_duplicate_not_a_near_collision():
         reg.register(_Handler("job"))
 
 
-def test_leading_whitespace_does_not_block_an_unrelated_type():
-    """Only *trailing* space is folded by PAD SPACE, so a leading space makes a
-    genuinely distinct index value — do not over-reject."""
+def test_internal_spacing_is_untouched():
+    """Only the *ends* are constrained. A type is never rewritten, and one with
+    interior spacing is a distinct index value on every engine."""
     reg = HandlerRegistry()
-    reg.register(_Handler("job"))
-    reg.register(_Handler(" job"))
-    assert reg.get(" job") is not None
+    handler = _Handler("legacy job.poll")
+    reg.register(handler)
+    assert reg.get("legacy job.poll") is handler
 
 
 def test_real_task_type_constants_do_not_collide_pairwise():
