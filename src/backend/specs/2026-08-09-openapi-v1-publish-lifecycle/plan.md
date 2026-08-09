@@ -3,6 +3,13 @@
 Implements `spec.md` in this directory. Issue
 [#909](https://github.com/inclusionAI/Avernet/issues/909).
 
+**Read `design.md` first.** During review the scope widened: the public surface
+is built on an *evolved* internal core (the `core/service_bot/release/`
+package — typed release facts, one store for `ext`, the status machine as
+data, the ledger as the single home of BaaS workflow ids), not on the current
+mixin pipeline as-is. `design.md` defines that evolution and its phasing;
+this plan implements **Phase 1** of it plus the public category.
+
 All paths are relative to `src/backend/src/agentclaw/community/` unless stated
 otherwise.
 
@@ -10,27 +17,34 @@ otherwise.
 
 ## 1. Shape of the change
 
-Five public operations in a new `publish` category, backed by one new core
-service that composes services that already exist. Nothing in the publish
-pipeline changes: `PublishFlowService.process` is called exactly as the internal
-router calls it, and the internal router is not touched.
+Four public operations in a new `publish` category, on top of the Phase-1 core
+evolution from `design.md`. The stored JSON keys, the internal HTTP surface and
+the DB schema do not change; the shape of the code does. Neither write mints a
+release record — creating a service bot already creates its first draft
+(`bot_service.create_bot`, the `resolved_bot_type == "service"` branch), so a
+first release has a draft to advance from the moment the bot exists.
 
 ```
 adapters/http/openapi_v1/publish/router.py      ← thin: params, envelope, projection
         │  (UserIdDep, OwnerIdDep, PageParamsDep)
         ▼
-core/service_bot/services/release_lifecycle_service.py   ← ALL policy lives here
+core/service_bot/release/lifecycle.py            ← ALL public-surface policy
         │
         ├── BotService.get_bot ............... owner-scoped, tenant-guarded resolve
         ├── core/bot_collaborator/access.py .. role bar (extracted, see §3)
-        ├── BotPublishService ................ create-first / upgrade / read records
-        ├── PublishFlowService.process ....... the two CAS advances (unchanged)
-        └── PublishOperationRepository ....... the ledger read
+        ├── release/machine.py ............... the declared status machine
+        ├── release/store.py ................. typed ext + CAS advance
+        └── release/operations.py ............ ledger-backed workflow-id reads
+
+core/service_bot/release/                        ← Phase 1 of design.md §3–§4
+        facts.py / store.py / machine.py / operations.py
+        (PublishExtState absorbed; ext id-stash writes stopped;
+         process() consults the machine)
 ```
 
 The router owns no domain decision. That is the architecture rule (`core` stays
 transport-agnostic; adapters translate protocol details) and it is also what
-makes the state-machine behaviour testable without a TestClient.
+makes the precondition behaviour testable without a TestClient.
 
 ### Endpoints
 
@@ -38,19 +52,28 @@ Component literal `publish`; addressing rule `/openapi/v1/bots/<component>/{bot_
 
 | Method | Path | Purpose | Success |
 |---|---|---|---|
-| POST | `/openapi/v1/bots/publish/{bot_id}/releases` | Start a verify release | `202 Envelope[Release]` started · `200 Envelope[Release]` already in flight |
+| POST | `/openapi/v1/bots/publish/{bot_id}/releases` | Start a verify release — **requires the newest release to be a draft** | `202 Envelope[Release]` |
 | GET | `/openapi/v1/bots/publish/{bot_id}/releases` | List releases, newest first | `Envelope[Page[Release]]` |
 | GET | `/openapi/v1/bots/publish/{bot_id}/releases/{version}` | One release's state | `Envelope[Release]` |
-| POST | `/openapi/v1/bots/publish/{bot_id}/releases/{version}/promote` | Promote verify → online | `202 Envelope[Release]` promoted · `200 Envelope[Release]` already promoted |
-| GET | `/openapi/v1/bots/publish/{bot_id}/releases/{version}/operations` | The release's operation ledger | `Envelope[Page[ReleaseOperation]]` |
+| POST | `/openapi/v1/bots/publish/{bot_id}/releases/{version}/promote` | Promote verify → online — **requires the release to be validating** | `202 Envelope[Release]` |
+
+The operation-ledger endpoint from the first draft of this plan is **dropped**
+(spec Decision 4): `ac_publish_operation` stays internal, and nothing in this
+change reads it.
 
 Every operation takes the required `user_id` query parameter and the optional
 `owner_id` query parameter. **No `stage` parameter**: a release *is* the stage
-transition; `stage` appears inside a ledger entry as data, never as an address.
+transition. **No request body on either write**: the operations take no
+arguments beyond their address, so there is nothing for a body to carry, and no
+body means no `extra="forbid"` surface to get wrong.
 
 `{version}` is `ac_bot_publish.version` — per-bot, monotonic from 1, assigned by
 `BotPublishService._get_next_version`. Declared `int` with `ge=1`, so a
 non-numeric segment is a 422 before any lookup runs.
+
+The start write takes no version: it advances the bot's newest release, and its
+precondition is exactly that the newest release is a draft. The response carries
+the version it advanced.
 
 ---
 
@@ -97,24 +120,6 @@ and the whole of `ext` — which carries `binding.{verify,online}` binding ids,
 `source_status`. `ext` is never read by the projection, so a key added to it
 later cannot leak by default.
 
-### `ReleaseOperation` payload
-
-Published: `kind`, `stage`, `attempt`, `state`, `operator`, `created_at`,
-`updated_at`.
-
-`kind` and `state` are published enums mirroring `PublishOperationKind` and
-`PublishOperationState` value-for-value (both are already stable, English,
-caller-meaningful vocabularies); both mappings are asserted exhaustive, so a new
-kind fails CI here as it already does in the deploy-partition test. `stage`
-publishes the raw `PublishStage` value (`draft`/`verify`/`online`/`eval`) or the
-empty string, unchanged.
-
-Withheld: `id`, `publish_id`, `bot_uuid`, `baas_publish_id`, `params`, `result`,
-`last_error`, `request_id`, `env` (spec Decision 7).
-
-Ordering: `gmt_create` ascending, then `id` ascending — a timeline reads
-forward, and ties inside one second stay stable across pages.
-
 ---
 
 ## 3. Extraction: the role bar
@@ -146,30 +151,81 @@ behaviour-preserving extraction (recipe step 6): proved by leaving
 Bars used by this category:
 
 - **Writes** (start, promote): `PermissionLevel.ADMIN` — `CollaboratorRole.ADMIN`
-  is defined as *edit + publish* (spec Decision 2).
-- **Reads** (get, list, operations): `PermissionLevel.MEMBER` — the same
-  `OPERATOR_LEVEL` the access expansion applies to the runtimes these releases
-  produce.
+  is defined as *edit + publish* (spec Decision 3).
+- **Reads** (get, list): `PermissionLevel.MEMBER` — the same `OPERATOR_LEVEL`
+  the access expansion applies to the runtimes these releases produce.
 
 Both constants are named once in the new core service
 (`PUBLISH_LEVEL` / `PUBLISH_READ_LEVEL`), not spelled at call sites.
 
 ---
 
-## 4. New core service
+## 4. The Phase-1 core evolution (from `design.md`)
 
-`core/service_bot/services/release_lifecycle_service.py` —
+Executed before the public surface is wired, in this order:
+
+1. **`release/facts.py`** — `ReleaseFacts` (`StageBindings`, `BuildArtifact`,
+   `FailureInfo`, `engine_overrides_by_stage`, opaque `passthrough`), with
+   `from_ext`/`to_ext` round-tripping the existing JSON keys byte-compatibly.
+   Contract: a round-trip property test over real-shaped ext blobs, including
+   legacy variants.
+2. **`release/store.py`** — `ReleaseStore` absorbs `PublishExtState` (same
+   CAS/status+ext persistence semantics, verbatim), exposing
+   `load`/`mutate`/`advance`/`advance_with_facts` in `ReleaseFacts` terms.
+   `PublishExtState` becomes a thin delegating shell for the one release it
+   takes the mixins to migrate off it, then dies with them (Phase 2).
+3. **`release/machine.py`** — `RELEASE_MACHINE` as declared in design §3.3.
+   `process()` is refactored to consult it for the USER transition instead of
+   its two hand-written branches; the failure writes take each transition's
+   `on_failure` target from the machine instead of hand-writing
+   `ext["source_status"]` at eight sites. Same transitions, same messages,
+   same wire payloads — the internal suite passing **unmodified** is the proof.
+4. **`release/operations.py`** — ledger-backed workflow-id reads
+   (`latest_release_workflow` / `latest_restart_workflow` /
+   `latest_scale_workflow` / `is_restart_in_flight`) with read-fallback to the
+   legacy ext keys for pre-#197 rows. The ext id-stash **writes stop**:
+   `ext.publish.{stage}` (`publish_ext_mixin`, `release_stage`),
+   `ext.restart.{stage}` + `restart.restarting` (`restart_mixin`),
+   `ext.scale.publish_id` (`scale_mixin`); their readers
+   (`progress_sync_mixin`, `retry_ops_mixin`, `rollback_ops_mixin`,
+   `upgrade_resolution_mixin`, `restart_mixin:525`, `baas_service:3425`,
+   `arca_image_pin:134`, `bot_publish_service:641` — the binding reads among
+   these move to `StageBindings`, the id reads to `operations.py`) are
+   converted call-site by call-site. Rolling-deploy safety per design §4.
+5. **Architecture test** — outside `release/facts.py` and `release/store.py`,
+   no module under `core/service_bot` touches `ext[`/`ext.get(`/
+   `ext.setdefault(` on a publish record. (Grandfathered exceptions, each
+   named in the test with its Phase-2/3 ticket: the approval / rollback /
+   draft-restore / eval mixins' `passthrough` keys.)
+
+What Phase 1 does **not** touch, per design §4: the durable task handlers'
+semantics, the #197 ledger writes, the internal HTTP surface, the DB schema,
+and the hitchhiking domain states (approval, rollback, eval, data-init).
+
+---
+
+## 5. New core service
+
+`core/service_bot/release/lifecycle.py` —
 `ReleaseLifecycleService`, `@inject`, singleton.
 
 Collaborators: `BotService`, `CollaboratorServiceProtocol` (core),
-`BotPublishService`, `PublishFlowService`, `PublishOperationRepository`, plus
-`get_current_env()` for the env scope.
+`BotPublishRepositoryProtocol`, `ReleaseStore`, `TaskQueueService` (for the
+enqueue on a won advance — the same `enqueue_verify_flow` /
+`enqueue_online_release` helpers the flow uses), plus `get_current_env()` for
+the env scope.
 
-Returns transport-agnostic values only: `BotPublishRecord`,
-`list[PublishOperationRecord]`, and a small frozen
-`ReleaseAdvance(record, started: bool)` for the two writes — `started` is what
-the adapter turns into 202 vs 200. No HTTP types, no dicts shaped like
-responses.
+The two writes drive the USER transitions **directly** through
+`ReleaseStore.advance` — the same CAS `process()` uses — and enqueue the same
+durable task on a win, consulting `RELEASE_MACHINE` so this service and
+`process()` cannot disagree about what the two transitions are. A lost CAS is
+a boolean, not a parsed message (this replaces the message-comparison
+mechanism from an earlier draft of this plan; see design §3.5).
+
+Returns transport-agnostic values only: `BotPublishRecord` and
+`(total, list[BotPublishRecord])`. No HTTP types, no dicts shaped like
+responses. The writes return the **re-read record** after the advance, so the
+payload reports the state the advance actually produced.
 
 ### `_resolve_target(bot_id, owner_id, caller_id, *, min_level) -> BotFacts`
 
@@ -186,53 +242,45 @@ Synchronous and not cheap (row read + template fetch + possible collaborator
 query), so the service exposes an `async` façade that runs it via
 `asyncio.to_thread`, exactly as `resolve_bot_off_loop` does.
 
-### `start_verify_release(...) -> ReleaseAdvance`
+### `start_verify_release(...) -> BotPublishRecord`
 
 After `_resolve_target(min_level=ADMIN)`:
 
 1. Newest record for the bot: `publish_repo.list_by_source_bot(bot_pk, env)`
-   returns newest-first; take `records[0]` (`None` when the bot has never
-   published). Keyed on `bot_pk`, never `bot_id` (spec Decision 8).
-2. Choose the draft to advance:
+   returns newest-first; take `records[0]`. Keyed on `bot_pk`, never `bot_id`
+   (spec Decision 7).
+2. **Precondition:** the newest record exists and `status == DRAFT`. Anything
+   else — no record at all (a data anomaly for a service bot, since creation
+   mints the draft), `BUILDING`…`ONLINE_PUB` in flight, `SUCCESS`, `UPGRADED`,
+   `RELEASED`, `FAILED` — raises `ReleaseNotStartableError`. **No side effect on
+   this path**: nothing is minted, nothing is advanced.
+3. Advance via the machine: look up the USER transition from `DRAFT` in
+   `RELEASE_MACHINE` and drive it with `ReleaseStore.advance(draft.id,
+   BUILDING, DRAFT)`. `False` means a concurrent submit won between the
+   precondition read and the CAS — raise `ReleaseNotStartableError`, the same
+   answer as step 2, per spec Decision 2.
+4. On a win, enqueue the transition's durable task (`enqueue_verify_flow`,
+   the same helper `process()` uses) — CAS-then-enqueue in the same order as
+   `process()`, so the double-submit guarantee is identical.
+5. Re-read and return the record.
 
-   | Newest record | Action |
-   |---|---|
-   | *none* | `create_first_publish_for_bot(...)` → DRAFT v1 |
-   | `DRAFT` | use it |
-   | `SUCCESS` | `upgrade_publish(record.id, owner_id)` → DRAFT vN+1 (idempotent via `last_pub_id`) |
-   | `BUILDING`/`BUILT`/`VALIDATE_PUB`/`VALIDATING`/`ONLINE_PUB` | in flight → `ReleaseAdvance(record, started=False)`, **no side effect** |
-   | `FAILED`/`UPGRADED`/`RELEASED` | `ReleaseNotStartableError` → 409 |
-
-   `create_first_publish_for_bot` needs a name; it is derived from the bot's own
-   name (`bot["bot_name"]`, falling back to `bot_id`). The public surface takes
-   no release name: the internal one exists because the workbench asks a human
-   for it, and inventing a required public field to satisfy an internal column
-   would be a contract we then have to keep. `permission_owner` keeps its
-   `"owner"` default. `description` is optional in the request body.
-3. `await flow_service.process(publish_id=draft.id, operator=caller_id)`.
-4. Re-read the record and compare: `started = result.status == BUILDING and
-   the record was at DRAFT before the call`. Concretely — `process` returns
-   `PublishFlowResult`; `started` is `result.action == "process" and
-   result.status == PublishStatus.BUILDING`. The CAS loser gets the describe
-   path, whose status is whatever the winner advanced to, so `started=False`
-   falls out without a second query in the normal case.
-5. Return `ReleaseAdvance(record=<re-read record>, started=...)`.
-
-The record is re-read after `process` so the payload reports the state the
-advance actually produced, not the pre-call snapshot.
-
-### `promote_release(...) -> ReleaseAdvance`
+### `promote_release(...) -> BotPublishRecord`
 
 After `_resolve_target(min_level=ADMIN)` and `_load_release(bot_facts, version)`:
 
-| Record state | Result |
-|---|---|
-| `VALIDATING` | `process` → `ReleaseAdvance(started=True)` on `ONLINE_PUB`, `started=False` if the CAS was lost |
-| `ONLINE_PUB` / `SUCCESS` | `ReleaseAdvance(started=False)` — already promoted |
-| anything else | `ReleaseNotPromotableError` → 409 |
+1. **Precondition:** `status == VALIDATING`. Anything else — including
+   `ONLINE_PUB` (already promoted) and `SUCCESS` (already online) — raises
+   `ReleaseNotPromotableError`. No side effect on this path.
+2. Advance via the machine: `ReleaseStore.advance(record.id, ONLINE_PUB,
+   VALIDATING)`; `False` (the CAS loser) ⇒ `ReleaseNotPromotableError`, the
+   same answer as step 1.
+3. On a win, enqueue `enqueue_online_release` — same order as `process()`.
+4. Re-read and return the record.
 
-`process` is called **only** from `VALIDATING`, so promotion can never fall
-through into the `DRAFT` branch of the flow's own dispatch.
+Both writes and `process()` drive **the same two machine transitions through
+the same CAS**, so the surfaces cannot drift, and a stale observation advances
+nothing even under a race. A machine-agreement test pins that the transitions
+this service drives are exactly the machine's USER-driven set.
 
 ### `_load_release(bot_facts, version) -> BotPublishRecord`
 
@@ -240,7 +288,7 @@ through into the `DRAFT` branch of the flow's own dispatch.
 bot_facts.owner_id, version, env)`, then **assert
 `record.source_bot_pk == bot_facts.bot_pk`** and raise `PublishNotFoundError`
 otherwise. The repository lookup is already owner-scoped; the primary-key assert
-is what closes the `bot_id`-is-not-unique hole for good (spec Decision 8).
+is what closes the `bot_id`-is-not-unique hole for good (spec Decision 7).
 
 ### `list_releases(...) -> tuple[int, list[BotPublishRecord]]`
 
@@ -251,16 +299,13 @@ how many times a human published; adding pagination to the repository protocol
 would change a contract three other callers share, for no benefit here. This is
 stated in the service docstring so the choice reads as deliberate.
 
-### `list_release_operations(...) -> tuple[int, list[PublishOperationRecord]]`
+### `get_release(...) -> BotPublishRecord`
 
-`publish_operation_repo.list_by_publish_id(record.id)` after `_load_release`,
-sorted ascending by `(gmt_create, id)`, sliced the same way. Because the
-`publish_id` comes from a record already proven to belong to the addressed bot,
-no ledger row from another bot can be reached.
+`_resolve_target(min_level=MEMBER)` then `_load_release`.
 
 ### Errors
 
-New, in `core/service_bot/services/release_errors.py` (dependency-free, so the
+New, in `core/service_bot/release/errors.py` (dependency-free, so the
 adapter can map them without importing the service):
 
 - `ReleaseNotStartableError`
@@ -272,7 +317,7 @@ still lands on a sane base — and both are therefore mapped **before** it in
 
 ---
 
-## 5. Service API protocol + DI
+## 6. Service API protocol + DI
 
 - `api/release_lifecycle_service.py` — `ReleaseLifecycleServiceProtocol`,
   `@runtime_checkable`, with **real signatures** (not `*args/**kwargs`): the
@@ -287,7 +332,7 @@ still lands on a sane base — and both are therefore mapped **before** it in
 
 ---
 
-## 6. Adapter
+## 7. Adapter
 
 New package `adapters/http/openapi_v1/publish/` — `__init__.py`, `router.py`,
 `schemas.py`.
@@ -298,13 +343,10 @@ New package `adapters/http/openapi_v1/publish/` — `__init__.py`, `router.py`,
   (imported from `openapi_v1/engine_runtime/params.py` — one spelling of
   `owner_id` on the surface, per that module's own instruction), `PageParamsDep`,
   `request: Request`, `@envelope_errors`.
-- Responses via `responses.py` builders: `envelope`, `page`, `accepted`. The
-  202-vs-200 split is `accepted(...)` vs `envelope(...)`, chosen from
-  `ReleaseAdvance.started`; the route declares `status_code=202` and the handler
-  returns a `JSONResponse`-free model, so the 200 branch sets
-  `response.status_code = 200` on the injected `Response`. (`bots/router.py`'s
-  create handler already does exactly this for its `201`/`202` split — follow it,
-  don't invent a second mechanism.)
+- Responses via `responses.py` builders: `envelope`, `page`, `accepted`. Both
+  writes declare `status_code=202` and return `accepted(...)` — there is no
+  alternate success status, because a call that did not advance the release is a
+  409, not a success.
 - Mount in `openapi_v1/__init__.py`: add `publish_router` to `_SUBGROUPS`
   (before the bots router, per the mount-order rule) with
   `USER_SCOPED_ERROR_RESPONSES` — which already documents the 403 and the 409
@@ -319,10 +361,9 @@ Order matters — leaves before their base:
 | `service_bot…bot_publish_service.BotNotFoundError` | 404 | `"Not found"` |
 | `PublishNotFoundError` | 404 | `"Not found"` |
 | `BotNotServiceTypeError` | 409 | `"Operation not supported for this bot"` |
-| `ReleaseNotStartableError` | 409 | `"Release cannot be started from its current state"` |
+| `ReleaseNotStartableError` | 409 | `"Release is not in a state that can be started"` |
 | `ReleaseNotPromotableError` | 409 | `"Release is not awaiting promotion"` |
 | `PublishStatusInvalidError` | 409 | `"Release is not in a state that allows this operation"` |
-| `PublishAlreadyExistsError` | 409 | `"Release already exists"` |
 | `BotPublishServiceError` *(base — last)* | 500 | `"Publish service error"` |
 | `PublishFlowServiceError` | 500 | `"Publish service error"` |
 
@@ -332,18 +373,20 @@ which the table already maps. Both must be present, and the 404 messages must be
 byte-identical so "no such bot" and "not your bot" stay indistinguishable.
 
 Business subcodes follow the existing scheme (`xxx000` unless the category needs
-distinguishable leaves); the four 409s here are operationally distinct, so they
-get `409` + a per-error subcode in `ERROR_SUBCODES`, matching how the skills
-category already differentiates its conflicts.
+distinguishable leaves); the three publish 409s are operationally distinct, so
+they get `409` + a per-error subcode in `ERROR_SUBCODES`, matching how the
+skills category already differentiates its conflicts.
 
 ---
 
-## 7. Documentation
+## 8. Documentation
 
 - `docs/openapi-v1/README.md`:
   - Track B status board: new `publish` row, `✅ DONE — PR #___`.
-  - New endpoint section with the five-row table, the state map, the ledger's
-    published/withheld field sets, and the role bar.
+  - New endpoint section with the four-row table, the state map, the
+    precondition rule for the two writes, the role bar, and the **known
+    limitation** (re-publishing a live bot still needs the internal upgrade to
+    mint the next draft — spec's Known limitation section).
   - Reserved names: add `publish` to the `<!-- reserved-component-names -->`
     fenced list (the routed one — a route publishes it in this change, so it
     must not go in the unrouted list).
@@ -353,29 +396,38 @@ category already differentiates its conflicts.
 
 ---
 
-## 8. Tests
+## 9. Tests
 
 New, under `tests/community/adapters/http/openapi_v1/publish/`:
 
 | File | Pins |
 |---|---|
-| `test_publish_endpoints.py` | all five handlers, success + every mapped error; the 202/200 split; `extra="forbid"` on the request body |
-| `test_release_state_machine.py` | start and promote from **each** of the ten `PublishStatus` values, plus both CAS-loser paths |
+| `test_publish_endpoints.py` | all four handlers, success + every mapped error; both writes answer 202 on success and nothing else |
+| `test_release_state_machine.py` | start and promote attempted from **each** of the ten `PublishStatus` values — exactly one succeeds per write, the other nine are the fixed 409, with **no side effect** (no record minted, no status moved); plus both CAS-loser paths refused with the same 409 |
 | `test_publish_access.py` | role matrix — owner / admin collaborator / member collaborator / stranger × writes and reads; every refusal byte-identical to a missing bot |
-| `test_publish_projection.py` | the state map is exhaustive over `PublishStatus`; the kind/op-state maps exhaustive over their enums; the withheld field sets absent from both payloads; no `ext` key reachable |
+| `test_publish_projection.py` | the state map is exhaustive over `PublishStatus`; the withheld field set absent from the payload; no `ext` key reachable; the `failed` message carries no internal text |
 | `test_publish_tenant_isolation.py` | a foreign tenant's bot and a foreign bot's version are both masked 404s, against the real Track A guard |
 
-Under `tests/community/core/service_bot/services/`:
+New, under `tests/community/core/service_bot/release/` (the Phase-1 core):
 
 | File | Pins |
 |---|---|
-| `test_release_lifecycle_service.py` | the draft-resolution table, `_load_release`'s `source_bot_pk` assert, ledger scoping, the read/write bar constants |
+| `test_release_facts.py` | `from_ext`/`to_ext` round-trip property over real-shaped and legacy ext blobs — every key the model does not own preserved verbatim; passthrough keys untouched |
+| `test_release_store.py` | the CAS/status+ext persistence semantics carried over from `PublishExtState`, in `ReleaseFacts` terms |
+| `test_release_machine.py` | machine agreement — exactly two USER transitions; every non-terminal status covered; `on_failure` targets equal today's `source_status` writes; `process()` and `ReleaseLifecycleService` drive the same USER set |
+| `test_release_operations.py` | ledger-first workflow-id reads with ext fallback for pre-#197 rows; the restart-vs-release classification needs no ext comparison |
+| `test_lifecycle_service.py` | both preconditions row by row; the CAS-loser boolean path; `_load_release`'s `source_bot_pk` assert; the read/write bar constants |
+
+New, under `tests/community/architecture/`:
+
+- the no-raw-ext gate from plan §4 step 5, with its named grandfathered
+  exceptions.
 
 Amended:
 
 - `test_path_convention.py` — reserved-name lists (doc ↔ routes) pick up `publish`
   automatically; the run must confirm it.
-- `test_explicit_user_id.py` — the counts move from 56/4 to 61/4; update the
+- `test_explicit_user_id.py` — the counts move from 56/4 to 60/4; update the
   expectation.
 - `test_openapi_error_schema.py` — the new group must document exactly the
   `USER_SCOPED_ERROR_RESPONSES` set.
@@ -385,41 +437,58 @@ Amended:
   ← the new protocol). This has failed CI twice before on exactly this;
   declare first, then run.
 
-Unmodified and green, as the proof that nothing internal moved:
+Unmodified and green, as the proof the Phase-1 refactor preserved behaviour:
 `tests/community/adapters/http/service_bot/test_router_publish_coverage.py`,
 `tests/community/core/service_bot/services/test_publish_flow_service.py`,
+`test_publish_crash_windows.py`, `test_publish_tasks.py`,
 `tests/community/e2e/publish_boundary/`, and the engine-runtime operator/stage
-suites.
+suites. One honest caveat: any existing test that *asserts the ext id stashes
+are written* (`ext.publish`/`ext.restart`/`ext.scale`) is asserting the exact
+duplication this change removes — such assertions are updated to assert the
+ledger row instead, and each such edit is called out individually in the PR so
+it reads as a contract change made on purpose, not a test bent to pass.
 
 ---
 
-## 9. Rejected alternatives
+## 10. Rejected alternatives
 
 Recorded so they are not reopened:
 
 | Rejected | Why |
 |---|---|
-| Publish `POST …/releases` as *advance only*, requiring the record to be minted elsewhere | Leaves the public surface unable to start a first release at all; the draft record is storage, not a user-facing artifact (spec Decision 1) |
-| A second public write that mints the release record | Two calls for one intent, and the second is pure bookkeeping the caller cannot reason about |
-| Address a release by its record id | Global auto-increment; leaks cross-tenant volume, and its meaning is internal (spec Decision 9) |
+| Publish the operation ledger (a fifth, read-only endpoint) | The ledger is the pipeline's internal step structure — provider workflow ids, attempt bookkeeping, crash-recovery state. Publishing even a projection turns a crash-safety mechanism into a contract that then cannot be restructured (spec Decision 4) |
+| Start-release resolves-or-creates the draft (mint on demand) | Folds `create_first_publish_for_bot` / `upgrade_publish` — each with its own preconditions — into one public call whose effect depends on state the caller cannot see. The precondition form keeps the operation's meaning fixed; the cost is the recorded known limitation (spec Decision 1) |
+| Return the release's state with a 200 when a write's precondition fails | Four flavours of "no" (too early, too late, repeat, race-loser) would advertise timing detail a caller cannot act on differently; one fixed 409 plus the read endpoint answers all four (spec Decision 2) |
+| Detect the CAS winner by parsing `process()`'s result (message comparison, or an `advanced: bool` field) | The message form is a string tripwire; the field form changes the internal wire payload (`ApiResponse.data` serializes the whole result). Driving the machine transition directly through `ReleaseStore.advance` makes the outcome a boolean at the source (design §3.5) |
+| Wrap the current pipeline as-is and defer the core evolution entirely | The review asked for the evolution, and the public surface would otherwise be a fourth consumer of the untyped ext maze — every new consumer makes the eventual cleanup strictly harder (design §1) |
+| Big-bang rewrite of the whole pipeline in this change | ~8k lines carrying production crash-safety semantics (#197) and three fix-specs; the strangler phasing in design §4 keeps every step provable against the existing suites |
+| Address a release by its record id | Global auto-increment; leaks cross-tenant volume, and its meaning is internal (spec Decision 8) |
 | Collapse the ten statuses into three or four coarse phases | The whole point of the read side is following progress; `built` vs `publishing_verify` is exactly the distinction a stalled publish turns on |
-| Return 409 to the loser of a double-submit | Makes correct retry logic read as failure on an API that is asynchronous by construction (spec Decision 3) |
 | Publish `ext.error_message` on a failed release | Raw internal text — exception reprs, provider ids, internal-language strings; the surface's fixed-message rule exists for this |
-| Publish the ledger's `params` / `result` / `baas_publish_id` | Unversioned internal payloads and provider-side identifiers would become a contract the moment they shipped |
-| Hide ledger kinds this surface cannot trigger (rollback, restore, scale) | Would make `attempt` numbering and the timeline lie about the bot's own history |
-| One role bar for the whole category | Either hides progress from members who can already watch the runtime, or lets them ship (spec Decision 2) |
-| A `stage` query parameter, matching the engine-runtime groups | A release *is* the stage transition; `stage` is data inside a ledger entry, not an address |
-| Add `avernet_tenant` to the publish tables | Not this change's job; isolation already derives from the tenant-guarded bot resolve plus primary-key keying, the same argument PR #904 made (spec Decision 8) |
+| One role bar for the whole category | Either hides progress from members who can already watch the runtime, or lets them ship (spec Decision 3) |
+| A `stage` query parameter, matching the engine-runtime groups | A release *is* the stage transition; there is nothing left for a `stage` to address |
+| Add `avernet_tenant` to the publish tables | Not this change's job; isolation already derives from the tenant-guarded bot resolve plus primary-key keying, the same argument PR #904 made (spec Decision 7) |
 
 ---
 
-## 10. Risk and rollback
+## 11. Risk and rollback
 
 - **No schema change, no DDL, no migration.** Rollback is reverting the code.
-- **The internal surface is untouched**, so a revert cannot strand a release: any
-  record this surface created is an ordinary draft the internal surface already
-  knows how to drive.
-- **The one shared-code edit is the role-bar extraction (§3).** It is
+  The stored JSON keys are round-trip compatible, so rows written by the new
+  code are readable by the old — except the stopped id-stash writes, whose
+  rolling-deploy story is design §4: the ledger has carried those ids
+  authoritatively since #197, and both old and new readers consult it.
+- **The internal HTTP surface's contract is untouched.** The internal-file
+  edits are the Phase-1 refactor (§4) — `process()` consulting the machine,
+  the ext accessors migrating to `ReleaseStore`, the id-stash writes stopping
+  — all behaviour-preserving by the suites named in §9. A revert cannot strand
+  a release: every record this surface advances is an ordinary record the
+  internal surface already drives.
+- **The largest real risk is the Phase-1 read migration** (the ~11 call sites
+  in §4 step 4). It is sequenced first, lands with the round-trip and
+  ledger-fallback tests before the public surface is wired on top, and each
+  call-site conversion is a small, individually-revertable commit.
+- **The one shared-code move is the role-bar extraction (§3).** It is
   behaviour-preserving and its proof is the engine-runtime suites staying
   unmodified and green. If review prefers not to move it, the fallback is a
   `min_level` parameter on `require_bot_operator` with the current bar as the
