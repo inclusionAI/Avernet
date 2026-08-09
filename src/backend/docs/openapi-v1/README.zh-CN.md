@@ -143,7 +143,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**（仅 personal bot；`service` 返回 501） |
+| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**；运维者 + 阶段 2026-08-09 |
 | engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630** |
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
@@ -539,6 +539,59 @@ Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的�
 
 ---
 
+## 操作共享 Bot 与已发布阶段（`?owner_id=`、`?stage=`）
+
+**engine-runtime 各组是一个运维台（operator console），谁可以持有它只有一条规则：**
+Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部设备连接采用同一门槛
+（`core/engine_runtime/gate.py` 的 `OPERATOR_LEVEL`）。公开（public）可见性不授予任何
+人操作权：公开 Bot 的受众通过 messages 通道与它对话，操作权仍属于它的团队。其他任何
+调用者得到的应答**与 Bot 不存在时逐字节一致**（掩蔽 404）—— 不是 403，403 保持其
+`user_id` 不匹配的唯一含义。协作者查询失败时拒绝（fail closed）。拒绝点会把两个 id
+写入日志；响应不携带任何一个。
+
+两个可选的 query 参数指定目标，遵循与 `user_id` 相同的放置规则（query string，从不
+放在 body 或路径段）：
+
+```text
+GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            协作者，团队 Bot
+GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            拥有者，线上运行态
+GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+```
+
+- **`owner_id`** —— 请求所指向 Bot 的拥有者。默认是调用者本人，因此操作自己的 Bot
+  无需额外指定，**此前有效的每个请求行为逐字节不变**。
+- **`stage`** —— 请求指向哪个运行态：`draft`（默认 —— Bot 自己的工作区，也是 personal
+  bot 唯一的运行态）、`verify` 或 `online`。已发布阶段是否存活由
+  `core/engine_runtime/stage.py` 的规则决定，与 cron 的运行态选取一致：`online` 在最新
+  发布单为 `SUCCESS` 时存活；`verify` 在有发布单验证中时存活，或在晋级后保留的 verify
+  binding 仍为 ACTIVE 时存活。没有存活运行态的阶段 —— 包括对 personal bot 指定已发布
+  阶段 —— 返回 `409` `"No live runtime at the requested stage"`，从不回退到另一阶段的
+  binding。（`eval` 没有长期运行态，不可寻址。）
+
+**运维者看到的是整个设备的状态，这是明文契约。** 引擎的会话集合不按调用者划分 ——
+引擎端口会丢弃 `user_id` 过滤 —— 因此被准入的运维者会看到所指运行态上的所有会话，
+包括终端用户对话创建的会话，与内部工作台向拥有者展示的完全一致。经由本面创建的会话
+会记录实际操作者，保持可归因。一个注意点：多实例 provider 可能把一个已发布阶段扇出
+到多个设备实例；按阶段寻址的应答描述的是所指 binding 的当前实例，不是整个集群
+（cron 的扇出仍在内部）。
+
+被否决的替代方案（记录在 `specs/2026-08-09-openapi-v1-access-expansion/plan.md`，
+避免重新展开讨论）：按调用者划分会话（引擎会忽略按用户过滤，而后端自建
+调用者→会话索引等于在运维台里重造聊天产品）；把公开 Bot 的任意调用者当作运维者
+（内部可达不等于公开授权）；`stage` 作为路径段；必填的 `owner_id`。
+
+延后但未丢失 —— 已建 issue：数据类目的协作者访问（#906、#907）、routines 的阶段
+钉死（#908）、发布生命周期（#909）、可见性/协作者管理（#910）、delegation（#911）。
+skills 组的 `owner_entity_id` 定位参数早于 `owner_id`，应在 skills 发布前统一到
+`owner_id`（spec 未决问题 1）。
+
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对全部十六个操作扫掠
+运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在这
+十六个操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
+钉住存活规则。
+
+---
+
 ## 寻址规则
 
 **每个操作的地址都是 `/openapi/v1/bots/<component>/…`。** 组件的**字面**名称在前；
@@ -736,7 +789,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 仅 personal bot |
+| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 拥有者/协作者运维 |
 | engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
 | models | 2 | `/openapi/v1/bots/models/{bot_id}`、`…/{bot_id}/{model_id}` |
 | approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode`（GET/PUT）、`…/modes` |
@@ -835,6 +888,28 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-09** —— **engine-runtime 各组开始服务共享 Bot 与已发布阶段。** 运维者规则
+  取代了共享 Bot 一律拒绝：Bot 的拥有者与 member 级及以上协作者可以操作它 —— 包括公开
+  的 personal bot、带协作者的 Bot、以及 service bot 的 verify/online 运行态 —— 通过两个
+  可选 query 参数（`owner_id` 默认为调用者；`stage` 默认为 `draft`），默认值保证此前的
+  每个请求逐字节不变。非运维者得到与 Bot 不存在时一致的应答；死阶段返回 `409`
+  `"No live runtime at the requested stage"`；501 现在只表示「不服务该 Bot 类型」。
+  relay 的 `draft_device` 改为必填无默认的 `stage`，阶段→binding 规则唯一存放于
+  `core/engine_runtime/stage.py`（与 connection 服务共用，并与 cron 的保留 verify 规则
+  一致），`sharing.py` / `BotFacts.is_shared` 退役。详见上文 **操作共享 Bot 与已发布
+  阶段** 与 `specs/2026-08-09-openapi-v1-access-expansion/`。看板已挪动：sessions 行
+  备注。后续工作已建 issue #906–#911。
+
+- **2026-08-09（追记，记录 2026-08-07 合入的 PR #880）** —— **草稿 service bot 曾在整个
+  公共面被服务、且始终指向 draft 设备。** 该变更落地时没有 spec 目录也没有变更记录；
+  在此补记以保全文档历史。它把 Track C 门禁从「仅私有 personal bot」放宽到「未共享
+  personal bot + service bot 未共享的发布前草稿」，所有被门禁的转发固定
+  `draft_device=True` —— 也就是上一条 2026-08-09 访问扩展所取代的状态。其 docstring 中
+  `publish_bot_id + "pub" + version` 的命名方案说法与事实不符（代码写入的是
+  `publish_bot_id = bot_id`；draft 与已发布运行态的真正分界是 binding 的存放位置 ——
+  `ac_bots.binding_id` 与 `ac_bot_publish.ext.binding.{verify,online}`），已由访问扩展
+  修正。
 
 - **2026-08-09** —— **公共面现在显式指定终端用户。** 65 个操作中的 56 个改为接受必填的
   `user_id` query 参数，不再从已验证 principal 推导 owner；指定其他用户返回 `403`。四个

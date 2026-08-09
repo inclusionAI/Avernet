@@ -170,7 +170,7 @@
         exclusivity claim).
 - **Depends on:** Task 5
 
-## Task 7: Write the rule where the next author will find it  `[ ]`
+## Task 7: Write the rule where the next author will find it  `[x]`
 
 - **Goal:** The docs say who may operate what, at which stage, and what an
   operator sees — before an integrator discovers it.
@@ -178,18 +178,18 @@
   `src/backend/docs/openapi-v1/README.md` + `README.zh-CN.md`,
   `src/backend/docs/openapi-v1/engine-surface.md` + `engine-surface.zh-CN.md`
 - **Done when:**
-  - [ ] The operator rule (owner or MEMBER+; public grants nothing; masked
+  - [x] The operator rule (owner or MEMBER+; public grants nothing; masked
         404), the stage addressing (parameters, defaults, the 409), and the
         device-wide exposure statement are in the README beside the
         explicit-user-id section, with the rejected alternatives recorded in
         one short paragraph.
-  - [ ] `engine-surface.md`'s "personal bots only" ruling and its
+  - [x] `engine-surface.md`'s "personal bots only" ruling and its
         published-binding notes carry dated amendments; the multi-instance
         caveat (a stage answer describes the addressed instance) is stated.
-  - [ ] The changelog gains this change's entry **and** a retroactive entry
+  - [x] The changelog gains this change's entry **and** a retroactive entry
         for the undocumented draft-service widening (PR #880), so the
         history is whole; the status board moves; both zh-CN mirrors match.
-  - [ ] The follow-ups the spec names (collaborator access to data
+  - [x] The follow-ups the spec names (collaborator access to data
         categories, routines' stage pin, `owner_entity_id` reconciliation)
         are listed as deferred items, not lost.
 - **Depends on:** Task 6

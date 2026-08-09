@@ -165,7 +165,7 @@ DDL. Full ruling and per-endpoint mapping in
 
 | Group | Endpoints | Owner | Pri | Router | State |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630** (personal bots only; `service` → 501) |
+| sessions | 7 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **IMPLEMENTED — PR #630**; operators + stages 2026-08-09 |
 | engine (read-only) | 3 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **IMPLEMENTED — PR #630** |
 | connection | 1 | ⬜ unassigned | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **IMPLEMENTED — PR #630** |
 | approvals | 3 | ⬜ unassigned | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **IMPLEMENTED — PR #630** |
@@ -720,6 +720,78 @@ unchanged — so a route that breaks the rule fails there rather than in review.
 
 ---
 
+## Operating shared bots and published stages (`?owner_id=`, `?stage=`)
+
+**The engine-runtime groups are an operator console, and who may hold it is
+one rule:** the bot's **owner**, or a **collaborator at member level or
+above** — the same bar the internal device-connection applies
+(`core/engine_runtime/gate.py`, `OPERATOR_LEVEL`). Public visibility grants
+operation to **no one**: a public bot's audience converses with it over the
+messages channel; operating it stays with its team. Anyone else is answered
+**byte-identically to a bot that does not exist** (the masked 404) — not a
+403, which keeps its single `user_id`-mismatch meaning. A failed collaborator
+lookup refuses (fail closed). Both ids are logged at the refusal; the
+response carries neither.
+
+Two optional query parameters name the target, following the same placement
+rule as `user_id` (query string, never a body field or a path segment):
+
+```text
+GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            collaborator, team bot
+GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            owner, live runtime
+GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+```
+
+- **`owner_id`** — the owner of the bot the request addresses. Defaults to
+  the caller, so operating one's own bot names nothing extra and **every
+  request valid before this change behaves byte-for-byte the same**.
+- **`stage`** — which runtime the request addresses: `draft` (default — the
+  bot's own workspace, the only runtime a personal bot has), `verify`, or
+  `online`. A published stage is live per the rule in
+  `core/engine_runtime/stage.py`, shared with cron's runtime targeting:
+  `online` while the newest publish record is at `SUCCESS`; `verify` while a
+  record validates, or through the promoted record's **retained** verify
+  binding while it stays ACTIVE. A stage with no live runtime — including a
+  published stage named on a personal bot — is `409` `"No live runtime at
+  the requested stage"`, never a fallback to another stage's binding.
+  (`eval` has no long-lived runtime and is not addressable.)
+
+**What an operator sees is device-wide, by documented contract.** The
+engine's session collection is not scoped per caller — the engine ports drop
+the `user_id` filter — so an admitted operator sees every session on the
+addressed runtime, including ones end users' chats created, exactly as the
+internal workbench already shows an owner. Sessions created through this
+surface stamp the acting caller, so they stay attributable. One caveat: a
+multi-instance provider can fan a published stage out to several device
+instances; a stage-addressed answer describes the addressed binding's current
+instance, not the fleet (cron's fan-out stays internal).
+
+Rejected alternatives, recorded so the question is not reopened
+(`specs/2026-08-09-openapi-v1-access-expansion/plan.md`): per-caller session
+scoping (the engine ignores per-user filters, and a backend-owned caller→
+session index rebuilds the chat product inside an operator console);
+admitting public-bot callers as operators (internal reachability is not
+public authorization); `stage` as a path segment; a required `owner_id`.
+
+Deferred, not lost — filed as issues: collaborator access to the data
+categories ([#906](https://github.com/inclusionAI/Avernet/issues/906),
+[#907](https://github.com/inclusionAI/Avernet/issues/907)), routines' stage
+pin ([#908](https://github.com/inclusionAI/Avernet/issues/908)), publish
+lifecycle ([#909](https://github.com/inclusionAI/Avernet/issues/909)),
+visibility/collaborator management
+([#910](https://github.com/inclusionAI/Avernet/issues/910)), delegation
+([#911](https://github.com/inclusionAI/Avernet/issues/911)). The skills
+group's `owner_entity_id` locator predates `owner_id` and should be
+reconciled to it before skills' pending release (spec Open Question 1).
+
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` sweeps the
+operator matrix across all sixteen operations;
+`…/test_stage_addressing.py` pins the stage behaviour and asserts the two
+parameters sit on exactly the sixteen, optional, in the query;
+`tests/community/core/engine_runtime/test_stage.py` pins the liveness rule.
+
+---
+
 ## Addressing rule
 
 **Every operation is addressed `/openapi/v1/bots/<component>/…`.** The
@@ -937,7 +1009,7 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 
 | Group | Endpoints | Public paths |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` — personal bots only |
+| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` — owner/collaborator operators |
 | engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
 | models | 2 | `/openapi/v1/bots/models/{bot_id}`, `…/{bot_id}/{model_id}` |
 | approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode` (GET/PUT), `…/modes` |
@@ -1060,6 +1132,35 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-09** — **The engine-runtime groups serve shared bots and published
+  stages.** The operator rule replaces the shared-bot refusal: a bot's owner
+  and its member-level collaborators operate it — public personal bots,
+  collaborated bots, and a service bot's verify/online runtimes included —
+  via two optional query parameters (`owner_id`, defaulting to the caller;
+  `stage`, defaulting to `draft`) whose defaults keep every prior request
+  byte-for-byte identical. A non-operator is answered identically to an
+  absent bot; a dead stage is `409` `"No live runtime at the requested
+  stage"`; the 501 now means only "bot type not served". `draft_device`
+  became `stage` in the relay (required, no default), the stage→binding rule
+  lives once in `core/engine_runtime/stage.py` (shared with the connection
+  service, aligned with cron's retained-verify rule), and `sharing.py` /
+  `BotFacts.is_shared` retired. See **Operating shared bots and published
+  stages** above and `specs/2026-08-09-openapi-v1-access-expansion/`.
+  Board moved: sessions row note. Follow-ups filed as #906–#911.
+
+- **2026-08-09 (retroactive, recording PR #880, merged 2026-08-07)** — **Draft
+  service bots were served across the public surface, draft device always.**
+  Landed without a spec directory or a changelog entry; recorded here so the
+  doc's history is whole. It widened the Track C gate from "private personal
+  bots only" to "unshared personal bots + a service bot's unshared
+  pre-publication draft", with every gated forward pinned `draft_device=True`
+  — the state the 2026-08-09 access expansion above then replaced. Its
+  docstrings' `publish_bot_id + "pub" + version` naming-scheme claim was
+  factually wrong (the code writes `publish_bot_id = bot_id`; the real
+  draft/published separation is binding storage — `ac_bots.binding_id` vs
+  `ac_bot_publish.ext.binding.{verify,online}`) and was corrected by the
+  access expansion.
 
 - **2026-08-09** — **The public surface now names its end user explicitly.** 56
   of the 65 operations take a required `user_id` query parameter instead of
