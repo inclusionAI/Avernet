@@ -4,14 +4,13 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1 `[x]`: Add the schema columns, unique index, and prod DDL
-- **Goal:** `ac_task_queue` carries `idempotency_key` and `active_idempotency_key` with the active-only unique index, in both the ORM definition and the checked-in prod DDL.
-- **Files:** `core/task_queue/repository/models.py`, `core/task_queue/sql/2026_08_04_task_queue_idempotency.sql` (new dir + file)
+## Task 1 `[x]`: Add the schema columns and unique index
+- **Goal:** `ac_task_queue` carries `idempotency_key` and `active_idempotency_key` with the active-only unique index, in the ORM definition.
+- **Files:** `core/task_queue/repository/models.py`
 - **Done when:**
   - [x] Both columns exist on `TaskQueueModel` as `String(190), nullable=True` with comments.
   - [x] `__table_args__` carries `Index("uk_env_task_type_active_idempotency_key", "env", "task_type", "active_idempotency_key", unique=True)`.
-  - [x] The `.sql` file mirrors the ORM exactly and uses the `GLOBAL` index keyword, matching `core/service_bot/sql/ac_bot_publish.sql:22-26`.
-  - [x] The file header states the DDL must be applied before the code that writes the columns, and that no backfill is required.
+  - [x] The README states the schema change must be applied before deploying the release that writes the columns, and that no backfill is required.
   - [x] `Base.metadata.create_all()` builds the table with the index on SQLite (existing `repo` fixture still constructs). Verified: index reports `unique=1` over `['env', 'task_type', 'active_idempotency_key']`; 21 existing tests pass unchanged.
 - **Depends on:** —
 - **Note:** This task is inert at runtime — nothing writes the columns yet.
@@ -104,7 +103,7 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Goal:** Confirm every acceptance criterion in `spec.md` holds.
 - **Files:** —
 - **Done when:**
-  - [x] Acceptance 1 — columns + unique index exist in ORM (`models.py`) and in the checked-in prod DDL (`sql/2026_08_04_task_queue_idempotency.sql`); SQLite `create_all` reports the index as `unique=1`.
+  - [x] Acceptance 1 — columns + unique index exist in the ORM (`models.py`); SQLite `create_all` reports the index as `unique=1`.
   - [x] Acceptance 2 — `enqueue` takes an optional key and returns `(record, created)` across all three layers (protocol, service, repository).
   - [x] Acceptance 3 — `test_duplicate_keyed_enqueue_returns_existing_and_inserts_nothing` asserts `created=False`, same id, and a row count of 1.
   - [x] Acceptance 4 — `test_terminal_transition_releases_key_and_allows_reenqueue`, parametrized over all four terminal paths.

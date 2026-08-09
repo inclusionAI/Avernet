@@ -215,10 +215,8 @@ are non-truncating, so prefer raising the row format over shortening.
 Per `repository/models.py:1-9`, the prod OceanBase table is created manually and
 must mirror the ORM definition. So:
 
-1. Apply the DDL above to prod, checked in as
-   `core/task_queue/sql/2026_08_04_task_queue_idempotency.sql`, following the
-   per-module `sql/` convention already used by `core/session_resources/sql/`
-   and `core/service_bot/sql/`.
+1. Apply the schema change above to prod. It is provisioned out of band —
+   `repository/models.py` is the source of truth and no DDL is checked in.
 2. Only then deploy **the release containing this change** — not merely the
    later change that starts passing a key. The ORM maps both columns
    unconditionally, so every `SELECT` projects them and every `INSERT` writes

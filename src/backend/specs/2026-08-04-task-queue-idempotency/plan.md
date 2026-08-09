@@ -24,14 +24,13 @@ the `NULL` opt-out.
 - `src/backend/src/agentclaw/community/core/task_queue/types.py` — `TaskRecord` field, new `EnqueueResult`.
 - `src/backend/src/agentclaw/community/core/task_queue/services/task_queue_service.py` — the adopter-facing facade; pass-through + return shape.
 - `src/backend/src/agentclaw/community/plugins/task_queue_repository.py` — insert path, and the four terminal writes that must release the key.
-- `src/backend/src/agentclaw/community/core/task_queue/sql/` — **new directory**; the prod DDL, per the per-module `sql/` convention already used by `core/session_resources/sql/` and `core/service_bot/sql/`.
 - `src/backend/src/agentclaw/community/core/task_queue/README.md` — the "How idempotency works" section.
 - `src/backend/tests/community/plugins/test_task_queue_repository.py` — the eight cases from spec (g).
 
 ## Data Model Changes
 
 ```sql
--- core/task_queue/sql/2026_08_04_task_queue_idempotency.sql
+-- Schema change (provisioned out of band; models.py is the source of truth).
 -- Apply BEFORE deploying Backend code that writes these columns.
 -- Existing rows take NULL in both columns; NULLs are distinct in a unique
 -- index, so no existing row can collide and no backfill or scrub is required.
@@ -275,7 +274,7 @@ None. `IntegrityError` comes from `sqlalchemy.exc`, already a dependency.
 - **Risk:** The DDL ships after the release containing this change → `Unknown column` in prod, breaking the *entire* queue rather than just keyed callers. The ORM maps both columns unconditionally, so every `SELECT` projects them and every `INSERT` writes them even for an un-keyed enqueue.
   **Mitigation:** Rollout ordering below states "before this release", not "before the first keyed caller"; there is no fallback path, so ordering is mandatory, not best-effort.
 - **Risk:** A case-insensitive default collation on MySQL/OceanBase makes `publish:Bot-A:poll` and `publish:bot-a:poll` the same key in the unique index (non-`_0900` ci collations also PAD SPACE, so `k1` == `k1 `), silently joining one caller's enqueue to another's task.
-  **Mitigation:** Both key columns pin `utf8mb4_bin` via `with_variant`, in the ORM and in the DDL. SQLite is BINARY natively, so no behavioural test can catch a regression — a test asserts the rendered MySQL `CREATE TABLE` carries the collation.
+  **Mitigation:** Both key columns pin `utf8mb4_bin` via `with_variant` in the ORM, and the provisioned table must match. SQLite is BINARY natively, so no behavioural test can catch a regression — a test asserts the rendered MySQL `CREATE TABLE` carries the collation.
 
 ## Alternatives Considered
 
@@ -288,8 +287,8 @@ None. `IntegrityError` comes from `sqlalchemy.exc`, already a dependency.
 ## Rollout
 
 ```bash
-# 1. DDL to prod FIRST — the code below writes columns that must already exist.
-mysql < src/backend/src/agentclaw/community/core/task_queue/sql/2026_08_04_task_queue_idempotency.sql
+# 1. Schema change to prod FIRST — the code below writes columns that must
+#    already exist. Applied out of band; see models.py for the definition.
 
 # 2. Then deploy Backend. Local/test SQLite gets the columns from create_all().
 ```

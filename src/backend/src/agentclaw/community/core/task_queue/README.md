@@ -119,8 +119,9 @@ precise as its least precise column. Left on the default, `Job` and `job` would
 be one index entry — two registered handlers sharing a single dedup slot, so a
 keyed enqueue for one joins the other's live task. Pinning it costs nothing
 elsewhere: on this table `task_type` is compared in SQL only by the dedup
-lookup and appears in no other index. Note this requires a `MODIFY COLUMN` on
-an existing column, so unlike the new columns it rewrites data — see the DDL.
+lookup and appears in no other index. Note that on an already-provisioned table
+this is a change to an *existing* column rather than a new one, so it rewrites
+data — expect a table rebuild rather than a metadata-only change.
 
 **`env` deliberately does not.** It is scoped by the same index, but unlike
 `task_type` it is compared by the claim/reclaim eligibility filter and carries
@@ -202,43 +203,53 @@ the release) surfaces as a raised `RuntimeError` from `enqueue` rather than as a
 finished task handed back with `created=False`. That is a loud failure on an
 inconsistent row, not a repair — see its docstring.
 
-The idempotency migration **must be applied before deploying the release that
-contains it** — not merely before the first call site passes a key. The ORM maps
-both columns unconditionally, so every `SELECT` projects them and every `INSERT`
-writes them even for an un-keyed enqueue; against a table without the columns the
-whole queue fails with "unknown column".
+## Provisioning
+
+**`repository/models.py` is the source of truth for the schema.** No DDL is
+checked in: the deployed tables are provisioned out of band, so a copy in the
+repo would be a second definition to keep in step rather than an authority. Read
+the ORM model — column types, nullability, collations, and the index are all
+declared there with the reasoning inline.
+
+**The schema change must be applied before deploying the release that contains
+it** — not merely before the first call site passes a key. The ORM maps both new
+columns unconditionally, so every `SELECT` projects them and every `INSERT`
+writes them even for an un-keyed enqueue; against a table without them the whole
+queue fails with "unknown column".
 
 That applies to **any** deployment that has provisioned `ac_task_queue`, not just
 prod. `CommunityDatabase` is a pure connection provider and never runs
 `create_all`, so a community schema is operator-provisioned and does not pick the
-columns up automatically. The engines need different DDL, so the migration ships
-as one file per store, with `sql/2026_08_04_task_queue_idempotency.README.md` as
-the index of which to run:
+columns up automatically. What has to exist:
 
-| Store | File |
-| --- | --- |
-| OceanBase (prod) | `sql/2026_08_04_task_queue_idempotency.sql` |
-| MySQL (stock) | `sql/2026_08_04_task_queue_idempotency.mysql.sql` |
-| SQLite (persistent file) | `sql/2026_08_04_task_queue_idempotency.sqlite.sql` |
+- `idempotency_key` and `active_idempotency_key` — nullable, matching the width
+  in `models.py`, both pinning `utf8mb4_bin` on MySQL/OceanBase.
+- `task_type` also pinning `utf8mb4_bin` there — it is the index's other scope
+  column, and an index is only as precise as its least precise column.
+- `UNIQUE (env, task_type, active_idempotency_key)`.
+- `env` deliberately left on the table default — see the index comment in
+  `models.py` for why widening it is a much larger change.
 
-**PostgreSQL is not a supported store for this component**, and no PostgreSQL
-DDL is shipped. `CommunityDatabase` will connect to it, but `_now_plus` branches
-on SQLite and treats every other dialect as MySQL, emitting `date_add(now(),
-INTERVAL n SECOND)` — which PostgreSQL does not have. Since all the repository's
-timing is DB-side, the queue does not work there at all, so shipping DDL for it
-would produce a table that still cannot be used while looking like a supported
-path. Supporting it means teaching `_now_plus` a third dialect.
+On SQLite none of the collation clauses apply: it compares `TEXT` as `BINARY`
+natively, which is already the semantics the key contract needs.
 
-Only the MySQL-family files carry `COLLATE utf8mb4_bin` and the `task_type`
-rewrite; SQLite already compares BINARY, so it needs neither.
-That collation is load-bearing rather than cosmetic — see "How idempotency works"
-above. Deployments that never provisioned the table need nothing: the worker is
-disabled by default and nothing reads it. The local/test profile needs nothing
-either, since its schema is rebuilt from the ORM metadata on every start.
+**No backfill.** Both columns are new and nullable, every existing row takes
+`NULL`, and all supported engines treat `NULL`s as distinct in a unique index —
+so no two existing rows can collide however many duplicate enqueues the table
+already holds, and the index can be created alongside the columns.
 
-The SQLite file is executed by a test that builds a pre-migration table, applies
-it, and then runs real keyed enqueues through the repository, so it is verified
-rather than merely written down.
+**PostgreSQL is not a supported store for this component.** `CommunityDatabase`
+will connect to it, but `_now_plus` branches on SQLite and treats every other
+dialect as MySQL, emitting `date_add(now(), INTERVAL n SECOND)` — which
+PostgreSQL does not have. Since all the repository's timing is DB-side, the queue
+does not work there at all. Supporting it means teaching `_now_plus` a third
+dialect, not writing DDL.
+
+Deployments that never provisioned the table need nothing: the worker is disabled
+by default and nothing reads it. The local/test profile needs nothing either,
+since its schema is rebuilt from the ORM metadata on every start — note that
+`create_all(checkfirst=True)` adds missing *tables*, not missing *columns*, so a
+long-lived local SQLite file predating this change needs recreating.
 
 ## Context Boundary
 
