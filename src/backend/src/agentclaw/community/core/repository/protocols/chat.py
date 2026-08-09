@@ -12,6 +12,13 @@ from abc import abstractmethod
 from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.bot_chat.query_support import QueryScope
+    from agentclaw.community.core.bot_chat.schemas import (
+        ConversationDetail,
+        ConversationObservation,
+        ConversationSession,
+        SessionListResponse,
+    )
     from agentclaw.community.core.channel.models import ChannelRecord
 
 
@@ -242,4 +249,153 @@ class ChannelRepository(Protocol):
     @abstractmethod
     def delete_by_id(self, *, channel_id: int) -> None:
         """Logical delete a channel record by id (set deleted=1)."""
+        ...
+
+
+@runtime_checkable
+class OpenBotChatRepositoryProtocol(Protocol):
+    """Reads owned exclusively by the Bot Chat OpenAPI surface."""
+
+    @abstractmethod
+    def list_scope_traces(
+        self,
+        *,
+        from_ms: int,
+        to_ms: int,
+        page: int,
+        limit: int,
+        session_key: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+    ) -> SessionListResponse:
+        """List one exact Session, Task, or Group scope without product policy."""
+        ...
+
+    @abstractmethod
+    def get_trace_detail(self, trace_id: str) -> ConversationDetail:
+        """Return one exact Trace and observations without product authorization."""
+        ...
+
+    @abstractmethod
+    def list_user_bot_traces(
+        self,
+        *,
+        user_id: str,
+        bot_id: str,
+        from_ms: int,
+        to_ms: int,
+        page: int,
+        limit: int,
+    ) -> SessionListResponse:
+        """Return one atomic page for the exact user-and-Bot pair."""
+        ...
+
+
+@runtime_checkable
+class BotChatDbRepositoryProtocol(Protocol):
+    """Product-facing bot-chat queries and OTLP ingestion."""
+
+    @abstractmethod
+    def owns_bot(self, owner_id: str, bot_id: str) -> bool:
+        """Check if owner owns the specified bot via ac_bots table."""
+        ...
+
+    @abstractmethod
+    def is_bot_owner(self, owner_id: str, bot_id: str) -> bool:
+        """Check if owner_id is the owner of bot_id via ac_bots table."""
+        ...
+
+    @abstractmethod
+    def is_bot_collaborator(self, user_id: str, bot_id: str) -> bool:
+        """Check if user_id is a collaborator of bot_id via ac_bot_collaborator."""
+        ...
+
+    @abstractmethod
+    def has_bot_access(self, user_id: str, bot_id: str) -> bool:
+        """Check if user_id is either owner or collaborator of bot_id."""
+        ...
+
+    @abstractmethod
+    def enrich_labels(
+        self,
+        rows: list[Any],
+        preferred_biz_scene: str | None = None,
+        preferred_biz_task_id: str | None = None,
+    ) -> None:
+        """Batch-fill display labels for one final response page."""
+        ...
+
+    @abstractmethod
+    def list_traces(
+        self,
+        owner_id: str | None,
+        from_ms: int,
+        to_ms: int,
+        page: int,
+        limit: int,
+        bot_id: str | None = None,
+        trace_id: str | None = None,
+        session_id: str | None = None,
+        session_key: str | None = None,
+        query: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
+    ) -> tuple[list[ConversationSession], int]:
+        """List traces from DB with pagination."""
+        ...
+
+    @abstractmethod
+    def list_ocb_traces(
+        self,
+        owner_id: str | None,
+        from_ms: int,
+        to_ms: int,
+        page: int,
+        limit: int,
+        bot_id: str | None = None,
+        trace_id: str | None = None,
+        session_id: str | None = None,
+        session_key: str | None = None,
+        query: str | None = None,
+        biz_scene: str | None = None,
+        biz_task_id: str | None = None,
+        group_id: str | None = None,
+        match_mode: str = "exact",
+        include_output_match: bool = False,
+        query_scope: QueryScope = QueryScope.OWNER,
+    ) -> tuple[list[ConversationSession], int]:
+        ...
+
+    @abstractmethod
+    def get_trace(self, trace_id: str) -> Any | None:
+        """Get single trace by ID."""
+        ...
+
+    @abstractmethod
+    def get_ocb_trace(self, trace_id: str) -> Any | None:
+        ...
+
+    @abstractmethod
+    def list_ocb_observations(self, trace_id: str) -> list[ConversationObservation]:
+        ...
+
+    @abstractmethod
+    def list_legacy_observations(self, trace_id: str) -> list[ConversationObservation]:
+        ...
+
+    @abstractmethod
+    def upsert_ocb_trace(self, trace: dict[str, Any], source: dict[str, Any] | None = None) -> str:
+        ...
+
+    @abstractmethod
+    def upsert_ocb_observation(self, observation: dict[str, Any]) -> str:
+        ...
+
+    @abstractmethod
+    def upsert_biz_refs(self, relation: dict[str, Any]) -> dict[str, int]:
         ...

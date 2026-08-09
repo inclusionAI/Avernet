@@ -63,24 +63,24 @@ commit that file.
   - [x] All 11 import standalone. `protocols/bot` became a **package** (1265 lines > the Rule 9 cap); its `__init__` re-exports so importers are unchanged.
 - **Depends on:** Task 2
 
-## Task 5: Author the two missing chat Protocols
+## Task 5: Author the two missing chat Protocols  `[x]`
 - **Goal:** Give `OpenBotChatRepository` and `BotChatDbRepository` contracts
   derived from their current public surface — no members added or dropped (R3b).
 - **Files:** `core/repository/protocols/chat.py`.
 - **Done when:**
-  - [ ] Both Protocols mirror the existing public method sets exactly (AST-diffed against the implementations).
-  - [ ] Both are `@runtime_checkable` with `@abstractmethod` members.
+  - [x] AST-diffed against the implementations: `OpenBotChatRepositoryProtocol` 3/3, `BotChatDbRepositoryProtocol` 14/14 — identical sets, nothing added or dropped.
+  - [x] Both `@runtime_checkable`; contract surface now **46 Protocols / 430 members / 430 `@abstractmethod`**.
 - **Depends on:** Task 4
 
-## Task 6: Retire `plugin_api/local_skill_cleanup.py`
+## Task 6: Retire `plugin_api/local_skill_cleanup.py`  `[x]`
 - **Goal:** Move `LocalSkillCleanupRepository` to `protocols/skill_center.py`; it
   is a repository contract with one implementation, not a plugin contract.
 - **Files:** delete `plugin_api/local_skill_cleanup.py`; update
   `di/modules/skill_center_module.py` and `plugin_api/README.md`.
 - **Done when:**
-  - [ ] The Protocol lives in `protocols/skill_center.py`; the old module is gone.
-  - [ ] `plugin_api/README.md`'s Protocol count is corrected.
-  - [ ] `pytest tests/community/architecture/test_protocol_contracts.py` green (it never discovered this Protocol — confirm the count is unaffected).
+  - [x] Lives in `protocols/skill_center.py`; the old module is deleted.
+  - [x] Corrected 23 → 27. The count was already stale before this change: the removed contract never subclassed `Plugin`, so it was never in that number.
+  - [x] Green — Rule 25 discovery only walks `Plugin` subclasses, so the count is unaffected, as predicted.
 - **Depends on:** Task 4
 
 ## Task 7: Move the 36 plugin-layer implementations
