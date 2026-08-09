@@ -262,10 +262,6 @@ def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
     """The flip of the old shared-bot 501: operators are adjudicated per
     caller — a collaborator reads engine state, a stranger's answer is
     byte-identical to a bot that does not exist."""
-    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine import (
-        router as engine_router,
-    )
-
     relay.add_operator("u2")
     relay.results = [EngineResult(data=RAW_STATUS)]
     collaborator = make_client(engine_router, caller="u2")

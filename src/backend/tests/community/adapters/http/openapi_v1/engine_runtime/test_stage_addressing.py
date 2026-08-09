@@ -11,6 +11,8 @@ operation is covered without editing this file.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 import pytest
 from fastapi import FastAPI
 
@@ -54,14 +56,82 @@ def test_the_default_is_the_draft_byte_for_byte(client, relay):
     assert [c["stage"] for c in relay.calls] == ["draft"]
 
 
+#: One representative route per relay-forwarding group — a group whose router
+#: gated on the requested stage but forwarded a pasted literal would slip a
+#: sessions-only pin.
+_GROUP_ROUTES = [
+    ("sessions", f"/openapi/v1/bots/sessions/{BOT}"),
+    ("engine", f"/openapi/v1/bots/engine/{BOT}/capabilities"),
+    ("models", f"/openapi/v1/bots/models/{BOT}"),
+    ("approvals", f"/openapi/v1/bots/approvals/{BOT}/mode?session_key=k"),
+]
+
+
+@pytest.mark.parametrize(("group", "url"), _GROUP_ROUTES, ids=lambda v: str(v))
 @pytest.mark.parametrize("stage", ["verify", "online"])
-def test_a_named_stage_travels_to_the_forward_unchanged(client, relay, stage):
-    """The stage the gate admitted is the stage the forward addresses — the
-    relay's required parameter makes a divergence a TypeError, and this pins
-    the value itself."""
+def test_a_named_stage_travels_to_the_forward_unchanged(
+    make_client, relay, group, url, stage
+):
+    """The stage the gate admitted is the stage the forward addresses, in
+    every relay-forwarding group — the relay's required parameter makes an
+    *omitted* stage a TypeError, and this pins the value itself."""
+    import importlib
+
+    module = importlib.import_module(
+        "agentclaw.community.adapters.http.openapi_v1.engine_runtime." + group
+    )
     relay.set_bot_type("service")
-    ok(client.get(_base(), params={"stage": stage}))
+    relay.results = [
+        EngineResult(
+            data={"supported": [], "sessionKey": "k", "mode": "approve", "id": "s"}
+        )
+    ]
+    client = make_client(module.router)
+    resp = client.get(url, params={"stage": stage})
+    assert resp.status_code == 200, resp.json()
     assert [c["stage"] for c in relay.calls] == [stage]
+
+
+def test_the_connection_build_receives_the_named_stage(relay):
+    """The socket side of the same pin: the router passes the request's stage
+    to ``build`` verbatim."""
+    from fastapi_injector import attach_injector
+    from injector import Injector, Module
+
+    from tests.community.adapters.http.openapi_v1.conftest import (
+        user_scoped_client,
+    )
+    from tests.community.adapters.http.openapi_v1.engine_runtime import (
+        test_operator_access as op,
+    )
+    from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+        require_principal,
+    )
+    from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection import (
+        router as connection_router,
+    )
+    from agentclaw.community.api.engine_connection_service import (
+        EngineConnectionServiceProtocol,
+    )
+
+    relay.set_bot_type("service")
+    connections = op._Connections(relay)
+
+    class _M(Module):
+        def configure(self, binder):
+            binder.bind(EngineConnectionServiceProtocol, to=connections)
+
+    app = FastAPI()
+    app.include_router(connection_router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
+    attach_injector(app, Injector([_M()]))
+    client = user_scoped_client(app, OWNER)
+
+    resp = client.get(
+        f"/openapi/v1/bots/connection/{BOT}", params={"stage": "online"}
+    )
+    assert resp.status_code == 200, resp.json()
+    assert [b["stage"] for b in connections.builds] == ["online"]
 
 
 @pytest.mark.parametrize("stage", ["verify", "online"])
@@ -99,7 +169,10 @@ def test_a_dead_stage_is_the_fixed_409(client, relay):
 # ── the document ─────────────────────────────────────────────────────────────
 
 
+@lru_cache(maxsize=1)
 def _schema() -> dict:
+    # Cached: four document tests read the same generated description, and
+    # assembling the whole public surface per test quadruples the cost.
     app = FastAPI()
     app.include_router(build_public_router())
     return app.openapi()
@@ -145,17 +218,36 @@ def test_the_stage_enum_publishes_exactly_the_three_runtimes():
 
 
 def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
+    """Scoped to the sixteen operations' request bodies and addresses — a
+    future *response* model elsewhere on the surface may legitimately expose
+    an ``owner_id`` or ``stage`` field; the placement rule is about where
+    these two request parameters travel."""
     schema = _schema()
-    for name, definition in schema.get("components", {}).get("schemas", {}).items():
-        for field in definition.get("properties", {}) or {}:
-            assert field not in ("owner_id", "stage"), (
-                f"{field} appears in request/response schema {name}"
-            )
-    for path in schema["paths"]:
+    components = schema.get("components", {}).get("schemas", {})
+    for path, method, operation in _operations(schema):
+        if not path.startswith(_ENGINE_RUNTIME_PREFIXES):
+            continue
+        body = operation.get("requestBody", {})
+        ref = (
+            body.get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+            .get("$ref", "")
+        )
+        if ref:
+            model = components.get(ref.rsplit("/", 1)[-1], {})
+            for field in model.get("properties", {}) or {}:
+                assert field not in ("owner_id", "stage"), (
+                    f"{field} is a body field on {method.upper()} {path}"
+                )
         assert "{owner_id}" not in path and "{stage}" not in path
 
 
 def test_the_409_is_documented_on_every_engine_runtime_operation():
+    """A regression pin, not an exclusivity claim: 409 is documented
+    surface-wide (``ERROR_RESPONSES``), which is what covers the stage
+    refusal — this fails only if the engine-runtime groups stop carrying
+    it."""
     schema = _schema()
     for path, method, operation in _operations(schema):
         if path.startswith(_ENGINE_RUNTIME_PREFIXES):

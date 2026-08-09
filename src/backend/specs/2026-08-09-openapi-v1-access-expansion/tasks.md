@@ -165,7 +165,9 @@
   - [x] Document-level, in the shape of `test_explicit_user_id.py`:
         `owner_id` and `stage` are optional query parameters on exactly the
         sixteen engine-runtime operations, the enum publishes three values,
-        and the 409 is documented on exactly those operations.
+        and the 409's documentation on them is pinned (it comes from the
+        surface-wide error table, so the pin is a regression guard, not an
+        exclusivity claim).
 - **Depends on:** Task 5
 
 ## Task 7: Write the rule where the next author will find it  `[ ]`
@@ -201,8 +203,8 @@
         negative ones (allowlist unwidened; end-user contract untouched;
         draft byte-compat; no path or body changes).
   - [ ] The generated document is diffed against the base: exactly sixteen
-        operations gain `owner_id` and `stage`, the 409 appears on exactly
-        those, and nothing else moves.
+        operations gain `owner_id` and `stage` (the 409 was already
+        documented surface-wide), and nothing else moves.
   - [ ] `pytest tests/community` is green — not just the touched subtrees.
   - [ ] `scripts/ci/python_sast_local.sh src/backend` passes; changed-line
         coverage meets the backend gate; singlebox coverage runs on the PR.

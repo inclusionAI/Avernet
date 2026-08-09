@@ -163,9 +163,12 @@ class _Collaborators:
         self.calls = []
 
     def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        # Recorded unconditionally — the owner short-circuit is the real
+        # service's; skipping the record here made the owner assertions
+        # tautological.
+        self.calls.append((bot_pk, user_id, owner_id))
         if user_id == owner_id:
             return PermissionLevel.OWNER
-        self.calls.append((bot_pk, user_id, owner_id))
         return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
 
@@ -713,11 +716,37 @@ def test_an_unreadable_collaborator_lookup_refuses_rather_than_publishes():
         _build(svc, caller_id="u2")
 
 
-def test_the_collaborator_lookup_is_skipped_for_the_owner():
-    """The owner short-circuits; no collaborator query is spent on them."""
+def test_the_owner_holds_their_socket_with_no_collaborator_row():
+    """The owner needs no configured row; the level policy — including its
+    DB-free owner short-circuit — is the real ``CollaboratorService``'s."""
     collaborators = _Collaborators()
-    _build(_svc(collaborators=collaborators))
-    assert collaborators.calls == []
+    result = _build(_svc(collaborators=collaborators))
+    assert [s.kind for s in result.sockets] == ["chat"]
+
+
+def test_a_published_stage_socket_addresses_the_stage_binding():
+    """``stage=online`` composes against the publish record's binding — never
+    ``ac_bots.binding_id`` — through the same rule the relay uses. A draft
+    fallback here would be the cross-stage leak the spec forbids."""
+    from tests.community.core.engine_runtime.test_stage import _Record
+
+    bindings = _Bindings(raises=AssertionError("the draft binding was read"))
+    devices = _Devices()
+    publish_repo = _PublishRepo(
+        {100: [_Record({"binding": {"online": 77, "verify": 76}}, "success")]}
+    )
+    _build(
+        _svc(
+            bots=_Bots(bot_type="service"),
+            bindings=bindings,
+            devices=devices,
+            publish_repo=publish_repo,
+        ),
+        stage="online",
+    )
+    assert devices.kwargs["binding_id"] == 77
+    # Keyed on the primary key of the row the adjudication was proven against.
+    assert [pk for pk, _ in publish_repo.calls] == [100]
 
 
 def test_an_unknown_bot_type_is_refused_rather_than_assumed_personal():

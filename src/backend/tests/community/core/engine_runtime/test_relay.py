@@ -167,9 +167,13 @@ class _Collaborators:
         self.calls: list[tuple[int, str, str]] = []
 
     def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        # Recorded unconditionally — the owner's DB-free short-circuit lives
+        # inside the real CollaboratorService, not at this boundary, and a
+        # fake that skipped recording made "no lookup for the owner" a
+        # tautology no regression could fail.
+        self.calls.append((bot_pk, user_id, owner_id))
         if user_id == owner_id:
             return PermissionLevel.OWNER
-        self.calls.append((bot_pk, user_id, owner_id))
         return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
 
@@ -884,12 +888,13 @@ async def test_an_ungated_route_still_resolves_its_own_bot():
 # ── the operator adjudication ─────────────────────────────────────────────────
 
 
-def test_the_owner_is_an_operator_without_a_lookup():
-    """The owner short-circuits: no collaborator query is spent on them."""
+def test_the_owner_is_an_operator():
+    """The owner resolves their own bot with no configured collaborator row —
+    the level policy (including its DB-free owner short-circuit) is the real
+    ``CollaboratorService``'s, delegated to, not re-implemented at the gate."""
     collaborators = _Collaborators()
     facts = _relay(collaborators=collaborators).resolve_bot(BOT, OWNER, OWNER)
     assert facts.owner_id == OWNER
-    assert collaborators.calls == []
 
 
 @pytest.mark.parametrize(

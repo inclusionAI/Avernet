@@ -144,7 +144,7 @@ def test_the_owner_is_served_every_route(make_caller, method, suffix, body):
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
 def test_a_collaborator_is_served_every_route(
-    make_caller, relay, method, suffix, body
+    make_caller, relay, connections, method, suffix, body
 ):
     """One bar for the whole surface: a member-level collaborator holds the
     console on reads, writes and the socket alike, naming the owner they
@@ -155,6 +155,13 @@ def test_a_collaborator_is_served_every_route(
     kwargs["params"] = {"owner_id": OWNER}
     resp = getattr(client, method)(_url(suffix), **kwargs)
     assert resp.status_code in (200, 201), resp.json()
+    # Every forward and build addresses the NAMED owner's bot — a handler
+    # that regressed to passing the caller's id would resolve the wrong
+    # owner's device in production while the prepaid-facts fake stayed green.
+    for forwarded in relay.calls:
+        assert forwarded["owner_id"] == OWNER
+    for built in connections.builds:
+        assert built["owner_id"] == OWNER and built["caller_id"] == COLLABORATOR
 
 
 @pytest.mark.parametrize(("method", "suffix", "body"), ROUTES, ids=lambda v: str(v))
