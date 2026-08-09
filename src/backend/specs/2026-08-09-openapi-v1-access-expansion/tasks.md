@@ -194,7 +194,7 @@
         are listed as deferred items, not lost.
 - **Depends on:** Task 6
 
-## Task 8: Tests & Verification  `[ ]`
+## Task 8: Tests & Verification  `[~]`
 
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** —

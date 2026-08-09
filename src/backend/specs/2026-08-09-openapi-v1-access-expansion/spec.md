@@ -72,85 +72,85 @@ lives once.
 
 ### Which bots are served
 
-- [ ] A public personal bot is served to its operators, exactly as a private
+- [x] A public personal bot is served to its operators, exactly as a private
       one is.
-- [ ] A bot with collaborators — a service bot, or a personal bot whose engine
+- [x] A bot with collaborators — a service bot, or a personal bot whose engine
       takes collaborators — is served to its operators.
-- [ ] A service bot's verify runtime is addressable while a verify release is
+- [x] A service bot's verify runtime is addressable while a verify release is
       live, and its online runtime while an online release is live.
-- [ ] A service bot's draft workspace is served exactly as it is today.
-- [ ] Bot types the surface has never heard of are still refused; the
+- [x] A service bot's draft workspace is served exactly as it is today.
+- [x] Bot types the surface has never heard of are still refused; the
       allowlist itself does not widen.
 
 ### Who may operate
 
-- [ ] The bot's owner may operate it.
-- [ ] A collaborator at member level or above may operate it — one bar for
+- [x] The bot's owner may operate it.
+- [x] A collaborator at member level or above may operate it — one bar for
       every operation on the surface, the same bar the internal operator
       channel applies.
-- [ ] Public visibility grants operation to no one: a public bot's audience
+- [x] Public visibility grants operation to no one: a public bot's audience
       can talk to it, not operate it.
-- [ ] Any other caller receives an answer byte-identical to naming a bot that
+- [x] Any other caller receives an answer byte-identical to naming a bot that
       does not exist.
-- [ ] The end-user contract from the explicit-user-id change is untouched: the
+- [x] The end-user contract from the explicit-user-id change is untouched: the
       request's `user_id` still names the verified caller, and naming anyone
       else is still refused the same way.
 
 ### Naming the target
 
-- [ ] An operation can name the bot's owner when the owner is not the caller.
+- [x] An operation can name the bot's owner when the owner is not the caller.
       The parameter is optional and defaults to the caller, so operating one's
       own bot names nobody extra.
-- [ ] An operation can name the stage it addresses. The parameter is optional,
+- [x] An operation can name the stage it addresses. The parameter is optional,
       defaults to the draft, and its value set is closed and published.
-- [ ] Both parameters follow the placement rule the explicit-user-id change
+- [x] Both parameters follow the placement rule the explicit-user-id change
       settled: the query string, never a body field, never a path segment. No
       path changes.
-- [ ] A request that names neither owner nor stage behaves byte-for-byte as
+- [x] A request that names neither owner nor stage behaves byte-for-byte as
       today, for every operation on the surface.
-- [ ] The published API description documents both parameters on exactly the
+- [x] The published API description documents both parameters on exactly the
       engine-runtime operations, and nowhere else.
 
 ### Stage semantics
 
-- [ ] Naming a stage with no live runtime — a verify that is not validating,
+- [x] Naming a stage with no live runtime — a verify that is not validating,
       an online that has not released, any stage but draft on a personal bot —
       is refused with one fixed answer that says the stage is not live, and
       that answer is distinguishable from "no such bot".
-- [ ] There is no fallback between stages: a request for verify is never
+- [x] There is no fallback between stages: a request for verify is never
       answered by the online runtime, or the reverse.
-- [ ] The draft remains the pre-publication workspace only; a draft-addressed
+- [x] The draft remains the pre-publication workspace only; a draft-addressed
       request can never reach a published runtime.
 
 ### What an operator sees
 
-- [ ] The surface remains an operator console: an admitted operator reaches
+- [x] The surface remains an operator console: an admitted operator reaches
       the addressed runtime's device-wide state, including sessions created by
       other operators and by end users conversing with a public or published
       bot. The published documentation says this plainly, before an integrator
       discovers it.
-- [ ] A session created through this surface records the operator who created
+- [x] A session created through this surface records the operator who created
       it as its user, so that on a shared runtime, sessions remain
       attributable.
 
 ### Refusals and disclosure
 
-- [ ] A refused non-operator learns nothing: not whether the bot exists, is
+- [x] A refused non-operator learns nothing: not whether the bot exists, is
       public, is published, or has collaborators. Two refused callers get
       byte-identical answers.
-- [ ] Which caller asked, and which owner's bot was asked for, are recoverable
+- [x] Which caller asked, and which owner's bot was asked for, are recoverable
       from the logs at the point of refusal.
-- [ ] The "not supported" refusal (501) now means only what it says — a bot
+- [x] The "not supported" refusal (501) now means only what it says — a bot
       type the surface cannot serve — and no longer stands in for "shared".
 
 ### Documentation
 
-- [ ] The surface's handoff documentation and the engine-surface reference
+- [x] The surface's handoff documentation and the engine-surface reference
       record the widened rule — who may operate, which stages, what an
       operator sees — in the same change, including the Chinese mirrors.
-- [ ] The prior widening to draft service bots, which shipped without a spec
+- [x] The prior widening to draft service bots, which shipped without a spec
       or a doc entry, is recorded retroactively so the doc's history is whole.
-- [ ] Prose that misstates how published runtimes are separated from the draft
+- [x] Prose that misstates how published runtimes are separated from the draft
       is corrected where it stands.
 
 ## In Scope
