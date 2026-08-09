@@ -159,7 +159,7 @@ def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -219,7 +219,7 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -267,7 +267,7 @@ def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -304,7 +304,7 @@ def test_readme_route_falls_back_when_skill_not_found_and_bot_type_lookup_fails(
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -360,7 +360,7 @@ def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
     client, factory, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -388,7 +388,7 @@ def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -430,7 +430,7 @@ def test_readme_route_rejects_ambiguous_default_bot_owner_scope():
     client, _, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -458,7 +458,7 @@ def test_readme_route_handles_target_bot_repository_failure(caplog):
     client, _, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
