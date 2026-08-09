@@ -14,9 +14,7 @@ from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.harness.models import FindingsReport, Layer
-from agentclaw.community.plugins.harness_scan_repository import (
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.harness.scan import HarnessScanRecordRepository
 
 pytestmark = pytest.mark.integration
 

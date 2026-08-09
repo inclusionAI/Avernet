@@ -4,7 +4,7 @@ from injector import Binder, Injector, Module, singleton
 
 from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
 from agentclaw.community.core.bot_chat.open_service import OpenBotChatService
-from agentclaw.community.core.bot_chat.repository import OpenBotChatRepository
+from agentclaw.community.core.repository.implementations.chat.open import OpenBotChatRepository
 from agentclaw.community.di.modules.bot_chat_open_module import BotChatOpenModule
 from agentclaw.community.di.container import (
     build_injector,

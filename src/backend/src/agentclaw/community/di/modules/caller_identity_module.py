@@ -31,9 +31,7 @@ from agentclaw.community.core.caller_identity.iam_token_service import (
 )
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
-from agentclaw.community.plugins.caller_identity_repository import (
-    CallerIdentityRepository,
-)
+from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
 from agentclaw.community.plugin_api.auth import AuthPlugin
 
 

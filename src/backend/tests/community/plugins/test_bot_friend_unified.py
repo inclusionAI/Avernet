@@ -17,9 +17,7 @@ from agentclaw.community.core.bot_public.repository.models import (
     BotFriendModel,
     BotFriendStatus,
 )
-from agentclaw.community.plugins.bot_friend_repository import (
-    BotFriendRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration

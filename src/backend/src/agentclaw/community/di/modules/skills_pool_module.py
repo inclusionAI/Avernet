@@ -52,18 +52,14 @@ from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRecoveryService,
     SkillsPoolRollbackService,
 )
-from agentclaw.community.plugins.skill_repository import SkillRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
-from agentclaw.community.plugins.skills_pool_runtime import SkillsPoolRuntime
-from agentclaw.community.plugins.skills_pool_layout_repository import (
-    SkillsPoolLayoutRepository,
-)
-from agentclaw.community.plugins.skills_pool_rollout_repository import (
-    SkillsPoolRolloutRepository,
-)
+from agentclaw.community.core.skills_pool.runtime import SkillsPoolRuntime
+from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
+from agentclaw.community.core.repository.implementations.skills_pool.rollout import SkillsPoolRolloutRepository
 
 
 class SkillsPoolModule(Module):

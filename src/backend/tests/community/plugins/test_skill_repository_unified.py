@@ -25,10 +25,7 @@ from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion
-from agentclaw.community.plugins.skill_repository import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository, SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration
@@ -217,9 +214,7 @@ def test_delete_cannot_remove_a_skill_or_association_from_another_tenant(
 
 
 def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, sets, db):
-    from agentclaw.community.plugins.local_skill_cleanup_repository import (
-        SqlLocalSkillCleanupRepository,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
     with avernet_tenant_scope("tenant-a"):
         skill = skills.create(
@@ -255,9 +250,7 @@ def test_public_local_delete_commits_cleanup_work_with_derived_state(skills, set
 
 
 def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills, db):
-    from agentclaw.community.plugins.local_skill_cleanup_repository import (
-        SqlLocalSkillCleanupRepository,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
     with avernet_tenant_scope("tenant-a"):
         skill = skills.create(
@@ -300,9 +293,7 @@ def test_public_local_replace_commits_locator_and_cleanup_work_atomically(skills
 def test_public_local_replace_rolls_back_locator_when_cleanup_commit_fails(
     skills, db
 ):
-    from agentclaw.community.plugins.local_skill_cleanup_repository import (
-        SqlLocalSkillCleanupRepository,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
     with avernet_tenant_scope("tenant-a"):
         skill = skills.create(
@@ -355,9 +346,7 @@ def test_public_local_replace_rolls_back_locator_when_cleanup_commit_fails(
 
 
 def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skills, sets, db):
-    from agentclaw.community.plugins.local_skill_cleanup_repository import (
-        SqlLocalSkillCleanupRepository,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
     with avernet_tenant_scope("tenant-a"):
         skill = skills.create(
@@ -400,9 +389,7 @@ def test_public_local_delete_rolls_back_cleanup_work_with_all_derived_state(skil
 def test_public_local_delete_rechecks_active_custom_set_in_delete_transaction(
     skills, sets, db
 ):
-    from agentclaw.community.plugins.local_skill_cleanup_repository import (
-        SqlLocalSkillCleanupRepository,
-    )
+    from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
     with avernet_tenant_scope("tenant-a"):
         skill = skills.create({

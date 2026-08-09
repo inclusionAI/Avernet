@@ -240,9 +240,7 @@ class TestSkillPropagationServiceUsesResolver:
     """L273 SkillPropagationService._refresh_bot 走 resolver + dispatcher。"""
 
     def test_refresh_bot_resolves_and_dispatches(self):
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         ctx = _make_ctx()
         resolver = MagicMock()

@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models import Skill, SkillSet, SkillSetMCPServer, SkillSetSkill
-from agentclaw.community.plugins.skill_repository import SkillSetRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
 )

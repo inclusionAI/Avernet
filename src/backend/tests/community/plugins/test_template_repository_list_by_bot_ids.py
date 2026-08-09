@@ -1,4 +1,4 @@
-from agentclaw.community.plugins.template_repository import TemplateRepository
+from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository
 
 
 def test_list_by_bot_ids_empty_returns_empty_without_db():

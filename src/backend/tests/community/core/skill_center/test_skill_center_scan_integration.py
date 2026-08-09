@@ -3,9 +3,7 @@ from unittest.mock import MagicMock, patch
 
 
 def _make_sync_service(nas_root: str, skill_repo=None, scan_service=None):
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     return SkillCenterSyncService(
         skill_center_client=MagicMock(),
         sync_log_repo=MagicMock(),
@@ -127,9 +125,7 @@ class TestForceSyncTriggersScan:
         mock_log_repo = MagicMock()
         mock_log_repo.find_latest.return_value = None
 
-        from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-            SkillCenterSyncService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
         svc = SkillCenterSyncService(
             skill_center_client=mock_client,
             sync_log_repo=mock_log_repo,
@@ -155,9 +151,7 @@ class TestForceSyncTriggersScan:
         mock_log_repo = MagicMock()
         mock_log_repo.find_latest.return_value = {"status": "success", "version": "1.0.0"}
 
-        from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-            SkillCenterSyncService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
         svc = SkillCenterSyncService(
             skill_center_client=mock_client,
             sync_log_repo=mock_log_repo,

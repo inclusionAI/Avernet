@@ -12,9 +12,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.render_screen_repository import (
-    RenderScreenRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository
 
 pytestmark = pytest.mark.integration
 

@@ -30,7 +30,7 @@ from agentclaw.community.core.skill_center.factories import (
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
-from agentclaw.community.plugins.bot_friend_repository import BotFriendRepository
+from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 from tests.community.contracts.gateway.conftest import (

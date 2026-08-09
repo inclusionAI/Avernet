@@ -12,9 +12,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 
 pytestmark = pytest.mark.integration
 

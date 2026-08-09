@@ -6,7 +6,7 @@ import aiohttp
 from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import LangfuseAPIError, SessionNotFoundError
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,

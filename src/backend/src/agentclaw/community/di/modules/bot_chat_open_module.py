@@ -6,7 +6,7 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.bot_chat_service import OpenBotChatServiceProtocol
 from agentclaw.community.core.bot_chat.open_service import OpenBotChatService
-from agentclaw.community.core.bot_chat.repository import OpenBotChatRepository
+from agentclaw.community.core.repository.implementations.chat.open import OpenBotChatRepository
 
 
 class BotChatOpenModule(Module):

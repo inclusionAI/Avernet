@@ -11,9 +11,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, Text, UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.expert_chat_instance_repository import (
-    ExpertChatInstanceRepository,
-)
+from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository
 
 pytestmark = pytest.mark.integration
 
@@ -372,7 +370,7 @@ def test_get_instance_different_envs(repo):
     repo.upsert_instance("u_env", "b_env", "o_env", status="init")
 
     # Query in different env should return None
-    with patch("agentclaw.community.plugins.expert_chat_instance_repository.get_current_env", return_value="other_env"):
+    with patch("agentclaw.community.core.repository.implementations.chat.expert_chat_instance.get_current_env", return_value="other_env"):
         result = repo.get_instance("u_env", "b_env", "o_env")
 
     assert result is None

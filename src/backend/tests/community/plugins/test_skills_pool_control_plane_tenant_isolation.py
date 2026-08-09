@@ -20,9 +20,7 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-from agentclaw.community.plugins.skills_pool_rollout_repository import (
-    SkillsPoolRolloutRepository,
-)
+from agentclaw.community.core.repository.implementations.skills_pool.rollout import SkillsPoolRolloutRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError
 

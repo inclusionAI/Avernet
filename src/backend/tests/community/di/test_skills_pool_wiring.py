@@ -61,12 +61,10 @@ from agentclaw.community.core.skill_center.services.skill_symlink_listener impor
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
-from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.di import DeployProfile, build_injector
-from agentclaw.community.plugins.skills_pool_layout_repository import (
-    SkillsPoolLayoutRepository,
-)
-from agentclaw.community.plugins.skill_repository import SkillRepository
+from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
 
 
 @pytest.mark.parametrize(

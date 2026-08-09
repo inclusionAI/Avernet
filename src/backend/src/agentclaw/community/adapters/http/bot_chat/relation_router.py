@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.schemas import ApiResponse
 from agentclaw.community.di import Injected
 from agentclaw.community.plugin_api.database import DatabasePlugin

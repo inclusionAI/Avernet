@@ -123,25 +123,6 @@ class SkillRepository(Protocol):
         """Return every current-environment SkillSet association for a Skill."""
 
     @abstractmethod
-    def add_default_skill_exclusion(
-        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
-    ) -> bool:
-        ...
-
-    @abstractmethod
-    def remove_default_skill_exclusion(
-        self, user_id: str, bot_id: str, skill_set_id: int, skill_id: int
-    ) -> bool:
-        ...
-
-    @abstractmethod
-    def remove_all_default_skill_exclusions(
-        self, user_id: str, bot_id: str, skill_id: int
-    ) -> bool:
-        """Clear every default-set exclusion for one Bot-owned Skill."""
-        ...
-
-    @abstractmethod
     def delete_bot_local_skill(
         self,
         *,

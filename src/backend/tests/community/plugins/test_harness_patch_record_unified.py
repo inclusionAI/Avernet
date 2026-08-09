@@ -18,9 +18,7 @@ from agentclaw.community.core.harness.models import (
     PatchStatus,
     PatchTarget,
 )
-from agentclaw.community.plugins.harness_patch_record_repository import (
-    HarnessPatchRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.harness.patch_record import HarnessPatchRecordRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration

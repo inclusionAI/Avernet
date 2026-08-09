@@ -25,9 +25,7 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
 )
 from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.channel_repository import (
-    ChannelRepository as UnifiedChannelRepository,
-)
+from agentclaw.community.core.repository.implementations.chat.channel import ChannelRepository as UnifiedChannelRepository
 
 
 logger = get_logger()

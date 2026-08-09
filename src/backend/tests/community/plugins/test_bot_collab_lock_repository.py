@@ -8,9 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.plugins.bot_collab_lock_repository import (
-    BotCollabLockRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.collab_lock import BotCollabLockRepository
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockModel
 
 

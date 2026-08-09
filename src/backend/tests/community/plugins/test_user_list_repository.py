@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.user_list.models import EntityUserListModel
-from agentclaw.community.plugins.user_list_repository import UserListRepository
+from agentclaw.community.core.repository.implementations.identity.user_list import UserListRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 

@@ -11,10 +11,10 @@
   - ``domain/ticket.py`` — 领域模型状态机方法(``transition_to`` 设
     ``self.governance_status``)。这是守卫本身的所在,模型方法是状态变更的
     单一物理实现。
-  - ``repositories/task_record_repo.py`` — 仅 ``bulk_close_open`` 全量原语
+  - ``../repository/implementations/governance/task_record.py`` — 仅 ``bulk_close_open`` 全量原语
     (SQL ``WHERE status IN ('open','scheduled')`` 等价守卫,方案 A 唯一豁免)。
     repo 不再有逐条状态机方法。
-  - ``repositories/notify_log_repo.py`` — 通知侧镜像列写入(``bulk_close_open_muted`` /
+  - ``../repository/implementations/governance/notify_log.py`` — 通知侧镜像列写入(``bulk_close_open_muted`` /
     ``bulk_cancel_by_bots``),这是通知投递机的展示镜像,非工单主状态机。
   - ``services/lifecycle_service.py`` — 驱动服务内部不字面量赋值(走模型方法),
     但守卫豁免它以防 find→save 链路偶尔需直写;实际本守卫不依赖此项,留白。
@@ -41,6 +41,28 @@ _GOV_ROOT = (
     _BACKEND_ROOT
     / "src" / "agentclaw" / "community" / "core" / "economy" / "governance"
 )
+# The governance repository bodies moved to the consolidated repository package.
+# Both trees are governed: allowlist keys under this root are prefixed "repository/".
+_GOV_REPO_ROOT = (
+    _BACKEND_ROOT
+    / "src" / "agentclaw" / "community" / "core" / "repository"
+    / "implementations" / "governance"
+)
+
+
+def _gov_files():
+    """(path, allowlist-key) for every governed governance file, both roots."""
+    for py in _GOV_ROOT.rglob("*.py"):
+        yield py, str(py.relative_to(_GOV_ROOT))
+    for py in _GOV_REPO_ROOT.rglob("*.py"):
+        yield py, "repository/" + str(py.relative_to(_GOV_REPO_ROOT))
+
+
+def _gov_path(rel: str) -> pathlib.Path:
+    """Resolve an allowlist key back to its file under the right root."""
+    if rel.startswith("repository/"):
+        return _GOV_REPO_ROOT / rel[len("repository/"):]
+    return _GOV_ROOT / rel
 
 
 # ---------------------------------------------------------------------------
@@ -51,11 +73,11 @@ _GUARD_A_ALLOWLIST: dict[str, str] = {
         "领域模型状态机方法 transition_to 设 self.governance_status —— "
         "状态变更的单一物理实现,守卫本身的所在。"
     ),
-    "repositories/task_record_repo.py": (
+    "repository/task_record.py": (
         "仅 bulk_close_open 全量原语 WHERE 守卫(方案 A 唯一豁免);"
         "repo 不含逐条状态机方法。"
     ),
-    "repositories/notify_log_repo.py": (
+    "repository/notify_log.py": (
         "通知侧镜像列写入(bulk_close_open_muted / bulk_cancel_by_bots "
         "把通知侧 governance_status/closed 等镜像置 CLOSED)—— notify "
         "投递机的展示镜像,非工单主状态机。"
@@ -63,7 +85,7 @@ _GUARD_A_ALLOWLIST: dict[str, str] = {
 }
 
 
-def _governance_status_literal_assigns(path: pathlib.Path) -> list[str]:
+def _governance_status_literal_assigns(path: pathlib.Path, rel: str | None = None) -> list[str]:
     """Return ``"<rel>:<line> governance_status = <literal>"`` violations.
 
     Flags ``row.governance_status = <const>`` / ``obj.governance_status = X``
@@ -76,7 +98,8 @@ def _governance_status_literal_assigns(path: pathlib.Path) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return []
-    rel = str(path.relative_to(_GOV_ROOT))
+    if rel is None:
+        rel = str(path.relative_to(_GOV_ROOT))
     out: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
@@ -92,11 +115,10 @@ def _governance_status_literal_assigns(path: pathlib.Path) -> list[str]:
 def test_guard_a_no_governance_status_literal_outside_allowlist():
     """守卫 A:除豁免外,无 governance_status 字面量赋值(验收 1 后半句)。"""
     violations: list[str] = []
-    for py in _GOV_ROOT.rglob("*.py"):
-        rel = str(py.relative_to(_GOV_ROOT))
+    for py, rel in _gov_files():
         if rel in _GUARD_A_ALLOWLIST:
             continue
-        violations.extend(_governance_status_literal_assigns(py))
+        violations.extend(_governance_status_literal_assigns(py, rel))
     if violations:
         pytest.fail(
             "发现 governance_status = 直接赋值(守卫 A 违规,验收 1):\n  "
@@ -112,7 +134,7 @@ def test_guard_a_no_governance_status_literal_outside_allowlist():
 def test_guard_a_allowlist_paths_exist():
     """豁免项必须指向真实文件,防 stale 条目藏覆盖缺口。"""
     missing = [
-        rel for rel in _GUARD_A_ALLOWLIST if not (_GOV_ROOT / rel).exists()
+        rel for rel in _GUARD_A_ALLOWLIST if not _gov_path(rel).exists()
     ]
     if missing:
         pytest.fail(
@@ -142,7 +164,7 @@ def test_guard_b_repo_has_no_semantic_commands():
     repo 无状态机推进入口 —— "唯一驱动者"由分层保证。
     bulk_close_open 是全量豁免(SQL WHERE 守卫),不在此 9 个内。
     """
-    repo_path = _GOV_ROOT / "repositories" / "task_record_repo.py"
+    repo_path = _GOV_REPO_ROOT / "task_record.py"
     tree = ast.parse(repo_path.read_text(encoding="utf-8"))
     forbidden_found: list[str] = []
     for node in ast.walk(tree):
@@ -171,7 +193,7 @@ def test_no_external_callers_of_repo_semantic_commands():
         rel = str(py.relative_to(backend))
         # 跳过 repo 自身(已删,但避免把方法定义误判为调用)与 lifecycle
         # driver(driver 的方法名同名但走 self.<cmd> 不走 task_repo.<cmd>)。
-        if "repositories/task_record_repo.py" in rel:
+        if "repository/task_record.py" in rel:
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))

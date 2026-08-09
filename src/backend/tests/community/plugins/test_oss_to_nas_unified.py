@@ -20,9 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.oss_to_nas_record_repository import (
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.devices.oss_to_nas_record import OssToNasRecordRepository
 
 pytestmark = pytest.mark.integration
 
@@ -92,7 +90,7 @@ def _make_db(tmp_path):
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "agentclaw.community.plugins.oss_to_nas_record_repository.get_current_env",
+        "agentclaw.community.core.repository.implementations.devices.oss_to_nas_record.get_current_env",
         lambda: "dev",
     )
     return OssToNasRecordRepository(_make_db(tmp_path))
@@ -205,7 +203,7 @@ def test_real_sqlitedb_orm_session_commits(tmp_path, monkeypatch):
 
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'real.db'}")
     monkeypatch.setattr(
-        "agentclaw.community.plugins.oss_to_nas_record_repository.get_current_env",
+        "agentclaw.community.core.repository.implementations.devices.oss_to_nas_record.get_current_env",
         lambda: "dev",
     )
     db_mod = importlib.import_module("agentclaw.community.plugins.local.database")

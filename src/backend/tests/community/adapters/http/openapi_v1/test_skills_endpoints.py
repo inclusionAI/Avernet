@@ -49,12 +49,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.plugins.bot_repository import BotRepository
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
-from agentclaw.community.plugins.skill_repository import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository, SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,

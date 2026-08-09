@@ -26,9 +26,7 @@ from agentclaw.community.core.caller_identity.models import (
     McpCallType,
 )
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.caller_identity_repository import (
-    CallerIdentityRepository,
-)
+from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError
 from agentclaw.community.utils.env_utils import get_current_env

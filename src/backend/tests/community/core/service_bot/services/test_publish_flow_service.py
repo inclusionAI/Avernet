@@ -75,9 +75,7 @@ def _real_ledger():
     from agentclaw.community.core.service_bot.repository.models import (  # noqa: F401
         PublishOperationModel,
     )
-    from agentclaw.community.plugins.publish_operation_repository import (
-        OrmPublishOperationRepository as PublishOperationRepository,
-    )
+    from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository as PublishOperationRepository
 
     engine = create_engine(
         "sqlite:///:memory:",

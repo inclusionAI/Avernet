@@ -38,9 +38,9 @@ from agentclaw.community.core.bot_management.services.template_service import Te
 from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.plugins.bot_collaborator_repository import CollaboratorRepository
-from agentclaw.community.plugins.bot_collab_log_repository import BotCollabLogRepository
-from agentclaw.community.plugins.bot_collab_lock_repository import BotCollabLockRepository
+from agentclaw.community.core.repository.implementations.bot.collaborator import CollaboratorRepository
+from agentclaw.community.core.repository.implementations.bot.collab_log import BotCollabLogRepository
+from agentclaw.community.core.repository.implementations.bot.collab_lock import BotCollabLockRepository
 
 
 class BotCollaboratorModule(Module):

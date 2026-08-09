@@ -28,9 +28,7 @@ from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
 from agentclaw.community.api.mcp_sync_service import MCPSyncServiceProtocol
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.models.mcp import UserMCPConfig
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration

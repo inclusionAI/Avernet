@@ -18,9 +18,7 @@ from agentclaw.community.api.task_processor_service import TaskProcessorProtocol
 from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository
 from agentclaw.community.core.quality.services.quality_task_service import QualityTaskService
 from agentclaw.community.core.quality.services.task_processor import TaskProcessor
-from agentclaw.community.plugins.quality_repository import (
-    QualityTaskRepository as UnifiedQualityTaskRepository,
-)
+from agentclaw.community.core.repository.implementations.platform.quality import QualityTaskRepository as UnifiedQualityTaskRepository
 
 
 class QualityModule(Module):

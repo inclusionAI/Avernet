@@ -12,9 +12,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
-from agentclaw.community.plugins.oss_to_nas_record_repository import (
-    OssToNasRecordRepository as UnifiedOssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.devices.oss_to_nas_record import OssToNasRecordRepository as UnifiedOssToNasRecordRepository
 
 ALL_IMPLS = [UnifiedOssToNasRecordRepository]
 

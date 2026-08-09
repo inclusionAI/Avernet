@@ -15,7 +15,7 @@ from agentclaw.community.core.bot_chat.models import (
     AwLangfuseTrace,
     BcsGroupSession,
 )
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
     enrich_group_labels,

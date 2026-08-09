@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentclaw.community.core.common_config.repository import CommonConfigRepository
+from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
 
 
 def test_common_config_repository_crud_and_upsert(test_injector):

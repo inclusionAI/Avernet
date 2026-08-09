@@ -38,7 +38,7 @@ from agentclaw.community.core.expert_chat.errors import (
     SessionCreateError,
     ConnectionError,
 )
-from agentclaw.community.core.expert_chat.repository import ExpertChatRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatRepository
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
     ExpertChatInstanceService,
 )

@@ -39,9 +39,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin
 from agentclaw.community.plugin_api.bot_publish_approval import BotPublishApprovalPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
-from agentclaw.community.plugins.bot_friend_repository import (
-    BotFriendRepository as UnifiedBotFriendRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository as UnifiedBotFriendRepository
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
 
 

@@ -7,9 +7,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.bot_collab_log_repository import (
-    BotCollabLogRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.collab_log import BotCollabLogRepository
 
 
 class InMemorySqliteDB:

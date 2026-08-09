@@ -21,7 +21,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.device_repository import DeviceRepository
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
 from agentclaw.community.plugins.local import database as local_db_mod
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
@@ -1132,7 +1132,7 @@ def test_get_active_by_bot_and_owner_skips_soft_deleted_bot(repo, db):
 # 都必须加 env 过滤，否则跨环境串数据（同 user 在 pre 和 prod 都有
 # 同 bot_id 的 default bot 时会随机命中错环境）。
 
-_ENV_MOD = "agentclaw.community.plugins.device_repository.get_current_env"
+_ENV_MOD = "agentclaw.community.core.repository.implementations.devices.device.get_current_env"
 
 
 def test_get_active_by_bot_and_owner_env_isolation(repo, db):

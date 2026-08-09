@@ -15,9 +15,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models.mcp import UserMCPConfig
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError
 from agentclaw.community.utils.env_utils import get_current_env

@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.config_repository import ConfigRepository
+from agentclaw.community.core.repository.implementations.config.config import ConfigRepository
 from agentclaw.community.core.system_config.orm import AcConfigCategory, AcConfigItem
 
 pytestmark = pytest.mark.integration

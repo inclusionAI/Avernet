@@ -13,6 +13,7 @@ consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.core.economy.governance.orm    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module

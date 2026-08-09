@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.plugin_api.models import ResourceModel
-from agentclaw.community.plugins.resource_repository import ResourceRepository
+from agentclaw.community.core.repository.implementations.platform.resource import ResourceRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration

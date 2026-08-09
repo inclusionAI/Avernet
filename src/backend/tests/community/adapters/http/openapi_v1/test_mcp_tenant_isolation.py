@@ -29,9 +29,7 @@ from agentclaw.community.core.mcp.config_flow import (
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.models.mcp import UserMCPConfig
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration

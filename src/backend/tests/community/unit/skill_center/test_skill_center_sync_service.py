@@ -54,9 +54,7 @@ def test_force_sync_downloads_and_extracts(tmp_path):
 
 def test_force_sync_skips_if_already_synced(tmp_path):
     """已同步且版本相同则跳过下载。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     mock_client = MagicMock()
     mock_repo = MagicMock()
     mock_repo.find_latest.return_value = {"status": "success", "version": "1.0.0"}
@@ -81,9 +79,7 @@ def test_force_sync_skips_if_already_synced(tmp_path):
 
 def test_force_sync_raises_on_download_failure(tmp_path):
     """SC 返回失败时应抛 SkillSyncError。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService, SkillSyncError,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService, SkillSyncError
     mock_client = MagicMock()
     mock_client.list_versions.return_value = [{"versionNumber": "1.0.0"}]
     mock_client.get_download_url.return_value = {"success": False, "error": "not found"}
@@ -106,9 +102,7 @@ def test_force_sync_raises_on_download_failure(tmp_path):
 
 def test_cleanup_stale_preserves_current_and_recent(tmp_path):
     """cleanup_stale 应保留 current + 最近 keep 个版本。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     nas = tmp_path / "uuid-clean"
     nas.mkdir(parents=True)
     (nas / "v1").mkdir()
@@ -136,9 +130,7 @@ def test_cleanup_stale_preserves_current_and_recent(tmp_path):
 
 def test_is_synced_returns_true_when_log_success(tmp_path):
     """is_synced 应在 log success 时返回 True。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     mock_client = MagicMock()
     mock_repo = MagicMock()
     mock_repo.find_latest.return_value = {"status": "success", "version": "1.0.0"}
@@ -160,9 +152,7 @@ def test_is_synced_returns_true_when_log_success(tmp_path):
 
 def test_is_synced_returns_false_when_no_record(tmp_path):
     """is_synced 应在无记录时返回 False。"""
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     mock_client = MagicMock()
     mock_repo = MagicMock()
     mock_repo.find_latest.return_value = None
@@ -185,9 +175,7 @@ def test_is_synced_returns_false_when_no_record(tmp_path):
 # =============================================================================
 
 def _make_sync_svc_for_bootstrap(tmp_path, mock_skill_repo):
-    from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-        SkillCenterSyncService,
-    )
+    from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
     return SkillCenterSyncService(
         skill_center_client=MagicMock(),
         sync_log_repo=MagicMock(),

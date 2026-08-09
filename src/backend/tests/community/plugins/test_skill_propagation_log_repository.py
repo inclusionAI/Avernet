@@ -12,9 +12,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.skill_propagation_log_repository import (
-    SkillPropagationLogRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository
 
 pytestmark = pytest.mark.integration
 

@@ -47,7 +47,7 @@ from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
     ConnectionError,
 )
-from agentclaw.community.core.expert_chat.repository import ExpertChatInstanceRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.services.baas_service import (

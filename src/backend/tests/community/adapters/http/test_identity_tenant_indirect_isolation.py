@@ -47,8 +47,8 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.core.services.identity import IdentityService
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.device_repository import DeviceRepository
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 

@@ -23,7 +23,7 @@ from agentclaw.community.core.bot_public.services.bot_discover_service import (
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.di.config import BcsFuseConfig
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.bot_repository import BotRepository
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
 from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import (
     DEFAULT_AVERNET_TENANT,

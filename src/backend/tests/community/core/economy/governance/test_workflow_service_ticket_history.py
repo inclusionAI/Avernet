@@ -41,7 +41,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
+    import agentclaw.community.core.economy.governance.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 

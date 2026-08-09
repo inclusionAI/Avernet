@@ -13,10 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.quality.models import QualityTaskRecord
-from agentclaw.community.plugins.quality_repository import (
-    QualityTaskRepository,
-    _row_to_record,
-)
+from agentclaw.community.core.repository.implementations.platform.quality import QualityTaskRepository, _row_to_record
 
 
 class MockRow:
@@ -101,7 +98,7 @@ class TestRowToRecord:
 
     def test_row_with_none_env_uses_current_env(self):
         """Test row with None env uses get_current_env()."""
-        with patch("agentclaw.community.plugins.quality_repository.get_current_env") as mock_env:
+        with patch("agentclaw.community.core.repository.implementations.platform.quality.get_current_env") as mock_env:
             mock_env.return_value = "dev"
             row = MockRow(env=None)
             result = _row_to_record(row)
@@ -317,7 +314,7 @@ class TestQualityTaskRepository:
 
     def test_get_by_id_filters_by_env(self, repo):
         """Test get_by_id filters by current env."""
-        with patch("agentclaw.community.plugins.quality_repository.get_current_env") as mock_env:
+        with patch("agentclaw.community.core.repository.implementations.platform.quality.get_current_env") as mock_env:
             mock_env.return_value = "test-env"
             # Create in test-env
             created = repo.create(

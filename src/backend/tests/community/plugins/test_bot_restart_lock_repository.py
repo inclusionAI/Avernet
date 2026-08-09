@@ -9,9 +9,7 @@ from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.bot_restart_lock_repository import (
-    BotRestartLockRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
 # Imported for side effect: registers BotRestartLockModel on Base.metadata
 # so create_all() builds the ac_bot_restart_lock table.
 from agentclaw.community.core.bot_management.repository.models import (  # noqa: F401

@@ -6,12 +6,8 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.common_config.repository import (
-    CommonConfigRepository,
-)
-from agentclaw.community.plugins.skills_pool_rollout_repository import (
-    SkillsPoolRolloutRepository,
-)
+from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
+from agentclaw.community.core.repository.implementations.skills_pool.rollout import SkillsPoolRolloutRepository
 
 
 def _value(*, bots: list[dict[str, str]] | None = None) -> dict[str, object]:

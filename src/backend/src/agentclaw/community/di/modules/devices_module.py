@@ -105,9 +105,7 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
-from agentclaw.community.plugins.device_repository import (
-    DeviceRepository as UnifiedDeviceRepository,
-)
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository as UnifiedDeviceRepository
 from agentclaw.community.plugins.local.process_manager import LocalProcessManager
 
 
@@ -118,9 +116,7 @@ class DevicesModule(Module):
     """Neutral, profile-independent bindings for the devices module."""
 
     def configure(self, binder) -> None:
-        from agentclaw.community.plugins.oss_to_nas_record_repository import (
-            OssToNasRecordRepository as UnifiedOssToNasRecordRepository,
-        )
+        from agentclaw.community.core.repository.implementations.devices.oss_to_nas_record import OssToNasRecordRepository as UnifiedOssToNasRecordRepository
 
         # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
         # the bound DatabasePlugin; prod vs test differ only by which

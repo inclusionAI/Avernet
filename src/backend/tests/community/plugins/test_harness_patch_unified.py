@@ -12,9 +12,7 @@ from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.harness.models import Layer, PatchDefinition
-from agentclaw.community.plugins.harness_patch_repository import (
-    HarnessPatchRepository,
-)
+from agentclaw.community.core.repository.implementations.harness.patch import HarnessPatchRepository
 
 pytestmark = pytest.mark.integration
 

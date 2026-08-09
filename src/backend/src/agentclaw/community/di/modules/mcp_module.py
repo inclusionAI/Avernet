@@ -45,9 +45,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
-from agentclaw.community.plugins.user_mcp_config_repository import (
-    UserMCPConfigRepository as UnifiedUserMCPConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.user_mcp_config import UserMCPConfigRepository as UnifiedUserMCPConfigRepository
 
 
 logger = get_logger()

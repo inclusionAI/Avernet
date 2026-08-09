@@ -22,9 +22,7 @@ from agentclaw.community.core.service_bot.repository.config_artifact_offload imp
     ARTIFACT_OSS_THRESHOLD_BYTES,
     ConfigArtifactOffloader,
 )
-from agentclaw.community.plugins.bot_publish_repository import (
-    BotPublishRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository
 
 pytestmark = pytest.mark.integration
 

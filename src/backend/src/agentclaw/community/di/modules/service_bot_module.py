@@ -116,12 +116,8 @@ from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlu
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
-from agentclaw.community.plugins.bot_publish_repository import (
-    BotPublishRepository as UnifiedBotPublishRepository,
-)
-from agentclaw.community.plugins.publish_operation_repository import (
-    OrmPublishOperationRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository as UnifiedBotPublishRepository
+from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository
 from agentclaw.community.utils import env_utils
 
 logger = get_logger()

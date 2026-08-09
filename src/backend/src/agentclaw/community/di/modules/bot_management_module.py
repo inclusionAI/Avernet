@@ -104,16 +104,10 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.plugins.bot_repository import (
-    BotRepository as UnifiedBotRepository,
-)
-from agentclaw.community.plugins.bot_restart_lock_repository import BotRestartLockRepository
-from agentclaw.community.plugins.render_screen_repository import (
-    RenderScreenRepository as UnifiedRenderScreenRepository,
-)
-from agentclaw.community.plugins.template_repository import (
-    TemplateRepository as UnifiedTemplateRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
+from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
+from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
+from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
 
 
 logger = get_logger()

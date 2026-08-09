@@ -18,7 +18,7 @@ from agentclaw.community.core.access.sqlite_models import (
     AccessControlPolicy,
     UserInfo,
 )
-from agentclaw.community.plugins.policy_repository import PolicyRepository
+from agentclaw.community.core.repository.implementations.identity.policy import PolicyRepository
 
 pytestmark = pytest.mark.integration
 

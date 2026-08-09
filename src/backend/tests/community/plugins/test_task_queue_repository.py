@@ -19,14 +19,8 @@ from sqlalchemy.pool import StaticPool
 from agentclaw.community.core.task_queue.repository.models import TaskQueueModel  # noqa: F401
 from agentclaw.community.core.task_queue.types import TaskStatus
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
-from agentclaw.community.plugins.task_queue_repository import (
-    _ACTIVE_IDEM_INDEX,
-    _KEYED_INSERT_ATTEMPTS,
-    _MAX_IDEMPOTENCY_KEY_LEN,
-    _MAX_TASK_TYPE_LEN,
-    TaskQueueRepository,
-    _is_active_idem_conflict,
-)
+from agentclaw.community.core.repository.implementations.platform.task_queue import _ACTIVE_IDEM_INDEX, _KEYED_INSERT_ATTEMPTS, _MAX_IDEMPOTENCY_KEY_LEN, _MAX_TASK_TYPE_LEN
+from agentclaw.community.core.repository.implementations.platform.task_queue import TaskQueueRepository, _is_active_idem_conflict
 
 pytestmark = pytest.mark.integration
 

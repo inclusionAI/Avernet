@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.schemas import ApiResponse
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger

@@ -13,9 +13,7 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    RuntimeQuarantineCleanupResult,
-)
+from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCleanupResult
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 
 

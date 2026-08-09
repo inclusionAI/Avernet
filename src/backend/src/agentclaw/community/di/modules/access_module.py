@@ -20,7 +20,7 @@ from agentclaw.community.core.repository.protocols.identity import PolicyReposit
 from agentclaw.community.core.access.services.policy_service import PolicyService
 from agentclaw.community.core.access.services.user_service import UserService
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.policy_repository import PolicyRepository as UnifiedPolicyRepository
+from agentclaw.community.core.repository.implementations.identity.policy import PolicyRepository as UnifiedPolicyRepository
 
 
 logger = get_logger()

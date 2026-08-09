@@ -173,15 +173,9 @@ from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.plugins.skill_center_sync_log_repository import (
-    SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository,
-)
-from agentclaw.community.plugins.skill_propagation_log_repository import (
-    SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository,
-)
-from agentclaw.community.plugins.local_skill_cleanup_repository import (
-    SqlLocalSkillCleanupRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.sync_log import SkillCenterSyncLogRepository as UnifiedSkillCenterSyncLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.propagation_log import SkillPropagationLogRepository as UnifiedSkillPropagationLogRepository
+from agentclaw.community.core.repository.implementations.skill_center.local_skill_cleanup import SqlLocalSkillCleanupRepository
 
 
 logger = get_logger()
@@ -258,9 +252,7 @@ class SkillCenterModule(Module):
     @provider
     @inject
     def skill_repository(self, db: DatabasePlugin) -> SkillRepository:
-        from agentclaw.community.plugins.skill_repository import (
-            SkillRepository as UnifiedSkillRepository,
-        )
+        from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository as UnifiedSkillRepository
 
         return UnifiedSkillRepository(db)
 
@@ -268,9 +260,7 @@ class SkillCenterModule(Module):
     @provider
     @inject
     def skill_set_repository(self, db: DatabasePlugin) -> SkillSetRepository:
-        from agentclaw.community.plugins.skill_repository import (
-            SkillSetRepository as UnifiedSkillSetRepository,
-        )
+        from agentclaw.community.core.repository.implementations.skill_center.skill import SkillSetRepository as UnifiedSkillSetRepository
 
         return UnifiedSkillSetRepository(db)
 
@@ -377,9 +367,7 @@ class SkillCenterModule(Module):
     @provider
     @inject
     def skill_member_repository(self, db: DatabasePlugin) -> SkillMemberRepository:
-        from agentclaw.community.plugins.skill_member_repository import (
-            SkillMemberRepository as UnifiedSkillMemberRepository,
-        )
+        from agentclaw.community.core.repository.implementations.skill_center.member import SkillMemberRepository as UnifiedSkillMemberRepository
 
         return UnifiedSkillMemberRepository(db)
 
@@ -387,9 +375,7 @@ class SkillCenterModule(Module):
     @provider
     @inject
     def skill_category_repository(self, db: DatabasePlugin) -> SkillCategoryRepository:
-        from agentclaw.community.plugins.skill_category_repository import (
-            SkillCategoryRepository as UnifiedSkillCategoryRepository,
-        )
+        from agentclaw.community.core.repository.implementations.skill_center.category import SkillCategoryRepository as UnifiedSkillCategoryRepository
 
         return UnifiedSkillCategoryRepository(db)
 

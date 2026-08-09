@@ -10,9 +10,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.skill_member_repository import (
-    SkillMemberRepository,
-)
+from agentclaw.community.core.repository.implementations.skill_center.member import SkillMemberRepository
 
 pytestmark = pytest.mark.integration
 

@@ -27,9 +27,7 @@ from agentclaw.community.adapters.http.skills_pool.schemas import (
 from agentclaw.community.api.skills_pool_rollout_service import (
     SkillsPoolRolloutServiceProtocol,
 )
-from agentclaw.community.core.common_config.repository import (
-    CommonConfigRepository,
-)
+from agentclaw.community.core.repository.implementations.config.common_config import CommonConfigRepository
 from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRollbackOutcome,
     SkillsPoolRollbackResult,

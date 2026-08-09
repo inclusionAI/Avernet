@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_chat.models import AwLangfuseTrace
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.service import _extract_user_input
 from agentclaw.community.core.bot_chat.schemas import ConversationObservation, ConversationSession, SessionMetadata
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel

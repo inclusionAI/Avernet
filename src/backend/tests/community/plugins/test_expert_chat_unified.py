@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import Column, MetaData, Table, UniqueConstraint, create_engine
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.plugins.expert_chat_repository import ExpertChatRepository
+from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository
 
 pytestmark = pytest.mark.integration
 

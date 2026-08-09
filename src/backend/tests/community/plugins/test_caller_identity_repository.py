@@ -17,9 +17,7 @@ from agentclaw.community.core.caller_identity.contracts import CallerIdentityLoc
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityIrreversibleError,
 )
-from agentclaw.community.plugins.caller_identity_repository import (
-    CallerIdentityRepository,
-)
+from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
 from agentclaw.community.plugin_api.models import BotModel
 
 

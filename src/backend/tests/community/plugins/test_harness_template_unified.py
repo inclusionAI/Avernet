@@ -20,9 +20,7 @@ from agentclaw.community.core.harness.models import (
     PatchTemplateStatus,
     RiskLevel,
 )
-from agentclaw.community.plugins.harness_repository import (
-    HarnessTemplateRepository,
-)
+from agentclaw.community.core.repository.implementations.harness.template import HarnessTemplateRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration
