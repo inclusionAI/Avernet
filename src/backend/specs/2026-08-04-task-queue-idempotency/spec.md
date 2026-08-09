@@ -253,9 +253,25 @@ Two correctness requirements, both of which need explicit test coverage:
   (rollback to a savepoint, or perform the lookup in a fresh session).
 
 There is an inherent race: the conflicting row can go terminal between the
-failed insert and the re-`SELECT`, leaving nothing to return. The insert is
-therefore retried once, and only a second consecutive failure surfaces as an
-error. This is bounded and must be covered by a test.
+failed insert and the re-`SELECT`, leaving nothing to return.
+
+"The index rejected us and there is no live holder" has **two** causes that want
+opposite responses, so they must be told apart rather than sharing one retry
+budget:
+
+- **The key is genuinely free** — its holder went terminal inside the window.
+  Retrying is correct and normally succeeds. Losing this race repeatedly is bad
+  luck, not an error, so the bound must be loose enough that exhausting it is not
+  mistaken for a fault.
+- **The key is stranded** — a *terminal* row still holds it, because something
+  wrote the terminal status without releasing the key. Retrying can never
+  succeed, since the unique index does not care about status. This must raise
+  immediately, naming the offending row, rather than spending the budget.
+
+Both are bounded and must be covered by tests. (Superseded the original
+"retry once, surface the second failure": one budget serving both causes reported
+a permanent, fixable fault as if it were contention, and raised on a benign race
+that had simply lost twice.)
 
 ### (f) — Adopter migration
 

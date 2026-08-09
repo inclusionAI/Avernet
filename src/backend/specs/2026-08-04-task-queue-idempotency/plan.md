@@ -157,7 +157,7 @@ def enqueue(self, *, task_type, payload, delay_seconds, deadline_seconds,
     Keyed → try-insert; on *this* constraint, re-SELECT the live holder."""
     if idempotency_key is None:
         return EnqueueResult(self._insert(...), True)
-    for _ in range(2):                      # bounded: see the race note below
+    for _ in range(_KEYED_INSERT_ATTEMPTS):
         try:
             return EnqueueResult(self._insert(..., idempotency_key=...), True)
         except IntegrityError as exc:
@@ -166,13 +166,24 @@ def enqueue(self, *, task_type, payload, delay_seconds, deadline_seconds,
             existing = self._find_active_by_key(env, task_type, idempotency_key)
             if existing is not None:
                 return EnqueueResult(existing, False)
+            stranded = self._find_stranded_key_holder(env, task_type, key)
+            if stranded is not None:
+                raise RuntimeError(...)     # permanent: retrying cannot help
             # holder went terminal between INSERT and SELECT → key is free again
-    raise RuntimeError(...)                 # two consecutive losses: surface it
+    raise RuntimeError(...)                 # sustained churn: surface it
 ```
 
-The `for _ in range(2)` is the spec's bounded retry for the insert/re-`SELECT`
-race — the conflicting row can reach a terminal state (releasing the key) in the
-window between the failed insert and the lookup, leaving nothing to return.
+The loop implements the spec's bounded retry for the insert/re-`SELECT` race —
+the conflicting row can reach a terminal state (releasing the key) in the window
+between the failed insert and the lookup, leaving nothing to return.
+
+The two causes of "conflict but no live holder" are separated deliberately.
+`_find_stranded_key_holder` finds a *terminal* row still holding the key, which
+retrying can never resolve, so it raises at once and names the row. Only genuine
+races consume `_KEYED_INSERT_ATTEMPTS`, which is why that bound is 5 rather than
+2: each additional loss needs another caller to claim *and* release the key
+inside one microsecond-wide window, so exhausting it means sustained churn rather
+than a fault. A bound is still kept — unbounded retry could spin forever.
 
 ```python
 # plugins/task_queue_repository.py (new module-level helper)
@@ -187,10 +198,17 @@ def _is_active_idem_conflict(exc: IntegrityError) -> bool:
 ```
 
 ```python
-# plugins/task_queue_repository.py (new private method)
+# plugins/task_queue_repository.py (new private methods)
 def _find_active_by_key(self, env: str, task_type: str, key: str) -> Optional[TaskRecord]:
-    """The live holder of ``key``, or None. Filters on active_idempotency_key,
-    so terminal rows (which released it) are invisible here by construction."""
+    """The live holder of ``key``, or None. Filters on active_idempotency_key
+    and excludes terminal statuses — the column alone should suffice, since
+    terminal transitions null it, but a mixed-version writer can leave a
+    terminal row still holding the key and it must not be returned as live."""
+
+def _find_stranded_key_holder(self, env: str, task_type: str, key: str) -> Optional[int]:
+    """Id of a terminal row still holding ``key``, or None. Always None in a
+    consistent database; exists so a permanently-held key raises immediately
+    instead of being mistaken for contention."""
 ```
 
 **Transaction safety is already handled by the contract** — `orm_session()`
