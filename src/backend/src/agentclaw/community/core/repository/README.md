@@ -78,13 +78,105 @@ in a comment, rather than an exception to the rule.
 ```yaml
 purpose: "Every repository contract (protocols/) and implementation (implementations/) in the backend, grouped by domain. Persistence only — no services, no routers, no domain policy."
 provides:
-  - "Repository Protocols — @abstractmethod contracts consumed by domain services for DI"
-  - "Repository implementations — the ORM bodies, one per contract"
-  - "Runtime contract enforcement: an implementation missing a member fails at construction"
+  # Contracts — protocols/<domain>.py. This is the surface domain services
+  # import at runtime for DI; a change here is a change to their constructors.
+  # bot
+  - BotCollabLockRepositoryProtocol
+  - BotCollabLogRepositoryProtocol
+  - BotFriendRepositoryProtocol
+  - BotRepository
+  - BotRestartLockRepositoryProtocol
+  - CollaboratorRepositoryProtocol
+  - RenderScreenRepository
+  - TemplateRepository
+  - UserMCPConfigRepository
+  # chat
+  - BotChatDbRepositoryProtocol
+  - ChannelRepository
+  - ExpertChatInstanceRepository
+  - ExpertChatRepository
+  - OpenBotChatRepositoryProtocol
+  # config
+  - CommonConfigRepositoryProtocol
+  - ConfigRepositoryProtocol
+  # devices
+  - DeviceBindingRepository
+  - OssToNasRecordRepository
+  # governance
+  - AuditRepositoryProtocol
+  - NotifyLogRepositoryProtocol
+  - TaskRecordRepositoryProtocol
+  - WhitelistRepositoryProtocol
+  # harness
+  - HarnessPatchRecordRepository
+  - HarnessPatchRepository
+  - HarnessScanRecordRepository
+  - HarnessTemplateRepository
+  # identity
+  - CallerIdentityRepositoryProtocol
+  - PolicyRepository
+  - UserListRepositoryProtocol
+  # platform
+  - QualityTaskRepository
+  - ResourceRepositoryProtocol
+  - SessionResourceRepositoryProtocol
+  - TaskQueueRepositoryProtocol
+  # publishing
+  - BotPublishRepositoryProtocol
+  # skill_center
+  - LocalSkillCleanupRepository
+  - SkillCategoryRepository
+  - SkillCenterSyncLogRepository
+  - SkillMemberRepository
+  - SkillPropagationLogRepository
+  - SkillRepository
+  - SkillSetRepository
+  # skills_pool
+  - QuarantineRepositoryProtocol
+  - SkillsPoolLayoutRepositoryProtocol
+  - SkillsPoolRolloutRepositoryProtocol
+  - SkillsPoolSkillRepositoryProtocol
+  # Implementations — implementations/<domain>/. Bound by DI, never constructed
+  # directly outside di/modules/. Names repeat above where impl and contract share one.
+  # bot
+  - BotCollabLockRepository
+  - BotCollabLogRepository
+  - BotFriendRepository
+  - BotRestartLockRepository
+  - CollaboratorRepository
+  # chat
+  - BotChatDbRepository
+  - OpenBotChatRepository
+  # config
+  - CommonConfigRepository
+  - ConfigRepository
+  # devices
+  - DeviceRepository
+  # governance
+  - GovernanceAuditRepository
+  - GovernanceWhitelistRepository
+  - NotifyLogRepository
+  - TaskRecordRepository
+  # identity
+  - CallerIdentityRepository
+  - UserListRepository
+  # platform
+  - ResourceRepository
+  - SessionResourceRepository
+  - TaskQueueRepository
+  # publishing
+  - BotPublishRepository
+  - OrmPublishOperationRepository
+  # skill_center
+  - SqlLocalSkillCleanupRepository
+  # skills_pool
+  - SkillsPoolLayoutRepository
+  - SkillsPoolRolloutRepository
 consumes:
-  - "DatabasePlugin (the per-profile session seam)"
-  - "Domain ORM models, records, enums and error types (type-only, plus ORM classes at runtime)"
-  - "Tenant and environment helpers"
+  - DatabasePlugin                # the per-profile session seam, injected into every implementation
+  - get_current_env               # environment scoping (utils.env_utils)
+  - get_server_host               # ditto
+  - get_current_avernet_tenant    # tenant scoping (utils.avernet_tenant)
 internal_dependencies:
   - agentclaw.community.plugin_api.database    # DatabasePlugin — the injected session seam
   - agentclaw.community.plugin_api.models

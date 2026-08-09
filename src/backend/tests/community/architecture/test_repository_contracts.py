@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 import pytest
+import yaml
 
 _THIS_FILE = pathlib.Path(__file__).resolve()
 _BACKEND_ROOT = _THIS_FILE.parents[3]                  # .../src/backend
@@ -143,6 +145,54 @@ def test_protocols_hold_no_implementations() -> None:
     assert not offenders, (
         "protocols/ holds contracts only; these look like concrete classes:\n  "
         + "\n  ".join(offenders)
+    )
+
+
+def _declared_provides() -> set[str]:
+    """The ``provides`` list from the package README's Context Boundary block."""
+    text = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    heading = re.search(r"^##\s+Context\s+Boundary\s*$", text, flags=re.MULTILINE)
+    assert heading, "README.md has no '## Context Boundary' section"
+    fence = re.search(
+        r"^```yaml\s*\n(.*?)\n```", text[heading.end():],
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert fence, "Context Boundary section has no fenced yaml block"
+    return set(yaml.safe_load(fence.group(1))["provides"])
+
+
+def _public_surface() -> set[str]:
+    """Every Protocol and every non-mixin repository class in the package."""
+    names: set[str] = set()
+    for path in _py_files(_PROTOCOLS):
+        names.update(c.name for c in _classes(path) if _is_protocol(c))
+    for path in _py_files(_IMPLEMENTATIONS):
+        names.update(
+            c.name for c in _classes(path)
+            if not c.name.startswith("_")
+            and not c.name.endswith("Mixin")
+            and c.name.endswith(("Repository", "Repositories"))
+        )
+    return names
+
+
+def test_readme_provides_lists_the_real_public_surface() -> None:
+    """Rule 22's ``provides`` is a name index, and here it is a checked one.
+
+    ``test_module_boundaries.py`` only asserts that each entry is a string, so a
+    ``provides`` list of prose descriptions passes it while naming nothing —
+    which is what this README shipped first. The names are the point:
+    ``docs/arch/context-boundary-format.md`` calls the field "Public surface —
+    names only". With ~90 of them, a hand-maintained list rots by the next
+    repository added, so it is derived-checked instead of trusted.
+    """
+    declared, actual = _declared_provides(), _public_surface()
+    missing = sorted(actual - declared)
+    stale = sorted(declared - actual)
+    assert not missing and not stale, (
+        "core/repository/README.md 'provides' is out of step with the package.\n"
+        + (f"  missing (add): {', '.join(missing)}\n" if missing else "")
+        + (f"  stale (remove): {', '.join(stale)}\n" if stale else "")
     )
 
 
