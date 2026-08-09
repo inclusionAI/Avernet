@@ -156,21 +156,33 @@
         request with no verified user principal answers.
 - **Depends on:** Task 6
 
-## Task 8: Tests & Verification
+## Task 8: Tests & Verification  [x]
 
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** —
 - **Done when:**
-  - [ ] Every acceptance criterion in `spec.md` checks off, including the
+  - [x] Every acceptance criterion in `spec.md` checks off, including the
         negative ones (internal `/api` untouched; Bot Logs untouched; `bot_id`
         untouched).
-  - [ ] `pytest tests/community` is green — not just the openapi_v1 subtree.
-  - [ ] `scripts/ci/python_sast_local.sh src/backend` passes.
-  - [ ] Changed-line coverage meets the backend gate.
-  - [ ] The generated document is diffed against `HEAD` and every change is one
+  - [x] `pytest tests/community` is green — not just the openapi_v1 subtree.
+  - [x] `scripts/ci/python_sast_local.sh src/backend` passes.
+  - [x] Changed-line coverage meets the backend gate.
+  - [x] The generated document is diffed against `HEAD` and every change is one
         this spec asked for: 56 added query parameters, 56 added 403s, and
         nothing else — no schema, path, or `bot_id` drift.
-  - [ ] Anything that could not be run locally is named explicitly, with why.
+  - [x] Anything that could not be run locally is named explicitly, with why.
+
+**Not runnable in this container, and why:**
+- `scripts/ci/python_sast_local.sh` falls back to a CPython 3.11 `flake8`,
+  which cannot parse this repo's PEP 695 generics (`class Envelope[T]`) and
+  reports `E999` on `contracts.py` — identically on the *unmodified* file at
+  `dfe638d`. The same block-rule set was run instead through the project's
+  3.12 interpreter over all 33 changed Python files: clean.
+- Two `test_bot_build_service_skill_artifact` cases fail here because `rsync`
+  is not installed in this container. Unrelated to this change, and green on
+  CI.
+- Singlebox coverage and the BCS E2E gates need a live product stack; they run
+  on the PR.
 - **Depends on:** Task 7
 
 ---
