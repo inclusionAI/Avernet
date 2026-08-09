@@ -147,7 +147,7 @@
   - [x] `pytest tests/community/adapters/http/openapi_v1 tests/community/core/engine_runtime` is green.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Pin the widened contract  `[ ]`
+## Task 6: Pin the widened contract  `[x]`
 
 - **Goal:** The adjudication matrix, the stage matrix, and the document-level
   convention each fail the build if broken later.
@@ -155,14 +155,14 @@
   `src/backend/tests/community/adapters/http/openapi_v1/engine_runtime/test_operator_access.py` (new),
   `…/engine_runtime/test_stage_addressing.py` (new)
 - **Done when:**
-  - [ ] Operator matrix: owner and MEMBER+ served on all sixteen operations;
+  - [x] Operator matrix: owner and MEMBER+ served on all sixteen operations;
         below-member, stranger, and absent-bot answers are byte-identical;
         public visibility grants nothing; refusals log both ids.
-  - [ ] Stage matrix: default-draft byte-compat, online↔`SUCCESS`,
+  - [x] Stage matrix: default-draft byte-compat, online↔`SUCCESS`,
         verify↔`VALIDATING` only, superseded records refuse, personal+stage
         is 409, no cross-stage fallback, socket and sessions address the same
         binding for the same (bot, stage), unknown stage value is 422.
-  - [ ] Document-level, in the shape of `test_explicit_user_id.py`:
+  - [x] Document-level, in the shape of `test_explicit_user_id.py`:
         `owner_id` and `stage` are optional query parameters on exactly the
         sixteen engine-runtime operations, the enum publishes three values,
         and the 409 is documented on exactly those operations.

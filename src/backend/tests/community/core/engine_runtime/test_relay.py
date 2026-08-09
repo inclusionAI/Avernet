@@ -925,6 +925,19 @@ def test_a_public_bot_grants_operation_to_no_one():
         relay.resolve_bot(BOT, OWNER, "stranger")
 
 
+def test_the_refusal_logs_the_caller_and_the_owner(caplog):
+    """The response cannot carry either id (it is a fixed masked 404), so the
+    log line at the point of refusal is an operator's only record of who
+    asked for whose bot."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(BotNotFoundError):
+            _relay().resolve_bot(BOT, OWNER, "stranger")
+    line = next(r for r in caplog.records if "not an operator" in r.getMessage())
+    assert "stranger" in line.getMessage() and OWNER in line.getMessage()
+
+
 def test_a_collaborator_lookup_failure_refuses():
     """Fails closed: the direction of the guess decides what a database blip
     does, and it must not admit a stranger."""
