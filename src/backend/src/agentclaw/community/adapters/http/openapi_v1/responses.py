@@ -75,6 +75,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineRuntimeError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
@@ -259,6 +260,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # NOT retryable as-is: the named stage has no live runtime (nothing
+    # validating for verify, nothing released for online, or a published stage
+    # named on a personal bot). Distinct from the masked 404 deliberately — the
+    # operator adjudication has already run, and an operator may fix a stage by
+    # publishing — and from "device not ready", which promises a retry will
+    # eventually succeed.
+    EngineStageNotLiveError: (409, "No live runtime at the requested stage"),
     # An out-of-range page argument, so it joins the 422 FastAPI already returns
     # for page_size > 100 rather than inventing a status. Needs a mapped entry
     # rather than a bare HTTPException: app-level handlers replace an unmapped
@@ -272,7 +280,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
-    # Base of the four above — LAST of its group.
+    # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
     # Transport errors that reach a handler without the relay translating them
     # (e.g. a future caller using the transport directly). The relay already

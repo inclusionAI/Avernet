@@ -35,7 +35,7 @@
         `tests/community/architecture/test_service_api_conformance.py` passes.
 - **Depends on:** —
 
-## Task 2: Stage-aware device resolution  `[ ]`
+## Task 2: Stage-aware device resolution  `[x]`
 
 - **Goal:** `stage` replaces `draft_device`; verify and online resolve their
   publish-record bindings; a dead stage refuses with its own error.

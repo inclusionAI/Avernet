@@ -8,8 +8,10 @@ request to that bot's engine adapter and normalises the answer.
 ```yaml
 purpose: "Engine-runtime relay — resolves the caller's bot, forwards one HTTP call to its engine adapter, and normalises the engine envelope."
 provides:
-  - "EngineRuntimeRelay — owner-scoped bot resolution + device forward + envelope normalisation"
+  - "EngineRuntimeRelay — bot resolution with operator adjudication + stage-aware device forward + envelope normalisation"
   - "EngineConnectionService — composes a bot's usable WebSocket connections"
+  - "gate — who may operate a bot, and which bot types/stages the operator surfaces serve"
+  - "stage — which runtime a stage names (draft workspace vs published bindings)"
   - "EngineResult / ConnectionResult / SocketInfo value objects"
   - "Engine-runtime domain errors (no HTTP status; the adapter maps them)"
 consumes:
@@ -18,7 +20,7 @@ consumes:
   - "DeviceAdapterTransport — the one system boundary (HTTP to the bot's engine adapter)"
   - "DeviceService — connection info for the socket-composing endpoint"
   - "DeviceBindingRepository — the active binding id, without building conn info"
-  - "BotPublishRepository — a service bot's published runtime binding (ext.binding.online)"
+  - "BotPublishRepository — a service bot's published stage bindings (ext.binding.{verify,online})"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module

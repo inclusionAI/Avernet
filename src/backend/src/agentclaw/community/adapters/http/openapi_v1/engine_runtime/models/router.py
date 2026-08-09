@@ -28,6 +28,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
 
@@ -54,7 +55,7 @@ async def list_models(
     """List the models this bot's engine can route to."""
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
@@ -94,7 +95,7 @@ async def get_model(
         raise EngineResourceNotFoundError("invalid model id")
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
         path=f"/api/models/{model_id}",
     )

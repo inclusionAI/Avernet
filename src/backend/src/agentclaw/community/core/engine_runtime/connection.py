@@ -38,6 +38,7 @@ from agentclaw.community.core.engine_runtime.gate import (
     require_operable_bot,
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
 
@@ -181,7 +182,9 @@ class EngineConnectionService:
             caller_id=owner_id,
             owner_id=str(bot.get("owner_id") or owner_id),
         )
-        require_operable_bot(str(bot.get("bot_type") or ""), surface="connections")
+        require_operable_bot(
+            str(bot.get("bot_type") or ""), stage=STAGE_DRAFT, surface="connections"
+        )
         engine = str(bot.get("active_engine") or "")
 
         binding_id = self._active_binding_id(bot_id, owner_id)

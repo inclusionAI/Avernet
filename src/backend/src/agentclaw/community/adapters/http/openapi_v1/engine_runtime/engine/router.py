@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
 
@@ -64,7 +65,7 @@ async def get_engine_status(
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/engine/status",
         enveloped=False,
     )
@@ -97,7 +98,7 @@ async def get_engine_capabilities(
     """
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
         path="/api/engine/capabilities",
     )
@@ -128,7 +129,7 @@ async def list_available_engines(
     # Publicly a noun; the engine models the same read under a verb path.
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/engine/list",
     )
     raw = result.data

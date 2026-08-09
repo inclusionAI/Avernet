@@ -23,7 +23,6 @@ public surface existed.
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 
 from injector import inject
@@ -43,16 +42,19 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.gate import require_bot_operator
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.engine_runtime.stage import (
+    SERVICE_BOT_TYPE,
+    STAGE_DRAFT,
+    STAGE_ONLINE,
+    resolve_stage_bind_id,
+)
 from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
-)
-from agentclaw.community.core.service_bot.repository.models import (
-    PublishStatus,
-    select_stage_bind_id,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -70,9 +72,10 @@ logger = get_logger()
 #: the generic upstream failure.
 _CAPABILITY_UNSUPPORTED_STATUS = 501
 
-#: A published bot, whose runtime device is **not** the one ``ac_bots.binding_id``
-#: names. See :meth:`EngineRuntimeRelay._resolve_published_device`.
-_SERVICE_BOT_TYPE = "service"
+#: A published bot, whose stage runtimes are **not** the one
+#: ``ac_bots.binding_id`` names. See
+#: :meth:`EngineRuntimeRelay._resolve_published_device`.
+_SERVICE_BOT_TYPE = SERVICE_BOT_TYPE
 
 
 class EngineRuntimeRelay:
@@ -156,27 +159,31 @@ class EngineRuntimeRelay:
         return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
 
     def _resolve_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts, draft_device: bool
+        self, bot_id: str, owner_id: str, facts: BotFacts, stage: str
     ) -> DeviceContext:
         """Resolve the bot's device, translating "not reachable" to one error.
 
-        ``draft_device`` picks which of a ``service`` bot's devices this call
-        addresses. The default resolves the **published** runtime — the device
-        the bot a caller addressed actually runs on. ``True`` resolves the
-        bot's own binding (``ac_bots.binding_id``, the pre-publication draft)
-        instead; the sessions group passes it because that surface operates the
-        owner's draft workspace, and the published runtime is a multi-caller
-        device whose session collection is not scoped per caller. The draft
-        lookup is the same owner-scoped ``resolve_for_bot`` a personal bot
-        uses, so for a personal bot the flag changes nothing.
+        ``stage`` picks which of a ``service`` bot's runtimes this call
+        addresses. :data:`~agentclaw.community.core.engine_runtime.stage.\
+STAGE_DRAFT` resolves the bot's own binding (``ac_bots.binding_id``, the
+        pre-publication workspace); a published stage resolves that stage's
+        live publish-record binding through
+        :func:`~agentclaw.community.core.engine_runtime.stage.\
+resolve_stage_bind_id`. The draft lookup is the same owner-scoped
+        ``resolve_for_bot`` a personal bot uses, and a personal bot ignores
+        the stage entirely — it has only its workspace, and the *refusal* of a
+        published stage on one is the gate's job
+        (``require_operable_bot``), before any device work.
 
-        ``DeviceNotBoundError`` (never provisioned, released, or — for a service
-        bot — never published) and ``ConnInfoBuildError`` (the provider could not
-        build connection info) are both "try again later" from a caller's point
-        of view, so they collapse to a single retryable error.
-        ``UnknownProviderError`` does **not** — it means the binding row names a
-        provider we do not know, which is bad data on our side and not something
-        a caller can fix by retrying. It propagates to the adapter's 500 mapping.
+        ``DeviceNotBoundError`` (never provisioned, released, or malformed
+        publish data) and ``ConnInfoBuildError`` (the provider could not build
+        connection info) are both "try again later" from a caller's point of
+        view, so they collapse to a single retryable error.
+        ``EngineStageNotLiveError`` does **not** — a stage with no live
+        runtime is its own caller-facing answer, not a retry.
+        ``UnknownProviderError`` also propagates — the binding row names a
+        provider we do not know, which is bad data on our side and not
+        something a caller can fix by retrying.
 
         **Synchronous on purpose, and never called from the event loop.** The
         provider leg of this is blocking network I/O — the BaaS builder calls
@@ -184,107 +191,50 @@ class EngineRuntimeRelay:
         timeout — so :meth:`call` runs it in a worker thread.
         """
         try:
-            if facts.bot_type == _SERVICE_BOT_TYPE and not draft_device:
-                return self._resolve_published_device(facts, owner_id)
+            if facts.bot_type == _SERVICE_BOT_TYPE and stage != STAGE_DRAFT:
+                return self._resolve_published_device(facts, owner_id, stage)
             return self._resolver.resolve_for_bot(bot_id, owner_id)
         except (DeviceNotBoundError, ConnInfoBuildError) as exc:
             raise EngineDeviceNotReadyError(
                 f"device not ready for bot={bot_id}"
             ) from exc
-        except UnknownProviderError:
+        except (EngineStageNotLiveError, UnknownProviderError):
             raise
 
     def _resolve_published_device(
-        self, facts: BotFacts, owner_id: str
+        self, facts: BotFacts, owner_id: str, stage: str
     ) -> DeviceContext:
-        """Resolve a ``service`` bot through its **published** runtime binding.
+        """Resolve a ``service`` bot through a published stage's runtime binding.
 
         A service bot's ``ac_bots.binding_id`` is the pre-publication draft — on
-        the BaaS path it is the owner's own personal device, and the binding
-        publishing produced is not on that column at all
-        (``baas_builder.BaasConnInfoBuilder._resolve_bot``). So the by-bot entry
-        point resolves the wrong device for these bots: engine, model and
-        approval calls would land on the owner's draft box while the published
-        bot a caller actually addressed runs elsewhere, or fail as "not ready"
-        once the draft binding is released while the published bot is healthy.
-
-        The live binding is the publish record's ``ext.binding.online``, and
-        ``select_stage_bind_id`` is the shared selector for that choice rather
-        than a second copy of the rule; on a ``success`` record it yields
-        ``online``.
-
-        **Keyed on the bot's primary key, never on ``bot_id``.** ``bot_id`` is
-        not unique across owners — the column carries no unique constraint, and
-        ``create_bot_for_others`` gives every user a bot called ``default`` — so
-        a lookup by ``(bot_id, env)`` alone selects whichever owner published
-        most recently, and could hand one caller another owner's running device.
-        The owner-scoped bot resolution in :meth:`call` does not constrain a
-        second query that does not mention the row it authorised, which is why
-        the ``ac_bots`` primary key is threaded through :class:`BotFacts` and
-        used here. Filtering by ``owner_id`` instead would also be safe, but it
-        re-introduces the false negative
-        ``get_latest_success_by_source_bot_id`` warns about — an org bot whose
-        record was created under a different staff id. The primary key has
-        neither problem: it is the identity of the exact row ownership was
-        proven against.
-
-        No fallback to the draft binding. Serving the draft is the defect this
-        replaces, so a bot with no published runtime is "not ready" — the same
-        answer an unprovisioned personal bot gets.
+        the BaaS path it is the owner's own personal device, and the bindings
+        publishing produced are not on that column at all
+        (``baas_builder.BaasConnInfoBuilder._resolve_bot``): they live only in
+        ``ac_bot_publish.ext.binding.{verify,online}``. Which record and which
+        key a stage names is :func:`~agentclaw.community.core.engine_runtime.\
+stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
+        socket and an HTTP forward for the same (bot, stage) cannot address
+        different devices. A stage with no live record raises
+        ``EngineStageNotLiveError`` there; no fallback to the draft binding,
+        and none between stages.
         """
-        bot_id = facts.bot_id
-        if not facts.bot_pk:
-            raise DeviceNotBoundError(
-                f"EngineRuntimeRelay: no bot primary key for bot={bot_id}; "
-                "cannot resolve a published runtime without one"
-            )
-
-        env = get_current_env()
-        # Records come back newest-first; the newest *successful* one is the
-        # published runtime. Scoped to this bot row, so "newest" cannot mean
-        # "some other owner's".
-        record = next(
-            (
-                r
-                for r in self._publish_repo.list_by_source_bot(facts.bot_pk, env)
-                if r.status == PublishStatus.SUCCESS.value
-            ),
-            None,
+        bind_id = resolve_stage_bind_id(
+            self._publish_repo,
+            bot_pk=facts.bot_pk,
+            bot_id=facts.bot_id,
+            stage=stage,
+            env=get_current_env(),
         )
-        if record is None:
-            raise DeviceNotBoundError(
-                f"EngineRuntimeRelay: no published runtime for bot={bot_id} env={env}"
-            )
-
-        # ``BotPublishRecord.ext`` is parsed to a dict by ``to_record()``; the
-        # str branch mirrors the defensive handling in ``DeviceInstanceService``.
-        ext = record.ext or {}
-        if isinstance(ext, str):
-            try:
-                ext = json.loads(ext)
-            except (json.JSONDecodeError, TypeError):
-                raise DeviceNotBoundError(
-                    f"EngineRuntimeRelay: unreadable publish ext for bot={bot_id} "
-                    f"publish_id={record.id}"
-                ) from None
-
-        bind_id = select_stage_bind_id(ext.get("binding") or {}, record.status)
-        if not bind_id:
-            raise DeviceNotBoundError(
-                f"EngineRuntimeRelay: no stage binding for bot={bot_id} "
-                f"publish_id={record.id} status={record.status}"
-            )
-
         # ``…_invoke`` rather than ``resolve_for_binding``: for the multi-instance
         # providers a published bot runs on, the transport fetches the address per
         # binding at call time and this only has to carry the routing fields. It
         # falls through to full resolution for the providers that need it.
         return self._resolver.resolve_for_binding_invoke(
-            int(bind_id), owner_id, bot_id=bot_id
+            bind_id, owner_id, bot_id=facts.bot_id
         )
 
     def _resolve_bot_and_device(
-        self, bot_id: str, owner_id: str, facts: BotFacts | None, draft_device: bool
+        self, bot_id: str, owner_id: str, facts: BotFacts | None, stage: str
     ) -> DeviceContext:
         """Prove ownership, then resolve the device — one worker-thread hop.
 
@@ -299,7 +249,7 @@ class EngineRuntimeRelay:
             if facts is not None
             else self.resolve_bot(bot_id, owner_id, owner_id)
         )
-        return self._resolve_device(bot_id, owner_id, resolved, draft_device)
+        return self._resolve_device(bot_id, owner_id, resolved, stage)
 
     # ── forwarding ────────────────────────────────────────────────────────
 
@@ -315,27 +265,31 @@ class EngineRuntimeRelay:
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
-        draft_device: bool = False,
+        stage: str = STAGE_ONLINE,
     ) -> EngineResult:
-        """Issue ``method path`` against the caller's bot's engine adapter.
+        """Issue ``method path`` against the addressed bot's engine adapter.
 
-        Resolution order is load-bearing: bot first (isolation), then device,
-        then the forward. A handler that reverses it would touch a device for a
-        bot the caller does not own.
+        Resolution order is load-bearing: bot first (isolation and the
+        operator adjudication), then device, then the forward. A handler that
+        reverses it would touch a device for a bot the caller may not operate.
 
         ``facts`` is the bot this call was already resolved against, for
-        handlers that had to resolve it to gate on it — the sessions group
-        resolves to check :attr:`BotFacts.is_shared` before forwarding. Passing
-        it keeps the request at one owner-scoped resolution instead of two.
-        ``None`` means "not resolved yet" and this call resolves it, which is
-        what every ungated route does. It is **not** a way to supply bot facts
-        from outside: the only safe value is one this relay returned for the
-        same ``bot_id``/``owner_id``, since it stands in for the ownership
-        proof.
+        handlers that had to resolve it to gate on it — the gated groups
+        resolve to run the operator adjudication and the type gate before
+        forwarding. Passing it keeps the request at one resolution instead of
+        two. ``None`` means "not resolved yet" and this call resolves it with
+        the owner as the caller, which is what every ungated (owner-scoped)
+        route does. It is **not** a way to supply bot facts from outside: the
+        only safe value is one this relay returned for the same
+        ``bot_id``/``owner_id``, since it stands in for the ownership proof.
 
-        ``draft_device`` addresses a ``service`` bot's pre-publication draft
-        binding instead of its published runtime — see :meth:`_resolve_device`
-        for the rule and who passes it. Inert for a personal bot.
+        ``stage`` names which of a ``service`` bot's runtimes this call
+        addresses — see :meth:`_resolve_device` for the rule. The default is
+        the published online runtime, today's meaning for the relay's
+        owner-scoped callers; the gated public groups pass the request's
+        stage explicitly, as they passed ``draft_device=True`` before stages
+        were addressable. A personal bot ignores it (it has only its
+        workspace; refusing a published stage on one is the gate's job).
 
         Bot and device resolution share one **worker thread** hop. Both legs are
         synchronous and neither belongs on the event loop:
@@ -362,7 +316,7 @@ class EngineRuntimeRelay:
         to lack one is exactly the malformed case that must still fail.
         """
         ctx = await asyncio.to_thread(
-            self._resolve_bot_and_device, bot_id, owner_id, facts, draft_device
+            self._resolve_bot_and_device, bot_id, owner_id, facts, stage
         )
         raw = await self._invoke(ctx, method, path, body, params, timeout)
         return self._normalise(raw, bot_id=bot_id, path=path, enveloped=enveloped)

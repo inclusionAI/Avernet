@@ -13,26 +13,33 @@ from __future__ import annotations
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.gate import require_operable_bot
 from agentclaw.community.core.engine_runtime.models import BotFacts
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 
 
 async def resolve_operable_bot(
-    relay: EngineRuntimeRelayProtocol, bot_id: str, owner_id: str, *, surface: str
+    relay: EngineRuntimeRelayProtocol,
+    bot_id: str,
+    owner_id: str,
+    *,
+    stage: str = STAGE_DRAFT,
+    surface: str,
 ) -> BotFacts:
     """Resolve the caller's bot and reject anything more than one caller reaches.
 
     Runs **before** any device call, deliberately: a filter applied to what the
     device returned would already have fetched device-wide data. This also
-    performs the owner-scoped resolve, so a foreign ``bot_id`` raises
-    ``BotNotFoundError`` here — before a device is touched. The resolved facts
+    performs the owner-scoped resolve and the operator adjudication, so a
+    foreign ``bot_id`` — or a caller who may not operate the bot — raises
+    ``BotNotFoundError`` here, before a device is touched. The resolved facts
     are returned so the forward can reuse them (``relay.call(..., facts=facts,
-    draft_device=True)``) instead of resolving again.
+    stage=…)``) instead of resolving again.
 
     ``surface`` names the group for the refusal message; the adapter maps the
     type refusal to a public 501 — what the surface cannot serve, rather than
     something the caller may retry or fix.
     """
     facts = await relay.resolve_bot_off_loop(bot_id, owner_id, owner_id)
-    require_operable_bot(facts.bot_type, surface=surface)
+    require_operable_bot(facts.bot_type, stage=stage, surface=surface)
     return facts
 
 

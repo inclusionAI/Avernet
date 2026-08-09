@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineUpstreamError,
@@ -95,7 +96,7 @@ async def get_approval_mode(
     # a POST with a body.
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST",
         path="/api/approvals/mode/get",
         # user_id is filled from the principal; the engine uses it to route.
@@ -118,7 +119,7 @@ async def set_approval_mode(
     # engine's accept-set, so no translation is needed and none is applied.
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST",
         path="/api/approvals/mode/set",
         body={
@@ -160,7 +161,7 @@ async def list_approval_modes(
     # engine's descriptions are Chinese and this surface promises English.
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
         path="/api/engine/capabilities",
     )

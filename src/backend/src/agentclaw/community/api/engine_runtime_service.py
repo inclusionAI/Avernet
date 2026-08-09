@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
+from agentclaw.community.core.engine_runtime.stage import STAGE_ONLINE
 
 
 @runtime_checkable
@@ -59,21 +60,24 @@ class EngineRuntimeRelayProtocol(Protocol):
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
-        draft_device: bool = False,
+        stage: str = STAGE_ONLINE,
     ) -> EngineResult:
-        """Issue ``method path`` against the caller's bot's engine adapter.
+        """Issue ``method path`` against the addressed bot's engine adapter.
 
         ``enveloped=False`` for the one engine route that answers with a raw
         payload instead of the standard envelope (``GET /api/engine/status``).
 
         ``facts`` reuses a resolve a gating handler already paid for; ``None``
-        resolves here. Only a value this relay returned for the same
-        ``bot_id``/``owner_id`` is safe — it stands in for the ownership proof.
+        resolves here with the owner as the caller. Only a value this relay
+        returned for the same ``bot_id``/``owner_id`` is safe — it stands in
+        for the ownership proof.
 
-        ``draft_device=True`` addresses a ``service`` bot's pre-publication
-        draft binding instead of its published runtime; inert for a personal
-        bot. The sessions group passes it — that surface operates the owner's
-        draft workspace, and the published runtime is a multi-caller device.
+        ``stage`` names which of a ``service`` bot's runtimes this call
+        addresses: the draft workspace (``ac_bots.binding_id``) or a published
+        stage's live binding. The default is the published online runtime;
+        the gated public groups pass the request's stage explicitly. Ignored
+        by a personal bot — refusing a published stage on one is the gate's
+        job, before any device work.
         """
         ...
 

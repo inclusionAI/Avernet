@@ -33,6 +33,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
@@ -308,7 +309,7 @@ async def list_sessions(
     if session_key:
         params["session_key"] = session_key
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/sessions",
         params=params,
     )
@@ -330,7 +331,7 @@ async def create_session(
     """Create a session."""
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST", path="/api/sessions",
         body={
             "title": body.title,
@@ -362,7 +363,7 @@ async def get_session(
     # containing "/" would not be addressable, but no engine id format has one.
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
         path=f"/api/sessions/{session_id}",
     )
@@ -387,7 +388,7 @@ async def update_session(
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST",
         # QUERY params, not a body. The engine declares this route's fields as
         # bare scalar arguments, which FastAPI binds from the query string —
@@ -413,7 +414,7 @@ async def delete_session(
     """Delete a session."""
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="DELETE",
         path=f"/api/sessions/{session_id}",
     )
@@ -442,7 +443,7 @@ async def list_session_messages(
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     _require_within_depth(page)
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
         path=f"/api/sessions/{session_id}/messages",
         # The history route tail-limits rather than paginating, so the offset is
@@ -469,7 +470,7 @@ async def clear_session_messages(
     """Clear a session's message history, keeping the session."""
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
     await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="DELETE",
         path=f"/api/sessions/{session_id}/messages",
     )

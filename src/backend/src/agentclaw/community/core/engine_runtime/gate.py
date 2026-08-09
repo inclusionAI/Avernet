@@ -61,6 +61,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
+    EngineStageNotLiveError,
+)
+from agentclaw.community.core.engine_runtime.stage import (
+    SERVICE_BOT_TYPE,
+    STAGE_DRAFT,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env
@@ -150,19 +155,31 @@ def require_bot_operator(
         raise BotNotFoundError(f"bot {bot_id} not found")
 
 
-def require_operable_bot(bot_type: str, *, surface: str) -> None:
-    """Reject bot types the operator surfaces do not serve.
+def require_operable_bot(bot_type: str, *, stage: str, surface: str) -> None:
+    """Reject bot types and stages the operator surfaces do not serve.
 
     Callers run this after the operator adjudication (so a stranger learns
     nothing, not even the type) and before composing a socket or forwarding a
     request. ``surface`` names what the caller serves ("sessions",
     "connections") so the refusal reads the same as it always has on each
-    surface; the adapter maps it to a 501 — what the surface cannot serve,
-    rather than something the caller may retry or fix.
+    surface; the adapter maps the type refusal to a 501 — what the surface
+    cannot serve, rather than something the caller may retry or fix.
+
+    The stage half: a ``personal`` bot has only its own workspace runtime, so
+    naming a published stage for one raises
+    :class:`EngineStageNotLiveError` — the same answer a dead stage gives,
+    because that is what it is. Checked here rather than at device resolution
+    so the refusal lands *before* any device work, and so the relay's
+    internal callers (whose default stage is the published one and whose
+    personal bots ignore it) keep their meaning.
     """
     if bot_type not in SUPPORTED_BOT_TYPES:
         raise EngineBotTypeNotSupportedError(
             f"{surface} are not served for bot_type={bot_type!r}"
+        )
+    if stage != STAGE_DRAFT and bot_type != SERVICE_BOT_TYPE:
+        raise EngineStageNotLiveError(
+            f"a {bot_type} bot has no {stage} runtime; only its workspace"
         )
 
 
