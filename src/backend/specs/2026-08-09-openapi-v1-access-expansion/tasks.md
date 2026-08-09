@@ -63,9 +63,9 @@
         caller — raises `EngineStageNotLiveError`, mapped to
         `(409, "No live runtime at the requested stage")` in
         `ENVELOPE_ERRORS`, and never falls back to another stage's binding.
-  - [~] The stage→binding lookup lives in one helper
-        (`core/engine_runtime/stage.py`) the relay calls; the connection
-        service's side lands with Task 4.
+  - [x] The stage→binding lookup lives in one helper
+        (`core/engine_runtime/stage.py`) the relay and the connection
+        service both call (connection side landed with Task 4).
 - **Depends on:** Task 1
 
 ## Task 3: The parameters, on all fifteen HTTP operations  `[x]`
@@ -97,7 +97,7 @@
   - [x] `ruff check --select E,F,W` is clean on the package.
 - **Depends on:** Task 2
 
-## Task 4: The connection endpoint  `[ ]`
+## Task 4: The connection endpoint  `[x]`
 
 - **Goal:** The operator socket obeys the same adjudication and stage
   addressing as the HTTP groups.
@@ -105,14 +105,14 @@
   `…/core/engine_runtime/connection.py`,
   `…/adapters/http/openapi_v1/engine_runtime/connection/router.py`
 - **Done when:**
-  - [ ] `build` takes caller, owner and stage; adjudicates with the Task 1
+  - [x] `build` takes caller, owner and stage; adjudicates with the Task 1
         rule before any binding or device work; resolves `verify`/`online`
         bindings through the Task 2 helper and `draft` through
         `get_active_by_bot_and_owner` as today.
-  - [ ] `OperatorContext.staff_id` is the caller. A test pins that a public
+  - [x] `OperatorContext.staff_id` is the caller. The pin that a public
         bot's non-collaborator is refused *before* `DeviceService` is
-        consulted — its wider internal model must not widen this surface.
-  - [ ] The router passes the new parameters; the connection service's
+        consulted lands with Task 5's flip of the same connection test.
+  - [x] The router passes the new parameters; the connection service's
         docstrings drop the `publish_bot_id` naming-scheme claim (same
         correction as Task 1).
 - **Depends on:** Task 2

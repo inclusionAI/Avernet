@@ -40,9 +40,16 @@ from agentclaw.community.core.engine_runtime.gate import (
     require_operable_bot,
 )
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
-from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
+from agentclaw.community.core.engine_runtime.stage import (
+    STAGE_DRAFT,
+    resolve_stage_bind_id,
+)
+from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -151,22 +158,28 @@ class EngineConnectionService:
         device_service: DeviceService,
         gateway: GatewayEndpoint,
         collaborators: CollaboratorServiceProtocol,
+        publish_repo: BotPublishRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
         self._gateway = gateway
         self._collaborators = collaborators
+        self._publish_repo = publish_repo
 
-    def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
-        """Return the bot's usable sockets.
+    def build(
+        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str
+    ) -> ConnectionResult:
+        """Return the addressed bot's usable sockets for one stage.
 
-        ``owner_id`` must be the authenticated principal: the bot is resolved
-        owner-scoped here, then the shared operator adjudication decides
-        whether the caller may hold the channel. ``DeviceService.
-        get_device_connection`` applies a permission model of its own — one
-        that also admits any caller to a *public* bot — and adjudicating first
-        with the stricter rule means that model can never widen this surface.
+        ``caller_id`` must be the authenticated principal; ``owner_id`` is the
+        owner the request addresses and may name someone else. The bot is
+        resolved ``(bot_id, owner_id)``-scoped, then the shared operator
+        adjudication decides whether the caller may hold the channel.
+        ``DeviceService.get_device_connection`` applies a permission model of
+        its own — one that also admits any caller to a *public* bot — and
+        adjudicating first with the stricter rule means that model can never
+        widen this surface.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
         # The socket this endpoint publishes is **not** chat-scoped, however it
@@ -181,21 +194,25 @@ class EngineConnectionService:
             self._collaborators,
             bot_pk=int(bot.get("id") or 0),
             bot_id=str(bot.get("bot_id") or bot_id),
-            caller_id=owner_id,
+            caller_id=caller_id,
             owner_id=str(bot.get("owner_id") or owner_id),
         )
         require_operable_bot(
-            str(bot.get("bot_type") or ""), stage=STAGE_DRAFT, surface="connections"
+            str(bot.get("bot_type") or ""), stage=stage, surface="connections"
         )
         engine = str(bot.get("active_engine") or "")
 
-        binding_id = self._active_binding_id(bot_id, owner_id)
+        binding_id = self._stage_binding_id(bot, bot_id, owner_id, stage)
 
+        # The true actor. ``DeviceService.get_device_connection`` runs its own
+        # (wider) permission model against this id; ours ran first and is
+        # stricter, so composing as the caller cannot widen the surface — and
+        # the provider's records show who actually held the channel.
         operator = OperatorContext(
-            staff_id=owner_id,
-            staff=owner_id,
-            nick_name=owner_id,
-            operator_name=owner_id,
+            staff_id=caller_id,
+            staff=caller_id,
+            nick_name=caller_id,
+            operator_name=caller_id,
         )
         chat_path = self._chat_path(engine)
         try:
@@ -231,8 +248,31 @@ class EngineConnectionService:
             engine=engine, expires_at=self._expires_at(info), sockets=sockets
         )
 
+    def _stage_binding_id(
+        self, bot: dict, bot_id: str, owner_id: str, stage: str
+    ) -> int:
+        """The binding id of the runtime ``stage`` names — and *only* the id.
+
+        The draft is the bot's own binding, read directly (see
+        :meth:`_active_binding_id`). A published stage resolves through the
+        same ``resolve_stage_bind_id`` rule the relay uses — one rule, so a
+        socket and an HTTP forward for the same (bot, stage) cannot address
+        different devices. The stage's validity for this bot was already
+        checked by the gate above.
+        """
+        if stage == STAGE_DRAFT:
+            return self._active_binding_id(bot_id, owner_id)
+        return resolve_stage_bind_id(
+            self._publish_repo,
+            self._binding_repository,
+            bot_pk=int(bot.get("id") or 0),
+            bot_id=str(bot.get("bot_id") or bot_id),
+            stage=stage,
+            env=get_current_env(),
+        )
+
     def _active_binding_id(self, bot_id: str, owner_id: str) -> int:
-        """The bot's active binding id — and *only* the id.
+        """The bot's own (draft) binding id — and *only* the id.
 
         Deliberately not ``DeviceContextResolver.resolve_for_bot``. That builds
         full connection info, which on the BaaS path means a blocking
@@ -254,10 +294,12 @@ class EngineConnectionService:
         ``(bot_id, owner_id)``, so another owner's binding cannot be returned
         even though ownership was already established above.
 
-        For a ``service`` bot this is the **draft** binding, and that is what
-        the gate above relies on: the verify/online runtimes publishing
-        produces are bound under ``publish_bot_id`` on the publish records,
-        so a ``bot_id``-keyed read cannot select them.
+        For a ``service`` bot this is the **draft** binding: the verify/online
+        runtimes publishing produces are bound only in the publish records'
+        ``ext.binding.{verify,online}`` (never on ``ac_bots.binding_id``), so
+        a ``bot_id``-keyed read cannot select them —
+        :meth:`_stage_binding_id` resolves those through the shared stage
+        rule instead.
         """
         binding = self._binding_repository.get_active_by_bot_and_owner(
             bot_id, owner_id
