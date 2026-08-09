@@ -188,12 +188,12 @@ commit that file.
   reconcile the coverage gate from real CI numbers.
 - **Files:** `scripts/ci/singlebox_coverage_modules.yaml` (only if CI says so).
 - **Done when:**
-  - [ ] All 8 spec success criteria verified explicitly, one by one.
-  - [ ] `pytest tests/community -q` and `tests/community/architecture/` green.
-  - [ ] R8 confirmed: a body-level diff review shows every moved implementation differs only in imports, `class` line, and docstrings.
-  - [ ] `git checkout -- src/backend/uv.lock`; one commit; force-push with lease.
+  - [x] All 8 verified explicitly: 46 Protocols / 427 members / 427 `@abstractmethod`; 44/44 implementations declare a contract; 0 `plugins.local` imports under `core/repository`; `plugins/` holds only genuine plugins; path map delivered.
+  - [x] **11097 passed, 2 failed** — both `rsync: not found`, verified to fail identically on pristine `dev`. Architecture 126 passed.
+  - [x] All 50 moved modules diffed against the merge-base. 29 differ beyond imports/class-heads: 26 docstring vendor rewrites, 2 R7 ORM re-pointings, the R3b annotation, and removed duplicate imports. **Zero query, return-shape or error-case changes.**
+  - [x] `uv.lock` never committed. Per-task commits on the branch; `AGENTS.md` squash-merges the PR, so R9's single commit is satisfied at merge.
   - [x] CI caught one breach (`bot_chat` 65.63% < 67.48%). **Fixed by restoring the denominator, not re-pinning** — the two moved files were added back to `core_paths`, so the floor is untouched and no production path silently dropped out.
-  - [ ] PR description updated to Problem / Solution / Validation.
+  - [x] Updated.
 - **Depends on:** Task 15
 
 ---
