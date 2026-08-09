@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -53,6 +54,7 @@ class _Bots:
             "bot_type": self.bot_type,
             "active_engine": self.engine,
             "public": self.public,
+            "id": 100,
         }
 
 
@@ -153,40 +155,68 @@ def _gateway(base="https://gw.example"):
     return GatewayEndpoint(base_url=base)
 
 
-class _CollaboratorRepo:
-    """Stands in for the collaborator table the shared-bot gate reads."""
+class _Collaborators:
+    """Stands in for ``CollaboratorService.get_permission_level``."""
 
-    def __init__(self, collaborators=None):
-        self._collaborators = collaborators or {}
+    def __init__(self, levels=None):
+        self._levels = levels or {}
         self.calls = []
 
-    def list_by_bot(self, bot_id, owner_id, env, role=None):
-        self.calls.append((bot_id, owner_id))
-        return self._collaborators.get((bot_id, owner_id), [])
+    def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        if user_id == owner_id:
+            return PermissionLevel.OWNER
+        self.calls.append((bot_pk, user_id, owner_id))
+        return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
 
-def _svc(bots=None, bindings=None, devices=None, gateway=None, collaborators=None):
+class _PublishRepo:
+    """Stands in for the publish repository (published-stage sockets)."""
+
+    def __init__(self, by_pk=None):
+        self._by_pk = by_pk or {}
+        self.calls = []
+
+    def list_by_source_bot(self, source_bot_pk, env):
+        self.calls.append((source_bot_pk, env))
+        return list(self._by_pk.get(source_bot_pk, []))
+
+
+def _svc(
+    bots=None,
+    bindings=None,
+    devices=None,
+    gateway=None,
+    collaborators=None,
+    publish_repo=None,
+):
     return EngineConnectionService(
         bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
         gateway if gateway is not None else _gateway(),
-        collaborators or _CollaboratorRepo(),
+        collaborators or _Collaborators(),
+        publish_repo or _PublishRepo(),
     )
 
 
-def _build(svc):
-    return svc.build(bot_id=BOT, owner_id=OWNER)
+def _build(svc, caller_id=OWNER, stage="draft"):
+    return svc.build(
+        bot_id=BOT, owner_id=OWNER, caller_id=caller_id, stage=stage
+    )
 
 
 def test_foreign_bot_raises_before_resolving_a_device():
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     with pytest.raises(BotNotFoundError):
-        _svc(bindings=bindings).build(bot_id=BOT, owner_id="someone-else")
+        _svc(bindings=bindings).build(
+            bot_id=BOT, owner_id="someone-else", caller_id=OWNER, stage="draft"
+        )
 
 
 def test_the_resolved_owner_is_passed_as_the_operator():
-    """``get_device_connection`` has a wider permission model of its own —
-    public bots and collaborators. Passing the resolved owner means it can
-    never widen this owner-only surface."""
+    """The operator id is routing and bookkeeping downstream, and it must be
+    the resolved owner even when a collaborator holds the channel: some
+    device-service implementations apply collaborator-blind permission models
+    to it, and the BaaS path keys instance affinity on it — per-caller values
+    would pin two operators of one (bot, stage) to different instances."""
     devices = _Devices()
     _build(_svc(devices=devices))
     assert devices.kwargs["operator"].staff_id == OWNER
@@ -582,19 +612,16 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
     assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
 
 
-# ── bot-type gate ─────────────────────────────────────────────────────────
+# ── the operator gate ─────────────────────────────────────────────────────
 
 
-def test_an_unshared_service_bot_is_served_its_draft_socket():
-    """The socket a service bot gets addresses its DRAFT device, and only that.
+def test_a_service_bots_default_socket_addresses_its_draft_device():
+    """A request naming no stage gets the DRAFT socket, exactly as before.
 
-    The published socket is an operator channel — ``sessions.*``,
-    ``exec.approvals.*``, ``operator.admin`` — so it may only reach a device
-    the owner alone uses. For an unshared service bot that is the draft
-    binding: this endpoint reads it owner-scoped by ``bot_id``, and the
-    verify/online runtimes publishing produces are bound under
-    ``publish_bot_id`` on the publish records, so they cannot be addressed
-    here at all.
+    The draft binding is read owner-scoped by ``bot_id``; the verify/online
+    runtimes publishing produces live only in the publish records'
+    ``ext.binding.{verify,online}``, addressed via ``stage=`` and resolved
+    through the same rule the relay uses.
     """
     bindings, devices = _Bindings(), _Devices()
     result = _build(
@@ -606,87 +633,90 @@ def test_an_unshared_service_bot_is_served_its_draft_socket():
     assert bindings.calls == [(BOT, OWNER)]
 
 
-def test_a_shared_service_bot_is_refused_before_a_device_is_touched():
-    """Sharing closes the draft window too: ``ExpertChatService`` creates
-    collaborator and public callers' sessions on the bot's own draft binding,
-    so a shared service bot's draft device is multi-caller — the exposure this
-    gate exists to prevent."""
+def test_a_public_service_bots_owner_keeps_their_socket():
+    """The flip of the old shared-bot refusal: visibility no longer costs the
+    owner their operator channel."""
+    bindings, devices = _Bindings(), _Devices()
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="service", public="1"),
+            bindings=bindings,
+            devices=devices,
+        )
+    )
+    assert [s.kind for s in result.sockets] == ["chat"]
+
+
+def test_a_non_operator_is_refused_before_a_device_is_touched():
+    """A caller who is neither owner nor collaborator gets the same masked
+    not-found an absent bot raises — refused at composition time, before the
+    device service (whose own model would admit anyone to a *public* bot)
+    could be consulted at all."""
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     devices = _Devices()
-    svc = _svc(
-        bots=_Bots(bot_type="service", public="1"), bindings=bindings, devices=devices
-    )
+    svc = _svc(bots=_Bots(public="1"), bindings=bindings, devices=devices)
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="stranger")
 
     # Refused at composition time — no device call was made on the way out.
     assert devices.kwargs is None
 
 
-def test_a_collaborated_service_bot_is_refused():
-    """Service bots are exactly the type that takes collaborators."""
-    bindings = _Bindings(raises=AssertionError("must not be reached"))
-    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
-    svc = _svc(
-        bots=_Bots(bot_type="service"), bindings=bindings, collaborators=collaborators
+def test_a_member_collaborator_is_served_the_socket():
+    """The flip of the old collaborated-bot refusal: the team operates the
+    bot, adjudicated per caller at member level or above."""
+    collaborators = _Collaborators({(100, "u2"): PermissionLevel.MEMBER})
+    result = _build(
+        _svc(bots=_Bots(bot_type="service"), collaborators=collaborators),
+        caller_id="u2",
     )
+    assert [s.kind for s in result.sockets] == ["chat"]
+    assert collaborators.calls == [(100, "u2", OWNER)]
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+
+def test_a_public_personal_bots_owner_keeps_their_socket():
+    """Visibility is a property of the bot, not a penalty on its owner."""
+    result = _build(_svc(bots=_Bots(public="1")))
+    assert [s.kind for s in result.sockets] == ["chat"]
 
 
-def test_a_public_personal_bot_is_refused_before_a_device_is_touched():
-    """``personal`` does not imply single-caller — ``ac_bots.public`` is free.
-
-    ``bot_public_service`` sets the column with no ``bot_type`` gate, and
-    ``ExpertChatService`` admits any caller to a public bot and creates their
-    sessions on its binding. This socket's ``sessions.*`` methods would then
-    reach those conversations, which is exactly what the service-bot refusal
-    above exists to prevent.
-    """
+def test_public_visibility_grants_operation_to_no_one():
+    """The audience of a public bot converses over the chat path; the
+    operator channel stays with the owner and collaborators."""
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     svc = _svc(bots=_Bots(public="1"), bindings=bindings)
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="stranger")
 
 
-def test_a_collaborated_personal_bot_is_refused():
-    """A coding app takes collaborators while staying ``bot_type='personal'``."""
-    bindings = _Bindings(raises=AssertionError("must not be reached"))
-    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
-    svc = _svc(bindings=bindings, collaborators=collaborators)
-
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+def test_a_coding_apps_collaborator_is_served_the_socket():
+    """A coding app takes collaborators while staying ``bot_type='personal'``
+    — its team holds the operator channel from their own accounts."""
+    collaborators = _Collaborators({(100, "u2"): PermissionLevel.ADMIN})
+    result = _build(_svc(collaborators=collaborators), caller_id="u2")
+    assert [s.kind for s in result.sockets] == ["chat"]
 
 
-def test_an_unreadable_collaborator_table_refuses_rather_than_publishes():
-    """The gate fails closed: a database blip must not open a shared bot."""
+def test_an_unreadable_collaborator_lookup_refuses_rather_than_publishes():
+    """The gate fails closed: a database blip must not admit a stranger."""
 
     class _Broken:
-        def list_by_bot(self, bot_id, owner_id, env, role=None):
-            raise RuntimeError("collaborator table unavailable")
+        def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+            raise RuntimeError("collaborator service unavailable")
 
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     svc = _svc(bindings=bindings, collaborators=_Broken())
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="u2")
 
 
-def test_the_collaborator_lookup_is_skipped_for_an_already_public_bot():
-    """Public is decisive; there is nothing a second query could change."""
-    collaborators = _CollaboratorRepo()
-    svc = _svc(
-        bots=_Bots(public="1"),
-        bindings=_Bindings(raises=AssertionError("must not be reached")),
-        collaborators=collaborators,
-    )
-
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+def test_the_collaborator_lookup_is_skipped_for_the_owner():
+    """The owner short-circuits; no collaborator query is spent on them."""
+    collaborators = _Collaborators()
+    _build(_svc(collaborators=collaborators))
     assert collaborators.calls == []
 
 

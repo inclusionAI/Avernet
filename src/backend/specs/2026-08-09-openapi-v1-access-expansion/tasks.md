@@ -123,7 +123,7 @@
         correction as Task 1).
 - **Depends on:** Task 2
 
-## Task 5: Bring the existing suite to the widened contract  `[ ]`
+## Task 5: Bring the existing suite to the widened contract  `[x]`
 
 - **Goal:** Every test that pins today's refusals flips deliberately, none
   silently.
@@ -133,18 +133,18 @@
   `src/backend/tests/community/adapters/http/openapi_v1/engine_runtime/{test_sessions,test_engine_models,test_approvals,test_tenant_isolation}.py`,
   `…/engine_runtime/conftest.py`
 - **Done when:**
-  - [ ] The shared/public/collaborated 501 pins become served-to-operator /
+  - [x] The shared/public/collaborated 501 pins become served-to-operator /
         masked-404-to-stranger pins; the unknown-bot-type and fail-closed
         refusals stay refusals.
-  - [ ] The `draft_device is True` forward assertions become
+  - [x] The `draft_device is True` forward assertions become
         `stage == "draft"` assertions; the `bot_is_shared` suite retires with
         `sharing.py`.
-  - [ ] The `FakeRelay` harness models collaborator level and stage, keeping
+  - [x] The `FakeRelay` harness models collaborator level and stage, keeping
         the `attempts` vs `calls` split so "no device was touched" stays a
         real assertion.
-  - [ ] The stale "Only sessions is personal-only" docstring at
+  - [x] The stale "Only sessions is personal-only" docstring at
         `test_engine_models.py:202` is corrected.
-  - [ ] `pytest tests/community/adapters/http/openapi_v1 tests/community/core/engine_runtime` is green.
+  - [x] `pytest tests/community/adapters/http/openapi_v1 tests/community/core/engine_runtime` is green.
 - **Depends on:** Tasks 3, 4
 
 ## Task 6: Pin the widened contract  `[ ]`
