@@ -420,7 +420,7 @@ class TestBotChatServiceListSessions:
     def service(self):
         # Mock DatabasePlugin for testing
         mock_db = MagicMock()
-        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG, db_repo=MagicMock())
 
     @pytest.mark.asyncio
     async def test_list_sessions_defaults_to_db_source(self, service):
@@ -1338,7 +1338,7 @@ class TestBotChatServiceGetSession:
     def service(self):
         # Mock DatabasePlugin for testing
         mock_db = MagicMock()
-        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG, db_repo=MagicMock())
 
     def _detail(self, trace_id="trace-1"):
         return ConversationDetail(
@@ -1791,7 +1791,7 @@ class TestBotChatServiceHealthCheck:
     def service(self):
         # Mock DatabasePlugin for testing
         mock_db = MagicMock()
-        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG, db_repo=MagicMock())
 
     @pytest.mark.asyncio
     async def test_health_check_healthy_langfuse(self, service):
@@ -1850,7 +1850,7 @@ class TestCheckBotAccessNoDefaultShortcut:
     @pytest.fixture
     def service(self):
         mock_db = MagicMock()
-        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG)
+        return BotChatService(db=mock_db, config=_TEST_BOTCHAT_CONFIG, db_repo=MagicMock())
 
     def test_historical_default_still_goes_through_has_bot_access(self, service):
         """The retired "default" literal must go through has_bot_access, not short-circuit."""
