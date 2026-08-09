@@ -10,16 +10,16 @@ contract-to-implementation link exists only inside a DI `binder.bind()` call and
 in prose.
 
 This feature moves all 43 repository implementation modules (44 classes) and all
-46 repository Protocols into one flat package —
+46 repository Protocols into one package —
 `agentclaw/community/core/repository/`, split into `protocols/` and
-`implementations/` — and makes the contract enforceable at runtime: every
+`implementations/` and grouped into 11 domain subdirectories — and makes the contract enforceable at runtime: every
 Protocol member becomes `@abstractmethod`, every implementation declares its
 Protocol(s) as a base, and an implementation that omits a member fails at
 construction with a `TypeError` naming the missing member.
 
 36 of those modules come from the plugin layer, which is where the misplacement
 this feature corrects actually lives. The remaining 7 already sit inside `core/`
-but under four more competing conventions; they are pulled in so that the flat
+but under four more competing conventions; they are pulled in so that the new
 package is the *single* answer rather than the most common one.
 
 No repository body changes behaviour: same queries, same return shapes, same
@@ -216,6 +216,21 @@ The skills_pool mixins and helpers are only reachable from
 `skills_pool_layout_repository.py` (and one test); nothing else in the tree
 imports them.
 
+**Decision — the mixins stay mixins.** Inlining them into their composite was
+considered and rejected: the four mixins plus the composite total ~1,856 lines,
+so a merged file would sit ~856 lines over the 1000-line Rule 9 cap and could only
+land by adding an allowlist entry — which success criterion 4 forbids. Inlining
+therefore is not available until the decomposition in
+[#912](https://github.com/inclusionAI/Avernet/issues/912) lands, and that work is
+explicitly out of scope here under R8.
+
+The domain grouping in R1 removes the reason the mixins read badly in the first
+place. Under a flat layout they would have been four files named
+`skills_pool_*_repository.py` sitting in a directory called `implementations/`
+while not being repositories. Inside `implementations/skills_pool/` they are named
+for the part they are (`layout_capability.py`, `layout_quarantine.py`, …), sort
+directly beneath the `layout.py` they compose, and need no disambiguating prefix.
+
 `core/economy/governance/repositories/orm.py` holds four `Base` subclasses
 (`GovernanceNotificationOrm`, `AuditLogOrm`, `WhitelistEntryOrm`,
 `GovernanceTicketOrm`) that are imported by three `domain/` modules as well as by
@@ -226,12 +241,22 @@ metadata-registration import in `plugins/local/database.py:160` follows them.
 
 ## Requirements
 
-### R1 — Flat package
+### R1 — One package, grouped by domain
 
-All repository Protocols live in
-`agentclaw/community/core/repository/protocols/`; all repository
-implementations live in `agentclaw/community/core/repository/implementations/`.
-Both directories are new and flat — no per-domain subdirectories.
+All repository Protocols live under
+`agentclaw/community/core/repository/protocols/`; all repository implementations
+live under `agentclaw/community/core/repository/implementations/`. Both
+directories are new.
+
+Within them, content is grouped into **domain subdirectories** — one module per
+domain under `protocols/`, one subdirectory per domain under `implementations/`.
+44 implementation modules plus their mixins and helpers in a single directory is
+not navigable, and the domain grouping is what makes "where does a new repository
+go?" answerable by inspection rather than by reading this spec.
+
+The domain set is a deliberate consolidation, not a copy of the `core/` domain
+names: several `core/` domains own exactly one repository, and a subdirectory per
+one-file domain would trade a too-flat layout for a too-deep one.
 
 ### R2 — Enforceable contract
 
@@ -284,7 +309,7 @@ construction and a singleton are behaviourally identical.
 
 The eight non-plugin modules in the classification table above move without
 gaining a Protocol. `plugins/http_client.py` does not move. The governance ORM
-models keep their domain ownership rather than entering the flat package.
+models keep their domain ownership rather than entering the repository package.
 
 ### R5 — Wiring updated
 
@@ -425,19 +450,25 @@ suppression:
 The full architecture suite must be run against the relocated tree early, before
 the wiring is finished — some of these only appear once files are inside `core/`.
 
-### C2 — `arch.rules.md` §8 conflict (accepted, but visible)
+### C2 — `arch.rules.md` §8 (resolved by the domain grouping)
 
 §8 ("Directory Organization Matches Architectural Roles") recommends
-`core/<domain>/repositories/` — repositories co-located with the domain they
-serve. A flat `core/repository/` departs from that recommendation. §8 is
-classified **Policy**, states that "exact directory names are repository-specific",
-and closes with "recommended directory layouts belong in the architecture
-playbook, not in the constitution itself", so the flat layout does not violate a
-binding invariant. It does contradict the published recommendation, and §8's
-required check — "each top-level architectural directory or package has a
-declared role" — means the new package must document its role.
+`core/<domain>/repositories/` — repositories grouped by the domain they serve.
 
-**This is a deliberate decision, surfaced for acceptance, not a blocker.**
+An earlier revision of this spec required a **flat** `core/repository/`, which
+contradicted that recommendation and was recorded here as a deliberate accepted
+cost. R1 now groups by domain, so the conflict is gone: this change keeps §8's
+*grouping* principle while consolidating the *location*, which is what removes the
+nine competing conventions.
+
+Two obligations from §8 remain and are met by the plan:
+
+- *"each top-level architectural directory or package has a declared role"* —
+  `core/repository/README.md` carries a Context Boundary section, and the package
+  joins `BOUNDARY_SIGNIFICANT_MODULES`.
+- *"one path does not serve incompatible roles simultaneously"* — `protocols/`
+  holds contracts only and `implementations/` bodies only, enforced by the guard
+  in Task 13.
 
 ### C3 — Module-boundary model
 

@@ -20,7 +20,7 @@ today.
 
 ## Affected Components
 
-- `src/backend/src/agentclaw/community/core/repository/` — **new**; the flat home
+- `src/backend/src/agentclaw/community/core/repository/` — **new**; the consolidated home, grouped by domain
 - `src/backend/src/agentclaw/community/plugins/` — loses 43 modules, keeps
   `local/`, `community/`, and `http_client.py`
 - `src/backend/src/agentclaw/community/core/<21 domains>/` — lose their Protocol
@@ -70,7 +70,7 @@ No HTTP surface changes. Two internal shapes change.
 **1. Every Protocol member becomes abstract** (46 Protocols):
 
 ```diff
-# core/repository/protocols/bot_management.py
+# core/repository/protocols/bot.py
 +from abc import abstractmethod
 +
  @runtime_checkable
@@ -82,7 +82,7 @@ No HTTP surface changes. Two internal shapes change.
 **2. Every implementation declares its Protocol(s)** (44 classes):
 
 ```diff
-# core/repository/implementations/bot_repository.py
+# core/repository/implementations/bot/bot.py
 -class BotRepository:
 +class BotRepository(BotRepositoryProtocol):
      @inject
@@ -92,7 +92,7 @@ No HTTP surface changes. Two internal shapes change.
 Two classes take two Protocols; one takes four mixins plus two Protocols:
 
 ```python
-# core/repository/implementations/skills_pool_layout_repository.py
+# core/repository/implementations/skills_pool/layout.py
 class SkillsPoolLayoutRepository(
     SkillsPoolCapabilityRepositoryMixin,
     SkillsPoolOperationalRepositoryMixin,
@@ -131,24 +131,23 @@ because their file seams cut across the contract seams:
 Only 5 of the quarantine mixin's 8 public methods belong to the quarantine
 contract. Files are cut by size; interfaces by concern; the cuts disagree.
 
-**Carried as-is.** R8 forbids restructuring a repository body in this change, and a
-genuine fix (decompose along the contract seam into two classes, or collapse the
-size-driven mixins once the file can be shortened) is its own piece of work with
-its own review.
+**Carried as-is.** R8 forbids restructuring a repository body in this change, and
+a genuine fix — decompose along the contract seam into two classes — is its own
+piece of work with its own review. Tracked as
+[#912](https://github.com/inclusionAI/Avernet/issues/912).
+
+**Inlining the mixins was considered and rejected.** Merging them back into the
+composite would produce a ~1,856-line file — ~856 over the Rule 9 cap — landable
+only by adding an allowlist entry, which spec success criterion 4 forbids. It is
+not available until #912 decomposes the class along its contract seam.
 
 Two things this change *does* do about it:
 
-1. **Naming.** In a flat `implementations/` directory, four modules named
-   `skills_pool_*_repository.py` that are not repositories is actively misleading.
-   They are renamed to sort beside their composite and read as parts of it:
-
-   ```text
-   skills_pool_capability_repository.py   → skills_pool_layout_repository_capability.py
-   skills_pool_operational_repository.py  → skills_pool_layout_repository_operational.py
-   skills_pool_post_cutover_repository.py → skills_pool_layout_repository_post_cutover.py
-   skills_pool_quarantine_repository.py   → skills_pool_layout_repository_quarantine.py
-   ```
-
+1. **Naming.** The domain grouping removes the problem rather than papering over
+   it. Under `implementations/skills_pool/` the mixins are `layout_capability.py`,
+   `layout_operational.py`, `layout_post_cutover.py`, and `layout_quarantine.py`,
+   sorting directly beneath the `layout.py` they compose — no file claims to be a
+   repository that isn't one.
 2. **Visibility.** Under R2 the composite must satisfy both Protocols' abstract
    members at construction, so any future mixin edit that drops a declared member
    fails immediately instead of at the call site.
@@ -170,47 +169,104 @@ the class holds nothing but its `DatabasePlugin`.
 
 ## Key Files & Functions
 
+### The domain set
+
+Eleven domains. The `core/` tree has 22 domains that own a repository, but 8 of
+them own exactly one — a subdirectory per `core/` domain would be as unnavigable
+as the flat layout, in the other direction. Domains that own a single repository
+are merged into the sibling that shares their consumer; domains that own four or
+more keep their own.
+
+| Domain | Protocols | Impl modules | Merged from `core/` |
+| --- | ---: | ---: | --- |
+| `bot` | 9 | 9 | bot_management, bot_public, bot_collaborator, mcp |
+| `chat` | 5 | 5 | bot_chat, expert_chat, channel |
+| `skill_center` | 7 | 6 | skill_center (+ `LocalSkillCleanupRepository` from `plugin_api/`) |
+| `skills_pool` | 4 | 2 (+6 support) | skills_pool |
+| `governance` | 4 | 4 (+1 mixin) | economy/governance |
+| `harness` | 4 | 4 | harness |
+| `platform` | 4 | 4 | task_queue, quality, resources, session_resources |
+| `identity` | 3 | 3 | access, caller_identity, user_list |
+| `devices` | 2 | 2 | devices |
+| `publishing` | 2 | 2 | service_bot |
+| `config` | 2 | 2 | system_config, common_config |
+| **total** | **46** | **43** | |
+
+Rationale for the non-obvious merges:
+
+- **`bot`** absorbs `mcp` because `UserMCPConfigRepository` stores per-user,
+  per-bot MCP server config — it is bot-scoped state, not an MCP subsystem.
+- **`chat`** groups the three conversation surfaces (product/OpenAPI bot chat,
+  expert chat, channel) that are otherwise three one-repository domains.
+- **`skill_center` and `skills_pool` stay separate** despite both being "skills".
+  They are distinct bounded contexts in the tree today, and merging them would
+  produce the single largest directory (11 protocols, 14 files).
+- **`platform`** is the one bucket without a single bounded context: task queue,
+  quality scanning, and the two resource stores. They are cross-cutting services
+  that no product domain owns. Named for what it is rather than pretending to a
+  cohesion it does not have.
+
+`SkillsPoolSkillRepositoryProtocol` lives in `protocols/skills_pool.py` (its
+consumer) while the class satisfying it, `SkillRepository`, lives in
+`implementations/skill_center/`. Protocol placement follows the consumer; that
+asymmetry is intentional and is the same shape the DI module already expresses.
+
 ### Target layout and naming rules
 
 ```text
 core/repository/
-├── README.md                  # Context Boundary (Rule 22 + §8 "declared role")
-├── protocols/                 # 22 modules, one per domain, 46 Protocols
-│   ├── access.py              # PolicyRepository
-│   ├── bot_chat.py            # 2 NEW Protocols (R3b)
-│   ├── bot_management.py      # BotRepository, BotRestartLock…, Template…, RenderScreen…
-│   ├── skill_center.py        # 7, incl. LocalSkillCleanupRepository (from plugin_api/)
+├── README.md                       # Context Boundary (Rule 22 + §8 "declared role")
+├── protocols/                      # one module per domain — 11 modules, 46 Protocols
+│   ├── bot.py
+│   ├── chat.py
+│   ├── skill_center.py
+│   ├── skills_pool.py
 │   └── …
-└── implementations/           # 43 repository modules + 7 plain modules
-    ├── bot_repository.py
-    ├── governance_audit_repository.py
-    ├── bot_chat_open_repository.py
-    ├── skills_pool_capability_repository.py   # mixin, no Protocol
+└── implementations/                # one subdirectory per domain
+    ├── bot/
+    │   ├── bot.py                  # BotRepository
+    │   ├── restart_lock.py
+    │   ├── template.py
+    │   ├── render_screen.py
+    │   ├── friend.py
+    │   ├── collaborator.py
+    │   ├── collab_log.py
+    │   ├── collab_lock.py
+    │   └── user_mcp_config.py
+    ├── skills_pool/
+    │   ├── layout.py               # SkillsPoolLayoutRepository (the composite)
+    │   ├── layout_capability.py    # mixin — see #912
+    │   ├── layout_operational.py   # mixin
+    │   ├── layout_post_cutover.py  # mixin
+    │   ├── layout_quarantine.py    # mixin
+    │   ├── layout_persistence.py   # SQL-expression helpers
+    │   ├── cutover_diagnostics.py  # logging helper
+    │   └── rollout.py
     └── …
 ```
 
-Naming: implementations keep their current basename where it is already unique
-(all 36 plugin-layer modules are). The 7 in-core modules are renamed on the way
-in, because their current names only make sense inside their old directory:
+**Naming: the domain moves into the path, so it comes out of the filename.**
+`plugins/bot_collab_lock_repository.py` becomes
+`implementations/bot/collab_lock.py` — the `bot_` prefix and the `_repository`
+suffix are both redundant once the file sits under `implementations/bot/`.
 
-```text
-core/economy/governance/repositories/audit_repo.py       → governance_audit_repository.py
-                                     notify_log_repo.py  → governance_notify_log_repository.py
-                                     task_record_repo.py → governance_task_record_repository.py
-                                     whitelist_repo.py   → governance_whitelist_repository.py
-                                     task_record_query.py→ governance_task_record_query.py   (mixin)
-core/bot_chat/repository/open.py                         → bot_chat_open_repository.py
-core/bot_chat/repository/product.py                      → bot_chat_db_repository.py
-core/common_config/repository/common_config_repository.py→ common_config_repository.py       (unchanged)
-```
+This also disposes of a wart the flat layout forced. Under a flat directory the
+four `SkillsPoolLayoutRepository` mixins would have been named
+`skills_pool_*_repository.py` — four files that say "repository" while not being
+repositories — and an earlier revision of this plan proposed renaming them
+`skills_pool_layout_repository_<part>.py` to compensate. Inside
+`implementations/skills_pool/` they are simply `layout_<part>.py`, sorting
+directly beneath the `layout.py` they compose. No prefix needed.
 
-No class is renamed. `DeviceRepository` keeps its name despite implementing
-`DeviceBindingRepository`.
+**No class is renamed.** `DeviceRepository` keeps its name despite implementing
+`DeviceBindingRepository`, and `BotChatDbRepository` keeps its name in
+`implementations/chat/db.py`. Module paths change; the importable symbols do not,
+which keeps the `corp/ocb` path map a pure path rewrite.
 
 ### The cycle-avoidance rule, applied
 
 ```python
-# core/repository/protocols/system_config.py
+# core/repository/protocols/config.py
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -226,12 +282,12 @@ submodule executes the parent package's `__init__.py` first, and that is where t
 cycle lives:
 
 ```text
-protocols/system_config.py
+protocols/config.py
   imports core.system_config.models
     → Python executes core/system_config/__init__.py first
       → `from agentclaw.community.core.system_config.service import SystemConfigService`
         → service.py:17 `from …repository import ConfigRepositoryProtocol`
-          → i.e. core.repository.protocols.system_config — the module still mid-import
+          → i.e. core.repository.protocols.config — the module still mid-import
             → ImportError: cannot import name from partially initialized module
 ```
 
@@ -244,7 +300,7 @@ imports from them: `bot_public`, `service_bot`, `session_resources`, `skills_poo
 `system_config`. `bot_management` has neither (its `__init__.py` is a bare
 docstring), so it would not cycle.
 
-**The rule is nevertheless applied to all 22 protocol modules, not just the five.**
+**The rule is nevertheless applied to all 11 protocol modules, not just the five affected domains.**
 Auditing which domains cycle produces an answer that silently expires the next time
 somebody adds an import to a domain `__init__.py` — the failure would then surface
 as an ImportError at boot, far from the edit that caused it. A blanket "no runtime
@@ -276,10 +332,15 @@ Three targets already exist (`contracts.py`, `skill_center/errors.py`,
 ### Non-repositories
 
 ```text
-plugins/skills_pool_{capability,operational,post_cutover,quarantine}_repository.py
-plugins/skills_pool_{layout_persistence,cutover_diagnostics}.py
+plugins/skills_pool_capability_repository.py    → implementations/skills_pool/layout_capability.py
+plugins/skills_pool_operational_repository.py   → implementations/skills_pool/layout_operational.py
+plugins/skills_pool_post_cutover_repository.py  → implementations/skills_pool/layout_post_cutover.py
+plugins/skills_pool_quarantine_repository.py    → implementations/skills_pool/layout_quarantine.py
+plugins/skills_pool_layout_persistence.py       → implementations/skills_pool/layout_persistence.py
+plugins/skills_pool_cutover_diagnostics.py      → implementations/skills_pool/cutover_diagnostics.py
 core/economy/governance/repositories/task_record_query.py
-        → core/repository/implementations/   (plain modules, no Protocol)
+                                                → implementations/governance/task_record_query.py
+        (plain modules, no Protocol; each sits beside the composite it serves)
 
 plugins/skills_pool_runtime.py  → core/skills_pool/runtime.py
         (transport client; its SkillsPoolRuntimeProtocol already lives in core/skills_pool/ports.py)
@@ -295,7 +356,7 @@ plugins/http_client.py          → unchanged, genuine paired plugin
 ```diff
 # tests/community/architecture/test_no_oversized_modules.py:116
 -    "plugins/skill_repository.py":
-+    "core/repository/implementations/skill_repository.py":
++    "core/repository/implementations/skill_center/skill.py":
          "~2423 lines — skill CRUD + market + install + parameters + members.",
 ```
 
@@ -353,10 +414,13 @@ version bumps.
 
 ## Alternatives Considered
 
-- **Per-domain subdirectories** (`core/repository/bot_management/…`) — closer to
-  `arch.rules.md` §8's recommendation. Rejected: the spec's C2 records the flat
-  layout as a deliberate accepted decision; §8 is Policy and says names are
-  repository-specific.
+- **A flat `core/repository/`** with all 43 implementation modules in one
+  directory — the spec's original requirement. Rejected on review: 43 modules plus
+  mixins and helpers in a single directory is not navigable, and it forced
+  disambiguating filename prefixes that the domain path now supplies for free. The
+  change also resolves the `arch.rules.md` §8 conflict the flat layout carried.
+- **One subdirectory per `core/` domain** (22 of them). Rejected: 8 of those
+  domains own exactly one repository, trading a too-flat layout for a too-deep one.
 - **One Protocol per module** (46 files) instead of one per domain (22).
   Rejected: it would split groups that are read together
   (`CollaboratorRepositoryProtocol` + its log and lock siblings) for no gain.

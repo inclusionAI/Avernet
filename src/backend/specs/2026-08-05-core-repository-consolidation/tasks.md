@@ -50,21 +50,23 @@ commit that file.
 - **Depends on:** Task 1
 
 ## Task 4: Create `core/repository/protocols/` with abstract contracts
-- **Goal:** All 46 Protocols in 22 domain-grouped modules, every member
+- **Goal:** All 46 Protocols in 11 domain modules, every member
   `@abstractmethod`, zero runtime domain imports.
-- **Files:** `core/repository/protocols/*.py` (22 new), `core/repository/__init__.py`.
+- **Files:** `core/repository/protocols/*.py` (11 new — `bot`, `chat`, `skill_center`,
+  `skills_pool`, `governance`, `harness`, `platform`, `identity`, `devices`,
+  `publishing`, `config`), `core/repository/__init__.py`.
 - **Done when:**
-  - [ ] All 46 Protocols present; `@runtime_checkable` preserved where it exists today.
+  - [ ] All 46 Protocols present, each in the domain module named in `plan.md`; `@runtime_checkable` preserved where it exists today.
   - [ ] Every public member carries `@abstractmethod`.
   - [ ] Every module opens `from __future__ import annotations`; every `agentclaw` import sits under `if TYPE_CHECKING:`.
   - [ ] `QuarantineRepositoryProtocol` split out of `core/skills_pool/quarantine.py`, leaving its services behind.
   - [ ] Each module imports cleanly in isolation (`python -c "import ..."` per module).
 - **Depends on:** Task 2
 
-## Task 5: Author the two missing `bot_chat` Protocols
+## Task 5: Author the two missing chat Protocols
 - **Goal:** Give `OpenBotChatRepository` and `BotChatDbRepository` contracts
   derived from their current public surface — no members added or dropped (R3b).
-- **Files:** `core/repository/protocols/bot_chat.py`.
+- **Files:** `core/repository/protocols/chat.py`.
 - **Done when:**
   - [ ] Both Protocols mirror the existing public method sets exactly (AST-diffed against the implementations).
   - [ ] Both are `@runtime_checkable` with `@abstractmethod` members.
@@ -84,9 +86,10 @@ commit that file.
 ## Task 7: Move the 36 plugin-layer implementations
 - **Goal:** Relocate bodies to `implementations/`, each declaring its Protocol(s)
   as base, with no behaviour change.
-- **Files:** `core/repository/implementations/*.py` (36); delete the originals.
+- **Files:** `core/repository/implementations/<domain>/*.py` (36 across 11 domain
+  subdirectories); delete the originals.
 - **Done when:**
-  - [ ] All 36 modules moved under their existing basenames.
+  - [ ] All 36 modules moved into their domain subdirectory, with the domain prefix and `_repository` suffix dropped from the filename (`plugins/bot_collab_lock_repository.py` → `implementations/bot/collab_lock.py`).
   - [ ] Each class declares its Protocol(s); `SkillRepository` and `SkillsPoolLayoutRepository` declare two each.
   - [ ] Bodies unchanged apart from imports, the `class` line, and vendor-docstring rewrites.
   - [ ] The 27 `ZDAS` docstring mentions rewritten to capability language.
@@ -95,23 +98,25 @@ commit that file.
 ## Task 8: Move the 7 in-core implementations
 - **Goal:** Bring `common_config`, the four governance repos, and both `bot_chat`
   repos into `implementations/` under their new names.
-- **Files:** `implementations/{common_config,governance_*,bot_chat_*}_repository.py`;
-  delete `core/{common_config,bot_chat}/repository/` and
-  `core/economy/governance/repositories/`.
+- **Files:** `implementations/config/common_config.py`,
+  `implementations/governance/{audit,notify_log,task_record,whitelist}.py`,
+  `implementations/chat/{open,db}.py`; delete `core/{common_config,bot_chat}/repository/`
+  and `core/economy/governance/repositories/`.
 - **Done when:**
-  - [ ] All 7 moved and renamed per `plan.md`.
+  - [ ] All 7 moved into their domain subdirectory and renamed per `plan.md`.
   - [ ] `core/economy/governance/repositories/orm.py` → `core/economy/governance/orm.py`, with its 3 `domain/` importers and the `plugins/local/database.py:160` bootstrap re-pointed.
   - [ ] Emptied `repository/` packages deleted, their `__init__.py` re-exports removed from importers.
 - **Depends on:** Tasks 4, 5
 
 ## Task 9: Relocate the eight non-repositories
 - **Goal:** Move mixins and helpers without giving them contracts (R4).
-- **Files:** `implementations/skills_pool_layout_repository_{capability,operational,post_cutover,quarantine}.py`,
-  `implementations/skills_pool_{layout_persistence,cutover_diagnostics}.py`,
-  `implementations/governance_task_record_query.py`, `core/skills_pool/runtime.py`.
+- **Files:** `implementations/skills_pool/layout_{capability,operational,post_cutover,quarantine}.py`,
+  `implementations/skills_pool/{layout_persistence,cutover_diagnostics}.py`,
+  `implementations/governance/task_record_query.py`, `core/skills_pool/runtime.py`.
 - **Done when:**
-  - [ ] Seven plain modules sit in `implementations/`; none gains a Protocol.
-  - [ ] The four `SkillsPoolLayoutRepository` mixins are renamed `skills_pool_layout_repository_<part>.py` so they sort beside their composite and no longer read as standalone repositories. Class names unchanged.
+  - [ ] Seven plain modules sit beside the composite they serve, inside its domain subdirectory; none gains a Protocol.
+  - [ ] The four `SkillsPoolLayoutRepository` mixins are `layout_<part>.py` under `implementations/skills_pool/`, sorting directly beneath `layout.py`. Class names unchanged.
+  - [ ] Mixins are NOT inlined — a merged file would exceed the 1000-line cap and require an allowlist entry, which criterion 4 forbids. Tracked as #912.
   - [ ] `SkillsPoolRuntime` lives at `core/skills_pool/runtime.py`; its Protocol stays in `core/skills_pool/ports.py`.
   - [ ] `plugins/http_client.py` is untouched and still bound.
 - **Depends on:** Tasks 7, 8
@@ -140,8 +145,8 @@ commit that file.
 - **Files:** `tests/community/architecture/test_no_oversized_modules.py`,
   `test_module_boundaries.py`, 21 domain `README.md`, `core/repository/README.md` (new).
 - **Done when:**
-  - [ ] The oversized allowlist re-keyed to `core/repository/implementations/skill_repository.py`; no stale entry.
-  - [ ] `agentclaw.community.core.repository` added to `BOUNDARY_SIGNIFICANT_MODULES`, with a `README.md` carrying a Context Boundary section (Rule 22 + §8 "declared role").
+  - [ ] The oversized allowlist re-keyed to `core/repository/implementations/skill_center/skill.py`; no stale entry.
+  - [ ] `agentclaw.community.core.repository` added to `BOUNDARY_SIGNIFICANT_MODULES`, with a `README.md` carrying a Context Boundary section and the domain map (Rule 22 + §8 "declared role").
   - [ ] 21 domain READMEs declare the new dependency.
   - [ ] `_ALLOWLIST` in `test_core_no_concrete_plugin_imports.py` still empty.
   - [ ] `skills_pool_layout_repository.py` ≤ 1000 lines and `bot_repository.py` < 1000 — measured, not assumed.
