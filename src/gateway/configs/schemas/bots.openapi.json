@@ -3797,6 +3797,31 @@
         "title": "RoutineUpdate",
         "type": "object"
       },
+      "RuntimeStage": {
+        "description": "Which of the bot's runtimes an operation addresses.",
+        "enum": [
+          "draft",
+          "verify",
+          "online"
+        ],
+        "title": "RuntimeStage",
+        "type": "string",
+        "x-enum-descriptions": [
+          "The bot's own workspace runtime — the pre-publication draft, and the only runtime a personal bot has. The default.",
+          "A service bot's pre-production runtime, served while a release is validating (or retained after promotion).",
+          "A service bot's live published runtime."
+        ],
+        "x-enum-varnames": [
+          "DRAFT",
+          "VERIFY",
+          "ONLINE"
+        ],
+        "x-enumNames": [
+          "DRAFT",
+          "VERIFY",
+          "ONLINE"
+        ]
+      },
       "ScheduleTrigger": {
         "description": "A schedule trigger. Modeled as a typed nested object so other trigger\nkinds (event, webhook) can be added later without a breaking change.",
         "properties": {
@@ -4557,6 +4582,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -4566,6 +4602,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -4700,6 +4755,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -4709,6 +4775,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -4855,6 +4940,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -4864,6 +4960,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -5219,6 +5334,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -5228,6 +5354,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -5364,6 +5509,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -5373,6 +5529,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -5509,6 +5684,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -5518,6 +5704,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -5654,6 +5859,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -5663,6 +5879,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -7644,6 +7879,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -7680,6 +7926,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -7825,6 +8090,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -7834,6 +8110,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -10255,6 +10550,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "Only sessions belonging to this agent.",
             "in": "query",
             "name": "agent_id",
@@ -10327,6 +10633,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -10461,6 +10786,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -10470,6 +10806,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -10625,6 +10980,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -10634,6 +11000,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -10777,6 +11162,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -10786,6 +11182,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -10929,6 +11344,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -10938,6 +11364,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -11093,6 +11538,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
             "in": "query",
             "name": "user_id",
@@ -11102,6 +11558,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
@@ -11245,6 +11720,17 @@
             }
           },
           {
+            "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409).",
+            "in": "query",
+            "name": "stage",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/RuntimeStage",
+              "default": "draft",
+              "description": "Which of the bot's runtimes this request addresses. Defaults to the draft — the bot's own workspace, the only runtime a personal bot has. A service bot's verify/online runtimes are addressable while live; a stage with no live runtime is refused (409)."
+            }
+          },
+          {
             "description": "1-based page number.",
             "in": "query",
             "name": "page",
@@ -11281,6 +11767,25 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The owner of the bot this request addresses. Defaults to the caller — name it only to operate a bot shared with you. The caller must be the bot's owner or a collaborator on it; anyone else is answered exactly as if the bot did not exist (404).",
+              "title": "Owner Id"
             }
           }
         ],
