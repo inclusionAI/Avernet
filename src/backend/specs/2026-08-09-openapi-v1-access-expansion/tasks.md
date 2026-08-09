@@ -18,20 +18,20 @@
   `…/core/engine_runtime/sharing.py` (retired),
   `src/backend/src/agentclaw/community/api/engine_runtime_service.py`
 - **Done when:**
-  - [ ] `resolve_bot` / `resolve_bot_off_loop` take `caller_id`; when it is
+  - [x] `resolve_bot` / `resolve_bot_off_loop` take `caller_id`; when it is
         not the resolved owner, the caller's collaborator level is read from
         the repository the relay already holds, and below `MEMBER` raises
         `BotNotFoundError` — the same type, same public body, as an absent
         bot. Both ids are on a `logger.warning` line at the refusal.
-  - [ ] A collaborator-lookup failure logs and refuses (level `NONE`) — the
+  - [x] A collaborator-lookup failure logs and refuses (level `NONE`) — the
         fail-closed direction `bot_is_shared` pins today.
-  - [ ] `require_operable_bot` keeps only the bot-type allowlist; `is_shared`
+  - [x] `require_operable_bot` keeps only the bot-type allowlist; `is_shared`
         leaves its signature; the module docstring is rewritten — including
         correcting the `publish_bot_id` naming-scheme claim to the real
         separation (`ac_bots.binding_id` vs `ac_bot_publish.ext.binding`).
-  - [ ] `sharing.py` and `BotFacts.is_shared` are gone; `BotFacts` carries the
+  - [x] `sharing.py` and `BotFacts.is_shared` are gone; `BotFacts` carries the
         resolved `owner_id`.
-  - [ ] `EngineRuntimeRelayProtocol` mirrors the new signatures and
+  - [x] `EngineRuntimeRelayProtocol` mirrors the new signatures and
         `tests/community/architecture/test_service_api_conformance.py` passes.
 - **Depends on:** —
 
@@ -46,20 +46,26 @@
   `…/api/engine_runtime_service.py`,
   `…/adapters/http/openapi_v1/responses.py`
 - **Done when:**
-  - [ ] `call(..., stage: str)` replaces `draft_device: bool`; the default
-        preserves today's default (published online for a service bot), and
-        every existing call site states its stage explicitly.
-  - [ ] `verify` resolves the newest publish record at `VALIDATING` via
-        `ext.binding["verify"]`; `online` the newest at `SUCCESS` via
-        `ext.binding["online"]`; both through `resolve_for_binding_invoke`,
-        keyed on `facts.bot_pk`. Superseded statuses (`upgraded`, `released`,
-        `failed`) do not resolve.
-  - [ ] A stage with no live runtime — including `verify`/`online` on a
-        personal bot — raises `EngineStageNotLiveError`, mapped to
+  - [x] `call(..., stage: str)` replaces `draft_device: bool`. Review
+        refinement: `stage` is **required with no default**, so the stage a
+        handler gated on and the stage it forwards to cannot silently
+        diverge; every call site states its stage explicitly.
+  - [x] `online` resolves the newest publish record at `SUCCESS` via
+        `ext.binding["online"]`; `verify` the newest at `VALIDATING` — or,
+        when nothing validates, the newest `SUCCESS` record's **retained**
+        verify binding while it is ACTIVE (cron's
+        `_get_retained_verify_publish_record` rule, so the two surfaces
+        agree on whether a runtime exists); both through
+        `resolve_for_binding_invoke`, keyed on `facts.bot_pk`. Superseded
+        statuses (`upgraded`, `released`, `failed`) do not resolve.
+  - [x] A stage with no live runtime — including `verify`/`online` on a
+        personal bot, and any unknown stage string from a programmatic
+        caller — raises `EngineStageNotLiveError`, mapped to
         `(409, "No live runtime at the requested stage")` in
         `ENVELOPE_ERRORS`, and never falls back to another stage's binding.
-  - [ ] The stage→binding lookup lives in one helper the relay and the
-        connection service both call.
+  - [~] The stage→binding lookup lives in one helper
+        (`core/engine_runtime/stage.py`) the relay calls; the connection
+        service's side lands with Task 4.
 - **Depends on:** Task 1
 
 ## Task 3: The parameters, on all fifteen HTTP operations  `[ ]`

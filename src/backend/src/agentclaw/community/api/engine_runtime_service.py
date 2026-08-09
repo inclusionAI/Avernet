@@ -12,7 +12,6 @@ from __future__ import annotations
 from typing import Any, Protocol, runtime_checkable
 
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
-from agentclaw.community.core.engine_runtime.stage import STAGE_ONLINE
 
 
 @runtime_checkable
@@ -60,7 +59,7 @@ class EngineRuntimeRelayProtocol(Protocol):
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
-        stage: str = STAGE_ONLINE,
+        stage: str,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
 
@@ -74,10 +73,10 @@ class EngineRuntimeRelayProtocol(Protocol):
 
         ``stage`` names which of a ``service`` bot's runtimes this call
         addresses: the draft workspace (``ac_bots.binding_id``) or a published
-        stage's live binding. The default is the published online runtime;
-        the gated public groups pass the request's stage explicitly. Ignored
-        by a personal bot — refusing a published stage on one is the gate's
-        job, before any device work.
+        stage's live binding. Required with no default, so the stage a
+        handler gated on and the stage it forwards to cannot silently
+        diverge. Ignored by a personal bot — refusing a published stage on
+        one is the gate's job, before any device work.
         """
         ...
 

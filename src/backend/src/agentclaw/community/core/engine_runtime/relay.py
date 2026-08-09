@@ -35,6 +35,9 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.repository.protocols.devices import (
+    DeviceBindingRepository,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -50,7 +53,6 @@ from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResul
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
     STAGE_DRAFT,
-    STAGE_ONLINE,
     resolve_stage_bind_id,
 )
 from agentclaw.community.core.repository.protocols.publishing import (
@@ -89,12 +91,14 @@ class EngineRuntimeRelay:
         transport: DeviceAdapterTransport,
         publish_repo: BotPublishRepositoryProtocol,
         collaborator_repo: CollaboratorRepositoryProtocol,
+        binding_repo: DeviceBindingRepository,
     ) -> None:
         self._bot_service = bot_service
         self._resolver = resolver
         self._transport = transport
         self._publish_repo = publish_repo
         self._collaborator_repo = collaborator_repo
+        self._binding_repo = binding_repo
 
     # ── resolution ────────────────────────────────────────────────────────
 
@@ -220,6 +224,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         """
         bind_id = resolve_stage_bind_id(
             self._publish_repo,
+            self._binding_repo,
             bot_pk=facts.bot_pk,
             bot_id=facts.bot_id,
             stage=stage,
@@ -265,7 +270,7 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
-        stage: str = STAGE_ONLINE,
+        stage: str,
     ) -> EngineResult:
         """Issue ``method path`` against the addressed bot's engine adapter.
 
@@ -284,12 +289,13 @@ stage.resolve_stage_bind_id`'s rule, shared with the connection service so a
         ``bot_id``/``owner_id``, since it stands in for the ownership proof.
 
         ``stage`` names which of a ``service`` bot's runtimes this call
-        addresses — see :meth:`_resolve_device` for the rule. The default is
-        the published online runtime, today's meaning for the relay's
-        owner-scoped callers; the gated public groups pass the request's
-        stage explicitly, as they passed ``draft_device=True`` before stages
-        were addressable. A personal bot ignores it (it has only its
-        workspace; refusing a published stage on one is the gate's job).
+        addresses — see :meth:`_resolve_device` for the rule. Required, with
+        **no default**, deliberately: the gate's stage and the forward's stage
+        must be the same value, and a default here would let a handler that
+        gated on one silently address another — the cross-device leak the old
+        mandatory ``draft_device=True`` discipline prevented. A personal bot
+        ignores it (it has only its workspace; refusing a published stage on
+        one is the gate's job).
 
         Bot and device resolution share one **worker thread** hop. Both legs are
         synchronous and neither belongs on the event loop:

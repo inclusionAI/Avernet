@@ -64,6 +64,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineStageNotLiveError,
 )
 from agentclaw.community.core.engine_runtime.stage import (
+    RUNTIME_STAGES,
     SERVICE_BOT_TYPE,
     STAGE_DRAFT,
 )
@@ -177,6 +178,11 @@ def require_operable_bot(bot_type: str, *, stage: str, surface: str) -> None:
         raise EngineBotTypeNotSupportedError(
             f"{surface} are not served for bot_type={bot_type!r}"
         )
+    if stage not in RUNTIME_STAGES:
+        # Unreachable from HTTP (the adapter's enum answers 422 first), but a
+        # programmatic caller's typo must not sail through to an unmapped 500
+        # at device resolution — for any bot type.
+        raise EngineStageNotLiveError(f"unknown stage {stage!r}")
     if stage != STAGE_DRAFT and bot_type != SERVICE_BOT_TYPE:
         raise EngineStageNotLiveError(
             f"a {bot_type} bot has no {stage} runtime; only its workspace"

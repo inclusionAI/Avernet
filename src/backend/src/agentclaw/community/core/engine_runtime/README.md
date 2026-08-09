@@ -35,6 +35,7 @@ internal_dependencies:
   - agentclaw.community.core.devices.services.device_service
   - agentclaw.community.core.service_bot.repository.bot_publish_repository
   - agentclaw.community.core.service_bot.repository.models
+  - agentclaw.community.core.service_bot.types
   - agentclaw.community.log
   - agentclaw.community.core.devices.models
   - agentclaw.community.di.config

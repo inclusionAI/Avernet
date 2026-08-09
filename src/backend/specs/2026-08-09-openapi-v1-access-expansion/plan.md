@@ -259,13 +259,23 @@ class EngineStageNotLiveError(Exception):
 +    async def resolve_bot_off_loop(
 +        self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts: ...
 -    async def call(..., draft_device: bool = False) -> Any: ...
-+    async def call(..., stage: str = STAGE_ONLINE) -> Any: ...
++    async def call(..., stage: str) -> Any: ...
 ```
 
-`call`'s default maps to today's default (`draft_device=False` resolved the
-published online runtime for a service bot), so the relay's non-gated callers
-keep their meaning; the gated groups pass the request's stage explicitly, as
-they passed `draft_device=True` explicitly before.
+`stage` is required with **no default** (a review refinement over this plan's
+first revision, which defaulted it to the published online runtime — a
+default no caller used, and a one-missing-kwarg trap: a handler that gated on
+the draft but forgot `stage=` on the forward would silently address the
+multi-caller online runtime). The relay has no callers outside the gated
+groups, so requiring it costs nothing.
+
+Two more refinements from the same review round, both in
+`core/engine_runtime/stage.py`: the verify stage is live not only while a
+record validates but also through the newest SUCCESS record's **retained**
+verify binding while that binding is ACTIVE — mirroring cron's
+`_get_retained_verify_publish_record`, so the two surfaces cannot disagree on
+whether a runtime exists — and the stage vocabulary is aliased from
+`PublishStage` rather than respelled.
 
 Per-router handler counts (all gain `owner_id` + `stage`): sessions 7, engine
 3, models 2, approvals 3, connection 1 — 16 operations.
