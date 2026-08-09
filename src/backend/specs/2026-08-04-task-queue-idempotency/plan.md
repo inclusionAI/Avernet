@@ -62,21 +62,25 @@ keys far past the 767-byte `COMPACT` limit. The spec's pre-flight item is
 resolved; no column needs shortening.
 
 ```diff
-# core/task_queue/repository/models.py:79 — new columns after deadline_at
+# core/task_queue/repository/models.py — new columns after deadline_at
 +    idempotency_key = Column(
-+        String(190),
++        IdempotencyKeyString,
 +        nullable=True,
 +        comment="caller-supplied enqueue dedup key; NULL = opted out. Audit only",
 +    )
 +    active_idempotency_key = Column(
-+        String(190),
++        IdempotencyKeyString,
 +        nullable=True,
 +        comment="enforcement copy of idempotency_key; NULLed on terminal transitions",
 +    )
+#
+# Landed as IdempotencyKeyString / TaskTypeString — String(n) carrying a
+# utf8mb4_bin variant on MySQL — rather than the plain String(190) planned
+# here. The collation turned out to be load-bearing; see spec (d).
 ```
 
 ```diff
-# core/task_queue/repository/models.py:100 — __table_args__
+# core/task_queue/repository/models.py — __table_args__
      __table_args__ = (
          Index("idx_env_status_run_at", "env", "status", "run_at"),
          Index("idx_env_lease_expires_at", "env", "lease_expires_at"),
@@ -105,7 +109,7 @@ class EnqueueResult(NamedTuple):
 ```
 
 ```diff
-# core/task_queue/types.py:71 — TaskRecord, after `env`
+# core/task_queue/types.py — TaskRecord, after `env`
      env: str
 +    idempotency_key: Optional[str] = None
      gmt_create: Optional[datetime] = None
@@ -116,7 +120,7 @@ it is an enforcement detail, not part of the record's meaning. Tests assert on
 it by querying the model directly.
 
 ```diff
-# core/task_queue/repository/protocol.py:36 — NOT breaking; no call site
+# core/task_queue/repository/protocol.py — NOT breaking; no call site
 # consumes the current return value (verified across all 13).
   def enqueue(
       self,
@@ -132,7 +136,7 @@ it by querying the model directly.
 ```
 
 ```diff
-# core/task_queue/services/task_queue_service.py:24
+# core/task_queue/services/task_queue_service.py
   def enqueue(
       self,
       task_type: str,
@@ -150,7 +154,7 @@ it by querying the model directly.
 ### The insert path
 
 ```python
-# plugins/task_queue_repository.py — replaces the plain-INSERT enqueue at :98
+# plugins/task_queue_repository.py — replaces the plain-INSERT enqueue
 def enqueue(self, *, task_type, payload, delay_seconds, deadline_seconds,
             env, idempotency_key=None) -> EnqueueResult:
     """Un-keyed → plain insert, always created=True (today's behavior).
@@ -224,7 +228,7 @@ dict makes "terminal but key still held" unrepresentable — there is no orderin
 window to get wrong.
 
 ```diff
-# plugins/task_queue_repository.py:200 — claim_batch, past-deadline TIMED_OUT
+# plugins/task_queue_repository.py — claim_batch, past-deadline TIMED_OUT
                          self.Model.status: TaskStatus.TIMED_OUT.value,
                          self.Model.last_error: "deadline elapsed before execution",
                          self.Model.claimed_by: None,
@@ -233,7 +237,7 @@ window to get wrong.
 ```
 
 ```diff
-# plugins/task_queue_repository.py:232 — complete() → SUCCEEDED
+# plugins/task_queue_repository.py — complete() → SUCCEEDED
                  self.Model.status: TaskStatus.SUCCEEDED.value,
                  self.Model.claimed_by: None,
                  self.Model.lease_expires_at: None,
@@ -241,7 +245,7 @@ window to get wrong.
 ```
 
 ```diff
-# plugins/task_queue_repository.py:278 — reschedule() deadline-overshoot → TIMED_OUT
+# plugins/task_queue_repository.py — reschedule() deadline-overshoot → TIMED_OUT
                          self.Model.status: TaskStatus.TIMED_OUT.value,
                          self.Model.last_error: (error or "deadline elapsed"),
                          self.Model.claimed_by: None,
@@ -250,7 +254,7 @@ window to get wrong.
 ```
 
 ```diff
-# plugins/task_queue_repository.py:293 — fail() → FAILED
+# plugins/task_queue_repository.py — fail() → FAILED
                  self.Model.status: TaskStatus.FAILED.value,
                  self.Model.last_error: error,
                  self.Model.claimed_by: None,
@@ -258,9 +262,9 @@ window to get wrong.
 +                self.Model.active_idempotency_key: None,
 ```
 
-`reschedule()`'s `PENDING` branch at `:250-255` is **deliberately not touched** —
+`reschedule()`'s `PENDING` branch  is **deliberately not touched** —
 the task is still live, so it keeps holding its key. Same for `claim_batch`'s
-`RUNNING` claim at `:168-176` and `renew_lease` at `:308-311`.
+`RUNNING` claim  and `renew_lease` .
 
 These four are the complete set: a repo-wide grep for `TaskStatus.SUCCEEDED` /
 `FAILED` / `TIMED_OUT` writes finds only lines 200, 232, 278, 293, and
@@ -270,7 +274,7 @@ These four are the complete set: a repo-wide grep for `TaskStatus.SUCCEEDED` /
 ### Docs that currently promise the opposite
 
 ```diff
-# core/task_queue/repository/protocol.py:49
+# core/task_queue/repository/protocol.py
 -        JSON-serialized on write. Duplicate enqueues create distinct rows —
 -        idempotency is a claim-time guarantee, not an insert-time one.
 +        JSON-serialized on write. An un-keyed enqueue always creates a new row.
@@ -299,7 +303,7 @@ None. `IntegrityError` comes from `sqlalchemy.exc`, already a dependency.
 - **Risk:** The DDL ships after the release containing this change → `Unknown column` in prod, breaking the *entire* queue rather than just keyed callers. The ORM maps both columns unconditionally, so every `SELECT` projects them and every `INSERT` writes them even for an un-keyed enqueue.
   **Mitigation:** Rollout ordering below states "before this release", not "before the first keyed caller"; there is no fallback path, so ordering is mandatory, not best-effort.
 - **Risk:** A case-insensitive default collation on MySQL/OceanBase makes `publish:Bot-A:poll` and `publish:bot-a:poll` the same key in the unique index (non-`_0900` ci collations also PAD SPACE, so `k1` == `k1 `), silently joining one caller's enqueue to another's task.
-  **Mitigation:** Both key columns pin `utf8mb4_bin` via `with_variant` in the ORM, and the provisioned table must match. SQLite is BINARY natively, so no behavioural test can catch a regression — a test asserts the rendered MySQL `CREATE TABLE` carries the collation.
+  **Mitigation:** Both key columns **and `task_type`** pin `utf8mb4_bin` via `with_variant` in the ORM, and the provisioned table must match — an index is only as precise as its least precise column. SQLite is BINARY natively, so no behavioural test can catch a regression — a test asserts the rendered MySQL `CREATE TABLE` carries the collation.
 
 ## Alternatives Considered
 
@@ -330,7 +334,7 @@ Rollback is `DROP INDEX` + `DROP COLUMN`; no data migration to unwind.
 
 All in `tests/community/plugins/test_task_queue_repository.py` against real
 in-memory SQLite (the existing `repo` fixture), matching spec (g). The
-`_enqueue` helper at `:60` gains an `idempotency_key=None` pass-through.
+`_enqueue` helper  gains an `idempotency_key=None` pass-through.
 
 ```python
 # tests/community/plugins/test_task_queue_repository.py

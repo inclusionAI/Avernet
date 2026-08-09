@@ -177,7 +177,16 @@ class TaskQueueModel(Base):
         # nothing elsewhere.
         #
         # utf8mb4_bin is PAD SPACE, so it settles case but not trailing spaces;
-        # HandlerRegistry.register rejects task types that differ only that way.
+        # enqueue and HandlerRegistry.register reject values carrying any.
+        #
+        # ONE REQUIREMENT THIS DECLARATION CANNOT EXPRESS: on OceanBase the
+        # index must be created GLOBAL, as every other unique index in the
+        # deployment is. SQLAlchemy has no way to render that, so what follows
+        # is a plain unique index and the modifier lives only in README.md's
+        # Provisioning section. A partition-local index would allow the same
+        # active key once per partition and defeat dedup, so anyone provisioning
+        # the table by hand has to know it — do not read this declaration as the
+        # complete specification of the index.
         Index(
             "uk_env_task_type_active_idempotency_key",
             "env",

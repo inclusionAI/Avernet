@@ -203,20 +203,23 @@ rather than assumed away:
   key. The existing hot claim-scan index `idx_env_status_run_at` already has the
   same prefix shape, so this is not a new class of risk on this table.
 
-**Pre-flight check before applying the DDL** (this is a real constraint, not a
-formality): the composite index key is `20 + 100 + 190 = 310` characters, which
-under `utf8mb4` is **1240 bytes**. That fits InnoDB's 3072-byte limit under
-`DYNAMIC`/`COMPRESSED` row format (the default since MySQL 5.7) but **exceeds
-the 767-byte limit under `REDUNDANT`/`COMPACT`**. Before shipping, confirm the
-prod `ac_task_queue` row format and OceanBase's index key-length limit. If the
-limit is 767 bytes, the fallback is to shorten `task_type` in the index
-(`uk_env_task_type_active_idempotency_key (env, task_type(40), active_idempotency_key(100))`)
-— a prefix index still enforces uniqueness correctly here only if the prefixes
-are non-truncating, so prefer raising the row format over shortening.
+**Pre-flight check before provisioning — RESOLVED, no action needed.** The
+composite index key is `20 + 100 + 190 = 310` characters, which under `utf8mb4`
+is **1240 bytes**. That fits InnoDB's 3072-byte limit under
+`DYNAMIC`/`COMPRESSED` row format (the default since MySQL 5.7) but exceeds the
+767-byte limit under `REDUNDANT`/`COMPACT`. Resolved by inspection rather than
+by changing anything: `ac_bot_publish` already carries
+`UNIQUE KEY uk_oi_p_b_v (owner_id, publish_bot_id, version)` at roughly 4.6 KB
+in this same deployment, so it demonstrably tolerates index keys far past the
+767-byte limit. No column needs shortening.
+
+(The fallback, recorded in case the constraint ever binds elsewhere: shortening
+`task_type` in the index would only preserve correctness if the prefix were
+non-truncating, so raising the row format is preferable to shortening.)
 
 #### Rollout ordering
 
-Per `repository/models.py:1-9`, the prod OceanBase table is created manually and
+Per `repository/models.py`'s module docstring, the prod OceanBase table is created manually and
 must mirror the ORM definition. So:
 
 1. Apply the schema change above to prod. It is provisioned out of band —
@@ -227,12 +230,22 @@ must mirror the ORM definition. So:
    them even for an un-keyed enqueue; against a table without the columns the
    whole queue fails with "unknown column".
 
-Both columns pin `utf8mb4_bin`. Keys are compared byte-for-byte, and the usual
-`utf8mb4_*_ci` default would make `publish:Bot-A:poll` and `publish:bot-a:poll`
-the same key in the unique index (non-`_0900` ci collations also PAD SPACE, so
-`k1` == `k1 `), silently joining one caller's enqueue to another's task. SQLite
-compares BINARY already, so no behavioural test can catch a regression here —
-the rendered MySQL DDL is asserted directly instead.
+**Three** columns pin `utf8mb4_bin`: both key columns *and* `task_type`, since a
+unique index is only as precise as its least precise column. Values are compared
+byte-for-byte, and the usual `utf8mb4_*_ci` default would make
+`publish:Bot-A:poll` and `publish:bot-a:poll` — or `Job` and `job` — the same
+entry in the index, silently joining one caller's enqueue to another's task.
+`env` is deliberately excluded: it is also compared by the claim/reclaim
+eligibility filter and carries two other indexes, so altering it would change
+pre-existing behaviour for a value that comes from deployment config rather than
+per-call input. SQLite compares BINARY already, so no behavioural test can catch
+a regression here — the rendered MySQL DDL is asserted directly instead.
+
+`utf8mb4_bin` settles **case only**. It is itself a PAD SPACE collation, so
+`k1` and `k1 ` remain equal under it; that half is closed in Python by rejecting
+values with surrounding whitespace (see (h)). The two are complementary and
+neither alone is sufficient. (Superseded an earlier claim here that the
+collation covered padding as well.)
 
 Local and test SQLite get the columns free from `create_all`.
 
@@ -313,8 +326,8 @@ Both places that currently promise the opposite change **in the same commit**:
 
 - `core/task_queue/README.md` — the "How idempotency works" section, which
   today describes claim-time only.
-- `core/task_queue/repository/protocol.py:49-50` — the "Duplicate enqueues
-  create distinct rows" docstring.
+- `core/task_queue/repository/protocol.py` — the `enqueue` docstring's
+  "Duplicate enqueues create distinct rows" promise.
 
 Test coverage in `tests/community/plugins/test_task_queue_repository.py`:
 
@@ -331,6 +344,43 @@ Test coverage in `tests/community/plugins/test_task_queue_repository.py`:
 7. An unrelated `IntegrityError` propagates rather than being read as a
    duplicate.
 8. The `orm_session()` transaction is usable after the caught `IntegrityError`.
+
+### (h) — Input validation on the keyed path
+
+Added during review; not in the original design, and the largest single body of
+work the review rounds produced. Both scope columns of the dedup index are
+validated when a key is supplied, because the engines disagree about string
+equality in ways the SQLite suite structurally cannot observe — a wrong value
+does not error, it silently joins the wrong task.
+
+| Rule | Applies to | Failure it prevents |
+| --- | --- | --- |
+| non-empty | `idempotency_key` | `""` is a *valid* key, so it would become one global dedup slot per `(env, task_type)` |
+| within the column width | `idempotency_key`, `task_type` | a non-strict server truncates, so two distinct values collapse onto one stored value — or the row is filed under a truncated scope the holder lookup then cannot find |
+| no leading/trailing whitespace | `idempotency_key`, `task_type` | `utf8mb4_bin` is PAD SPACE, so `k1` and `k1 ` are one index entry |
+
+Both width limits are read off their columns so they cannot drift from the
+schema. Validation **rejects, never rewrites** — silently trimming or hashing a
+value would break the "stored verbatim" contract that makes the audit column
+answerable, and a `ValueError` surfaces the first time someone writes the key
+rather than in production months later.
+
+**Only keyed enqueues are validated.** An un-keyed row has a `NULL`
+`active_idempotency_key`, never enters the unique index, and so cannot collide
+however it is stored; validating it would change behaviour for un-keyed callers,
+which this design otherwise leaves untouched.
+
+`HandlerRegistry.register` carries two further rules on `task_type`, and the
+distinction between them is load-bearing:
+
+- **No surrounding whitespace — absolute**, checked against the value itself
+  rather than against what is already registered. A *pairwise* check is blind
+  across processes: a rolling deploy renaming `job` to `job ` leaves each
+  version's registry holding only its own spelling, so neither sees a collision
+  while the index merges them.
+- **No two registered types differing only by case — pairwise**, and second line
+  of defence only. The collation settles that across processes; this adds a loud
+  failure at startup naming both spellings.
 
 ## Answers to the two rollout worries
 

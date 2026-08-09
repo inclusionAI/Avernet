@@ -234,7 +234,12 @@ columns up automatically. What has to exist:
   in `models.py`, both pinning `utf8mb4_bin` on MySQL/OceanBase.
 - `task_type` also pinning `utf8mb4_bin` there — it is the index's other scope
   column, and an index is only as precise as its least precise column.
-- `UNIQUE (env, task_type, active_idempotency_key)`.
+- `UNIQUE (env, task_type, active_idempotency_key)` — **`GLOBAL` on OceanBase**,
+  matching the convention used by every other unique index in the deployment.
+  This one cannot be read off `models.py`: SQLAlchemy's `Index` has no way to
+  express `GLOBAL`, so the ORM renders a plain unique index and the modifier
+  exists only here. Without it the index can be partition-local, which would let
+  the same active key exist once per partition and defeat dedup entirely.
 - `env` deliberately left on the table default — see the index comment in
   `models.py` for why widening it is a much larger change.
 
