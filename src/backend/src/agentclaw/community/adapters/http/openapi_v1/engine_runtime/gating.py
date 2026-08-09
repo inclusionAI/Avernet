@@ -18,26 +18,30 @@ from agentclaw.community.core.engine_runtime.models import BotFacts
 async def resolve_operable_bot(
     relay: EngineRuntimeRelayProtocol,
     bot_id: str,
-    owner_id: str,
     *,
+    caller_id: str,
+    owner_id: str,
     stage: str,
     surface: str,
 ) -> BotFacts:
-    """Resolve the caller's bot and reject anything more than one caller reaches.
+    """Resolve the addressed bot and reject a caller who may not operate it.
 
     Runs **before** any device call, deliberately: a filter applied to what the
-    device returned would already have fetched device-wide data. This also
-    performs the owner-scoped resolve and the operator adjudication, so a
-    foreign ``bot_id`` — or a caller who may not operate the bot — raises
-    ``BotNotFoundError`` here, before a device is touched. The resolved facts
-    are returned so the forward can reuse them (``relay.call(..., facts=facts,
-    stage=…)``) instead of resolving again.
+    device returned would already have fetched device-wide data. This performs
+    the ``(bot_id, owner_id)`` resolve and the operator adjudication, so a
+    bot that does not exist under the named owner — or a caller who may not
+    operate it — raises ``BotNotFoundError`` here, before a device is
+    touched, byte-identical either way. The resolved facts are returned so
+    the forward can reuse them (``relay.call(..., facts=facts, stage=…)``)
+    instead of resolving again.
 
-    ``surface`` names the group for the refusal message; the adapter maps the
-    type refusal to a public 501 — what the surface cannot serve, rather than
-    something the caller may retry or fix.
+    ``caller_id`` is the request's verified user (``UserIdDep``);
+    ``owner_id`` is the owner it addresses (``OwnerIdDep`` — the caller when
+    unnamed). ``surface`` names the group for the refusal message; the
+    adapter maps the type refusal to a public 501 — what the surface cannot
+    serve, rather than something the caller may retry or fix.
     """
-    facts = await relay.resolve_bot_off_loop(bot_id, owner_id, owner_id)
+    facts = await relay.resolve_bot_off_loop(bot_id, owner_id, caller_id)
     require_operable_bot(facts.bot_type, stage=stage, surface=surface)
     return facts
 

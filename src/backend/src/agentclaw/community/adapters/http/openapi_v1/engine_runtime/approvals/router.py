@@ -1,10 +1,9 @@
 """Approvals group — ``/openapi/v1/bots/approvals/{bot_id}``.
 
-**Private bots only** — private personal bots, and a service bot's
-pre-publication draft workspace; see ``engine_runtime/gating.py``.
-Approval state is session-scoped, so on a shared bot these routes
-would reach other callers' sessions — the same hazard the sessions
-group gates on.
+An **operator console**: served to the addressed bot's owner and its
+member-level collaborators, for the stage the request names (``?stage=``,
+draft by default), and device-wide — see ``engine_runtime/gating.py`` and
+``core/engine_runtime/gate.py``.
 """
 
 from __future__ import annotations
@@ -20,7 +19,12 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schem
     ApprovalState,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
     ApprovalMode,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -31,7 +35,6 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
-from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineUpstreamError,
@@ -86,23 +89,31 @@ def _reject_refused_set(raw: Any) -> None:
 @envelope_errors
 async def get_approval_mode(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     session_key: Annotated[str, Query(description="Session to read the mode for.")],
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
     """Read the approval mode in force for a session."""
     # Publicly a GET with a query parameter; the engine models the same read as
     # a POST with a body.
     facts = await resolve_operable_bot(
-        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="approvals",
     )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="POST",
         path="/api/approvals/mode/get",
-        # user_id is filled from the principal; the engine uses it to route.
-        body={"session_key": session_key, "user_id": owner_id},
+        # The verified caller (never accepted from the body); the engine
+        # uses it to route.
+        body={"session_key": session_key, "user_id": user_id},
     )
     return envelope(_state(result.data, session_key), request)
 
@@ -112,24 +123,31 @@ async def get_approval_mode(
 async def set_approval_mode(
     bot_id: str,
     body: ApprovalModeSet,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
     """Set the approval mode for a session."""
     # The enum's value is forwarded verbatim: all three are already in the
     # engine's accept-set, so no translation is needed and none is applied.
     facts = await resolve_operable_bot(
-        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="approvals",
     )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="POST",
         path="/api/approvals/mode/set",
         body={
             "session_key": body.session_key,
             "mode": body.mode.value,
-            "user_id": owner_id,
+            "user_id": user_id,
         },
     )
     _reject_refused_set(result.data)
@@ -140,8 +158,10 @@ async def set_approval_mode(
 @envelope_errors
 async def list_approval_modes(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[ApprovalModeInfo]]:
     """List the approval modes that can be set on this bot.
@@ -164,10 +184,15 @@ async def list_approval_modes(
     # The list is served from the public enum rather than relayed, because the
     # engine's descriptions are Chinese and this surface promises English.
     facts = await resolve_operable_bot(
-        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="approvals",
     )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET",
         path="/api/engine/capabilities",
     )

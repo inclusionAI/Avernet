@@ -68,7 +68,7 @@
         service's side lands with Task 4.
 - **Depends on:** Task 1
 
-## Task 3: The parameters, on all fifteen HTTP operations  `[ ]`
+## Task 3: The parameters, on all fifteen HTTP operations  `[x]`
 
 - **Goal:** Every engine-runtime HTTP handler takes `owner_id` and `stage`
   from the query string and passes them through the seam.
@@ -79,21 +79,22 @@
   `…/adapters/http/openapi_v1/engine_runtime/{sessions,engine,models,approvals}/router.py`,
   `…/adapters/http/openapi_v1/contracts.py`
 - **Done when:**
-  - [ ] `OwnerIdDep` (defaults to the request's `user_id`) and the `stage`
+  - [x] `OwnerIdDep` (defaults to the request's `user_id`) and the `stage`
         parameter (new `RuntimeStage` documented enum: `draft` / `verify` /
         `online`, default `draft`) are defined once in `params.py` /
         `enums.py` and imported by every router — no per-router respelling.
-  - [ ] `resolve_operable_bot` passes caller, owner and stage; all fifteen
+  - [x] `resolve_operable_bot` passes caller, owner and stage; all fifteen
         handlers forward with `stage=…` and none passes `draft_device`.
-  - [ ] The `owner_id: UserIdDep` locals inherited from #902 are renamed
+  - [x] The `owner_id: UserIdDep` locals inherited from #902 are renamed
         `user_id`, so the dep's value (the caller) is never passed as the
         owner; the owner comes only from `OwnerIdDep`.
-  - [ ] The 409 is documented on the engine-runtime groups (route- or
-        group-level per how `ERROR_RESPONSES` carries 409 today — verify,
-        then follow the existing pattern in `contracts.py`).
-  - [ ] A request naming neither parameter is byte-for-byte today's behavior
+  - [x] The 409 is documented on the engine-runtime groups — verified:
+        409 is already in `ERROR_RESPONSES` surface-wide, which
+        `ENGINE_RUNTIME_ERROR_RESPONSES` builds on, so no `contracts.py`
+        edit was needed.
+  - [x] A request naming neither parameter is byte-for-byte today's behavior
         on every route.
-  - [ ] `ruff check --select E,F,W` is clean on the package.
+  - [x] `ruff check --select E,F,W` is clean on the package.
 - **Depends on:** Task 2
 
 ## Task 4: The connection endpoint  `[ ]`

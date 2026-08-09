@@ -59,6 +59,28 @@ class _DocumentedEnum(str, Enum):
         return schema
 
 
+class RuntimeStage(_DocumentedEnum):
+    """Which of the bot's runtimes an operation addresses."""
+
+    # Request-only, and a closed set at the source: the publish flow's own
+    # stage vocabulary (core/service_bot/types.py::PublishStage), minus `eval`,
+    # which has no long-lived runtime to address. The adapter passes the
+    # member's value to the core stage machinery verbatim; a fourth stage is
+    # added there first, then published here.
+
+    DRAFT = "draft"
+    VERIFY = "verify"
+    ONLINE = "online"
+
+    __descriptions__ = {
+        "draft": "The bot's own workspace runtime — the pre-publication "
+        "draft, and the only runtime a personal bot has. The default.",
+        "verify": "A service bot's pre-production runtime, served while a "
+        "release is validating (or retained after promotion).",
+        "online": "A service bot's live published runtime.",
+    }
+
+
 class SocketKind(_DocumentedEnum):
     """Which WebSocket a connection entry describes."""
 
@@ -120,4 +142,4 @@ class MessageRole(_DocumentedEnum):
     }
 
 
-__all__ = ["ApprovalMode", "MessageRole", "SocketKind"]
+__all__ = ["ApprovalMode", "MessageRole", "RuntimeStage", "SocketKind"]
