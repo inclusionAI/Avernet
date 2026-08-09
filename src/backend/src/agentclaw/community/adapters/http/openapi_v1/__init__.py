@@ -45,9 +45,15 @@ Four operations are exempt because they have no user dimension to scope by:
 ``list_mcp_servers`` / ``list_mcp_tenants`` / ``get_mcp_server`` read a
 marketplace catalogue that is identical for every caller in the tenant. They
 still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just have
-no user-shaped answer to give. The Bot Logs group is separate again: it never
-derived a user from the credential, and its one user-scoped query already names
-its user explicitly.
+no user-shaped answer to give.
+
+The Bot Logs group is a different exclusion, and the sharpest thing to know
+about this rule. ``GET …/bots/logs/traces`` already takes a required
+``user_id`` — but there it means *whose traces to read*, a filter, and any
+caller presenting both a user and an App identity may name someone else's. Here
+it means *whose call this is*, and naming someone else is a 403. Same spelling,
+opposite contract, and the published document will carry both. Do not "unify"
+them without deciding which meaning the address should have.
 
 Because of those exemptions the dependency is declared **per handler**, not per
 group: two of the four sit inside groups whose other routes do take it (1 of 13
@@ -96,10 +102,19 @@ from .skills import router as skills_router
 # only on this surface).
 PUBLIC_API_PREFIX = "/openapi/v1"
 
-# The groups that answer no 403, because no route in them takes a `user_id`:
-# Bot Logs never derived a user from the credential at all. Mounted with the
-# other literal sub-groups, for the ordering reason above.
-_GROUPS_WITHOUT_USER_ID = [
+# The groups that answer no 403, because no route in them is scoped by the
+# *caller's* user: Bot Logs never derived a user from the credential at all.
+#
+# It is not that Bot Logs has no `user_id` — `GET …/bots/logs/traces` has taken
+# a required one since #692. It means something else there, and the difference
+# is why that group stays out of this rule rather than being folded into it: on
+# the rest of the surface `user_id` is *whose call this is*, and must be the
+# caller (403 otherwise); on that one operation it is *whose traces to read*, a
+# filter over a tenant-level observability surface that already requires both a
+# user and an App identity (`route_security`, `require_user_and_app_principal`).
+# Bringing it under this rule would remove a capability that route exists to
+# provide. See the note in the spec's Out of Scope.
+_GROUPS_WITHOUT_CALLER_SCOPE = [
     logs_router,
 ]
 
@@ -111,8 +126,11 @@ _MIXED_GROUPS = [
     mcp_router,
 ]
 
-# Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
-# See "Mount order" above for which literals actually depend on it.
+# Order matters: every literal sub-group — these three lists — is registered
+# before the `{bot_id}` wildcard group, which `build_public_router` mounts last.
+# See "Mount order" above for which literals actually depend on it. Splitting the
+# literals across three lists is about which *response table* each gets; it does
+# not change that they all precede `bots`.
 _SUBGROUPS = [
     identity_router,
     resources_router,
@@ -164,7 +182,7 @@ def build_public_router() -> APIRouter:
     user" above).
     """
     public = APIRouter()
-    for router in _GROUPS_WITHOUT_USER_ID + _MIXED_GROUPS:
+    for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )

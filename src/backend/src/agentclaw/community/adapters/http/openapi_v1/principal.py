@@ -152,14 +152,22 @@ async def require_user_id(
     """
     caller = caller_owner_id(principal)
     if user_id != caller:
-        # The two ids are logged because the response cannot carry them: it is a
-        # fixed "Forbidden", so an operator debugging a partner integration has
-        # no other record of which user was asked for. Both values are the
-        # caller's own identifiers on this path — the parameter disagreeing with
-        # a verified principal is the only way to get here — so neither
-        # discloses a third party.
+        # Both ids are logged because the response cannot carry them: it is a
+        # fixed "Forbidden", so this line is an operator's only record of which
+        # user a partner integration asked for.
+        #
+        # The rejected value is quoted with ``%r``, and that is not decoration.
+        # This branch runs *only* when the parameter is not the caller's, so by
+        # construction the value is one the caller chose and the server refused
+        # — up to 256 characters of arbitrary text, newlines included. Formatted
+        # raw it would let the party being refused append convincing extra lines
+        # to the log and poison the audit trail of refusals. ``repr`` escapes
+        # them, so a forged line arrives as one visibly-quoted string.
+        # ``app.py``'s 422 handler drops the caller's raw input for the same
+        # reason; this keeps it because *which* user was named is the whole
+        # diagnostic value here, and escaping is enough to make it safe.
         logger.warning(
-            "%s=%s does not match the verified caller %s",
+            "%s=%r does not match the verified caller %s",
             USER_ID_QUERY,
             user_id,
             caller,
