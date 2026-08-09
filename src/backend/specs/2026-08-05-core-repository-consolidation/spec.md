@@ -359,10 +359,10 @@ Recorded before any file moves, so post-move numbers are comparable:
 
 - `tests/community/architecture/`: **120 passed** — measured on `dev` @ `dd02f82`
   and re-measured unchanged after the 2026-08-08 rebase onto `dev` @ `2de13dc`.
-- CI on this spec's own PR (`dev` + one Markdown file): **all 7 checks green** —
+- CI on this spec's own PR (`dev` + Markdown files): **all 7 checks green** —
   Backend / BaaS / Engine / Gateway / BCS unit tests, BCS e2e, and Singlebox
-  coverage. Per-module coverage figures from that run are in C4, with the
-  staleness caveat noted there.
+  coverage. Per-module coverage figures are in C4, measured on the rebased branch.
+- Aggregate backend coverage **46.79%**; BaaS 48.37%; BCS line/method 41.48%/38.44%.
 
 ### C0b — Re-derivation after the 2026-08-08 `dev` rebase
 
@@ -477,43 +477,58 @@ implementation bodies from their denominators, not just Protocol stubs.
 
 **The gate does run in CI** (`.github/workflows/singlebox-coverage.yml`, on every
 PR) — it is only the *local* pre-push path that gates it behind
-`OCB_PRE_PUSH_RUN_CI=1`. A baseline was captured from the green run on this
-spec's own PR (run 31011880791, `singlebox coverage gate passed`), which measures
-`dev` + one Markdown file and is therefore a true pre-move baseline:
-
-> **Superseded in part by the 2026-08-08 `dev` rebase.** The table below is the
-> baseline measured on `dev` @ `dd02f82`. It reproduced identically across two CI
-> runs, so these were real margins rather than jitter. But `dev` has since moved
-> 16 commits, and `harness`'s threshold was re-pinned 41.30 → 40.86 in that
-> window, so the `harness` row is stale and the others must be re-confirmed from
-> the CI run on the rebased branch before the plan relies on them. The *shape* of
-> the finding — two modules with almost no headroom, `bot_chat` losing half its
-> tree — is what carries forward; the digits are not.
+`OCB_PRE_PUSH_RUN_CI=1`. Because this PR is `dev` plus Markdown files, its green
+run is a true pre-move baseline. Measured on the rebased branch, `dev` @ `2de13dc`
+(run 31291465522):
 
 | Module | `core_min_percent` | measured | headroom | affected by this move? |
 | --- | ---: | ---: | ---: | --- |
-| `harness` | 41.30 → **now 40.86** | 41.44 (stale) | **+0.14 at the time** | yes — `repository_protocol.py` (279 lines) leaves |
-| `expert_chat` | 63.49 | 65.26 | **+1.77** | yes — 2 Protocol files (172 lines) leave |
-| `access` | 42.80 | 45.68 | +2.88 | yes — `repository.py` (38 lines) leaves |
-| `bot_chat` | 67.48 | 71.26 | +3.78 | yes — **both implementations (1,770 lines) leave** |
+| `expert_chat` | 63.49 | 65.59 | **+2.10** | yes — 2 Protocol files (172 lines) leave |
+| `access` | 42.80 | 45.68 | **+2.88** | yes — `repository.py` (38 lines) leaves |
+| `bot_chat` | 67.48 | 71.26 | **+3.78** | yes — **both implementations (1,770 lines) leave** |
 | `bot_collaborator` | 53.88 | 60.47 | +6.59 | yes — `repository/protocol.py` (341 lines) leaves |
-| `devices` | 43.36 | 53.69 | +10.33 | yes — `repository/protocol.py` + shim (309 lines) leave |
+| `devices` | 43.36 | 52.33 | +8.97 | yes — `repository/protocol.py` + shim (309 lines) leave |
+| `harness` | 40.86 | 53.08 | +12.22 | yes — `repository_protocol.py` (279 lines) leaves |
 | `bot_dormant` | 54.13 | 54.53 | +0.40 | no |
-| `cron` | 41.84 | 48.61 | +6.77 | no |
+| `cron` | 41.84 | 48.78 | +6.94 | no |
 | `files` | 63.52 | 70.31 | +6.79 | no |
 | `auth` | 100.00 | 100.00 | +0.00 | no |
 
 Reading this: a module's percentage moves *up* if the removed file was better
 covered than the module average and *down* if it was worse, so the direction is
-per-module and cannot be predicted from line counts alone. What the table does
-establish is where there is no room to absorb a shift in either direction:
+per-module and cannot be predicted from line counts alone. What the table
+establishes is where there is no room to absorb a shift in either direction:
 
-- **`harness` has 0.14 points of headroom.** Any denominator change at all is
-  likely to breach it.
-- **`expert_chat` has 1.77.**
+- **`expert_chat` has 2.10 points** — the tightest module this move touches.
+- **`access` has 2.88** on a 38-line Protocol file. Small file, small module
+  (529 lines total), so the proportional effect is not small.
 - **`bot_chat` loses roughly half its `core_paths` tree** (1,770 of 3,565 lines)
-  on 3.78 points of headroom — by far the largest single perturbation, and a
-  direct consequence of Decision 2.
+  on 3.78 points — by far the largest single perturbation, and a direct
+  consequence of Decision 2.
+- `bot_dormant` is the tightest module overall at +0.40, but **no repository file
+  lives under `core/bot_dormant/`**, so this move cannot disturb it.
+
+**What changed since the first baseline, and why it matters.** The `dd02f82`
+baseline (reproduced identically across two CI runs, so it was signal, not
+jitter) had `harness` at 41.44 against a 41.30 floor — **+0.14**, which this spec
+called the sharpest risk in the change. On the rebased branch `harness` measures
+**53.08 against 40.86: +12.22**. It went from the tightest module to the roomiest.
+
+The cause is recorded in the yaml itself. The `41.30 → 40.86` entry closes with:
+
+> Update: singlebox now gains a fixture-backed MCPCenter — TestingMcpModule serves
+> CommunityMCPCenter when SINGLEBOX_ACCEPTANCE_MCP_FIXTURE_FILE is set … so the
+> helpers are acceptance-coverable again; the floor stays at the last measured
+> value until CI re-measures with the fixture.
+
+This run is that re-measurement. The predicted reversal happened, and it is 11.64
+points larger than the floor anticipated.
+
+The lesson for Task 16 is not "the risk is gone" — it is that **these numbers have
+a short half-life**. Two of the ten modules moved by more than a point in four
+days for reasons unrelated to this change (`harness` +11.64, `devices` −1.36).
+Task 16 must re-read them from the post-move run rather than diffing against this
+table.
 
 Consequence for the plan: re-pinning at least one threshold is probable, not
 hypothetical. That is a re-baseline (the denominator changed, the testing did
