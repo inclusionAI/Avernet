@@ -240,7 +240,7 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
     path="/openapi/v1/bots/skills/upload",
     scenario="raw_zip_created_in_verified_tenant",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID},
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
         headers=_HEADERS,
         raw_body=_package(),
     ),
@@ -266,7 +266,7 @@ def raw_zip_upload_creates_an_inactive_skill():
     path="/openapi/v1/bots/skills/upload",
     scenario="multipart_rejected_after_verified_tenant_guard",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID},
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
         headers={**_HEADERS, "content-type": "multipart/form-data; boundary=x"},
         raw_body=b"--x--",
     ),
