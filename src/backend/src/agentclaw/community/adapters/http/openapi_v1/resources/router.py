@@ -172,10 +172,11 @@ async def check_resource_name(
 ) -> Envelope[NameCheck]:
     """Check whether a resource name is available.
 
-    ``parent_path`` / ``user_id`` / ``exclude_id`` from the legacy signature
-    are intentionally not exposed on the openapi contract yet — Direction A
-    (principal → user_id) will wire ``user_id`` once it lands. For now the
-    service treats them as None.
+    ``user_id`` is the request's own required parameter, forwarded to the
+    service — the wiring the older note here said was still pending.
+    ``parent_path`` and ``exclude_id`` from the legacy signature remain
+    unexposed on this contract and are passed as None: resources are bot-scoped,
+    so there is no parent path to qualify the name with.
     """
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
@@ -184,12 +185,10 @@ async def check_resource_name(
     # legacy handler's most common case — the openapi check-name call shape
     # has no FOLDER equivalent).
     legacy_type = _legacy_type_for(type) or _LegacyType.FILE
-    # owner_id is the request's own ``user_id`` (fail-closed: no parameter, or
-    # one naming another user, never reaches here); parent_path stays None — the
-    # openapi check-name contract has no parent_path concept (resources are
-    # bot-scoped only). The slim service
-    # signature REQUIRES both keyword args (no defaults), so pass them
-    # explicitly.
+    # owner_id is the request's own ``user_id`` — fail-closed, since neither a
+    # missing parameter nor one naming another user reaches this line. The slim
+    # service signature REQUIRES both keyword args (no defaults), so parent_path
+    # is passed explicitly as None rather than omitted.
     exists = await service.check_name_exists(
         name=name,
         resource_type=legacy_type,

@@ -7284,7 +7284,7 @@
     },
     "/openapi/v1/bots/mcp/servers/{server_code}/permissions": {
       "get": {
-        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's permission — the identity comes from the principal, never\na caller-supplied id (the internal route takes a ``user_id`` query param; this\none must not, or a caller could probe another identity's grants).\n\n**Fail-open, by decision (spec Open Question 1).** When the marketplace\nlookup errors, ``check_mcp_permission_detail`` reports the caller *as\npermitted*. This surface preserves that rather than failing closed: the\nendpoint is advisory — the MCP server itself is the enforcement point — so a\nwrong \"yes\" during an upstream outage costs one failed call, whereas failing\nclosed would make a marketplace outage look like a permission revocation.",
+        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's own permission. The identity is the request's required\n``user_id``, and it is refused unless it names the verified caller — so this\nstill cannot be pointed at someone else to probe their grants, which is the\nproperty the internal route's free-form ``user_id`` query param does not\nhave. The parameter states whose permission is being asked about; it does\nnot widen whose it may be.\n\n**Fail-open, by decision (spec Open Question 1).** When the marketplace\nlookup errors, ``check_mcp_permission_detail`` reports the caller *as\npermitted*. This surface preserves that rather than failing closed: the\nendpoint is advisory — the MCP server itself is the enforcement point — so a\nwrong \"yes\" during an upstream outage costs one failed call, whereas failing\nclosed would make a marketplace outage look like a permission revocation.",
         "operationId": "check_mcp_permission_openapi_v1_bots_mcp_servers__server_code__permissions_get",
         "parameters": [
           {
@@ -8137,7 +8137,7 @@
     },
     "/openapi/v1/bots/resources/check-name": {
       "get": {
-        "description": "Check whether a resource name is available.\n\n``parent_path`` / ``user_id`` / ``exclude_id`` from the legacy signature\nare intentionally not exposed on the openapi contract yet — Direction A\n(principal → user_id) will wire ``user_id`` once it lands. For now the\nservice treats them as None.",
+        "description": "Check whether a resource name is available.\n\n``user_id`` is the request's own required parameter, forwarded to the\nservice — the wiring the older note here said was still pending.\n``parent_path`` and ``exclude_id`` from the legacy signature remain\nunexposed on this contract and are passed as None: resources are bot-scoped,\nso there is no parent path to qualify the name with.",
         "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
         "parameters": [
           {

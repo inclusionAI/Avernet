@@ -240,9 +240,12 @@ async def check_mcp_permission(
 ) -> Envelope[McpPermission]:
     """Report the caller's own permission for an MCP server.
 
-    Always the caller's permission — the identity comes from the principal, never
-    a caller-supplied id (the internal route takes a ``user_id`` query param; this
-    one must not, or a caller could probe another identity's grants).
+    Always the caller's own permission. The identity is the request's required
+    ``user_id``, and it is refused unless it names the verified caller — so this
+    still cannot be pointed at someone else to probe their grants, which is the
+    property the internal route's free-form ``user_id`` query param does not
+    have. The parameter states whose permission is being asked about; it does
+    not widen whose it may be.
 
     **Fail-open, by decision (spec Open Question 1).** When the marketplace
     lookup errors, ``check_mcp_permission_detail`` reports the caller *as
