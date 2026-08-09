@@ -44,7 +44,7 @@ from agentclaw.community.core.engine_runtime.stage import (
     STAGE_DRAFT,
     resolve_stage_bind_id,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
+from agentclaw.community.core.repository.protocols.publishing import (
     BotPublishRepositoryProtocol,
 )
 from agentclaw.community.di.config import GatewayEndpoint

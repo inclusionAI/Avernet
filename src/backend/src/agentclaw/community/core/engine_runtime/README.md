@@ -22,18 +22,15 @@ consumes:
   - "DeviceBindingRepository — the active binding id, without building conn info"
   - "BotPublishRepository — a service bot's published stage bindings (ext.binding.{verify,online})"
 internal_dependencies:
-  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.bot_collaborator.models
   - agentclaw.community.core.bot_collaborator.protocols
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.errors
-  - agentclaw.community.core.devices.repository.protocol
   - agentclaw.community.core.devices.services.device_context
   - agentclaw.community.core.devices.services.device_context_resolver
   - agentclaw.community.core.devices.services.device_service
-  - agentclaw.community.core.service_bot.repository.bot_publish_repository
   - agentclaw.community.core.service_bot.repository.models
   - agentclaw.community.core.service_bot.types
   - agentclaw.community.log
