@@ -23,6 +23,7 @@ calls (test_ctor_partial_params_falls_back_to_pathlib pins this).
 """
 from __future__ import annotations
 
+import asyncio
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -80,7 +81,13 @@ class LocalDeviceFileSystem(DeviceFileSystem):
         Raises:
             BaasServiceError: get_http_info failure transparently propagates.
         """
-        info = self._baas_service.get_http_info(
+        # ``get_http_info`` is synchronous — a blocking HTTP call, and since the
+        # transport-resilience change potentially two of them plus a
+        # ``time.sleep`` backoff. Calling it inline from this coroutine would
+        # park the whole event loop for up to two 5s deadlines, stalling every
+        # other request on the worker. Offloaded to a thread for that reason.
+        info = await asyncio.to_thread(
+            self._baas_service.get_http_info,
             bind_id=self._binding_ctx.binding_id,
             port=self._binding_ctx.adapter_port,
             path=api_path,
@@ -266,7 +273,10 @@ class LocalDeviceFileSystem(DeviceFileSystem):
             "[LocalDeviceFileSystem.baas.write_file] binding=%s file=%s size=%d",
             self._binding_ctx.binding_id, file_path, len(content),
         )
-        info = self._baas_service.get_http_info(
+        # Offloaded for the same reason as ``_baas_request``: the call is
+        # synchronous and blocking, and this is a coroutine.
+        info = await asyncio.to_thread(
+            self._baas_service.get_http_info,
             bind_id=self._binding_ctx.binding_id,
             port=self._binding_ctx.adapter_port,
             path="/api/file/upload",

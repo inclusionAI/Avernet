@@ -110,7 +110,14 @@ class LocalHealthProbe(MockSeam, HealthProbePlugin):
             }
 
         try:
-            info = self._baas_service.get_http_info(
+            # Offloaded: ``get_http_info`` is a synchronous blocking call, and
+            # since the transport-resilience change potentially two of them plus
+            # a ``time.sleep`` backoff. Inline, it would park the event loop —
+            # and because the callers below fan these coroutines out through
+            # ``asyncio.gather``, each one would block before yielding, so the
+            # bindings would probe serially rather than concurrently.
+            info = await asyncio.to_thread(
+                self._baas_service.get_http_info,
                 bind_id=binding.id,
                 port=adapter_port,
                 path="/readiness",

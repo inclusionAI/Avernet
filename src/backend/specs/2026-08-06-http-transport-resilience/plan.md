@@ -70,8 +70,20 @@ response"), which is precisely how a wrapped connection failure presents.
 Jitter (50% of the base delay) is not decoration: the observed failures arrive in
 synchronized clusters, so un-jittered retries would re-converge on the same tick.
 
-`time.sleep` is correct rather than `asyncio.sleep`: every adopter on this path is
-synchronous and already runs inside `asyncio.to_thread`.
+`time.sleep` is correct rather than `asyncio.sleep` because the component is
+synchronous — but the original justification for it, "every adopter on this path
+is synchronous and already runs inside `asyncio.to_thread`", was **false**, and
+review caught it. Three `get_http_info` callers were `async def` and invoked it
+inline: `local_device_filesystem._baas_request` and `._baas_write_file`, and
+`plugins/local/health_probe._probe_binding_readiness`. Those already blocked the
+event loop on one HTTP call; retry would have made it two plus a blocking sleep,
+and the health probe fans its coroutines out through `asyncio.gather`, so each
+would block before yielding and the bindings would probe serially.
+
+All three now `await asyncio.to_thread(...)`. Any future async caller must do the
+same — this is the same head-of-line blocking that caused the incident this
+feature exists to absorb, and adding retry to a sync function called from a
+coroutine amplifies it rather than fixing it.
 
 ## Change 2 — `core/harness/services/llm.py`
 
