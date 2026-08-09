@@ -1,6 +1,7 @@
 """Unit tests for LocalHealthProbe BaaS mode (plan-04)."""
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -230,3 +231,50 @@ async def test_sandbox_health_returns_not_supported_per_spec():
     assert result["code"] == 1
     assert "not supported" in result["message"].lower()
     assert result["instances"] == []
+
+
+# ── Event-loop offload ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_probe_offloads_get_http_info_off_the_event_loop():
+    """``get_http_info`` must not run inline on the loop.
+
+    It is synchronous and blocking — one HTTP call, and since the
+    transport-resilience change potentially two plus a ``time.sleep`` backoff.
+    Inline it would park the loop; and because the public probe methods fan
+    these coroutines out through ``asyncio.gather``, each would block before
+    yielding and the bindings would probe serially rather than concurrently.
+
+    Asserts on the thread rather than on ``asyncio.to_thread`` being called, so
+    the behavior is pinned rather than the mechanism.
+    """
+    seen: dict[str, int] = {}
+
+    def _side(**kwargs):
+        seen["ident"] = threading.get_ident()
+        return HttpConnectionInfo(
+            http_url="http://10.0.0.1:20010/readiness", token="abc"
+        )
+
+    binding_repo = MagicMock()
+    binding_repo.list_bindings.return_value = (1, [_make_binding()])
+    baas_service = MagicMock()
+    baas_service.get_http_info.side_effect = _side
+
+    probe = _make_probe(binding_repo=binding_repo, baas_service=baas_service)
+
+    response_map = {
+        "http://10.0.0.1:20010/readiness": httpx.Response(
+            200, json={"state": "ready"},
+            request=httpx.Request("GET", "http://10.0.0.1:20010/readiness"),
+        ),
+    }
+
+    with patch("httpx.AsyncClient", _AsyncClientFactory(response_map)):
+        await probe.engine_health("staff_u001")
+
+    assert seen["ident"] != threading.get_ident(), (
+        "get_http_info ran on the event loop thread — the asyncio.to_thread "
+        "offload in _probe_binding_readiness was dropped"
+    )

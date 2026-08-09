@@ -7,6 +7,7 @@ test_local_device_filesystem.py (untouched).
 """
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -509,3 +510,64 @@ async def test_delete_file_baas_returns_false_on_oserror(fs_baas, tmp_path):
     d.mkdir()
     assert await fs_baas.delete_file(str(d)) is False
     assert d.exists()
+
+
+# ── Event-loop offload ────────────────────────────────────────────────
+#
+# ``get_http_info`` is synchronous and blocking — one HTTP call, and since the
+# transport-resilience change potentially two plus a ``time.sleep`` backoff.
+# Called inline from these coroutines it would park the event loop, which is the
+# same head-of-line blocking that caused the incident the retry exists to absorb.
+#
+# These tests assert the call genuinely leaves the loop thread. Asserting on
+# ``asyncio.to_thread`` being called would pin the mechanism; asserting on the
+# thread pins the behavior, so any offload that works passes and an inline call
+# fails.
+
+
+def _thread_recording_baas() -> tuple[MagicMock, dict]:
+    """BaasService stub that records which thread get_http_info ran on."""
+    seen: dict[str, int] = {}
+
+    def _side(*, path="", **kwargs):
+        seen["ident"] = threading.get_ident()
+        return HttpConnectionInfo(
+            http_url=f"http://10.0.0.1:20010{path}",
+            token="abc-token",
+        )
+
+    m = MagicMock()
+    m.get_http_info.side_effect = _side
+    return m, seen
+
+
+@pytest.mark.asyncio
+async def test_read_file_offloads_get_http_info_off_the_event_loop(binding_ctx):
+    mock_baas, seen = _thread_recording_baas()
+    fs = LocalDeviceFileSystem(baas_service=mock_baas, binding_ctx=binding_ctx)
+    response = _mock_httpx_response(status_code=200, content=b"data")
+    client = _patch_async_client(response)
+
+    with patch("httpx.AsyncClient", return_value=client):
+        await fs.read_file("/tmp/in.txt")
+
+    assert seen["ident"] != threading.get_ident(), (
+        "get_http_info ran on the event loop thread — the asyncio.to_thread "
+        "offload in _baas_request was dropped"
+    )
+
+
+@pytest.mark.asyncio
+async def test_write_file_offloads_get_http_info_off_the_event_loop(binding_ctx):
+    mock_baas, seen = _thread_recording_baas()
+    fs = LocalDeviceFileSystem(baas_service=mock_baas, binding_ctx=binding_ctx)
+    response = _mock_httpx_response(status_code=200, json_body={"code": 0})
+    client = _patch_async_client(response)
+
+    with patch("httpx.AsyncClient", return_value=client):
+        await fs.write_file("/tmp/out.txt", b"payload")
+
+    assert seen["ident"] != threading.get_ident(), (
+        "get_http_info ran on the event loop thread — the asyncio.to_thread "
+        "offload in _baas_write_file was dropped"
+    )
