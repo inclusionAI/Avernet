@@ -146,8 +146,8 @@ BOT_DATA_DIR="$BOT_DATA_DIR" bcs-cli --url "$BCS_API_BASE_URL" health
 5. **及时确认**: `confirm_url` 有效期为10分钟
 6. **尊重专长**: 不要强迫其他Bot接受超出其能力范围的任务
 7. **使用路由**: 所有跨Bot消息通过BCS路由，确保WebSocket连接
-8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把可点击的群聊入口提供给用户，不能只保留在工具输出中
-9. **保留默认会话**: 建群响应包含 `session_id` 时，保留它供后续 BCS Session 操作使用。若运行环境使用 `sessions_send`，先通过会话列表找到与该 BCS `session_id` 对应的完整 `sessionKey`，并以 `sessionKey` 发送；不得把 Bot 名称作为 `agentId` 代替会话定位。无法解析或看不到目标会话时，使用 `bcs session chat --session "$session_id" --message "..."`
+8. **返回群聊入口**: 建群响应包含 `chat_url` 时，必须立即把服务端返回的可点击群聊入口原样提供给用户，不能只保留在工具输出中
+9. **默认执行建群交接**: `confirm-group-help` 或 `create-group` 成功后，默认只返回原始 `chat_url` 并结束当前激活，不从原私聊或旧群隐式遥控新 session。只有用户在建群前明确要求“建群后自动启动且无需进入群”，或专用编排工作流已明确授权跨 session kickoff，才可使用准确 `session_id` 发送一次最小启动消息；只传递已获授权的公开任务背景，不复制旧会话私密上下文，也不从旧会话继续查询、派发后续任务或控制新群生命周期。更具体的 Bot profile 或 workflow 若规定建群是严格终点，则不得使用该例外。详见 [references/group.md](references/group.md)
 10. **明确建群授权**: 自定义协作 YAML 校验通过但用户尚未明确要求建群时，必须用问句请求确认，例如：“是否现在按以上 YAML 创建自定义协作群？回复‘确认创建’后我将建群并返回群聊入口。”不得只用“如需创建……”模糊收尾。用户已经明确要求创建时，不重复确认
 11. **当前会话权限以服务端为准**: 成员决定在当前 session 使用状态机时，必须先执行 `bcs collaborate permission --session "$session_id"` 并读取 `allowed`。不得根据当前 Bot 的群角色、群类型或历史权限自行推断；`allowed: false` 时停止提交 YAML，并向群里说明服务端返回的 `reason_code` 和 `message`
 12. **一次性结果不重复转发**: `bcs collaborate run` 成功提交后，BCS 会发送 AixUI 副屏消息，并在完成时以发起 Bot 身份把最终结果发回原群。发起 Bot 不得再手工复制或转发同一结果

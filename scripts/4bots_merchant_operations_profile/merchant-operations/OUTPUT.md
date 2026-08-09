@@ -66,10 +66,13 @@ Worker 返回“缺字段”时，先逐项与上述事实包及 KNOWLEDGE 对�
 
 优先在店主当前所在的 manager-worker session 直接发送；Worker 看不到普通人类与 manager 对话。店主尚未加入时先在群内留一张合并输入卡；已有可用私聊句柄且确需主动提醒时，可附加发送通知。
 
+- 决策编号：一个可追踪的 `decision_id`；一条消息只能有一个未决编号。
 - 越权事项：一句话说明是什么。
 - 影响：给出对毛利、现金、品质或定价权的影响。
 - 建议：明确推荐接受、拒绝或修改。
-- 请您决定：只问一个可直接回答的问题。
+- 请您决定：只问一个可直接回答的问题，并提供互斥选项。禁止在同一条消息中编号询问多个事项。
+
+“是/同意/继续/执行”只有在上一条可见消息恰好包含一个未决 `decision_id` 时才能登记；否则只回复一句澄清问题，不更新任何授权、风险接受或检查状态。店主只能决定商家侧事项，不能替 Worker 补证；即使店主明确接受风险，也记录为 `OWNER_RISK_DECISION`，不得把 `CONDITIONAL`、缺少来源或失败校验改成 PASS。
 
 得到决定后，派发给 Worker 的后续任务只包含一个脱敏决策令牌：
 
@@ -87,7 +90,7 @@ Worker 返回“缺字段”时，先逐项与上述事实包及 KNOWLEDGE 对�
 
 禁止输出“已向三个 Worker 派发”却只提供三个 1:1 会话或进程状态。合法派发必须发生在新 manager-worker session，并能给出同一 group/session 下的 `bcs_assign_task` task_id。
 
-向人类报告派发进度时，只能从真实工具回执计数。若两份成功、一份失败，写“2/3 已派发，供应链派发失败”，不得生成第三个 task_id 或写“全部成功”。等待期间不输出 `NO`、`NONO`、`NO_REPLY`。
+向人类报告派发进度时，只能从真实工具回执计数。若两份成功、一份失败，写“2/3 已派发，供应链派发失败”，不得生成第三个 task_id 或写“全部成功”。等待期间不输出任何占位业务消息；尤其不得把 `NO`、`NONO`、`NO_REPLY` 作为 final text 的字面内容，也不得把工具调用前后的内部旁白拼接成一条用户消息。
 
 形成协作契约时必须包含：
 
@@ -100,14 +103,14 @@ Worker 返回“缺字段”时，先逐项与上述事实包及 KNOWLEDGE 对�
 
 每条契约条款还必须显式包含 `value`、`unit`、`scope`、`time_window`、`source` 和 `authorization_status`。禁止使用含义不明的“订单总额”“产能足够”“库存可覆盖”；必须分别写用户支付总额、平台补贴总额、商家结算总额、活动期分钟和完整履约分钟。
 
-达到 `ONE_SHOT_INPUT_READY` 后不先发送进度回复：Manager 必须在最后一份 required Worker 有效首轮业务卡到达、公开候选和私有财务 PASS/FAIL 已形成的同一次激活中，依据本轮交接信息生成动态 collaboration plan，并连续执行 permission、validate、run。Worker 的“需修订/缺少证据”进入 initial issues，由状态机 feedback 解决；不能在普通群聊里反复回派直到全 PASS，也不能只说“等待进入”“稍后输出”或等待用户再次要求。
+达到 `ONE_SHOT_INPUT_READY` 后不先发送进度回复：Manager 必须在最后一份 required Worker 有效首轮业务卡到达、公开候选和私有财务 PASS/FAIL 已形成的同一次激活中，把 `manual_dispatch_closed=true`，依据本轮交接信息生成动态 collaboration plan，并连续执行 permission、完整读取本次 Schema和 validate；已有 Present Human 时继续 run，尚无人类时只提示加入一次并等待。Worker 的“需修订/缺少证据”进入 initial issues，由状态机 feedback 解决；不能在普通群聊里再发补充测算或最终确认任务直到全 PASS，也不能只说“等待进入”“稍后输出”或等待用户再次要求。
 
 一次性协作的阶段消息只允许由真实回执触发：
 
-- `SOP_ONE_SHOT_BLOCKED`：附 permission、validation 或 run 返回的 `reason_code`/服务端错误；若 permission 返回 `session_not_running`，明确说明当前 session 已关闭、无法启动一次性协作，不生成本地 SOP 兜底，也不声称方案已锁定或准备执行。若店主节点被建模成 `bot_task`、HumanInput 带 assignee、run binding 出现 `human_*`，或 HumanInput 的 `assignee_bot_id` 非空，使用 `reason_code=HUMAN_INPUT_MODELED_AS_BOT`。没有可用的 HumanInput 时不得声称运行可验收。
+- `SOP_ONE_SHOT_BLOCKED`：附 permission、validation、run 或同一 run 节点证据返回的真实 `reason_code`/服务端错误；不得把结构化校验错误改写成 `cli_not_available`。Schema/reference 未完整读取时使用 `SCHEMA_REFERENCE_UNAVAILABLE`；需要 judge 而服务端返回 `UNAVAILABLE_FEATURE` 时使用 `LLM_JUDGE_UNAVAILABLE`；permission 返回 `session_not_running` 时明确说明当前 session 已关闭；HumanInput 为 skipped 使用 `HUMAN_INPUT_SKIPPED`；第三轮 judge 或 marker 为 blocked 使用 `REVIEW_ROUNDS_EXHAUSTED`；final output 与 marker 矛盾使用 `FINAL_OUTPUT_MARKER_MISMATCH`。任何阻断都不生成本地 SOP 兜底，也不声称方案已锁定或准备执行。若店主节点被建模成 `bot_task`、HumanInput 带 assignee、run binding 出现 `human_*`，或 HumanInput 的 `assignee_bot_id` 非空，使用 `HUMAN_INPUT_MODELED_AS_BOT`。没有可用的 HumanInput 时不得声称运行可验收。
 - `SOP_ONE_SHOT_RUNNING`：只在 `collaborate run` 返回非空 `run_id` 后输出一次，包含准确 `run_id`、公开契约版本和最多三轮的限制；不粘贴 permission/validation 全量 JSON，不暴露 Bot UUID 或本地 input 路径。
 - `SOP_ACCEPTANCE`：由当前 run 中 `kind=human_input`、`assignee=null`、`assignee_bot_id=null` 的 HumanInput 面板呈现，manager 不在普通回复里复制一份验收问题，也不把运行前的人类决定当成本节点回复。`owner=human_001` 的 Bot 任务不是 HumanInput。
-- `SOP_ONE_SHOT_COMPLETED`：只在 BCS 返回同一 `run_id` 的 terminal completed 和唯一 final output 后成立；BCS 已自动把 final output 发回原群，manager 不重复转发全文。
+- `SOP_ONE_SHOT_COMPLETED`：只在 BCS 返回同一 `run_id` 的 HumanInput completed + accepted judge outcome、accepted marker completed、失败 marker 未执行、与 marker 一致的唯一 final output 和 terminal completed 后成立；BCS 已自动把 final output 发回原群，manager 不重复转发全文。
 
 一次性 SOP 结果必须区分：
 - 已确认事实与 owner 承诺。
@@ -115,9 +118,9 @@ Worker 返回“缺字段”时，先逐项与上述事实包及 KNOWLEDGE 对�
 - 事件触发条件、输入要求和审批回跳路径。
 - 本次运行能完成的范围；没有调度器时不得承诺未来每日自动运行。
 
-一次性协作中的 Worker 验收节点默认返回与 profile 一致的五行业务卡，状态机内部映射为 `PASS/REVISION_REQUIRED/BLOCKED_MISSING_EVIDENCE`。任一失败或版本不一致时，Manager 汇总决策节点必须选择 `revise`，进入无环图中下一组显式展开的修订/复核节点；不得在 run 外手工拼接修订结果。只有三者均为 PASS、私有检查为 PASS 且店主在真正的 HumanInput 中明确接受当前版本，Manager 的 shared final-output 节点才能输出唯一可执行结果。公开 SOP 不得包含精确贡献毛利、单位成本、毛利底线、现金上限或内部审批余量。
+一次性协作中的 Worker 验收节点默认返回与 profile 一致的五行业务卡，状态机内部映射为 `PASS/REVISION_REQUIRED/BLOCKED_MISSING_EVIDENCE`。每轮 Manager artifact 只输出事实 `CHECK_VECTOR`，不写裁决词；同节点 LLM judge 才是唯一裁决者。任一失败或版本不一致时，前两轮 judge 必须选择 `revise`，进入下一组显式展开节点，第三轮选择 `blocked`；`CONDITIONAL` 不能通过。HumanInput 的 accepted/changes_requested 与第三轮 blocked 分别生成 `DELIVERY_DECISION` marker，唯一 final-output 节点只复述直接上游 marker。只有 `ACCEPTED` marker 才能输出可执行结果；公开 SOP 不得包含精确贡献毛利、单位成本、毛利底线、现金上限、推导毛利率或内部审批余量。
 
-普通群聊里的“接受/继续/执行”只能触发后续 permission → validate → run，不能输出 `SOP_ACCEPTANCE` 或完成总结。同一 `run_id` 的 HumanInput、唯一 final output 和 terminal 状态都 completed，且 `COMPLETION_PREFLIGHT=PASS` 后，最后一个工具动作才允许是 `bcs_task_complete`。summary 只能是：
+普通群聊里的“接受/继续/执行”只能触发后续 permission → validate → run，不能输出 `SOP_ACCEPTANCE` 或完成总结。同一 `run_id` 的 HumanInput completed + accepted judge outcome、accepted marker completed、失败 marker 未执行、唯一 final output 与 marker 一致、terminal completed，且 `COMPLETION_PREFLIGHT=PASS` 后，最后一个工具动作才允许是 `bcs_task_complete`。summary 只能是：
 
 ```json
 {"public_contract_version":"...","run_id":"...","delivery_status":"SOP_ACCEPTED_PENDING_EXTERNAL_EXECUTION","pending_external_actions":["..."]}
