@@ -26,25 +26,25 @@
         delegation changes.
 - **Depends on:** —
 
-## Task 2: Document the 403 on exactly the operations that can return it
+## Task 2: Document the 403 on exactly the operations that can return it  [x]
 
 - **Goal:** The published description matches what each operation actually does.
 - **Files:** `…/openapi_v1/contracts.py`, `…/openapi_v1/__init__.py`
 - **Done when:**
-  - [ ] `USER_SCOPED_ERROR_RESPONSES = {**ERROR_RESPONSES, 403: …}` and a
+  - [x] `USER_SCOPED_ERROR_RESPONSES = {**ERROR_RESPONSES, 403: …}` and a
         `USER_SCOPED_403` single-entry dict for per-route merging.
-  - [ ] `ENGINE_RUNTIME_ERROR_RESPONSES` is built from the user-scoped set.
-  - [ ] `403` is **not** in `ERROR_RESPONSES`; the comment says why
+  - [x] `ENGINE_RUNTIME_ERROR_RESPONSES` is built from the user-scoped set.
+  - [x] `403` is **not** in `ERROR_RESPONSES`; the comment says why
         (`test_openapi_error_schema.py:55` requires every operation to document
         every status in that dict, and Bot Logs cannot return one).
-  - [ ] `build_public_router` attaches the user-scoped table to the nine groups
+  - [x] `build_public_router` attaches the user-scoped table to the nine groups
         with no exemption, and leaves `bots` / `mcp` / `bot_logs` on
         `ERROR_RESPONSES`.
-  - [ ] The `__init__.py` module docstring carries the placement rule next to the
+  - [x] The `__init__.py` module docstring carries the placement rule next to the
         addressing rule, phrased so a new endpoint's author can apply it without
         reading this spec — including the four exemptions and why they are
         exempt.
-  - [ ] `test_openapi_error_schema.py` still passes untouched.
+  - [x] `test_openapi_error_schema.py` still passes untouched.
 - **Depends on:** Task 1
 
 ## Task 3: Convert the 41 operations in the nine unexempted groups

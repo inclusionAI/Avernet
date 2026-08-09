@@ -29,6 +29,33 @@ whose id equals a component name is unreachable at that address. The reserved
 names are fixed and documented in ``docs/openapi-v1/README.md``; a test asserts
 the doc's list still equals the routes'.
 
+Naming the end user
+-------------------
+
+Every operation that scopes to a user takes a required **``user_id`` query
+parameter** — whatever the method, whatever the body. It is never a body field
+and never a path segment: it is not an attribute of any resource here, it is who
+the call is for, so a body (which describes the resource) and a path (which
+names it) are both the wrong place. ``bot_id`` is unaffected — it stays in the
+path where it addresses a bot and in the query string where it is a parameter.
+The full reasoning is in ``principal.py``; handlers declare ``UserIdDep``.
+
+Four operations are exempt because they have no user dimension to scope by:
+``check_bot_name`` answers a tenant-wide uniqueness question, and
+``list_mcp_servers`` / ``list_mcp_tenants`` / ``get_mcp_server`` read a
+marketplace catalogue that is identical for every caller in the tenant. They
+still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just have
+no user-shaped answer to give. The Bot Logs group is separate again: it never
+derived a user from the credential, and its one user-scoped query already names
+its user explicitly.
+
+Because of those exemptions the dependency is declared **per handler**, not per
+group: two of the four sit inside groups whose other routes do take it (1 of 13
+in ``bots``, 3 of 6 in ``mcp``), so a group-level dependency would put the
+parameter on them. ``test_explicit_user_id.py`` is what makes a new route
+impossible to forget — the same trade ``test_path_convention.py`` makes for the
+addressing rule above.
+
 Mount order
 -----------
 
@@ -46,7 +73,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from .bots import router as bots_router
-from .contracts import ENGINE_RUNTIME_ERROR_RESPONSES, ERROR_RESPONSES
+from .contracts import (
+    ENGINE_RUNTIME_ERROR_RESPONSES,
+    ERROR_RESPONSES,
+    USER_SCOPED_ERROR_RESPONSES,
+)
 from .dependencies import require_principal
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
@@ -65,12 +96,25 @@ from .skills import router as skills_router
 # only on this surface).
 PUBLIC_API_PREFIX = "/openapi/v1"
 
+# The groups that answer no 403, because no route in them takes a `user_id`:
+# Bot Logs never derived a user from the credential at all. Mounted with the
+# other literal sub-groups, for the ordering reason above.
+_GROUPS_WITHOUT_USER_ID = [
+    logs_router,
+]
+
+# The groups where SOME routes take a `user_id` and some do not — `bots`
+# (12 of 13) and `mcp` (3 of 6). They keep the surface-wide response table here
+# and declare the 403 per route, so the four exempt operations do not advertise
+# a failure they cannot produce. See "Naming the end user" above.
+_MIXED_GROUPS = [
+    mcp_router,
+]
+
 # Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
 # See "Mount order" above for which literals actually depend on it.
 _SUBGROUPS = [
-    logs_router,
     identity_router,
-    mcp_router,
     resources_router,
     routines_router,
     skills_router,
@@ -109,15 +153,24 @@ _PUBLIC_AUTH = [Depends(require_principal)]
 def build_public_router() -> APIRouter:
     """Assemble the ``/openapi/v1/bots`` public router.
 
-    ``ERROR_RESPONSES`` and ``_PUBLIC_AUTH`` are attached here rather than on
+    The response tables and ``_PUBLIC_AUTH`` are attached here rather than on
     each handler so the published schema documents the envelope this surface
     actually returns on failure, and so every route requires an authenticated
     caller — every group, every route, one declaration.
+
+    Which response table a group gets depends on whether all of its routes are
+    user-scoped. The two mixed groups declare their 403 per route instead; the
+    ``user_id`` parameter itself is always per handler (see "Naming the end
+    user" above).
     """
     public = APIRouter()
-    for router in _SUBGROUPS:
+    for router in _GROUPS_WITHOUT_USER_ID + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+    for router in _SUBGROUPS:
+        public.include_router(
+            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(
@@ -125,6 +178,7 @@ def build_public_router() -> APIRouter:
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH,
         )
+    # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )
