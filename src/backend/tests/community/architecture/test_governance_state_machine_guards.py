@@ -48,6 +48,10 @@ _GOV_REPO_ROOT = (
     / "src" / "agentclaw" / "community" / "core" / "repository"
     / "implementations" / "governance"
 )
+# Derived, never spelled out as a path substring: the two guards below both need
+# to point at this exact file, and a literal would rot silently the next time it
+# moves — which is how the previous one died.
+_TASK_RECORD_REPO = _GOV_REPO_ROOT / "task_record.py"
 
 
 def _gov_files():
@@ -164,8 +168,7 @@ def test_guard_b_repo_has_no_semantic_commands():
     repo 无状态机推进入口 —— "唯一驱动者"由分层保证。
     bulk_close_open 是全量豁免(SQL WHERE 守卫),不在此 9 个内。
     """
-    repo_path = _GOV_REPO_ROOT / "task_record.py"
-    tree = ast.parse(repo_path.read_text(encoding="utf-8"))
+    tree = ast.parse(_TASK_RECORD_REPO.read_text(encoding="utf-8"))
     forbidden_found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name in _FORBIDDEN_REPO_COMMANDS:
@@ -191,9 +194,9 @@ def test_no_external_callers_of_repo_semantic_commands():
     # task_repo. is the typical attribute name in services/tests.
     for py in backend.rglob("*.py"):
         rel = str(py.relative_to(backend))
-        # 跳过 repo 自身(已删,但避免把方法定义误判为调用)与 lifecycle
-        # driver(driver 的方法名同名但走 self.<cmd> 不走 task_repo.<cmd>)。
-        if "repository/task_record.py" in rel:
+        # 跳过 repo 自身(避免把方法定义误判为调用)与 lifecycle driver
+        # (driver 的方法名同名但走 self.<cmd> 不走 task_repo.<cmd>)。
+        if py == _TASK_RECORD_REPO:
             continue
         try:
             tree = ast.parse(py.read_text(encoding="utf-8"))
