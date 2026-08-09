@@ -8,14 +8,12 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.session_resource_service import (
     SessionResourceServiceProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.di.config import BaasConfig
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
@@ -24,9 +22,7 @@ from agentclaw.community.core.session_resources.materialization import (
     SessionResourceMaterializeHandler,
     SessionResourceTaskLifecycle,
 )
-from agentclaw.community.core.session_resources.repository.protocol import (
-    SessionResourceRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.service import SessionResourceService
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.plugin_api.http_client import (
@@ -36,9 +32,7 @@ from agentclaw.community.plugin_api.http_client import (
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )
-from agentclaw.community.plugins.session_resource_repository import (
-    SessionResourceRepository,
-)
+from agentclaw.community.core.repository.implementations.platform.session_resource import SessionResourceRepository
 
 
 class SessionResourcesModule(Module):

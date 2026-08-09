@@ -5,11 +5,9 @@ import logging
 import uuid
 from pathlib import Path
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
 from agentclaw.community.core.devices.services.device_context import (
     DeviceContext,
@@ -21,9 +19,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.session_resources.baas_client import (
     SessionResourceBaasClient,
 )
-from agentclaw.community.core.session_resources.repository.protocol import (
-    SessionResourceRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,

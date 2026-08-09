@@ -14,7 +14,7 @@ from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -29,10 +29,8 @@ from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_servers,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,

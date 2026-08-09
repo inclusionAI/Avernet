@@ -35,8 +35,8 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 from .conftest import BOT, OWNER, FakeRelay

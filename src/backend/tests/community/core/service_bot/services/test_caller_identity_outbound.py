@@ -6,9 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.caller_identity.credential import (
     CALLER_TARGET_AMBIGUOUS,
     CallerCredentialError,

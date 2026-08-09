@@ -162,7 +162,7 @@ def _skill_service_di_app(
 
     class _TestModule(Module):
         def configure(self, binder):
-            from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.devices.services.device_context_resolver import (
                 DeviceContextResolver,
             )
@@ -458,7 +458,7 @@ def _upload_skill_di_app(
     class _TestModule(Module):
         def configure(self, binder):
             from agentclaw.community.api.bot_service import BotServiceProtocol
-            from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
                 CollaboratorLockService,
             )

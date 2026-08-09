@@ -111,13 +111,11 @@ from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
-    from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-        PublishOperationRepository,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
     from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
         TeclawFilePromotion,
     )
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )

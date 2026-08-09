@@ -16,12 +16,10 @@ from agentclaw.community.api.content_scanner_service import ContentScannerProtoc
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from agentclaw.community.api.patch_library_service import PatchLibraryProtocol
 from agentclaw.community.api.patch_planner_service import PatchPlannerProtocol
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-    HarnessTemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
 from agentclaw.community.core.harness.services.llm import LLM
@@ -37,18 +35,10 @@ from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
-from agentclaw.community.plugins.harness_patch_record_repository import (
-    HarnessPatchRecordRepository as UnifiedHarnessPatchRecordRepository,
-)
-from agentclaw.community.plugins.harness_patch_repository import (
-    HarnessPatchRepository as UnifiedHarnessPatchRepository,
-)
-from agentclaw.community.plugins.harness_repository import (
-    HarnessTemplateRepository as UnifiedHarnessTemplateRepository,
-)
-from agentclaw.community.plugins.harness_scan_repository import (
-    HarnessScanRecordRepository as UnifiedHarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.implementations.harness.patch_record import HarnessPatchRecordRepository as UnifiedHarnessPatchRecordRepository
+from agentclaw.community.core.repository.implementations.harness.patch import HarnessPatchRepository as UnifiedHarnessPatchRepository
+from agentclaw.community.core.repository.implementations.harness.template import HarnessTemplateRepository as UnifiedHarnessTemplateRepository
+from agentclaw.community.core.repository.implementations.harness.scan import HarnessScanRecordRepository as UnifiedHarnessScanRecordRepository
 
 
 logger = get_logger()

@@ -40,8 +40,8 @@ _THIS_FILE = pathlib.Path(__file__).resolve()
 _BACKEND_ROOT = _THIS_FILE.parents[3]                 # .../src/backend
 _REPO_PATH = (
     _BACKEND_ROOT
-    / "src" / "agentclaw" / "community" / "core" / "economy" / "governance"
-    / "repositories" / "notify_log_repo.py"
+    / "src" / "agentclaw" / "community" / "core" / "repository"
+    / "implementations" / "governance" / "notify_log.py"
 )
 
 

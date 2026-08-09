@@ -28,7 +28,7 @@ from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlugin

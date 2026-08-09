@@ -4,14 +4,12 @@ import threading
 from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
-from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-    PublishOperationRepository,
-)
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.service_bot.services.bot_process import BotProcessRegistry
 from agentclaw.community.core.service_bot.services.publish_draft_restore_mixin import PublishDraftRestoreMixin

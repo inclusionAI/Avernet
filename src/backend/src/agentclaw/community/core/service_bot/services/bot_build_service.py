@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.service_bot.services.baas_service import (
     ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE,

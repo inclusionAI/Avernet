@@ -23,10 +23,8 @@ if TYPE_CHECKING:
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.models import (
     AllocatedDevice,

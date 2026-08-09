@@ -47,9 +47,9 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.core.services.identity import IdentityService
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.device_repository import DeviceRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration
@@ -58,7 +58,7 @@ pytestmark = pytest.mark.integration
 class _FileSqliteDB:
     """File-backed sqlite that inherits the ``ac_bots`` ORM guard wiring.
 
-    Mirrors the helper in ``tests/community/plugins/test_bot_tenant_isolation.py``;
+    Mirrors the helper in ``tests/community/repository/bot/test_bot_tenant_isolation.py``;
     the community ORM Session registers the ``before_insert`` +
     ``do_orm_execute`` guards eagerly at import time (plugin_api/models.py),
     so every ORM read in this module is filtered by

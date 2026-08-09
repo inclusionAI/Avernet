@@ -9,7 +9,7 @@ Uses CollaboratorPermissionInterceptor for access control.
 from __future__ import annotations
 
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishServiceError
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot, make_collaborator

@@ -11,7 +11,7 @@ from injector import inject
 
 from typing import Optional
 
-from agentclaw.community.core.task_queue.repository.protocol import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.types import EnqueueResult
 from agentclaw.community.utils.env_utils import get_current_env
 

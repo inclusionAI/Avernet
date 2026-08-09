@@ -9,12 +9,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    WhitelistEntryOrm,
-    AuditLogOrm,
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
+from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm, AuditLogOrm, GovernanceNotificationOrm, GovernanceTicketOrm
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────

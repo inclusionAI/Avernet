@@ -15,9 +15,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    ActiveSkillSetReferenceError,
-)
+from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 
 
 class _Files:

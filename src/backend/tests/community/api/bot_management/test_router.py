@@ -44,7 +44,7 @@ def _bind_bot_service(
     create_bot_for_others_service=None,
     default_bot_passport_repair_service=None,
 ):
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.api.bot_service import BotServiceProtocol
     from agentclaw.community.api.default_bot_passport_repair_service import (
         DefaultBotPassportRepairServiceProtocol,

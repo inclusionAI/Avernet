@@ -25,16 +25,12 @@ from agentclaw.community.core.economy.governance.domain.notification import (
     FrozenSnapshot,
     GovernanceNotification,
 )
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-)
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm
 from tests.community.core.economy.governance.conftest import FakeDB
 
 _ENV_PATCH = (
-    "agentclaw.community.core.economy.governance.repositories.notify_log_repo.get_current_env"
+    "agentclaw.community.core.repository.implementations.governance.notify_log.get_current_env"
 )
 NOTIFY_ID = "n-save-001"
 ENV = "dev"

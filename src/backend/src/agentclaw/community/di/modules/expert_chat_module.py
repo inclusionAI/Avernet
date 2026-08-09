@@ -17,21 +17,15 @@ from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtoco
 from agentclaw.community.api.expert_chat_instance_service import (
     ExpertChatInstanceServiceProtocol,
 )
-from agentclaw.community.core.expert_chat.repository import (
-    ExpertChatRepository,
-    ExpertChatInstanceRepository,
-)
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatRepository
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
     ExpertChatInstanceService,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_service import ExpertChatService
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugins.expert_chat_repository import (
-    ExpertChatRepository as UnifiedExpertChatRepository,
-)
-from agentclaw.community.plugins.expert_chat_instance_repository import (
-    ExpertChatInstanceRepository as UnifiedExpertChatInstanceRepository,
-)
+from agentclaw.community.core.repository.implementations.chat.expert_chat import ExpertChatRepository as UnifiedExpertChatRepository
+from agentclaw.community.core.repository.implementations.chat.expert_chat_instance import ExpertChatInstanceRepository as UnifiedExpertChatInstanceRepository
 
 
 logger = get_logger()

@@ -6,8 +6,8 @@ from typing import Any, Optional
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.mcp.services.repositories import UserMCPConfigRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.log import get_logger
 

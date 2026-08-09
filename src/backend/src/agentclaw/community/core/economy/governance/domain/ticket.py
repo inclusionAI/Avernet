@@ -827,9 +827,7 @@ class GovernanceTicket:
         Returns:
             ORM 对象(已赋值,可 s.add)。
         """
-        from agentclaw.community.core.economy.governance.repositories.orm import (
-            GovernanceTicketOrm,
-        )
+        from agentclaw.community.core.economy.governance.orm import GovernanceTicketOrm
         row = row or GovernanceTicketOrm()
         # 身份
         row.ticket_id = self.ticket_id

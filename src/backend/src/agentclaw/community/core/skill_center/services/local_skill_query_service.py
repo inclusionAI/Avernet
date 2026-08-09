@@ -14,12 +14,12 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotFoundError,
     LocalSkillOwnerAmbiguousError,
 )
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
 
 class LocalSkillQueryService:

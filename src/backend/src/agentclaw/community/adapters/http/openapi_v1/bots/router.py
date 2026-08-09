@@ -56,7 +56,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     create_bot_with_authorization,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,

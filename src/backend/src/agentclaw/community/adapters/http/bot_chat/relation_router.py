@@ -5,10 +5,9 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field, field_validator
 
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.protocols.chat import BotChatDbRepositoryProtocol
 from agentclaw.community.core.bot_chat.schemas import ApiResponse
 from agentclaw.community.di import Injected
-from agentclaw.community.plugin_api.database import DatabasePlugin
 
 router = APIRouter(prefix="/api/bot-chat", tags=["bot-chat"])
 
@@ -55,10 +54,9 @@ class LogRelationResult(BaseModel):
 @router.post("/log-relations", response_model=ApiResponse[LogRelationResult])
 async def ingest_log_relations(
     request: LogRelationRequest,
-    db: DatabasePlugin = Injected(DatabasePlugin),
+    repo: BotChatDbRepositoryProtocol = Injected(BotChatDbRepositoryProtocol),
 ):
     """Persist biz task to runtime-id relations for later log lookup."""
-    repo = BotChatDbRepository(db)
     result = repo.upsert_biz_refs(request.model_dump())
     return ApiResponse(
         success=True,

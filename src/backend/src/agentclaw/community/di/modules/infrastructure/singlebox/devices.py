@@ -10,7 +10,7 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import (
     DeviceConnectionInfo,
@@ -21,10 +21,8 @@ from agentclaw.community.core.devices.protocols import (
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_policy import (
     ArcaBotCreateBaasRolloutDecision,
     ArcaBotCreateBaasRolloutPolicy,
@@ -55,9 +53,7 @@ from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
 )
 from agentclaw.community.di import config as cfg
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterTransport,
 )

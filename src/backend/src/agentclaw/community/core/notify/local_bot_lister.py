@@ -1,7 +1,7 @@
 """Local-mode NotifyBotLister — reads bot mappings from persisted bot state."""
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.notify.constants import NOTIFY_SUPPORTED_ENGINES
 from agentclaw.community.core.notify.protocol import NotifyTarget
 

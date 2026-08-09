@@ -41,15 +41,9 @@ from agentclaw.community.core.economy.governance.services.service_protocols impo
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-        GovernanceAuditRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-        NotifyLogRepository,
-    )
-    from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-        TaskRecordRepository,
-    )
+    from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+    from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+    from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
     from agentclaw.community.core.economy.governance.services.notify_render_service import (
         NotifyRenderService,
     )

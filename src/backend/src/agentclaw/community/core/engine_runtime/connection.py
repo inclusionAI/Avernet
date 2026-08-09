@@ -20,17 +20,13 @@ from urllib.parse import quote, urlsplit
 
 from injector import inject
 
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
     DeviceServiceError,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.models import OperatorContext
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.engine_runtime.errors import (

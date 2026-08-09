@@ -19,7 +19,7 @@ from agentclaw.community.adapters.http.bot_public.public_noauth_router import (
     router,
 )
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 
 
 # --- Helpers ---

@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import shutil
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.resources.dependencies.resource import get_bot_workspace_dir
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from tests.community.factories.access import make_staff_user

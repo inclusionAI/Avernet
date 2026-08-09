@@ -5,7 +5,7 @@ Tests the following endpoint from ``api/service_bot/router_build.py``:
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import (
     CaseInput,

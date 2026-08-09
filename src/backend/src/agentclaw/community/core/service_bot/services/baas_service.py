@@ -34,7 +34,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CallerCredentialError,
     CallerToken,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotLookupAmbiguousError
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -61,9 +61,9 @@ from agentclaw.community.kernel.device_dto import (
 
 if TYPE_CHECKING:
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.system_config.service import SystemConfigService
     from agentclaw.community.core.common_config import CommonWhiteListService
 

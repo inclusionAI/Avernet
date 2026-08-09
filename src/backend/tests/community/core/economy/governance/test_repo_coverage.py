@@ -20,17 +20,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-    _extract_owner_id,
-)
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm, GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository, _extract_owner_id
 
 from .conftest import FakeDB
 
@@ -65,7 +57,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
+    import agentclaw.community.core.economy.governance.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 

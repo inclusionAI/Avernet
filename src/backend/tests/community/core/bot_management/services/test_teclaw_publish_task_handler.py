@@ -19,8 +19,8 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.device_repository import DeviceRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
 
 class _FileSqliteDB:

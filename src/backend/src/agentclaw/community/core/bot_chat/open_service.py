@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import InvalidBotLogQueryError
-from agentclaw.community.core.bot_chat.repository import OpenBotChatRepository
+from agentclaw.community.core.repository.implementations.chat.open import OpenBotChatRepository
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
     SessionListResponse,

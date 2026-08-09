@@ -277,6 +277,7 @@ consumes:
   - "DatabasePlugin (via the repository impl in plugins/)"
   - "TaskQueueWorkerConfig"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
   - agentclaw.community.core.base
   - agentclaw.community.di.config
   - agentclaw.community.kernel.lifecycle

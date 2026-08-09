@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
 
@@ -21,9 +21,10 @@ if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.core.devices.services.device_sync_dispatcher import DeviceSyncDispatcher
+from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
 
 logger = get_logger()
 
@@ -37,23 +38,6 @@ class PropagationResult:
     success_bot_count: int
     failed_bot_ids: list[str] = field(default_factory=list)
     propagation_log_id: str | None = None
-
-
-@runtime_checkable
-class SkillPropagationLogRepository(Protocol):
-    """ac_skill_propagation_log 存储接口。"""
-
-    def create(self, data: dict) -> dict:
-        """写入一条新 log 记录，返回含 propagation_id 的 dict。"""
-        ...
-
-    def update(self, propagation_id: str, data: dict) -> None:
-        """按 propagation_id 更新 log 记录。"""
-        ...
-
-    def find_recent(self, skill_uuid: str, env: str, within_seconds: int) -> dict | None:
-        """查找 within_seconds 内同 (skill_uuid, env) 的最新 done/pending 记录。"""
-        ...
 
 
 class SkillPropagationService:

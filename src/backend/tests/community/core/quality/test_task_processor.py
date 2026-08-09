@@ -9,7 +9,7 @@ from datetime import datetime
 
 import pytest
 
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.core.quality.services import task_processor as task_processor_module
 from agentclaw.community.core.quality.services.task_processor import (
     InvalidStatusTransitionError,

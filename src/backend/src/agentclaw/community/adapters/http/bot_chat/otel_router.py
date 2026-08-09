@@ -9,11 +9,10 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException
 from pydantic import BaseModel
 
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.protocols.chat import BotChatDbRepositoryProtocol
 from agentclaw.community.core.bot_chat.schemas import ApiResponse
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.database import DatabasePlugin
 
 logger = get_logger()
 # SOFAPy derives backend-agent-logs.log/error/fatal files from this logger name.
@@ -350,7 +349,7 @@ def _iter_resource_spans(payload: dict[str, Any]):
 @router.post("/traces", response_model=ApiResponse[OtlpIngestResult])
 async def ingest_otlp_traces(
     payload: dict[str, Any] = Body(...),
-    db: DatabasePlugin = Injected(DatabasePlugin),
+    repo: BotChatDbRepositoryProtocol = Injected(BotChatDbRepositoryProtocol),
 ):
     """Receive OTLP JSON traces and persist them into OCB log tables."""
     spans = list(_iter_resource_spans(payload))
@@ -358,7 +357,6 @@ async def ingest_otlp_traces(
         _write_otlp_request_log(payload=payload, status="rejected", error="no_spans")
         raise HTTPException(status_code=400, detail="No OTLP spans found")
 
-    repo = BotChatDbRepository(db)
     trace_count = 0
     observation_count = 0
     roots: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}

@@ -18,16 +18,9 @@ from datetime import datetime
 from agentclaw.community.api.governance_service import (
     GovernanceFeedbackServiceProtocol,  # noqa: F401  (card-callback via feedback_svc.resolve)
     )
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm, GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 
 

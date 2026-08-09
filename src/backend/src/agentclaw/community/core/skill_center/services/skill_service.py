@@ -30,10 +30,8 @@ from agentclaw.community.core.skill_center.errors import (
     SkillDeleteConsistencyError,
     SkillReferencedBySkillSetError,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillCategoryRepository,
-    SkillRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_parser import SkillInfo, SkillParser, SkillTreeNode
 from agentclaw.community.log import get_logger

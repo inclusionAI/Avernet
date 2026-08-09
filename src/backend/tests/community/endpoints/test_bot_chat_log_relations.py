@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from agentclaw.community.core.bot_chat.models import AcOtelLogBizRef
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
 

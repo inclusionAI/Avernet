@@ -9,10 +9,8 @@ from sqlalchemy.orm import sessionmaker
 
 from .conftest import FakeDB
 
-from agentclaw.community.core.economy.governance.repositories.orm import WhitelistEntryOrm
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 
 
 # --- Fakes ---

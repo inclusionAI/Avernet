@@ -16,7 +16,7 @@ from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.bot_management.errors import CreateBotForOthersError
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.mcp.services._defaults import get_default_cli_items
 from agentclaw.community.core.mcp.services.passport_scope import (
     filter_passport_mcp_codes,

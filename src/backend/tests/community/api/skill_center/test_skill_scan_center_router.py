@@ -6,9 +6,7 @@ from fastapi_injector import attach_injector
 from injector import Injector, Module
 
 from agentclaw.community.adapters.http.skill_center.skill_scan import router as skill_scan_router
-from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-    SkillCenterSyncService,
-)
+from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
 
 
 def _build_client(mock_svc):

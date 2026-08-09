@@ -15,7 +15,7 @@ from injector import Injector, Module
 
 from agentclaw.community.core.auth import AuthenticatedIdentity
 from agentclaw.community.adapters.http.auth.dependencies import require_operator
-from agentclaw.community.core.devices.repository.protocol import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
 
 # Fake operator user for bypassing require_operator in tests

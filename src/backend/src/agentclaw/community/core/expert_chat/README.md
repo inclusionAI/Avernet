@@ -17,6 +17,10 @@ consumes:
   - "SkillSync guard"
   - "CollaboratorService (chat 权限校验)"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.caller_identity

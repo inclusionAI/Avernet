@@ -24,7 +24,7 @@ from agentclaw.community.core.harness.models import (
 )
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
-from agentclaw.community.core.harness.repository_protocol import HarnessPatchRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
 if TYPE_CHECKING:
     from agentclaw.community.core.services.identity import IdentityService

@@ -17,7 +17,7 @@ from typing import Optional
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient

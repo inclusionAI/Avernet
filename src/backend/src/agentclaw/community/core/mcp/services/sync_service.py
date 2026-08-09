@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
@@ -24,7 +24,8 @@ from agentclaw.community.core.mcp.services.passport_scope import (
     passport_mcp_codes_from_entries,
     passport_mcp_items_from_entries,
 )
-from agentclaw.community.core.mcp.services.repositories import BotMCPProvider, UserMCPConfigRepository
+from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
+from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
 from agentclaw.community.plugin_api.device_sync import DeviceSyncPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.passport import CliItem, PassportPlugin

@@ -27,9 +27,7 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishOperationState,
     PublishStatus,
 )
-from agentclaw.community.plugins.publish_operation_repository import (
-    OrmPublishOperationRepository as PublishOperationRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository as PublishOperationRepository
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
 )

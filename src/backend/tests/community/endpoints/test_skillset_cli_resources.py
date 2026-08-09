@@ -9,8 +9,8 @@ observed rather than asserted against a stand-in of our own.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user

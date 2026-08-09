@@ -28,9 +28,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -49,9 +47,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
 from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
     select_stage_bind_id,

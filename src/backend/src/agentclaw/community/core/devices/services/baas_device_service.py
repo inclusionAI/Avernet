@@ -16,10 +16,8 @@ from agentclaw.community.core.devices.models import (
     NasMappingInfo,
     OperatorContext,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_lifecycle_executor import (
     BaasDeviceLifecycleError,
     BaasDeviceLifecycleExecutor,

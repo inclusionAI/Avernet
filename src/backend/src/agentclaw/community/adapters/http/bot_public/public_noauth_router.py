@@ -14,7 +14,7 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 

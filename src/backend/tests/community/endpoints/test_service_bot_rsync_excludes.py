@@ -4,7 +4,7 @@ Tests the core logic used by GET /api/service-bot/rsync-excludes endpoint.
 """
 import pytest
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.engines import parse_build_rsync_excludes_from_ext
 from agentclaw.community.core.workspace.engines.openclaw import _OPENCLAW_RSYNC_EXCLUDES
 from agentclaw.community.core.workspace.engines.claude_code import _CLAUDE_CODE_RSYNC_EXCLUDES

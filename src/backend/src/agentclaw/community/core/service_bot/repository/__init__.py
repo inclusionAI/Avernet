@@ -7,9 +7,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     BotPublishModel,
     PublishStatus,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 
 __all__ = [
     "BotPublishRecord",

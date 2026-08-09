@@ -187,9 +187,7 @@ class TestIdempotentWithinWindow:
 class TestFindAffectedBotsReturnsEngineType:
     def test_find_affected_bots_returns_engine_type(self):
         """_find_affected_bots 应返回包含 engine_type 的 dict。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         mock_repo = MagicMock()
         mock_repo.find_affected_bots_by_skill_uuid.return_value = [
@@ -211,9 +209,7 @@ class TestFindAffectedBotsReturnsEngineType:
 
     def test_find_affected_bots_engine_type_fallback_to_openclaw(self):
         """active_engine 为 None 时应 fallback 到 'openclaw'。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         mock_repo = MagicMock()
         mock_repo.find_affected_bots_by_skill_uuid.return_value = [
@@ -233,9 +229,7 @@ class TestFindAffectedBotsReturnsEngineType:
 
     def test_find_affected_bots_inactive_set_is_skipped(self):
         """is_active=False 的 SkillSet 不应出现在结果中。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         mock_repo = MagicMock()
         mock_repo.find_affected_bots_by_skill_uuid.return_value = []
@@ -254,9 +248,7 @@ class TestFindAffectedBotsReturnsEngineType:
 class TestNotifyHotReload:
     def test_notify_hot_reload_called_after_refresh(self, monkeypatch):
         """软链刷新成功后应调用 _notify_hot_reload。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
@@ -281,9 +273,7 @@ class TestNotifyHotReload:
 
     def test_notify_not_called_on_refresh_failure(self, monkeypatch):
         """_refresh_bot 失败时不应触发热重载通知。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
 
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
@@ -308,9 +298,7 @@ class TestNotifyHotReload:
 class TestSyncServiceIntegration:
     def test_propagate_on_upgrade_calls_sync_service(self):
         """upgrade 时应触发 sync_service.force_sync。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
         mock_log.create.return_value = {"propagation_id": "p1", "id": 1}
@@ -327,9 +315,7 @@ class TestSyncServiceIntegration:
 
     def test_propagate_on_removal_does_not_force_sync(self):
         """删除场景不立即拉 NAS（让 GC 处理）。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
         mock_log.create.return_value = {"propagation_id": "p2", "id": 2}
@@ -343,9 +329,7 @@ class TestSyncServiceIntegration:
 
     def test_sync_service_none_is_safe(self):
         """sync_service 为 None 时不应抛异常。"""
-        from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-            SkillPropagationService,
-        )
+        from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
         mock_log = MagicMock()
         mock_log.find_recent.return_value = None
         mock_log.create.return_value = {"propagation_id": "p3", "id": 3}
