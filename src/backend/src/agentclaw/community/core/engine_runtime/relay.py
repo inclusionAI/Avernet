@@ -27,7 +27,9 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -53,6 +55,7 @@ from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResul
 from agentclaw.community.core.engine_runtime.stage import (
     SERVICE_BOT_TYPE,
     STAGE_DRAFT,
+    require_stage_addressable,
     resolve_stage_bind_id,
 )
 from agentclaw.community.core.repository.protocols.publishing import (
@@ -90,14 +93,14 @@ class EngineRuntimeRelay:
         resolver: DeviceContextResolver,
         transport: DeviceAdapterTransport,
         publish_repo: BotPublishRepositoryProtocol,
-        collaborator_repo: CollaboratorRepositoryProtocol,
+        collaborators: CollaboratorServiceProtocol,
         binding_repo: DeviceBindingRepository,
     ) -> None:
         self._bot_service = bot_service
         self._resolver = resolver
         self._transport = transport
         self._publish_repo = publish_repo
-        self._collaborator_repo = collaborator_repo
+        self._collaborators = collaborators
         self._binding_repo = binding_repo
 
     # ── resolution ────────────────────────────────────────────────────────
@@ -130,7 +133,7 @@ class EngineRuntimeRelay:
         resolved_id = str(bot.get("bot_id") or bot_id)
         resolved_owner = str(bot.get("owner_id") or owner_id)
         require_bot_operator(
-            self._collaborator_repo,
+            self._collaborators,
             bot_pk=int(bot.get("id") or 0),
             bot_id=resolved_id,
             caller_id=caller_id,
@@ -195,6 +198,11 @@ resolve_stage_bind_id`. The draft lookup is the same owner-scoped
         timeout — so :meth:`call` runs it in a worker thread.
         """
         try:
+            # Re-checked here, not only at the public gate: a caller reaching
+            # the relay directly (facts=None path) must get the same clean
+            # refusal for an unknown stage or a published stage on a personal
+            # bot, not an unmapped error from the record scan.
+            require_stage_addressable(facts.bot_type, stage)
             if facts.bot_type == _SERVICE_BOT_TYPE and stage != STAGE_DRAFT:
                 return self._resolve_published_device(facts, owner_id, stage)
             return self._resolver.resolve_for_bot(bot_id, owner_id)

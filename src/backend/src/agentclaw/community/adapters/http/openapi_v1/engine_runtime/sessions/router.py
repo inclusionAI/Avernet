@@ -299,7 +299,9 @@ async def list_sessions(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[SessionPage]:
     """List the bot's sessions."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     params: dict[str, Any] = _window(page)
     if agent_id:
         params["agent_id"] = agent_id
@@ -329,7 +331,9 @@ async def create_session(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Session]:
     """Create a session."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST", path="/api/sessions",
@@ -361,7 +365,9 @@ async def get_session(
     """
     # A colon is legal in a path segment (RFC 3986), so ids route as-is. An id
     # containing "/" would not be addressable, but no engine id format has one.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
@@ -385,7 +391,9 @@ async def update_session(
     """Update a session. Omitted fields are left unchanged."""
     # Publicly a PATCH on the resource; the engine models the same operation as
     # a POST to an /update sub-path.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
@@ -412,7 +420,9 @@ async def delete_session(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Deleted]:
     """Delete a session."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="DELETE",
@@ -440,7 +450,9 @@ async def list_session_messages(
     depth is rejected with 422 rather than returned empty, so an end of history
     is never confused with the limit of what this endpoint serves.
     """
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     _require_within_depth(page)
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
@@ -468,7 +480,9 @@ async def clear_session_messages(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Deleted]:
     """Clear a session's message history, keeping the session."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="sessions"
+    )
     await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="DELETE",

@@ -94,7 +94,9 @@ async def get_approval_mode(
     """Read the approval mode in force for a session."""
     # Publicly a GET with a query parameter; the engine models the same read as
     # a POST with a body.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST",
@@ -117,7 +119,9 @@ async def set_approval_mode(
     """Set the approval mode for a session."""
     # The enum's value is forwarded verbatim: all three are already in the
     # engine's accept-set, so no translation is needed and none is applied.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="POST",
@@ -159,7 +163,9 @@ async def list_approval_modes(
     #
     # The list is served from the public enum rather than relayed, because the
     # engine's descriptions are Chinese and this surface promises English.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="approvals"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",

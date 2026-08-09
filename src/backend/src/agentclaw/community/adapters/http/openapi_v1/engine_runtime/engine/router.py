@@ -61,7 +61,9 @@ async def get_engine_status(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="engine"
+    )
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
@@ -96,7 +98,9 @@ async def get_engine_capabilities(
     The discovery endpoint for these groups: capabilities differ per bot, so the
     same request can succeed for one of your bots and be refused for another.
     """
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="engine"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",
@@ -127,7 +131,9 @@ async def list_available_engines(
 ) -> Envelope[list[EngineInfo]]:
     """Engines available on this bot, with the active one marked."""
     # Publicly a noun; the engine models the same read under a verb path.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="engine"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/engine/list",

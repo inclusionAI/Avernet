@@ -64,6 +64,26 @@ STAGE_ONLINE = PublishStage.ONLINE.value
 RUNTIME_STAGES = frozenset({STAGE_DRAFT, STAGE_VERIFY, STAGE_ONLINE})
 
 
+def require_stage_addressable(bot_type: str, stage: str) -> None:
+    """Refuse a stage this bot cannot have, before any device work.
+
+    Two refusals, one answer (:class:`EngineStageNotLiveError`): a stage name
+    outside :data:`RUNTIME_STAGES` — unreachable from HTTP, where the
+    adapter's enum answers 422 first, but a programmatic caller's typo must
+    not sail through to an unmapped 500 at device resolution — and a
+    published stage named on anything but a ``service`` bot, which has no
+    such runtime to be live. Run by the gate (before device work, for the
+    public surface) and by the relay's device resolution (for callers that
+    bypass the gate); one implementation so the two cannot drift.
+    """
+    if stage not in RUNTIME_STAGES:
+        raise EngineStageNotLiveError(f"unknown stage {stage!r}")
+    if stage != STAGE_DRAFT and bot_type != SERVICE_BOT_TYPE:
+        raise EngineStageNotLiveError(
+            f"a {bot_type} bot has no {stage} runtime; only its workspace"
+        )
+
+
 def _record_binding(record: Any, *, bot_id: str, stage: str) -> int:
     """``record.ext.binding[stage]`` as an int, ``0`` when absent.
 
@@ -152,7 +172,13 @@ def resolve_stage_bind_id(
             f"no live online runtime for bot={bot_id} env={env}"
         )
 
-    # stage == STAGE_VERIFY: a validating release wins outright.
+    # stage == STAGE_VERIFY: a validating release decides outright. Its
+    # binding may not be written yet (mid-publish) — that is "not live yet",
+    # NOT a licence to answer from the outgoing release: cron consults the
+    # retained record only when *no* validating record exists
+    # (`_get_retained_verify_publish_record`), and falling through here would
+    # silently serve the previous runtime and then flip once the new binding
+    # lands.
     record = next(
         (r for r in records if r.status == PublishStatus.VALIDATING.value), None
     )
@@ -160,6 +186,10 @@ def resolve_stage_bind_id(
         bind_id = _record_binding(record, bot_id=bot_id, stage=stage)
         if bind_id:
             return bind_id
+        raise EngineStageNotLiveError(
+            f"verify runtime not yet bound for bot={bot_id} "
+            f"publish_id={record.id}"
+        )
 
     # Nothing validating — the promoted record's retained verify runtime, but
     # only while its binding is ACTIVE. A released retained runtime is a dead
@@ -202,5 +232,6 @@ __all__ = [
     "STAGE_DRAFT",
     "STAGE_ONLINE",
     "STAGE_VERIFY",
+    "require_stage_addressable",
     "resolve_stage_bind_id",
 ]

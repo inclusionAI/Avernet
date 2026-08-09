@@ -49,33 +49,27 @@ with no live runtime.
 
 from __future__ import annotations
 
-from agentclaw.community.core.bot_collaborator.models import (
-    CollaboratorRole,
-    PermissionLevel,
-)
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineBotTypeNotSupportedError,
-    EngineStageNotLiveError,
 )
 from agentclaw.community.core.engine_runtime.stage import (
-    RUNTIME_STAGES,
     SERVICE_BOT_TYPE,
-    STAGE_DRAFT,
+    require_stage_addressable,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
 #: The bot types an operator surface may serve. Necessary but **not**
 #: sufficient — the caller must also pass :func:`require_bot_operator`.
-SUPPORTED_BOT_TYPES = frozenset({"personal", "service"})
+SUPPORTED_BOT_TYPES = frozenset({"personal", SERVICE_BOT_TYPE})
 
 #: The least collaborator level that holds an operator channel. One bar for
 #: every operation on the surface — reads, writes and the socket alike —
@@ -84,16 +78,9 @@ SUPPORTED_BOT_TYPES = frozenset({"personal", "service"})
 #: this is the seam to add it at.
 OPERATOR_LEVEL = PermissionLevel.MEMBER
 
-#: ``ac_bot_collaborator.role`` values → comparable levels. The owner never
-#: has a row (adding one raises), so the mapping covers collaborators only.
-_ROLE_LEVELS = {
-    CollaboratorRole.ADMIN.value: PermissionLevel.ADMIN,
-    CollaboratorRole.MEMBER.value: PermissionLevel.MEMBER,
-}
-
 
 def resolve_operator_level(
-    collaborator_repo: CollaboratorRepositoryProtocol,
+    collaborators: CollaboratorServiceProtocol,
     *,
     bot_pk: int,
     caller_id: str,
@@ -101,20 +88,23 @@ def resolve_operator_level(
 ) -> PermissionLevel:
     """The caller's level on this bot: OWNER, their collaborator level, or NONE.
 
-    ``owner_id`` must be the *resolved* owner — the record's, not the
-    request's — and ``bot_pk`` the primary key ownership was proven against;
-    ``bot_id`` alone is not unique across owners. A lookup failure returns
-    ``NONE`` (fail closed) and logs: this feeds a refusal, so the direction of
-    the guess decides what a database blip does.
+    Delegates to ``CollaboratorService.get_permission_level`` — the platform's
+    one role policy (owner short-circuit, role→level mapping) — rather than
+    keeping a second copy of it here; this wrapper adds only the fail-closed
+    direction. ``owner_id`` must be the *resolved* owner — the record's, not
+    the request's — and ``bot_pk`` the primary key ownership was proven
+    against; ``bot_id`` alone is not unique across owners. A lookup failure
+    returns ``NONE`` (fail closed) and logs: this feeds a refusal, so the
+    direction of the guess decides what a database blip does.
 
     Synchronous — one indexed read, and only when the caller is not the
     owner. Callers on an event loop run it in a worker thread with the rest
     of their resolution.
     """
-    if caller_id == owner_id:
-        return PermissionLevel.OWNER
     try:
-        role = collaborator_repo.get_user_role(bot_pk, caller_id, get_current_env())
+        return PermissionLevel(
+            collaborators.get_permission_level(bot_pk, caller_id, owner_id)
+        )
     except Exception:
         logger.exception(
             "[engine_runtime] collaborator lookup failed for bot_pk=%s; "
@@ -122,11 +112,10 @@ def resolve_operator_level(
             bot_pk,
         )
         return PermissionLevel.NONE
-    return _ROLE_LEVELS.get(str(role or ""), PermissionLevel.NONE)
 
 
 def require_bot_operator(
-    collaborator_repo: CollaboratorRepositoryProtocol,
+    collaborators: CollaboratorServiceProtocol,
     *,
     bot_pk: int,
     bot_id: str,
@@ -141,7 +130,7 @@ def require_bot_operator(
     cannot carry them.
     """
     level = resolve_operator_level(
-        collaborator_repo, bot_pk=bot_pk, caller_id=caller_id, owner_id=owner_id
+        collaborators, bot_pk=bot_pk, caller_id=caller_id, owner_id=owner_id
     )
     if level < OPERATOR_LEVEL:
         # ``%r`` on the caller id deliberately: this branch runs only for a
@@ -166,27 +155,17 @@ def require_operable_bot(bot_type: str, *, stage: str, surface: str) -> None:
     surface; the adapter maps the type refusal to a 501 — what the surface
     cannot serve, rather than something the caller may retry or fix.
 
-    The stage half: a ``personal`` bot has only its own workspace runtime, so
-    naming a published stage for one raises
-    :class:`EngineStageNotLiveError` — the same answer a dead stage gives,
-    because that is what it is. Checked here rather than at device resolution
-    so the refusal lands *before* any device work, and so the relay's
-    internal callers (whose default stage is the published one and whose
-    personal bots ignore it) keep their meaning.
+    The stage half is :func:`~agentclaw.community.core.engine_runtime.stage.\
+require_stage_addressable` — an unknown stage, or a published stage named on
+    a ``personal`` bot, refuses as a stage with no live runtime. It runs here
+    so the refusal lands *before* any device work; the relay's device
+    resolution runs the same check for callers that bypass this gate.
     """
     if bot_type not in SUPPORTED_BOT_TYPES:
         raise EngineBotTypeNotSupportedError(
             f"{surface} are not served for bot_type={bot_type!r}"
         )
-    if stage not in RUNTIME_STAGES:
-        # Unreachable from HTTP (the adapter's enum answers 422 first), but a
-        # programmatic caller's typo must not sail through to an unmapped 500
-        # at device resolution — for any bot type.
-        raise EngineStageNotLiveError(f"unknown stage {stage!r}")
-    if stage != STAGE_DRAFT and bot_type != SERVICE_BOT_TYPE:
-        raise EngineStageNotLiveError(
-            f"a {bot_type} bot has no {stage} runtime; only its workspace"
-        )
+    require_stage_addressable(bot_type, stage)
 
 
 __all__ = [

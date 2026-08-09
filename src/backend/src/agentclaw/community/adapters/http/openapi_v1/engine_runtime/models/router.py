@@ -53,7 +53,9 @@ async def list_models(
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="models"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET", path="/api/models",
@@ -93,7 +95,9 @@ async def get_model(
     # A model id never contains a dot segment.
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
+    facts = await resolve_operable_bot(
+        relay, bot_id, owner_id, stage=STAGE_DRAFT, surface="models"
+    )
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=STAGE_DRAFT,
         method="GET",

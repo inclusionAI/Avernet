@@ -20,7 +20,9 @@ from urllib.parse import quote, urlsplit
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
@@ -148,13 +150,13 @@ class EngineConnectionService:
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         gateway: GatewayEndpoint,
-        collaborator_repo: CollaboratorRepositoryProtocol,
+        collaborators: CollaboratorServiceProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
         self._gateway = gateway
-        self._collaborator_repo = collaborator_repo
+        self._collaborators = collaborators
 
     def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
         """Return the bot's usable sockets.
@@ -176,7 +178,7 @@ class EngineConnectionService:
         # about what may be *composed*, not about how it is served: any future
         # caller of ``build`` is covered without repeating the check.
         require_bot_operator(
-            self._collaborator_repo,
+            self._collaborators,
             bot_pk=int(bot.get("id") or 0),
             bot_id=str(bot.get("bot_id") or bot_id),
             caller_id=owner_id,

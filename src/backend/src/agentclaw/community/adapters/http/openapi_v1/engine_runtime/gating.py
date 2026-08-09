@@ -13,7 +13,6 @@ from __future__ import annotations
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.engine_runtime.gate import require_operable_bot
 from agentclaw.community.core.engine_runtime.models import BotFacts
-from agentclaw.community.core.engine_runtime.stage import STAGE_DRAFT
 
 
 async def resolve_operable_bot(
@@ -21,7 +20,7 @@ async def resolve_operable_bot(
     bot_id: str,
     owner_id: str,
     *,
-    stage: str = STAGE_DRAFT,
+    stage: str,
     surface: str,
 ) -> BotFacts:
     """Resolve the caller's bot and reject anything more than one caller reaches.
