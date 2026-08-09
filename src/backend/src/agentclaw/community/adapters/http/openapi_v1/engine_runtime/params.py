@@ -54,8 +54,13 @@ async def resolve_owner_id(
         str | None,
         Query(
             alias=OWNER_ID_QUERY,
+            # ``min_length`` only, matching ``user_id``'s deliberate choice in
+            # ``principal.py``: owner ids come from the same unconstrained
+            # gateway subject-id space, and a cap here would 422 a collaborator
+            # addressing a legitimately long owner id before adjudication ever
+            # ran — while the owner themselves (parameter omitted) sailed
+            # through.
             min_length=1,
-            max_length=256,
             description=OWNER_ID_DESCRIPTION,
         ),
     ] = None,

@@ -109,7 +109,13 @@
         rule before any binding or device work; resolves `verify`/`online`
         bindings through the Task 2 helper and `draft` through
         `get_active_by_bot_and_owner` as today.
-  - [x] `OperatorContext.staff_id` is the caller. The pin that a public
+  - [x] Review reversal: `OperatorContext.staff_id` is the **resolved
+        owner**, not the caller — some device-service implementations apply
+        collaborator-blind permission models to this id, and the BaaS path
+        keys instance affinity on it (per-caller values would pin two
+        operators of one (bot, stage) to different instances while the HTTP
+        relay resolves with the owner). The actor stays on the gate's log
+        line and in the sessions the caller creates. The pin that a public
         bot's non-collaborator is refused *before* `DeviceService` is
         consulted lands with Task 5's flip of the same connection test.
   - [x] The router passes the new parameters; the connection service's

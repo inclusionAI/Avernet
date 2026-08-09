@@ -182,6 +182,9 @@ class EngineConnectionService:
         widen this surface.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
+        resolved_id = str(bot.get("bot_id") or bot_id)
+        resolved_owner = str(bot.get("owner_id") or owner_id)
+        bot_pk = int(bot.get("id") or 0)
         # The socket this endpoint publishes is **not** chat-scoped, however it
         # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
         # ``exec.approvals`` methods and grants ``operator.admin``, so the
@@ -192,27 +195,37 @@ class EngineConnectionService:
         # caller of ``build`` is covered without repeating the check.
         require_bot_operator(
             self._collaborators,
-            bot_pk=int(bot.get("id") or 0),
-            bot_id=str(bot.get("bot_id") or bot_id),
+            bot_pk=bot_pk,
+            bot_id=resolved_id,
             caller_id=caller_id,
-            owner_id=str(bot.get("owner_id") or owner_id),
+            owner_id=resolved_owner,
         )
         require_operable_bot(
             str(bot.get("bot_type") or ""), stage=stage, surface="connections"
         )
         engine = str(bot.get("active_engine") or "")
 
-        binding_id = self._stage_binding_id(bot, bot_id, owner_id, stage)
+        binding_id = self._stage_binding_id(
+            bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
+        )
 
-        # The true actor. ``DeviceService.get_device_connection`` runs its own
-        # (wider) permission model against this id; ours ran first and is
-        # stricter, so composing as the caller cannot widen the surface — and
-        # the provider's records show who actually held the channel.
+        # Composed as the **resolved owner**, deliberately, even when the
+        # admitted caller is a collaborator. The adjudication above is this
+        # surface's authorization; downstream, the operator id is routing and
+        # bookkeeping, and two provider behaviors make the owner the only
+        # correct value there: some device-service implementations apply
+        # permission models of their own that know nothing of collaborators
+        # (they would refuse a caller our gate admitted, as a misleading
+        # "not ready"), and the BaaS path feeds this id into instance
+        # affinity — keyed per caller, two operators of the same (bot, stage)
+        # could be pinned to different instances while the HTTP relay path
+        # resolves with the owner. Who actually held the channel is on the
+        # gate's log line and stamped into the sessions the caller creates.
         operator = OperatorContext(
-            staff_id=caller_id,
-            staff=caller_id,
-            nick_name=caller_id,
-            operator_name=caller_id,
+            staff_id=resolved_owner,
+            staff=resolved_owner,
+            nick_name=resolved_owner,
+            operator_name=resolved_owner,
         )
         chat_path = self._chat_path(engine)
         try:
@@ -249,7 +262,7 @@ class EngineConnectionService:
         )
 
     def _stage_binding_id(
-        self, bot: dict, bot_id: str, owner_id: str, stage: str
+        self, *, bot_pk: int, bot_id: str, owner_id: str, stage: str
     ) -> int:
         """The binding id of the runtime ``stage`` names — and *only* the id.
 
@@ -257,16 +270,18 @@ class EngineConnectionService:
         :meth:`_active_binding_id`). A published stage resolves through the
         same ``resolve_stage_bind_id`` rule the relay uses — one rule, so a
         socket and an HTTP forward for the same (bot, stage) cannot address
-        different devices. The stage's validity for this bot was already
-        checked by the gate above.
+        different devices. ``bot_pk`` and ``bot_id`` are the values the
+        operator adjudication was proven against, passed rather than
+        re-derived so the two cannot drift. The stage's validity for this bot
+        was already checked by the gate above.
         """
         if stage == STAGE_DRAFT:
             return self._active_binding_id(bot_id, owner_id)
         return resolve_stage_bind_id(
             self._publish_repo,
             self._binding_repository,
-            bot_pk=int(bot.get("id") or 0),
-            bot_id=str(bot.get("bot_id") or bot_id),
+            bot_pk=bot_pk,
+            bot_id=bot_id,
             stage=stage,
             env=get_current_env(),
         )
