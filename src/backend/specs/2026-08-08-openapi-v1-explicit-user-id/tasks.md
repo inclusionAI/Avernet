@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Add the seam and its refusal
+## Task 1: Add the seam and its refusal  [x]
 
 - **Goal:** One place that answers "which end user is this request for, and may
   this caller act for them?", plus the 403 it raises.
@@ -12,16 +12,16 @@
   `…/openapi_v1/responses.py`,
   `src/backend/src/agentclaw/community/adapters/http/app.py`
 - **Done when:**
-  - [ ] `require_user_id` reads a required `user_id` query parameter, returns it
+  - [x] `require_user_id` reads a required `user_id` query parameter, returns it
         when it equals the caller's id, raises `MissingPrincipalError` when there
         is no verified caller, and raises `UserIdMismatchError` otherwise.
-  - [ ] `UserIdDep` is exported for routers to declare.
-  - [ ] Both ids are on a `logger.warning` line at the point of refusal; neither
+  - [x] `UserIdDep` is exported for routers to declare.
+  - [x] Both ids are on a `logger.warning` line at the point of refusal; neither
         appears in any response.
-  - [ ] `UserIdMismatchError` maps to `(403, "Forbidden")` in `ENVELOPE_ERRORS`,
+  - [x] `UserIdMismatchError` maps to `(403, "Forbidden")` in `ENVELOPE_ERRORS`,
         and `app.py` registers a concrete-type handler for it beside
         `_principal_error_handler` — with the reason in the docstring.
-  - [ ] `principal.py`'s module docstring states the placement rule, why the
+  - [x] `principal.py`'s module docstring states the placement rule, why the
         query string and not a body or a path, and that this function is what
         delegation changes.
 - **Depends on:** —
