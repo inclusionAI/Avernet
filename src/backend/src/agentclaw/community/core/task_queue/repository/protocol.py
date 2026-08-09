@@ -13,19 +13,28 @@ is evaluated DB-side too. No Python-generated ``now`` ever crosses this
 boundary — so clock skew between worker pods cannot affect claim, lease, or
 deadline decisions.
 
-**Claiming** is where idempotency is enforced: a row-level compare-and-swap
-UPDATE whose predicate only matches an unclaimed (or lease-expired) row, so
-across N racing workers each task is won by at most one. Past-deadline
-candidates are marked ``TIMED_OUT`` instead of claimed. ``complete`` /
-``reschedule`` / ``fail`` are CAS-guarded on ``claimed_by == worker_id AND
-status == RUNNING`` so a worker that lost its lease cannot clobber a task
-another worker took over.
+Idempotency is enforced at **two** points, answering two different questions.
+
+**Claim time — "who runs it?"** A row-level compare-and-swap UPDATE whose
+predicate only matches an unclaimed (or lease-expired) row, so across N racing
+workers each task is won by at most one. Past-deadline candidates are marked
+``TIMED_OUT`` instead of claimed. ``complete`` / ``reschedule`` / ``fail`` are
+CAS-guarded on ``claimed_by == worker_id AND status == RUNNING`` so a worker
+that lost its lease cannot clobber a task another worker took over.
+
+**Enqueue time — "should this row exist at all?"** Opt-in, via
+``idempotency_key``. See :meth:`TaskQueueRepositoryProtocol.enqueue`. A caller
+that supplies no key gets exactly the old behavior: every enqueue is a new row.
 """
 from __future__ import annotations
 
 from typing import List, Optional, Protocol, runtime_checkable
 
-from agentclaw.community.core.task_queue.types import TaskRecord, TaskStatus
+from agentclaw.community.core.task_queue.types import (
+    EnqueueResult,
+    TaskRecord,
+    TaskStatus,
+)
 
 
 @runtime_checkable
@@ -41,13 +50,81 @@ class TaskQueueRepositoryProtocol(Protocol):
         delay_seconds: int,
         deadline_seconds: int,
         env: str,
-    ) -> TaskRecord:
-        """Persist a new ``PENDING`` task and return its stored record.
+        idempotency_key: Optional[str] = None,
+    ) -> EnqueueResult:
+        """Persist a ``PENDING`` task and return ``(record, created)``.
 
         ``run_at`` is set to ``now() + delay_seconds`` and ``deadline_at`` to
         ``now() + deadline_seconds``, both computed DB-side. ``payload`` is
-        JSON-serialized on write. Duplicate enqueues create distinct rows —
-        idempotency is a claim-time guarantee, not an insert-time one.
+        JSON-serialized on write.
+
+        **Without a key** (the default) every enqueue creates a distinct row —
+        insert-time dedup is opt-in, so un-keyed callers are unaffected by it.
+
+        **With a key** dedup is *active-only*: at most one **live** task per
+        ``idempotency_key`` within an ``(env, task_type)``. If a live task
+        already holds the key, no row is inserted and that task is returned with
+        ``created=False``; otherwise a new row is created with ``created=True``.
+        Never raises for a plain duplicate.
+
+        Nor for the race around one: if the holder goes terminal between the
+        insert losing and the holder being looked up, the key is free again and
+        the insert is simply retried. Losing that race repeatedly is bad luck
+        rather than an error, and the retry budget is sized so it is not
+        mistaken for one. Two cases *do* raise ``RuntimeError`` — both mean the
+        enqueue could not be honoured, so neither can be reported as a
+        duplicate: a key held by a **terminal** row that never released it
+        (an inconsistent row; the message names it), and the key being taken and
+        released by other callers on every attempt (sustained churn).
+
+        A terminal transition (``SUCCEEDED`` / ``FAILED`` / ``TIMED_OUT``)
+        **releases** the key, so the same key may legitimately be re-enqueued
+        afterwards — which is what makes retry, re-poll, and repeated restart
+        work. Scope your key to a generation only when you want the *opposite*.
+
+        Key convention::
+
+            <entity>:<entity_id>[:<qualifier>][:<generation>]
+            publish:1234:online_release
+            skills_pool:prod:e-9:bot-7
+
+        A key must be non-empty and at most **190 characters** — the stored
+        column width. Both are enforced in Python and raise ``ValueError``,
+        because the engines disagree about overflow (SQLite ignores the bound,
+        strict MySQL errors, non-strict MySQL *silently truncates* and would
+        collide two distinct keys). Embed ids with care: some id columns are
+        far wider than 190, so hash the variable part rather than letting a
+        long id blow the bound.
+
+        When a key is supplied, ``task_type`` must satisfy the same two rules
+        (``ValueError`` for either) — it is the other scope column of the dedup
+        index, so it decides which key space a row lands in:
+
+        - **no leading or trailing whitespace**, since a padded value shares a
+          dedup slot with the unpadded one under PAD SPACE and could suppress a
+          legitimate enqueue for it;
+        - **at most 100 characters**, the stored column width, since a
+          truncating server files the row under the *truncated* scope while the
+          holder lookup searches for the full string — the duplicate then
+          conflicts with a row it cannot find and raises instead of joining it.
+
+        Un-keyed enqueues are unaffected by both: their
+        ``active_idempotency_key`` is ``NULL``, so they never enter the index and
+        any ``task_type`` remains acceptable.
+
+        A key must also carry **no leading or trailing whitespace** (also
+        ``ValueError``). Internal spacing is untouched and keys are stored
+        verbatim; only the ends are constrained, because MySQL/OceanBase
+        compare with a PAD SPACE collation under which ``"k1"`` and ``"k1 "``
+        are the *same* index entry while SQLite keeps them apart. Rejecting
+        such keys makes the collision unreachable rather than relying on a
+        NO PAD collation being available.
+
+        One edge worth knowing: a task whose deadline has passed but which no
+        worker has scanned yet is still non-terminal, so it still holds its key
+        and a duplicate enqueue joins it. The next claim scan retires it
+        ``TIMED_OUT`` and frees the key. This only bites when the worker is down
+        or behind by longer than the task's own deadline.
         """
         ...
 

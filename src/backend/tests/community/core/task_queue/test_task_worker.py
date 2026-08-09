@@ -70,13 +70,25 @@ class _World:
         self.service = TaskQueueService(self.repo)
         self.worker = TaskWorker(self.repo, self.registry, config)
 
-    def enqueue(self, task_type, payload=None, *, deadline_seconds=3600, delay_seconds=0):
+    def enqueue(
+        self,
+        task_type,
+        payload=None,
+        *,
+        deadline_seconds=3600,
+        delay_seconds=0,
+        idempotency_key=None,
+    ):
+        """Just the ``TaskRecord``. These tests predate enqueue idempotency and
+        pass no key, so they double as a regression guard that un-keyed enqueue
+        behaves exactly as it always has."""
         return self.service.enqueue(
             task_type,
             payload if payload is not None else {},
             deadline_seconds,
             delay_seconds=delay_seconds,
-        )
+            idempotency_key=idempotency_key,
+        ).record
 
     def status_of(self, task_id):
         return self.repo.get_by_id(task_id).status
