@@ -2,9 +2,10 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 >
-> Sequencing: implementation starts from the explicit-user-id change
-> (`specs/2026-08-08-openapi-v1-explicit-user-id/`, PR #902) — its branch, or
-> `dev` once it merges. The same 16 handlers are touched by both.
+> Sequencing: the explicit-user-id change
+> (`specs/2026-08-08-openapi-v1-explicit-user-id/`, PR #902) merged to `dev`
+> as `5cdb614`; implementation bases on `dev`. Note the handlers there bind
+> `UserIdDep` to a local named `owner_id` — Task 3 renames it.
 
 ## Task 1: Replace the shared-bot refusal with the operator adjudication  `[ ]`
 
@@ -78,6 +79,9 @@
         `enums.py` and imported by every router — no per-router respelling.
   - [ ] `resolve_operable_bot` passes caller, owner and stage; all fifteen
         handlers forward with `stage=…` and none passes `draft_device`.
+  - [ ] The `owner_id: UserIdDep` locals inherited from #902 are renamed
+        `user_id`, so the dep's value (the caller) is never passed as the
+        owner; the owner comes only from `OwnerIdDep`.
   - [ ] The 409 is documented on the engine-runtime groups (route- or
         group-level per how `ERROR_RESPONSES` carries 409 today — verify,
         then follow the existing pattern in `contracts.py`).

@@ -16,9 +16,12 @@ to the request's `user_id`, `stage` defaults to `draft`, and the resolved
 behavior is byte-for-byte today's.
 
 **This work builds on `specs/2026-08-08-openapi-v1-explicit-user-id/`** (PR
-#902): handlers are assumed to already take `user_id: UserIdDep`. Implement on
-top of that branch, or on `dev` after it merges — the same 16 handler
-signatures are touched by both, so landing order is #902 first, this second.
+#902, merged to `dev` as `5cdb614`). One wrinkle is inherited from it: the
+engine-runtime handlers bind `UserIdDep` to a local still named `owner_id` —
+accurate while the caller was always the owner, which is precisely the
+identity this change breaks. The conversion renames those locals to `user_id`
+and introduces the real `owner_id`, so the dep's value is never again passed
+as the owner.
 
 ## The rules
 
@@ -136,19 +139,25 @@ meaning "the caller's own bot" — the contract `AGENTS.md` permits.)
 # openapi_v1/engine_runtime/sessions/router.py — list_sessions
  async def list_sessions(
      bot_id: str,
-     request: Request,
-     user_id: UserIdDep,
+     page: PageParamsDep,
+-    owner_id: UserIdDep,
++    user_id: UserIdDep,
 +    owner_id: OwnerIdDep,
 +    stage: StageQuery = RuntimeStage.DRAFT,
+     request: Request,
      ...
  ) -> Envelope[SessionPage]:
--    facts = await resolve_operable_bot(relay, bot_id, user_id, surface="sessions")
--    ... relay.call(..., facts=facts, draft_device=True)
+-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="sessions")
+-    ... relay.call(bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True, ...)
 +    facts = await resolve_operable_bot(
 +        relay, bot_id, caller_id=user_id, owner_id=owner_id,
 +        stage=stage.value, surface="sessions")
-+    ... relay.call(..., facts=facts, stage=stage.value)
++    ... relay.call(bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value, ...)
 ```
+
+The rename on the first line of the signature is the point, not cosmetics:
+`UserIdDep` returns the *caller*, and after this change the caller and the
+owner are distinct roles that each go where they belong.
 
 ```jsonc
 // Owner, own private bot — unchanged, byte-for-byte:
