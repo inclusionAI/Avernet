@@ -2,8 +2,10 @@
 
 Public handlers that delegate to the existing internal bot services and wrap the
 result in the standard :class:`Envelope` / :class:`Page` contracts. Identity is
-the caller resolved from ``require_principal`` (owner-scoping, via
-``caller_owner_id``); the request tenant is bound by ``AvernetTenantMiddleware``
+the end user the request names in ``?user_id=`` (owner-scoping, via
+``UserIdDep``) — on 12 of the 13 operations here; ``check-name`` asks a
+tenant-wide question and takes none. The request tenant is bound by
+``AvernetTenantMiddleware``
 before the handler runs, so every service read/write is already tenant-scoped by
 the Track A guard. Services are obtained with ``Injected`` exactly as the
 internal router does.
@@ -11,12 +13,13 @@ internal router does.
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    USER_SCOPED_403,
     Deleted,
     Envelope,
     NameCheck,
@@ -28,12 +31,8 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     cluster_for_engine,
     validate_engine_cluster,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -86,8 +85,6 @@ from .schemas import (
 logger = get_logger()
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 def _to_bot(d: dict[str, Any]) -> Bot:
@@ -209,6 +206,7 @@ def _sync_passport_identity(
     status_code=201,
     response_model=Envelope[Bot],
     responses={
+        **USER_SCOPED_403,
         202: {
             "model": Envelope[BotAuthPending],
             "description": "Needs user authorization",
@@ -219,7 +217,7 @@ def _sync_passport_identity(
 async def create_bot(
     body: BotCreate,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
@@ -234,7 +232,6 @@ async def create_bot(
     nothing downstream reads that bag yet, so the request model does not expose
     an ``engine_options`` field for it — see :class:`BotCreate`.
     """
-    owner_id = caller_owner_id(principal)
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -278,19 +275,18 @@ async def create_bot(
     return created(_to_bot(outcome.bot), request)
 
 
-@router.get("", response_model=Envelope[Page[Bot]])
+@router.get("", response_model=Envelope[Page[Bot]], responses=USER_SCOPED_403)
 @envelope_errors
 async def list_bots(
     request: Request,
     page_params: PageParamsDep,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     keyword: str | None = None,
     engine: str | None = None,
     status: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
     """List the caller's bots (filter + paginate)."""
-    owner_id = caller_owner_id(principal)
     result = bot_service.list_bots_by_conditions(
         owner_id=owner_id,
         bot_name=keyword,
@@ -308,7 +304,6 @@ async def list_bots(
 async def check_bot_name(
     name: str,
     request: Request,
-    principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[NameCheck]:
     """Check whether a bot name is available (within the caller's tenant).
@@ -322,17 +317,23 @@ async def check_bot_name(
     The echoed ``name`` is the trimmed form actually checked, so a caller that
     sends ``" Foo "`` sees which string the availability applies to.
     """
-    caller_owner_id(principal)  # require an authenticated caller
+    # No ``user_id``: this operation has no user dimension to scope by. Name
+    # uniqueness is checked across the whole tenant — ``check_bot_name_exists``
+    # takes only the name.
+    # An authenticated caller is still required — ``_PUBLIC_AUTH`` in
+    # ``openapi_v1/__init__.py`` — it just has no user-shaped answer to give,
+    # so asking the caller to name one would be asking for a value this handler
+    # cannot use. See "Naming the end user" there.
     checked = validate_bot_name(name)
     exists = bot_service.check_bot_name_exists(checked)
     return envelope(NameCheck(name=checked, exists=exists), request)
 
 
-@router.get("/ceiling", response_model=Envelope[Ceiling])
+@router.get("/ceiling", response_model=Envelope[Ceiling], responses=USER_SCOPED_403)
 @envelope_errors
 async def get_bots_ceiling(
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Ceiling]:
     """Get the caller's bot-creation quota ceiling.
@@ -343,32 +344,30 @@ async def get_bots_ceiling(
     ``max_devices_per_entity``. Reading it directly would advertise 5 to a caller
     whose deployment allows (or rejects at) a different number.
     """
-    owner_id = caller_owner_id(principal)
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
 
-@router.get("/{bot_id}", response_model=Envelope[Bot])
+@router.get("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
 @envelope_errors
 async def get_bot(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Get a bot's details."""
-    owner_id = caller_owner_id(principal)
     bot = bot_service.get_bot(bot_id, owner_id)
     return envelope(_to_bot(bot), request)
 
 
-@router.put("/{bot_id}", response_model=Envelope[Bot])
+@router.put("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
 @envelope_errors
 async def update_bot(
     bot_id: str,
     body: BotUpdate,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> Envelope[Bot]:
@@ -378,7 +377,6 @@ async def update_bot(
     updatable here; ``engine_options`` is managed via the engine-config
     endpoints. Neither is accepted — see :class:`BotUpdate`.
     """
-    owner_id = caller_owner_id(principal)
     # Same name rule as create and the internal update route — otherwise this
     # surface could persist names the rest of the lifecycle rejects.
     bot_name = validate_bot_name(body.bot_name) if body.bot_name is not None else None
@@ -414,31 +412,33 @@ async def update_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.delete("/{bot_id}", response_model=Envelope[Deleted])
+@router.delete("/{bot_id}", response_model=Envelope[Deleted], responses=USER_SCOPED_403)
 @envelope_errors
 async def delete_bot(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Deleted]:
     """Delete a bot. See :func:`_reject_unowned_lifecycle` for what is refused."""
-    owner_id = caller_owner_id(principal)
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id), deleting=True)
     bot_service.delete_bot(bot_id, owner_id)
     return deleted_envelope(request)
 
 
-@router.post("/{bot_id}/restart", response_model=Envelope[Bot])
+@router.post(
+    "/{bot_id}/restart",
+    response_model=Envelope[Bot],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def restart_bot(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Bot]:
     """Restart a bot. Desktop bots are rejected — see :func:`_reject_unowned_lifecycle`."""
-    owner_id = caller_owner_id(principal)
     _reject_unowned_lifecycle(bot_service.get_bot(bot_id, owner_id))
     bot = bot_service.restart_bot(bot_id, owner_id)
     return envelope(_to_bot(bot), request)
@@ -448,6 +448,7 @@ async def restart_bot(
     "/{bot_id}/auth-status",
     response_model=Envelope[BotAuthStatus],
     responses={
+        **USER_SCOPED_403,
         # This route's 400 is the one documented exception to the surface-wide
         # ErrorEnvelope (whose ``data`` is null): a terminal authorization state
         # is reported as a failure, but the state itself is the actionable part,
@@ -464,7 +465,7 @@ async def restart_bot(
 async def get_bot_auth_status(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     engine: str | None = None,
     # Enum, not a bare str: validate_engine_cluster accepts only ACRA/ANDC,
     # so a plain string would let a generated client compile
@@ -493,7 +494,6 @@ async def get_bot_auth_status(
     personal|service restriction on ``bot_type``. Otherwise the completion path
     would be a way to create exactly the bots ``POST`` rejects.
     """
-    owner_id = caller_owner_id(principal)
     # Validate against the engine completion will actually use, not against the
     # query param: omitting ``engine`` does not mean "no engine", it means the
     # default one. Checking only when ``engine`` was supplied let
@@ -537,16 +537,19 @@ async def get_bot_auth_status(
     return envelope(BotAuthStatus(status=result.status, bot=bot), request)
 
 
-@router.get("/{bot_id}/status", response_model=Envelope[BotStatus])
+@router.get(
+    "/{bot_id}/status",
+    response_model=Envelope[BotStatus],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def get_bot_status(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[BotStatus]:
     """Get a bot's runtime / device readiness."""
-    owner_id = caller_owner_id(principal)
     bot = bot_service.get_bot(bot_id, owner_id)
     binding = bot.get("device_binding") or {}
     return envelope(
@@ -561,17 +564,20 @@ async def get_bot_status(
     )
 
 
-@router.get("/{bot_id}/passport", response_model=Envelope[Passport])
+@router.get(
+    "/{bot_id}/passport",
+    response_model=Envelope[Passport],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def get_bot_passport(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> Envelope[Passport]:
     """Get a bot's Agent Passport."""
-    owner_id = caller_owner_id(principal)
     bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard (raises 404)
     info = passport_plugin.query_agent_passport(bot_id=bot_id, owner_workno=owner_id)
     # Either identifier means "a passport exists". Which one is populated is a
@@ -599,19 +605,19 @@ def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
 @router.get(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
+    responses=USER_SCOPED_403,
 )
 @envelope_errors
 async def get_bot_engine_config(
     bot_id: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     engine_config_service: EngineConfigServiceProtocol = Injected(
         EngineConfigServiceProtocol
     ),
 ) -> Envelope[dict[str, Any]]:
     """Read a bot's engine configuration (free-form JSON)."""
-    owner_id = caller_owner_id(principal)
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, entity_type, engine = _engine_config_target(bot)
     data = await engine_config_service.read_bot_config(
@@ -624,20 +630,20 @@ async def get_bot_engine_config(
 @router.put(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
+    responses=USER_SCOPED_403,
 )
 @envelope_errors
 async def update_bot_engine_config(
     bot_id: str,
     body: dict[str, Any],
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     engine_config_service: EngineConfigServiceProtocol = Injected(
         EngineConfigServiceProtocol
     ),
 ) -> Envelope[dict[str, Any]]:
     """Write a bot's engine configuration (free-form JSON)."""
-    owner_id = caller_owner_id(principal)
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, entity_type, engine = _engine_config_target(bot)
     await engine_config_service.write_bot_config(

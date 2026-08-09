@@ -7,8 +7,10 @@ caller's devices). They delegate to the same MCP services the internal
 helpers, and wrap the result in the standard :class:`Envelope` / :class:`Page`
 contracts.
 
-Identity is the caller resolved from ``require_principal`` (owner-scoping, via
-``caller_owner_id``); the request tenant is bound by ``AvernetTenantMiddleware``
+Identity is the end user the request names in ``?user_id=`` (owner-scoping,
+via ``UserIdDep``) — on the three config/permission operations. The three
+marketplace catalogue reads reply the same for every caller in the tenant and
+take no ``user_id``. The request tenant is bound by ``AvernetTenantMiddleware``
 before the handler runs, so every config read/write is already tenant-scoped by
 the Track A guard. Unlike the internal detail route, no ``IAM_TOKEN`` cookie is
 read — a registered-tenant caller presents no browser cookie, and forwarding one
@@ -18,20 +20,17 @@ bots slice took).
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
+    USER_SCOPED_403,
     Envelope,
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -68,7 +67,6 @@ from .schemas import (
 
 router = APIRouter(prefix="/openapi/v1/bots/mcp", tags=["mcp"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 # The caller's own identity is used as both entity id and (staff) entity type
 # for the config push, mirroring the internal route's defaults and how the bots
@@ -147,12 +145,16 @@ def _to_config(cfg: Any) -> McpConfig:
 async def list_mcp_servers(
     request: Request,
     page_params: PageParamsDep,
-    principal: PrincipalDep,
     keyword: str | None = None,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[Page[McpServer]]:
     """List marketplace MCP servers (filter by ``keyword``, paginate)."""
-    caller_owner_id(principal)  # require an authenticated caller
+    # No ``user_id``: this operation has no user dimension to scope by. The
+    # marketplace catalogue is identical for every caller in the tenant.
+    # An authenticated caller is still required — ``_PUBLIC_AUTH`` in
+    # ``openapi_v1/__init__.py`` — it just has no user-shaped answer to give,
+    # so asking the caller to name one would be asking for a value this handler
+    # cannot use. See "Naming the end user" there.
     result = list_marketplace_servers(
         page=page_params.page,
         page_size=page_params.page_size,
@@ -173,11 +175,10 @@ async def list_mcp_servers(
 @envelope_errors
 async def list_mcp_tenants(
     request: Request,
-    principal: PrincipalDep,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[list[McpTenant]]:
     """List MCP tenants (the marketplace's own tenant concept)."""
-    caller_owner_id(principal)
+    # No ``user_id`` — catalogue read, see list_mcp_servers.
     result = list_marketplace_tenants(market_service=market_service)
     tenants = [_to_tenant(t) for t in (result.get("data") or []) if isinstance(t, dict)]
     return envelope(tenants, request)
@@ -188,7 +189,6 @@ async def list_mcp_tenants(
 async def get_mcp_server(
     server_code: str,
     request: Request,
-    principal: PrincipalDep,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[McpServerDetail]:
     """Get an MCP server's detail (including tools).
@@ -197,7 +197,7 @@ async def get_mcp_server(
     not-found from one site, so a caller cannot tell "does not exist" from
     "exists but not visible to you".
     """
-    caller_owner_id(principal)
+    # No ``user_id`` — catalogue read, see list_mcp_servers.
     detail = market_service.get_mcp_detail(server_code)
     if not detail or not is_network_type_visible(detail):
         raise McpServerNotFoundError(server_code)
@@ -206,12 +206,12 @@ async def get_mcp_server(
 
 @router.get(
     "/servers/{server_code}/permissions", response_model=Envelope[McpPermission]
-)
+, responses=USER_SCOPED_403)
 @envelope_errors
 async def check_mcp_permission(
     server_code: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     auth_service: MCPAuthServiceProtocol = Injected(MCPAuthServiceProtocol),
 ) -> Envelope[McpPermission]:
     """Report the caller's own permission for an MCP server.
@@ -227,7 +227,6 @@ async def check_mcp_permission(
     wrong "yes" during an upstream outage costs one failed call, whereas failing
     closed would make a marketplace outage look like a permission revocation.
     """
-    owner_id = caller_owner_id(principal)
     result = auth_service.check_mcp_permission_detail(owner_id, server_code)
     return envelope(
         McpPermission(
@@ -242,12 +241,16 @@ async def check_mcp_permission(
 # ── Unified config ──────────────────────────────────────────────────
 
 
-@router.get("/servers/{server_code}/config", response_model=Envelope[McpConfig])
+@router.get(
+    "/servers/{server_code}/config",
+    response_model=Envelope[McpConfig],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def get_mcp_config(
     server_code: str,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
 ) -> Envelope[McpConfig]:
     """Read the caller's unified config for an MCP server (``api_key`` masked).
@@ -255,20 +258,23 @@ async def get_mcp_config(
     A server the caller has never configured is not an error — it returns
     ``has_config: false`` with defaults.
     """
-    owner_id = caller_owner_id(principal)
     cfg = read_unified_config(
         user_id=owner_id, server_code=server_code, config_service=config_service
     )
     return envelope(_to_config(cfg), request)
 
 
-@router.put("/servers/{server_code}/config", response_model=Envelope[McpConfig])
+@router.put(
+    "/servers/{server_code}/config",
+    response_model=Envelope[McpConfig],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def update_mcp_config(
     server_code: str,
     body: McpConfigWrite,
     request: Request,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
     sync_service: MCPSyncServiceProtocol = Injected(MCPSyncServiceProtocol),
@@ -280,7 +286,6 @@ async def update_mcp_config(
     with a config that is stored but not in effect. The response is re-read from
     storage so it is exactly what a subsequent GET would return.
     """
-    owner_id = caller_owner_id(principal)
     await write_unified_config(
         user_id=owner_id,
         server_code=server_code,

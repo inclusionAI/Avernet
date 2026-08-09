@@ -68,23 +68,23 @@
         behind, no new `E501`.
 - **Depends on:** Task 2
 
-## Task 4: Convert `bots` and `mcp`, and leave the four exemptions alone
+## Task 4: Convert `bots` and `mcp`, and leave the four exemptions alone  [x]
 
 - **Goal:** The two groups that mix scoped and unscoped operations, done
   deliberately rather than in bulk.
 - **Files:** `…/openapi_v1/bots/router.py`, `…/openapi_v1/mcp/router.py`
 - **Done when:**
-  - [ ] 12 of 13 `bots` handlers and 3 of 6 `mcp` handlers take `user_id:
+  - [x] 12 of 13 `bots` handlers and 3 of 6 `mcp` handlers take `user_id:
         UserIdDep` and carry `responses=USER_SCOPED_403` on their route
         decorator, merged with any `responses=` already there.
-  - [ ] `check_bot_name`, `list_mcp_servers`, `list_mcp_tenants` and
+  - [x] `check_bot_name`, `list_mcp_servers`, `list_mcp_tenants` and
         `get_mcp_server` are **unchanged on the wire**: no `user_id` parameter,
         no 403 documented. Their `caller_owner_id(principal)` assertion is
         replaced by nothing — `_PUBLIC_AUTH` already requires the caller — and a
         comment records that they have no user dimension, with the reason.
-  - [ ] `caller_owner_id` is imported by `principal.py` alone; the routers no
+  - [x] `caller_owner_id` is imported by `principal.py` alone; the routers no
         longer reference it.
-  - [ ] The generated document shows exactly four `/openapi/v1/bots/**`
+  - [x] The generated document shows exactly four `/openapi/v1/bots/**`
         operations without `user_id`, and they are those four.
 - **Depends on:** Task 2
 
