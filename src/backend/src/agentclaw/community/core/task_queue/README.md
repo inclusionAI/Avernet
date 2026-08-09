@@ -138,9 +138,17 @@ handler, so a row can carry a type no registry ever saw. The harm there runs
 opposite to intuition: the padded row is the one that *cannot* run, but it shares
 a dedup slot with the bare type, so a live `job ` row holding `k1` makes a
 legitimate `job` enqueue for `k1` join it with `created=False` — the work
-suppressed is the work that would have run. Un-keyed enqueues are deliberately
-not validated: their `active_idempotency_key` is `NULL`, so they never enter the
-index and cannot collide.
+suppressed is the work that would have run.
+
+The same boundary also bounds `task_type` to the stored column width, for the
+same reason the key is bounded: a non-strict server truncates an over-long value,
+filing the row under the *truncated* scope while the holder lookup searches for
+the full string. The duplicate then conflicts with a row it cannot find and
+raises, where the contract promises the live holder with `created=False`.
+
+Un-keyed enqueues are deliberately exempt from both rules: their
+`active_idempotency_key` is `NULL`, so they never enter the index and cannot
+collide however they are stored.
 
 `HandlerRegistry.register` additionally rejects a task type that folds onto an
 already-registered one. That is second line of defence, not the enforcement:

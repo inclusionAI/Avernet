@@ -23,6 +23,7 @@ from agentclaw.community.plugins.task_queue_repository import (
     _ACTIVE_IDEM_INDEX,
     _KEYED_INSERT_ATTEMPTS,
     _MAX_IDEMPOTENCY_KEY_LEN,
+    _MAX_TASK_TYPE_LEN,
     TaskQueueRepository,
     _is_active_idem_conflict,
 )
@@ -804,3 +805,52 @@ def test_padded_task_type_is_rejected_through_the_service_facade(repo):
     with pytest.raises(ValueError, match="leading or trailing whitespace"):
         service.enqueue("job ", {}, 3600, idempotency_key="k1")
     assert _all_rows(repo) == []
+
+
+def test_max_task_type_length_tracks_the_column_width():
+    """Read off the column, like the key bound, so schema and check cannot drift."""
+    assert _MAX_TASK_TYPE_LEN == TaskQueueModel.__table__.c.task_type.type.length
+
+
+def test_keyed_enqueue_accepts_a_task_type_exactly_at_the_limit(repo):
+    """The bound is inclusive — the boundary value must not be rejected."""
+    res = _enqueue_result(
+        repo, task_type="t" * _MAX_TASK_TYPE_LEN, idempotency_key="k1"
+    )
+    assert res.created is True
+    assert res.record.task_type == "t" * _MAX_TASK_TYPE_LEN
+
+
+def test_keyed_enqueue_rejects_an_over_long_task_type(repo):
+    """``task_type`` is a scope column of the dedup index, so a non-strict
+    MySQL/OceanBase truncating it files the row under the *truncated* scope
+    while ``_find_active_by_key`` searches for the full string. The duplicate
+    then conflicts with a row it cannot find, burns the retry budget, and raises
+    — where the contract promises the live holder with ``created=False``."""
+    with pytest.raises(ValueError, match="task_type exceeds"):
+        _enqueue_result(
+            repo, task_type="t" * (_MAX_TASK_TYPE_LEN + 1), idempotency_key="k1"
+        )
+
+    assert _all_rows(repo) == []
+
+
+def test_two_task_types_sharing_a_truncation_prefix_are_both_rejected(repo):
+    """The concrete collision the bound prevents: two distinct types that a
+    truncating server would store as the same 100-char value would otherwise
+    share one dedup slot, so one caller's keyed enqueue joins the other's task."""
+    base = "t" * _MAX_TASK_TYPE_LEN
+    for suffix in ("aaa", "bbb"):
+        with pytest.raises(ValueError, match="task_type exceeds"):
+            _enqueue_result(repo, task_type=base + suffix, idempotency_key="k1")
+
+    assert _all_rows(repo) == []
+
+
+def test_unkeyed_enqueue_still_accepts_an_over_long_task_type(repo):
+    """Deliberate scoping, matching the padding rule: an un-keyed row has a NULL
+    active key, never enters the unique index, and so cannot collide however it
+    is stored. Validating it would change un-keyed behaviour."""
+    record = _enqueue(repo, task_type="t" * (_MAX_TASK_TYPE_LEN + 50))
+    assert len(record.task_type) == _MAX_TASK_TYPE_LEN + 50  # SQLite stores it whole
+    assert _key_columns(repo, record.id) == (None, None)

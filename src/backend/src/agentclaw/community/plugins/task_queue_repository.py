@@ -94,8 +94,11 @@ _ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idempotency_key"
 #: cannot spin forever.
 _KEYED_INSERT_ATTEMPTS = 5
 
-#: Read off the column itself so the limit and the schema cannot drift apart.
+#: Read off the columns themselves so the limits and the schema cannot drift
+#: apart. Both are scope columns of the dedup index, so both can collide two
+#: distinct values if a non-strict server truncates them.
 _MAX_IDEMPOTENCY_KEY_LEN = TaskQueueModel.__table__.c.idempotency_key.type.length
+_MAX_TASK_TYPE_LEN = TaskQueueModel.__table__.c.task_type.type.length
 
 
 def _validate_idempotency_key(key: str) -> None:
@@ -177,11 +180,21 @@ def _validate_keyed_task_type(task_type: str) -> None:
     one protects every stored row. Two boundaries, so deliberately two checks —
     core cannot import the plugin, so they cannot share an implementation.
 
+    The width bound is the same rule ``_validate_idempotency_key`` applies to
+    the key, for the same reason and on the same column family. A non-strict
+    MySQL/OceanBase silently truncates an over-long value, so the row is filed
+    under the *truncated* scope while :meth:`_find_active_by_key` searches for
+    the full string. A duplicate enqueue then conflicts with a row it cannot
+    find, exhausts its retries, and raises — where the contract promises the
+    live holder with ``created=False``. (A strict server raises ``DataError`` on
+    the first insert instead: louder, but still not the documented behaviour.)
+    Both limits are read off their columns so neither can drift from the schema.
+
     Only keyed enqueues are validated. An un-keyed row has a ``NULL``
     ``active_idempotency_key`` and so never participates in the unique index at
-    all; its ``task_type`` padding cannot collide with anything. Validating it
-    would change behaviour for un-keyed callers, which this change is otherwise
-    careful to leave exactly as they were.
+    all; neither padding nor truncation of its ``task_type`` can collide with
+    anything. Validating it would change behaviour for un-keyed callers, which
+    this change is otherwise careful to leave exactly as they were.
     """
     if task_type != task_type.strip():
         raise ValueError(
@@ -190,6 +203,15 @@ def _validate_keyed_task_type(task_type: str) -> None:
             "compare with a PAD SPACE collation, so 'job ' and 'job' share one "
             "dedup slot and this row could suppress a legitimate enqueue for the "
             "unpadded type — strip it at the call site"
+        )
+    if len(task_type) > _MAX_TASK_TYPE_LEN:
+        raise ValueError(
+            f"task_type exceeds {_MAX_TASK_TYPE_LEN} chars ({len(task_type)}) "
+            "and an idempotency_key was supplied; it is stored in a "
+            f"VARCHAR({_MAX_TASK_TYPE_LEN}), and a non-strict MySQL/OceanBase "
+            "would truncate it — the row would then be filed under the truncated "
+            "scope while the lookup searches for the full string, so a duplicate "
+            "enqueue could neither insert nor find its holder"
         )
 
 

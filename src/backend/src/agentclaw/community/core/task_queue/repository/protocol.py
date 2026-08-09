@@ -96,12 +96,21 @@ class TaskQueueRepositoryProtocol(Protocol):
         far wider than 190, so hash the variable part rather than letting a
         long id blow the bound.
 
-        When a key is supplied, ``task_type`` must carry no leading or trailing
-        whitespace either (``ValueError``) — it is the other scope column of the
-        dedup index, so a padded value shares a dedup slot with the unpadded one
-        under PAD SPACE and could suppress a legitimate enqueue for it. Un-keyed
-        enqueues are unaffected: their ``active_idempotency_key`` is ``NULL``, so
-        they never enter the index and any ``task_type`` remains acceptable.
+        When a key is supplied, ``task_type`` must satisfy the same two rules
+        (``ValueError`` for either) — it is the other scope column of the dedup
+        index, so it decides which key space a row lands in:
+
+        - **no leading or trailing whitespace**, since a padded value shares a
+          dedup slot with the unpadded one under PAD SPACE and could suppress a
+          legitimate enqueue for it;
+        - **at most 100 characters**, the stored column width, since a
+          truncating server files the row under the *truncated* scope while the
+          holder lookup searches for the full string — the duplicate then
+          conflicts with a row it cannot find and raises instead of joining it.
+
+        Un-keyed enqueues are unaffected by both: their
+        ``active_idempotency_key`` is ``NULL``, so they never enter the index and
+        any ``task_type`` remains acceptable.
 
         A key must also carry **no leading or trailing whitespace** (also
         ``ValueError``). Internal spacing is untouched and keys are stored
