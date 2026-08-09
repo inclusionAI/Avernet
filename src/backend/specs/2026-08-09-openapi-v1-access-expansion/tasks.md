@@ -194,22 +194,43 @@
         are listed as deferred items, not lost.
 - **Depends on:** Task 6
 
-## Task 8: Tests & Verification  `[~]`
+## Task 8: Tests & Verification  `[x]`
 
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** —
 - **Done when:**
-  - [ ] Every acceptance criterion in `spec.md` checks off, including the
+  - [x] Every acceptance criterion in `spec.md` checks off, including the
         negative ones (allowlist unwidened; end-user contract untouched;
         draft byte-compat; no path or body changes).
-  - [ ] The generated document is diffed against the base: exactly sixteen
+  - [x] The generated document is diffed against the base: exactly sixteen
         operations gain `owner_id` and `stage` (the 409 was already
         documented surface-wide), and nothing else moves.
-  - [ ] `pytest tests/community` is green — not just the touched subtrees.
-  - [ ] `scripts/ci/python_sast_local.sh src/backend` passes; changed-line
+  - [x] `pytest tests/community` is green — not just the touched subtrees.
+  - [x] `scripts/ci/python_sast_local.sh src/backend` passes; changed-line
         coverage meets the backend gate; singlebox coverage runs on the PR.
-  - [ ] Anything that could not be run locally is named explicitly, with why.
+  - [x] Anything that could not be run locally is named explicitly, with why.
 - **Depends on:** Task 7
+
+**Verification record (2026-08-09):**
+- Generated document diffed against the base (`5cdb614`) operation by
+  operation: 47 paths, an unchanged set; exactly 16 operations changed, each
+  gaining only the optional `owner_id` and `stage` query parameters with
+  everything else byte-identical; one schema added (`RuntimeStage`), none
+  removed or altered.
+- `pytest tests/community`: 11187 passed, 3 skipped, 2 failed — the two
+  `test_bot_build_service_skill_artifact` cases that need `rsync`, absent
+  from this container (the same two the explicit-user-id verification
+  recorded; green on CI). Case pass rate 99.98%.
+- `report_check`: line coverage 85.20% (gate 75%), **changed-line coverage
+  100.00% (171/171)** against the merge base.
+- `scripts/ci/python_sast_local.sh` reproduces its documented limitation:
+  the fallback CPython 3.11 flake8 cannot parse this repo's PEP 695 generics
+  and reports E999 on `contracts.py` / `sessions/schemas.py` — identically
+  on the unmodified files. The same block-rule set run through the project's
+  3.12 interpreter over all 30 changed Python files: clean.
+- Not runnable in this container: singlebox coverage and the BCS E2E gates
+  need a live product stack; they run on the PR (green on the artifacts-only
+  head, running on the implementation push).
 
 ---
 
