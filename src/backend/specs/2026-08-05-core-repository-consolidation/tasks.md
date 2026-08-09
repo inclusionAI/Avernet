@@ -106,11 +106,12 @@ commit that file.
 
 ## Task 9: Relocate the eight non-repositories
 - **Goal:** Move mixins and helpers without giving them contracts (R4).
-- **Files:** `implementations/skills_pool_{capability,operational,post_cutover,quarantine}_repository.py`,
+- **Files:** `implementations/skills_pool_layout_repository_{capability,operational,post_cutover,quarantine}.py`,
   `implementations/skills_pool_{layout_persistence,cutover_diagnostics}.py`,
   `implementations/governance_task_record_query.py`, `core/skills_pool/runtime.py`.
 - **Done when:**
   - [ ] Seven plain modules sit in `implementations/`; none gains a Protocol.
+  - [ ] The four `SkillsPoolLayoutRepository` mixins are renamed `skills_pool_layout_repository_<part>.py` so they sort beside their composite and no longer read as standalone repositories. Class names unchanged.
   - [ ] `SkillsPoolRuntime` lives at `core/skills_pool/runtime.py`; its Protocol stays in `core/skills_pool/ports.py`.
   - [ ] `plugins/http_client.py` is untouched and still bound.
 - **Depends on:** Tasks 7, 8

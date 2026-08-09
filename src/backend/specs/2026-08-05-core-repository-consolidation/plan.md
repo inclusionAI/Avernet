@@ -105,6 +105,54 @@ class SkillsPoolLayoutRepository(
 
 A mixin satisfying an abstract member is accepted — verified against Python 3.13.
 
+#### Note: `SkillsPoolLayoutRepository` is one repository in five files
+
+Read at face value that base list looks like a repository inheriting other
+repositories. It is not. All four mixins are slices of *this same class* over
+*one* table (`ac_bot_skill_layout_state`); none injects `DatabasePlugin`, none is
+DI-bound, and none exists independently — which is why the spec classifies them as
+non-repositories that relocate without contracts.
+
+The split is a **size workaround, not a design**: the class totals ~1,856 lines and
+the main file sits at exactly 1000 — the Rule 9 cap.
+
+The *two Protocols* are legitimate interface segregation — `QuarantineRepositoryProtocol`
+exposes 5 members to quarantine consumers, `SkillsPoolLayoutRepositoryProtocol`
+exposes 27 — and DI binds the single class to both. The *four mixins* are weaker,
+because their file seams cut across the contract seams:
+
+| Method | Implemented in | Declared on |
+| --- | --- | --- |
+| `quarantine_identity_conflicts` | quarantine mixin | **Layout** protocol |
+| `record_runtime_reconciliation` | quarantine mixin | **Layout** protocol |
+| `list_states` | operational mixin | **Layout** protocol |
+| `release_not_capable_claim` | capability mixin | **Layout** protocol |
+
+Only 5 of the quarantine mixin's 8 public methods belong to the quarantine
+contract. Files are cut by size; interfaces by concern; the cuts disagree.
+
+**Carried as-is.** R8 forbids restructuring a repository body in this change, and a
+genuine fix (decompose along the contract seam into two classes, or collapse the
+size-driven mixins once the file can be shortened) is its own piece of work with
+its own review.
+
+Two things this change *does* do about it:
+
+1. **Naming.** In a flat `implementations/` directory, four modules named
+   `skills_pool_*_repository.py` that are not repositories is actively misleading.
+   They are renamed to sort beside their composite and read as parts of it:
+
+   ```text
+   skills_pool_capability_repository.py   → skills_pool_layout_repository_capability.py
+   skills_pool_operational_repository.py  → skills_pool_layout_repository_operational.py
+   skills_pool_post_cutover_repository.py → skills_pool_layout_repository_post_cutover.py
+   skills_pool_quarantine_repository.py   → skills_pool_layout_repository_quarantine.py
+   ```
+
+2. **Visibility.** Under R2 the composite must satisfy both Protocols' abstract
+   members at construction, so any future mixin edit that drops a declared member
+   fails immediately instead of at the call site.
+
 **3. `BotChatDbRepository` becomes DI-bound** (R3b). It is the only wiring change:
 
 ```diff
@@ -162,23 +210,50 @@ No class is renamed. `DeviceRepository` keeps its name despite implementing
 ### The cycle-avoidance rule, applied
 
 ```python
-# core/repository/protocols/bot_management.py
+# core/repository/protocols/system_config.py
 from __future__ import annotations
 
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:                        # never imported at runtime
-    from agentclaw.community.core.bot_management.repository.models import TemplateModel
+    from agentclaw.community.core.system_config.models import ConfigItemRecord
 ```
 
-Why this is required, precisely: importing `core.bot_management.repository.models`
-executes `core/bot_management/__init__.py` first. Ten domain `__init__.py` files
-eagerly import their services, and those services import repository Protocols at
-runtime for DI. A runtime import from `protocols/` back into a domain therefore
-closes a loop. `core/channel/__init__.py` already carries a `__getattr__` lazy
-hack with the comment *"Lazy import to avoid circular dependencies at module load
-time"* — the hazard predates this change.
+**The loop is closed by package initialization, not by the model.** A model class
+is inert — it has no dependency on its domain's services. But importing *any*
+submodule executes the parent package's `__init__.py` first, and that is where the
+cycle lives:
+
+```text
+protocols/system_config.py
+  imports core.system_config.models
+    → Python executes core/system_config/__init__.py first
+      → `from agentclaw.community.core.system_config.service import SystemConfigService`
+        → service.py:17 `from …repository import ConfigRepositoryProtocol`
+          → i.e. core.repository.protocols.system_config — the module still mid-import
+            → ImportError: cannot import name from partially initialized module
+```
+
+Services must import Protocols at runtime (`injector` resolves constructor
+annotations via `get_type_hints()`), so that leg cannot be made lazy. The
+tractable leg is the other one.
+
+Five domains have both halves today — an eager `__init__` *and* a Protocol that
+imports from them: `bot_public`, `service_bot`, `session_resources`, `skills_pool`,
+`system_config`. `bot_management` has neither (its `__init__.py` is a bare
+docstring), so it would not cycle.
+
+**The rule is nevertheless applied to all 22 protocol modules, not just the five.**
+Auditing which domains cycle produces an answer that silently expires the next time
+somebody adds an import to a domain `__init__.py` — the failure would then surface
+as an ImportError at boot, far from the edit that caused it. A blanket "no runtime
+domain imports in `protocols/`" costs nothing (all 24 protocol source files are
+already annotation-only) and is checkable by a guard, which Task 13 adds.
+
+The hazard predates this change: `core/channel/__init__.py` already carries a
+`__getattr__` lazy-import hack commented *"Lazy import to avoid circular
+dependencies at module load time."*
 
 ### Six co-located types that must be separated first
 
