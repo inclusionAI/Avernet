@@ -23,10 +23,12 @@ from agentclaw.community.core.devices.services.device_context import (
     DeviceNotBoundError,
     UnknownProviderError,
 )
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.engine_runtime.relay import EngineRuntimeRelay
@@ -151,18 +153,43 @@ class _Transport:
         raise NotImplementedError
 
 
-class _CollaboratorRepo:
-    """Stands in for the collaborator table the shared-bot gate reads."""
+class _Collaborators:
+    """Stands in for ``CollaboratorService.get_permission_level``.
 
-    def __init__(
-        self, collaborators: dict[tuple[str, str], list] | None = None
-    ) -> None:
-        self._collaborators = collaborators or {}
-        self.calls: list[tuple[str, str]] = []
+    Mirrors the real policy's shape: the owner short-circuits to OWNER before
+    any lookup, everyone else gets their configured level or NONE. Calls are
+    recorded so tests can assert the adjudication was keyed on the primary
+    key of the row ownership was proven against.
+    """
 
-    def list_by_bot(self, bot_id: str, owner_id: str, env: str, role=None) -> list:
-        self.calls.append((bot_id, owner_id))
-        return self._collaborators.get((bot_id, owner_id), [])
+    def __init__(self, levels: dict[tuple[int, str], PermissionLevel] | None = None):
+        self._levels = levels or {}
+        self.calls: list[tuple[int, str, str]] = []
+
+    def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        # Recorded unconditionally — the owner's DB-free short-circuit lives
+        # inside the real CollaboratorService, not at this boundary, and a
+        # fake that skipped recording made "no lookup for the owner" a
+        # tautology no regression could fail.
+        self.calls.append((bot_pk, user_id, owner_id))
+        if user_id == owner_id:
+            return PermissionLevel.OWNER
+        return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
+
+
+class _BindingStatusRepo:
+    """Stands in for ``DeviceBindingRepository.get_by_id`` (retained-verify)."""
+
+    def __init__(self, statuses: dict[int, str] | None = None) -> None:
+        self._statuses = statuses or {}
+        self.calls: list[int] = []
+
+    def get_by_id(self, binding_id: int):
+        self.calls.append(binding_id)
+        status = self._statuses.get(binding_id)
+        if status is None:
+            return None
+        return type("Rec", (), {"status": status})()
 
 
 def _relay(
@@ -170,14 +197,16 @@ def _relay(
     resolver=None,
     transport=None,
     publish_repo=None,
-    collaborator_repo=None,
+    collaborators=None,
+    binding_repo=None,
 ) -> EngineRuntimeRelay:
     return EngineRuntimeRelay(
         bot_service or _BotService(),
         resolver or _Resolver(),
         transport or _Transport(),
         publish_repo or _PublishRepo(),
-        collaborator_repo or _CollaboratorRepo(),
+        collaborators or _Collaborators(),
+        binding_repo or _BindingStatusRepo(),
     )
 
 
@@ -204,7 +233,7 @@ async def test_foreign_bot_raises_before_touching_the_device():
     relay = _relay(_BotService(), resolver, transport)
 
     with pytest.raises(BotNotFoundError):
-        await relay.call(bot_id=BOT, owner_id="someone-else", method="GET", path="/api/sessions")
+        await relay.call(bot_id=BOT, owner_id="someone-else", stage="draft", method="GET", path="/api/sessions")
 
     assert transport.calls == []
     assert resolver.calls == []
@@ -214,7 +243,7 @@ async def test_foreign_bot_raises_before_touching_the_device():
 async def test_bot_is_resolved_with_the_callers_owner_id():
     bot_service = _BotService()
     await _relay(bot_service).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET", path="/api/sessions"
     )
     assert bot_service.calls == [(BOT, OWNER)]
 
@@ -229,7 +258,7 @@ async def test_bot_is_resolved_with_the_callers_owner_id():
 async def test_unreachable_device_is_one_retryable_error(exc):
     relay = _relay(resolver=_Resolver(raises=exc))
     with pytest.raises(EngineDeviceNotReadyError):
-        await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions")
+        await relay.call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions")
 
 
 @pytest.mark.asyncio
@@ -237,7 +266,7 @@ async def test_unknown_provider_is_not_reported_as_not_ready():
     """Bad binding data is ours to fix; retrying will never help the caller."""
     relay = _relay(resolver=_Resolver(raises=UnknownProviderError("bogus")))
     with pytest.raises(UnknownProviderError):
-        await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions")
+        await relay.call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions")
 
 
 # ── envelope normalisation ────────────────────────────────────────────────────
@@ -249,7 +278,7 @@ async def test_success_envelope_is_normalised():
         {"success": True, "data": [{"id": "s1"}], "total": 7, "warning": "partial"}
     )
     result = await _relay(transport=transport).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET", path="/api/sessions"
     )
     assert result.data == [{"id": "s1"}]
     assert result.total == 7
@@ -259,7 +288,7 @@ async def test_success_envelope_is_normalised():
 async def test_absent_total_is_none_not_zero():
     """Most engine list routes omit total; unknown is not empty."""
     result = await _relay(transport=_Transport({"success": True, "data": []})).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET", path="/api/sessions"
     )
     assert result.total is None
 
@@ -276,7 +305,7 @@ async def test_engine_warning_text_never_escapes_the_relay():
     leak = "teamclaw-aicoding-relay has no explicit sessions.create"
     result = await _relay(
         transport=_Transport({"success": True, "data": {}, "warning": leak})
-    ).call(bot_id=BOT, owner_id=OWNER, method="POST", path="/api/sessions")
+    ).call(bot_id=BOT, owner_id=OWNER, stage="draft", method="POST", path="/api/sessions")
     assert result.data == {}
     assert leak not in repr(result)
 
@@ -287,7 +316,7 @@ async def test_success_false_inside_http_200_raises():
     transport = _Transport({"success": False, "message": "internal detail"})
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -296,7 +325,7 @@ async def test_missing_success_key_is_a_failure_on_enveloped_routes():
     """Only for routes that *do* use the envelope — see the raw-payload tests."""
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=_Transport({"data": {}})).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -319,7 +348,7 @@ async def test_raw_payload_route_returns_the_whole_body_as_data():
         "transition": {},
     }
     result = await _relay(transport=_Transport(status)).call(
-        bot_id=BOT,
+        bot_id=BOT, stage="draft",
         owner_id=OWNER,
         method="GET",
         path="/api/engine/status",
@@ -335,6 +364,7 @@ async def test_raw_payload_mode_still_rejects_a_non_dict_body():
         await _relay(transport=_Transport(result="nope")).call(
             bot_id=BOT,
             owner_id=OWNER,
+            stage="draft",
             method="GET",
             path="/api/engine/status",
             enveloped=False,
@@ -346,7 +376,7 @@ async def test_raw_payload_mode_still_rejects_a_non_dict_body():
 async def test_non_envelope_body_raises(body):
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=_Transport(result=body)).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -354,7 +384,7 @@ async def test_non_envelope_body_raises(body):
 async def test_non_integer_total_is_dropped_rather_than_coerced():
     result = await _relay(
         transport=_Transport({"success": True, "data": [], "total": "many"})
-    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions")
+    ).call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions")
     assert result.total is None
 
 
@@ -366,7 +396,7 @@ async def test_501_becomes_capability_unsupported():
     transport = _Transport(raises=DeviceAdapterHTTPStatusError(501, "no such capability"))
     with pytest.raises(EngineCapabilityUnsupportedError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/nodes"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/nodes"
         )
 
 
@@ -383,7 +413,7 @@ async def test_engine_404_is_not_found_not_capability_unsupported():
     transport = _Transport(raises=DeviceAdapterEndpointNotFoundError("no route"))
     with pytest.raises(EngineResourceNotFoundError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions/gone"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions/gone"
         )
 
 
@@ -393,7 +423,7 @@ async def test_other_statuses_become_upstream_errors(status):
     transport = _Transport(raises=DeviceAdapterHTTPStatusError(status, "boom"))
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -403,7 +433,7 @@ async def test_timeout_propagates_unwrapped():
     transport = _Transport(raises=DeviceAdapterTimeoutError("too slow"))
     with pytest.raises(DeviceAdapterTimeoutError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -412,7 +442,7 @@ async def test_every_argument_is_forwarded_verbatim():
     """Covers body/params/timeout too — dropping any of them must fail a test."""
     transport = _Transport()
     await _relay(transport=transport).call(
-        bot_id=BOT,
+        bot_id=BOT, stage="draft",
         owner_id=OWNER,
         method="DELETE",
         path="/api/sessions/abc/messages",
@@ -453,7 +483,7 @@ async def test_the_forward_targets_the_device_resolved_for_that_bot():
 
     transport = _Transport()
     await _relay(resolver=_OtherResolver(), transport=transport).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET", path="/api/sessions"
     )
     assert transport.invocations[0]["conn_info"] == {"url": f"http://device-for-{BOT}"}
 
@@ -477,7 +507,7 @@ def test_resolve_bot_does_not_hand_back_device_internals():
             }
         }
     )
-    facts = _relay(bot_service).resolve_bot(BOT, OWNER)
+    facts = _relay(bot_service).resolve_bot(BOT, OWNER, OWNER)
     assert (facts.bot_id, facts.bot_type, facts.active_engine) == (
         BOT,
         "personal",
@@ -500,7 +530,7 @@ async def test_bare_value_error_from_the_transport_is_an_upstream_error():
     transport = _Transport(raises=ValueError("connect failed"))
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -517,7 +547,7 @@ async def test_non_json_body_does_not_surface_as_a_config_error():
     transport = _Transport(raises=json.JSONDecodeError("nope", "<<html>>", 0))
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions"
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/sessions"
         )
 
 
@@ -534,7 +564,7 @@ async def test_a_failure_envelope_on_a_raw_route_still_fails():
     transport = _Transport({"success": False, "message": "no device adapter"})
     with pytest.raises(EngineUpstreamError):
         await _relay(transport=transport).call(
-            bot_id=BOT, owner_id=OWNER, method="GET",
+            bot_id=BOT, owner_id=OWNER, stage="draft", method="GET",
             path="/api/engine/status", enveloped=False,
         )
 
@@ -544,7 +574,7 @@ async def test_a_raw_payload_that_merely_lacks_success_is_still_accepted():
     """The genuine raw shape has no ``success`` key; only an explicit False fails."""
     status = {"engine": "openclaw", "active_connections": 1}
     result = await _relay(transport=_Transport(status)).call(
-        bot_id=BOT, owner_id=OWNER, method="GET",
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET",
         path="/api/engine/status", enveloped=False,
     )
     assert result.data == status
@@ -570,7 +600,7 @@ async def test_service_bot_resolves_through_its_published_binding():
         bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
     )
 
-    await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    await relay.call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert resolver.binding_calls == [(42, OWNER, BOT)]
     # The by-bot entry point — the draft binding — must not be consulted at all.
@@ -601,7 +631,7 @@ async def test_another_owners_publish_record_is_never_selected():
 
     await _relay(
         bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
-    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert repo.calls and all(pk == 100 for pk, _ in repo.calls)
     assert resolver.binding_calls == [(42, OWNER, BOT)]
@@ -622,7 +652,7 @@ async def test_only_a_successful_publish_record_is_used():
 
     await _relay(
         bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
-    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert resolver.binding_calls == [(42, OWNER, BOT)]
 
@@ -633,7 +663,7 @@ async def test_personal_bot_still_resolves_by_bot():
     resolver = _Resolver()
     repo = _PublishRepo()
     await _relay(resolver=resolver, publish_repo=repo).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models"
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET", path="/api/models"
     )
 
     assert resolver.calls == [(BOT, OWNER)]
@@ -643,34 +673,35 @@ async def test_personal_bot_still_resolves_by_bot():
 
 
 @pytest.mark.asyncio
-async def test_service_bot_without_a_published_runtime_is_not_ready():
-    """No published runtime is "not ready", never a fall back to the draft.
+async def test_service_bot_without_a_published_runtime_is_stage_not_live():
+    """No live online record is a dead stage, never a fall back to the draft.
 
-    Falling back would resolve the owner's own device — the defect this
-    replaces — so an unpublished service bot gets the same retryable answer an
-    unprovisioned personal bot gets, and the device is never touched.
+    Falling back would resolve the owner's own device — the defect the
+    published lookup replaced — and "not ready" would promise a retry that
+    never helps. The typed refusal tells the operator the stage itself is not
+    live, and the device is never touched.
     """
     transport = _Transport()
-    with pytest.raises(EngineDeviceNotReadyError):
+    with pytest.raises(EngineStageNotLiveError):
         await _relay(
             bot_service=_service_bot_service(100),
             transport=transport,
             publish_repo=_PublishRepo({}),
-        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+        ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert transport.calls == []
 
 
 @pytest.mark.asyncio
-async def test_service_bot_with_no_stage_binding_is_not_ready():
+async def test_service_bot_with_no_stage_binding_is_stage_not_live():
     """A publish record whose ``ext.binding`` names no usable stage."""
     resolver = _Resolver()
-    with pytest.raises(EngineDeviceNotReadyError):
+    with pytest.raises(EngineStageNotLiveError):
         await _relay(
             bot_service=_service_bot_service(100),
             resolver=resolver,
             publish_repo=_PublishRepo({100: [_PublishRecord({"binding": {}})]}),
-        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+        ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert resolver.binding_calls == []
 
@@ -689,7 +720,7 @@ async def test_service_bot_without_a_primary_key_is_not_ready():
                 {(BOT, OWNER): {"bot_id": BOT, "bot_type": "service"}}
             ),
             publish_repo=repo,
-        ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+        ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert repo.calls == []
 
@@ -701,21 +732,19 @@ async def test_publish_ext_is_read_when_it_arrives_as_json_text():
     repo = _PublishRepo({100: [_PublishRecord(json.dumps({"binding": {"online": 9}}))]})
     await _relay(
         bot_service=_service_bot_service(100), resolver=resolver, publish_repo=repo
-    ).call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    ).call(bot_id=BOT, owner_id=OWNER, stage="online", method="GET", path="/api/models")
 
     assert resolver.binding_calls == [(9, OWNER, BOT)]
 
 
 @pytest.mark.asyncio
-async def test_draft_device_addresses_a_service_bots_draft_binding():
-    """``draft_device=True`` resolves the bot's own pre-publication binding.
+async def test_stage_draft_addresses_a_service_bots_draft_binding():
+    """``stage="draft"`` resolves the bot's own pre-publication binding.
 
-    The sessions group operates the owner's draft workspace, and the published
-    runtime is a multi-caller device whose session collection is not scoped
-    per caller — so its forwards must reach the draft binding even though the
-    bot is published. The draft lookup is the same owner-scoped
-    ``resolve_for_bot`` a personal bot uses, and the publish records are not
-    consulted at all.
+    The gated groups default to the draft workspace, so their forwards must
+    reach the draft binding even though the bot is published. The draft
+    lookup is the same owner-scoped ``resolve_for_bot`` a personal bot uses,
+    and the publish records are not consulted at all.
     """
     resolver = _Resolver()
     repo = _PublishRepo(
@@ -726,8 +755,8 @@ async def test_draft_device_addresses_a_service_bots_draft_binding():
     )
 
     await relay.call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
-        draft_device=True,
+        bot_id=BOT, owner_id=OWNER, stage="draft",
+        method="GET", path="/api/sessions",
     )
 
     assert resolver.calls == [(BOT, OWNER)]
@@ -736,12 +765,12 @@ async def test_draft_device_addresses_a_service_bots_draft_binding():
 
 
 @pytest.mark.asyncio
-async def test_draft_device_is_inert_for_a_personal_bot():
-    """A personal bot has only the one binding, so the flag changes nothing."""
+async def test_the_draft_stage_is_a_personal_bots_own_binding():
+    """A personal bot has only the one binding — the draft stage is it."""
     resolver = _Resolver()
     await _relay(resolver=resolver).call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/sessions",
-        draft_device=True,
+        bot_id=BOT, owner_id=OWNER, stage="draft",
+        method="GET", path="/api/sessions",
     )
 
     assert resolver.calls == [(BOT, OWNER)]
@@ -775,7 +804,7 @@ async def test_device_resolution_does_not_block_the_event_loop():
 
     relay = _relay(resolver=_BlockingResolver())
     task = asyncio.create_task(
-        relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+        relay.call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/models")
     )
 
     for _ in range(500):
@@ -794,7 +823,7 @@ async def test_bot_resolution_does_not_block_the_event_loop_either():
     """``BotService.get_bot`` is synchronous database work, so it offloads too.
 
     It does an owner-scoped row read plus device-binding and template fetches,
-    and the shared-bot gate may add a collaborator query. Left on the loop it
+    and the operator adjudication may add a collaborator query. Left on the loop it
     stalls every unrelated request for the length of one slow round trip.
     """
     entered = threading.Event()
@@ -809,7 +838,7 @@ async def test_bot_resolution_does_not_block_the_event_loop_either():
 
     relay = _relay(bot_service=_BlockingBotService())
     task = asyncio.create_task(
-        relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+        relay.call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/models")
     )
 
     for _ in range(500):
@@ -825,7 +854,9 @@ async def test_bot_resolution_does_not_block_the_event_loop_either():
 @pytest.mark.asyncio
 async def test_resolve_bot_off_loop_returns_the_same_facts():
     relay = _relay()
-    assert await relay.resolve_bot_off_loop(BOT, OWNER) == relay.resolve_bot(BOT, OWNER)
+    assert await relay.resolve_bot_off_loop(
+        BOT, OWNER, OWNER
+    ) == relay.resolve_bot(BOT, OWNER, OWNER)
 
 
 @pytest.mark.asyncio
@@ -834,11 +865,12 @@ async def test_prepaid_facts_skip_the_second_resolution():
     bot_service = _BotService()
     relay = _relay(bot_service=bot_service)
 
-    facts = await relay.resolve_bot_off_loop(BOT, OWNER)
+    facts = await relay.resolve_bot_off_loop(BOT, OWNER, OWNER)
     assert bot_service.calls == [(BOT, OWNER)]
 
     await relay.call(
-        bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models", facts=facts
+        bot_id=BOT, stage="draft", owner_id=OWNER, method="GET",
+        path="/api/models", facts=facts,
     )
     assert bot_service.calls == [(BOT, OWNER)], "the forward re-resolved the bot"
 
@@ -849,42 +881,75 @@ async def test_an_ungated_route_still_resolves_its_own_bot():
     bot_service = _BotService()
     relay = _relay(bot_service=bot_service)
 
-    await relay.call(bot_id=BOT, owner_id=OWNER, method="GET", path="/api/models")
+    await relay.call(bot_id=BOT, owner_id=OWNER, stage="draft", method="GET", path="/api/models")
     assert bot_service.calls == [(BOT, OWNER)]
 
 
-# ── shared bots ───────────────────────────────────────────────────────────────
+# ── the operator adjudication ─────────────────────────────────────────────────
 
 
-def test_a_private_personal_bot_is_not_shared():
-    assert _relay().resolve_bot(BOT, OWNER).is_shared is False
+def test_the_owner_is_an_operator():
+    """The owner resolves their own bot with no configured collaborator row —
+    the level policy (including its DB-free owner short-circuit) is the real
+    ``CollaboratorService``'s, delegated to, not re-implemented at the gate."""
+    collaborators = _Collaborators()
+    facts = _relay(collaborators=collaborators).resolve_bot(BOT, OWNER, OWNER)
+    assert facts.owner_id == OWNER
 
 
-def test_a_public_bot_is_shared():
+@pytest.mark.parametrize(
+    "level", [PermissionLevel.MEMBER, PermissionLevel.ADMIN]
+)
+def test_a_member_or_admin_collaborator_resolves_the_bot(level):
+    """A coding app keeps ``bot_type='personal'`` while taking collaborators —
+    its team operates the bot from their own accounts."""
+    bots = {(BOT, OWNER): {"bot_id": BOT, "owner_id": OWNER, "id": 100}}
+    collaborators = _Collaborators({(100, "u2"): level})
+    relay = _relay(
+        bot_service=_BotService(bots), collaborators=collaborators
+    )
+    assert relay.resolve_bot(BOT, OWNER, "u2").bot_id == BOT
+    # Keyed on the primary key of the row ownership was proven against —
+    # ``bot_id`` is not unique across owners.
+    assert collaborators.calls == [(100, "u2", OWNER)]
+
+
+def test_a_non_collaborator_is_the_masked_not_found():
+    """A refused caller cannot tell a bot they may not operate from one that
+    does not exist — same exception type, mapped to the same public body."""
+    with pytest.raises(BotNotFoundError):
+        _relay().resolve_bot(BOT, OWNER, "stranger")
+
+
+def test_a_public_bot_grants_operation_to_no_one():
+    """Visibility is not authorization: the audience talks to a public bot
+    over the chat path; operating it stays with its owner and collaborators."""
     bots = {(BOT, OWNER): {"bot_id": BOT, "owner_id": OWNER, "public": "1"}}
     relay = _relay(bot_service=_BotService(bots))
-    assert relay.resolve_bot(BOT, OWNER).is_shared is True
+    with pytest.raises(BotNotFoundError):
+        relay.resolve_bot(BOT, OWNER, "stranger")
 
 
-def test_a_bot_with_collaborators_is_shared():
-    """A coding app keeps ``bot_type='personal'`` while taking collaborators."""
-    repo = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone-else"}]})
-    relay = _relay(collaborator_repo=repo)
-    assert relay.resolve_bot(BOT, OWNER).is_shared is True
+def test_the_refusal_logs_the_caller_and_the_owner(caplog):
+    """The response cannot carry either id (it is a fixed masked 404), so the
+    log line at the point of refusal is an operator's only record of who
+    asked for whose bot."""
+    import logging
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(BotNotFoundError):
+            _relay().resolve_bot(BOT, OWNER, "stranger")
+    line = next(r for r in caplog.records if "not an operator" in r.getMessage())
+    assert "stranger" in line.getMessage() and OWNER in line.getMessage()
 
 
-def test_an_unreadable_collaborator_table_reads_as_shared():
-    """Fails closed: the gate this feeds refuses a surface."""
+def test_a_collaborator_lookup_failure_refuses():
+    """Fails closed: the direction of the guess decides what a database blip
+    does, and it must not admit a stranger."""
 
     class _Broken:
-        def list_by_bot(self, bot_id, owner_id, env, role=None):
-            raise RuntimeError("collaborator table unavailable")
+        def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+            raise RuntimeError("collaborator service unavailable")
 
-    assert _relay(collaborator_repo=_Broken()).resolve_bot(BOT, OWNER).is_shared is True
-
-
-def test_the_collaborator_lookup_is_keyed_on_the_resolved_owner():
-    """``bot_id`` is not unique across owners, so the pair must come from the row."""
-    repo = _CollaboratorRepo()
-    _relay(collaborator_repo=repo).resolve_bot(BOT, OWNER)
-    assert repo.calls == [(BOT, OWNER)]
+    with pytest.raises(BotNotFoundError):
+        _relay(collaborators=_Broken()).resolve_bot(BOT, OWNER, "u2")

@@ -20,7 +20,9 @@ from urllib.parse import quote, urlsplit
 
 from injector import inject
 
-from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.bot_collaborator.protocols import (
+    CollaboratorServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.errors import (
     DeviceDomainError,
@@ -33,11 +35,21 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
-from agentclaw.community.core.engine_runtime.gate import require_operable_bot
+from agentclaw.community.core.engine_runtime.gate import (
+    require_bot_operator,
+    require_operable_bot,
+)
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
-from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
+from agentclaw.community.core.engine_runtime.stage import (
+    STAGE_DRAFT,
+    resolve_stage_bind_id,
+)
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -145,54 +157,75 @@ class EngineConnectionService:
         binding_repository: DeviceBindingRepository,
         device_service: DeviceService,
         gateway: GatewayEndpoint,
-        collaborator_repo: CollaboratorRepositoryProtocol,
+        collaborators: CollaboratorServiceProtocol,
+        publish_repo: BotPublishRepositoryProtocol,
     ) -> None:
         self._bot_service = bot_service
         self._binding_repository = binding_repository
         self._device_service = device_service
         self._gateway = gateway
-        self._collaborator_repo = collaborator_repo
+        self._collaborators = collaborators
+        self._publish_repo = publish_repo
 
-    def build(self, *, bot_id: str, owner_id: str) -> ConnectionResult:
-        """Return the bot's usable sockets.
+    def build(
+        self, *, bot_id: str, owner_id: str, caller_id: str, stage: str
+    ) -> ConnectionResult:
+        """Return the addressed bot's usable sockets for one stage.
 
-        ``owner_id`` must be the authenticated principal: the bot is resolved
-        owner-scoped here and the resolved owner is passed on as the operator.
-        That matters because ``DeviceService.get_device_connection`` applies a
-        *wider* permission model of its own — public bots and collaborators —
-        and this surface is owner-only. Resolving first means the wider check
-        can never widen it.
+        ``caller_id`` must be the authenticated principal; ``owner_id`` is the
+        owner the request addresses and may name someone else. The bot is
+        resolved ``(bot_id, owner_id)``-scoped, then the shared operator
+        adjudication decides whether the caller may hold the channel.
+        ``DeviceService.get_device_connection`` applies a permission model of
+        its own — one that also admits any caller to a *public* bot — and
+        adjudicating first with the stricter rule means that model can never
+        widen this surface.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
+        resolved_id = str(bot.get("bot_id") or bot_id)
+        resolved_owner = str(bot.get("owner_id") or owner_id)
+        bot_pk = int(bot.get("id") or 0)
         # The socket this endpoint publishes is **not** chat-scoped, however it
         # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
         # ``exec.approvals`` methods and grants ``operator.admin``, so the
         # credential is an operator channel over every session on the device.
-        # The shared gate admits exactly the bots whose device only the owner
-        # reaches — see ``gate.py`` for the full rule, including why a service
-        # bot's *draft* device (the one ``_active_binding_id`` resolves) is in
-        # that set. Gated here rather than in the router because the rule is
+        # The shared gate decides who may hold one — see ``gate.py`` for the
+        # full rule. Gated here rather than in the router because the rule is
         # about what may be *composed*, not about how it is served: any future
         # caller of ``build`` is covered without repeating the check.
+        require_bot_operator(
+            self._collaborators,
+            bot_pk=bot_pk,
+            bot_id=resolved_id,
+            caller_id=caller_id,
+            owner_id=resolved_owner,
+        )
         require_operable_bot(
-            str(bot.get("bot_type") or ""),
-            is_shared=bot_is_shared(
-                bot,
-                self._collaborator_repo,
-                bot_id=str(bot.get("bot_id") or bot_id),
-                owner_id=str(bot.get("owner_id") or owner_id),
-            ),
-            surface="connections",
+            str(bot.get("bot_type") or ""), stage=stage, surface="connections"
         )
         engine = str(bot.get("active_engine") or "")
 
-        binding_id = self._active_binding_id(bot_id, owner_id)
+        binding_id = self._stage_binding_id(
+            bot_pk=bot_pk, bot_id=resolved_id, owner_id=owner_id, stage=stage
+        )
 
+        # Composed as the **resolved owner**, deliberately, even when the
+        # admitted caller is a collaborator. The adjudication above is this
+        # surface's authorization; downstream, the operator id is routing and
+        # bookkeeping, and two provider behaviors make the owner the only
+        # correct value there: some device-service implementations apply
+        # permission models of their own that know nothing of collaborators
+        # (they would refuse a caller our gate admitted, as a misleading
+        # "not ready"), and the BaaS path feeds this id into instance
+        # affinity — keyed per caller, two operators of the same (bot, stage)
+        # could be pinned to different instances while the HTTP relay path
+        # resolves with the owner. Who actually held the channel is on the
+        # gate's log line and stamped into the sessions the caller creates.
         operator = OperatorContext(
-            staff_id=owner_id,
-            staff=owner_id,
-            nick_name=owner_id,
-            operator_name=owner_id,
+            staff_id=resolved_owner,
+            staff=resolved_owner,
+            nick_name=resolved_owner,
+            operator_name=resolved_owner,
         )
         chat_path = self._chat_path(engine)
         try:
@@ -228,8 +261,33 @@ class EngineConnectionService:
             engine=engine, expires_at=self._expires_at(info), sockets=sockets
         )
 
+    def _stage_binding_id(
+        self, *, bot_pk: int, bot_id: str, owner_id: str, stage: str
+    ) -> int:
+        """The binding id of the runtime ``stage`` names — and *only* the id.
+
+        The draft is the bot's own binding, read directly (see
+        :meth:`_active_binding_id`). A published stage resolves through the
+        same ``resolve_stage_bind_id`` rule the relay uses — one rule, so a
+        socket and an HTTP forward for the same (bot, stage) cannot address
+        different devices. ``bot_pk`` and ``bot_id`` are the values the
+        operator adjudication was proven against, passed rather than
+        re-derived so the two cannot drift. The stage's validity for this bot
+        was already checked by the gate above.
+        """
+        if stage == STAGE_DRAFT:
+            return self._active_binding_id(bot_id, owner_id)
+        return resolve_stage_bind_id(
+            self._publish_repo,
+            self._binding_repository,
+            bot_pk=bot_pk,
+            bot_id=bot_id,
+            stage=stage,
+            env=get_current_env(),
+        )
+
     def _active_binding_id(self, bot_id: str, owner_id: str) -> int:
-        """The bot's active binding id — and *only* the id.
+        """The bot's own (draft) binding id — and *only* the id.
 
         Deliberately not ``DeviceContextResolver.resolve_for_bot``. That builds
         full connection info, which on the BaaS path means a blocking
@@ -251,10 +309,12 @@ class EngineConnectionService:
         ``(bot_id, owner_id)``, so another owner's binding cannot be returned
         even though ownership was already established above.
 
-        For a ``service`` bot this is the **draft** binding, and that is what
-        the gate above relies on: the verify/online runtimes publishing
-        produces are bound under ``publish_bot_id`` on the publish records,
-        so a ``bot_id``-keyed read cannot select them.
+        For a ``service`` bot this is the **draft** binding: the verify/online
+        runtimes publishing produces are bound only in the publish records'
+        ``ext.binding.{verify,online}`` (never on ``ac_bots.binding_id``), so
+        a ``bot_id``-keyed read cannot select them —
+        :meth:`_stage_binding_id` resolves those through the shared stage
+        rule instead.
         """
         binding = self._binding_repository.get_active_by_bot_and_owner(
             bot_id, owner_id

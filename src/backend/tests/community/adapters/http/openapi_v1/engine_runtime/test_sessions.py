@@ -406,7 +406,7 @@ def test_the_session_window_stays_page_sized(client, relay):
     assert relay.calls[0]["params"] == {"offset": 100, "limit": 51}
 
 
-# ── the private-bots-only gate ───────────────────────────────────────────────
+# ── the operator gate ────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -420,33 +420,42 @@ def test_the_session_window_stays_page_sized(client, relay):
 def test_a_service_bot_is_served_and_addressed_at_its_draft_device(
     client, relay, method, suffix
 ):
-    """All seven routes serve an unshared service bot — at its DRAFT binding.
+    """All seven routes serve a service bot at its DRAFT binding by default.
 
-    The relay's default for a service bot is the *published* runtime, which is
-    a multi-caller device whose session collection is not scoped per caller —
-    forwarding there would hand the owner other callers' conversations. So the
-    assertion is not merely that the route answered: every forward must carry
-    ``draft_device=True``, addressing the pre-publication binding the owner
-    alone uses.
+    A request that names no stage must behave exactly as before stages were
+    addressable: every forward carries ``stage == "draft"``, addressing the
+    pre-publication workspace — never the published runtime the relay's
+    internal default would resolve.
     """
     relay.set_bot_type("service")
     kwargs = {"json": {}} if method in ("post", "patch") else {}
     resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
     assert resp.status_code in (200, 201), resp.json()
     assert relay.calls, "the route never forwarded"
-    assert all(c["draft_device"] is True for c in relay.calls)
+    assert all(c["stage"] == "draft" for c in relay.calls)
 
 
-def test_a_shared_service_bot_gets_501_without_touching_the_device(client, relay):
-    """Sharing closes the draft window too: ``ExpertChatService`` creates
-    collaborator and public callers' sessions on the bot's own draft binding,
-    so a shared service bot's draft device is multi-caller like the published
-    one."""
+def test_a_collaborators_request_is_served(make_client, relay):
+    """The flip of the old shared-bot 501: a member-level collaborator now
+    operates the bot — naming the owner they address — instead of sharing
+    closing the surface for everyone."""
     relay.set_bot_type("service")
-    relay.set_shared()
-    body = fails(client.get(_base()), 501)
-    assert body["message"] == "Not supported for this bot type"
-    assert relay.calls == []
+    relay.add_operator("u2")
+    client = make_client(router, caller="u2")
+    resp = client.get(_base(), params={"owner_id": OWNER})
+    assert resp.status_code == 200, resp.json()
+    assert relay.paths == ["/api/sessions"]
+
+
+def test_a_non_operator_is_the_masked_404(make_client, relay):
+    """A caller who is neither owner nor collaborator learns nothing — the
+    answer is byte-identical to naming a bot that does not exist, and no
+    forward is even attempted."""
+    client = make_client(router, caller="u9")
+    refused = fails(client.get(_base(), params={"owner_id": OWNER}), 404)
+    absent = fails(client.get("/openapi/v1/bots/sessions/no-such-bot"), 404)
+    assert refused == {**absent, "request_id": refused["request_id"]}
+    assert relay.attempts == []
 
 
 @pytest.mark.parametrize("bot_type", ["", "something-new"])
@@ -469,29 +478,28 @@ def test_an_unknown_bot_type_gets_501_without_touching_the_device(
         ("get", f"/{SESSION_ID}/messages"), ("delete", f"/{SESSION_ID}/messages"),
     ],
 )
-def test_shared_personal_bot_gets_501_without_touching_the_device(
-    client, relay, method, suffix
+def test_a_collaborated_personal_bot_is_served_to_its_operators(
+    make_client, relay, method, suffix
 ):
-    """``personal`` is not on its own enough — the bot must be single-caller.
+    """The flip of the old shared-personal 501, on all seven routes.
 
-    A personal bot can be made public, and a coding app can take
-    collaborators; ``ExpertChatService`` then creates those callers' sessions
-    on this same binding. The engine's collection is not scoped per caller, so
-    serving these routes would let the owner list, read, rename and delete
-    other people's conversations. Gated before the forward for the same reason
-    as the bot-type check: filtering the response would already have fetched
-    them.
+    A coding app's collaborators are its team: each of them — and the owner —
+    operates the bot's workspace. The surface is an operator console, and the
+    exposure is device-wide by documented contract; what changed is who may
+    hold the console, adjudicated per caller instead of refused for all.
     """
-    relay.set_shared()
+    relay.add_operator("u2")
+    client = make_client(router, caller="u2")
     kwargs = {"json": {}} if method in ("post", "patch") else {}
+    kwargs["params"] = {"owner_id": OWNER}
     resp = getattr(client, method)(f"{_base()}{suffix}", **kwargs)
-    assert fails(resp, 501)["message"] == "Not supported for this bot type"
-    assert relay.calls == []
+    assert resp.status_code in (200, 201), resp.json()
+    assert relay.calls, "the route never forwarded"
 
 
-def test_an_unshared_personal_bot_is_still_served(client, relay):
-    """The gate must not have closed the case it exists to allow."""
-    relay.set_shared(False)
+def test_the_owners_own_request_is_still_served(client, relay):
+    """The gate must not have closed the case it exists to allow: the owner,
+    naming nothing extra, exactly as before the expansion."""
     assert client.get(_base()).status_code == 200
     assert relay.paths == ["/api/sessions"]
 

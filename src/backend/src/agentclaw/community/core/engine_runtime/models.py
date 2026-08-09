@@ -50,36 +50,21 @@ class BotFacts:
     bot_id: str
     bot_type: str
     active_engine: str
+    #: The *resolved* owner — the record's, not the request's. Carried because
+    #: the caller and the owner are distinct roles on this surface (a
+    #: collaborator operates a bot they do not own), and downstream reads that
+    #: were once "the caller's id" now need the owner the bot was actually
+    #: resolved against.
+    owner_id: str
     #: ``ac_bots`` primary key of the row ownership was just proven against.
     #: Internal, never published — it exists because ``bot_id`` is **not**
     #: unique across owners (no unique constraint on the column, and
     #: ``create_bot_for_others`` gives every user a bot called ``default``), so
     #: any second query keyed on ``bot_id`` alone could select a different
     #: owner's row. This is the discriminator that keeps the service-bot
-    #: publish lookup on the bot the caller actually owns.
+    #: publish lookup — and the collaborator adjudication — on the bot the
+    #: caller actually addressed.
     bot_pk: int = 0
-    #: Whether callers other than the owner can reach this bot's device.
-    #:
-    #: ``bot_type`` alone does not answer that. A ``personal`` bot is
-    #: single-caller only by default: ``ac_bots.public`` is set with no
-    #: ``bot_type`` gate (``bot_public_service``), and a coding app —
-    #: ``active_engine == "claude_code"`` with ``template_type ==
-    #: "applicationCoding"`` — takes collaborators through the same branch that
-    #: otherwise requires a ``service`` bot
-    #: (``collaborator_service.add_collaborator``). ``ExpertChatService``
-    #: admits owner, public, and collaborator callers alike
-    #: (``_check_chat_access``) and creates each one's sessions on the bot's
-    #: own binding.
-    #:
-    #: That matters because the engine's session collection is **not** scoped
-    #: per caller in practice: ``GET /api/sessions`` accepts a ``user_id``
-    #: query parameter, but openclaw's port drops it — ``sessions_list`` has no
-    #: such parameter and the adapter only logs ``request.user_id``
-    #: (``plugins/openclaw/_session.py``,
-    #: ``core/adapters/openclaw/session.py``). So a shared bot's session list
-    #: is every caller's sessions, and filtering it by passing ``user_id``
-    #: upstream would be a silent no-op rather than isolation.
-    is_shared: bool = False
 
 
 @dataclass(frozen=True)

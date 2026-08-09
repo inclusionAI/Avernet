@@ -149,30 +149,43 @@ def test_foreign_bot_is_masked_404_without_a_device_call(client, relay):
     assert relay.calls == []
 
 
-# ── the private-bots-only gate ───────────────────────────────────────────────
+# ── the operator gate ────────────────────────────────────────────────────────
 
 
 def test_a_service_bot_is_served_at_its_draft_device(client, relay):
-    """Approval reads/writes on a service bot must reach the DRAFT device —
-    the published runtime is multi-caller, and approval state is
-    session-scoped."""
+    """A request naming no stage reads approvals at the DRAFT device — the
+    default must stay byte-for-byte what it was before stages were
+    addressable."""
     relay.set_bot_type("service")
     relay.results = [EngineResult(data={"sessionKey": "sk", "mode": "approve"})]
     resp = client.get(
         f"/openapi/v1/bots/approvals/{BOT}/mode", params={"session_key": "sk"}
     )
     assert resp.status_code == 200, resp.json()
-    assert relay.calls and all(c["draft_device"] is True for c in relay.calls)
+    assert relay.calls and all(c["stage"] == "draft" for c in relay.calls)
 
 
-def test_a_shared_bot_gets_501_without_touching_the_device(client, relay):
-    """On a shared bot these routes would reach other callers' sessions."""
-    relay.set_shared()
-    body = fails(
-        client.get(
-            f"/openapi/v1/bots/approvals/{BOT}/mode", params={"session_key": "sk"}
-        ),
-        501,
+def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
+    make_client, relay
+):
+    """The flip of the old shared-bot 501: the operator adjudication decides
+    per caller, before any forward."""
+    relay.add_operator("u2")
+    relay.results = [EngineResult(data={"sessionKey": "sk", "mode": "approve"})]
+    collaborator = make_client(router, caller="u2")
+    ok(
+        collaborator.get(
+            f"/openapi/v1/bots/approvals/{BOT}/mode",
+            params={"session_key": "sk", "owner_id": OWNER},
+        )
     )
-    assert body["message"] == "Not supported for this bot type"
-    assert relay.calls == []
+    stranger = make_client(router, caller="u9")
+    refused = fails(
+        stranger.get(
+            f"/openapi/v1/bots/approvals/{BOT}/mode",
+            params={"session_key": "sk", "owner_id": OWNER},
+        ),
+        404,
+    )
+    assert refused["message"] == "Not found"
+    assert len(relay.calls) == 1

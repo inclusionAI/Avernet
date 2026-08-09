@@ -1,7 +1,9 @@
 """Engine group (read-only) — ``/openapi/v1/bots/engine/{bot_id}``.
 
-**Private bots only** — private personal bots, and a service bot's
-pre-publication draft workspace; see ``engine_runtime/gating.py``.
+An **operator console**: served to the addressed bot's owner and its
+member-level collaborators, for the stage the request names (``?stage=``,
+draft by default), and device-wide — see ``engine_runtime/gating.py`` and
+``core/engine_runtime/gate.py``.
 
 Three reads. ``switch`` and ``restart`` are deliberately **not** wrapped:
 wrapping ``switch`` would be a back door around the rule that a bot's engine is
@@ -20,6 +22,13 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas 
     EngineCapabilities,
     EngineInfo,
     EngineStatus,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -55,16 +64,25 @@ def _names(raw: Any) -> list[str]:
 @envelope_errors
 async def get_engine_status(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET", path="/api/engine/status",
         enveloped=False,
     )
@@ -86,8 +104,10 @@ async def get_engine_status(
 @envelope_errors
 async def get_engine_capabilities(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineCapabilities]:
     """What this bot can do.
@@ -95,9 +115,16 @@ async def get_engine_capabilities(
     The discovery endpoint for these groups: capabilities differ per bot, so the
     same request can succeed for one of your bots and be refused for another.
     """
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET",
         path="/api/engine/capabilities",
     )
@@ -120,15 +147,24 @@ async def get_engine_capabilities(
 @envelope_errors
 async def list_available_engines(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[EngineInfo]]:
     """Engines available on this bot, with the active one marked."""
     # Publicly a noun; the engine models the same read under a verb path.
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="engine",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET", path="/api/engine/list",
     )
     raw = result.data

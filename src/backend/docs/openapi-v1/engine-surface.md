@@ -82,16 +82,23 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 
 ### sessions (7) — engine `/api/sessions`
 
-> **Personal bots only.** All seven routes answer `501 "Not supported for this
-> bot type"` on a `service` bot, checked before any device call. The engine
-> accepts `user_id`, logs it, and **drops it** — `sessions_list()` has no
-> `user_id` parameter (`plugins/openclaw/_session.py:125-132`), so the device
-> returns every session it holds. On a personal bot that set is the owner's; on
-> a service bot, whose device serves many callers, it is everyone's. Filtering
-> on the `user:<id>` suffix the session key already carries is the right fix but
-> belongs in the **engine** — a backend filter over an unfiltered device response
-> is bypassable. Widening to both bot types later breaks no contract.
-> _Decided 2026-07-30._
+> **An operator console, device-wide by contract.** _Amended 2026-08-09
+> (`specs/2026-08-09-openapi-v1-access-expansion/`); original 2026-07-30
+> ruling served personal bots only, PR #880 added the service draft._ All
+> seven routes serve the addressed bot's **operators** — its owner and its
+> member-level collaborators, adjudicated before any device call; anyone else
+> gets the masked 404 — at the stage the request names (`?stage=`, draft by
+> default; verify/online while live). The engine accepts `user_id`, logs it,
+> and **drops it** — `sessions_list()` has no `user_id` parameter
+> (`plugins/openclaw/_session.py:125-132`) — so the device returns every
+> session it holds and an admitted operator sees them all, end-user chats
+> included; the published docs say so plainly. Per-caller filtering on the
+> `user:<id>` suffix the session key carries would belong in the **engine** —
+> a backend filter over an unfiltered device response is bypassable — and was
+> rejected as an expansion goal, not deferred. One caveat: a multi-instance
+> provider can fan a published stage over several device instances; a
+> stage-addressed answer describes the addressed binding's current instance,
+> not the fleet.
 
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
@@ -346,11 +353,15 @@ answers differently for two of a tenant's own bots.**
 
 Several engine routes take `user_id` as a **query parameter**
 (`GET /api/sessions`, `POST /api/approvals/mode/get`, `/api/session-favorites`).
-On the public surface these must be filled from `caller_owner_id(principal)` and
-**rejected if present in the request** (`extra="forbid"` on bodies, explicit
-omission from the query model). A caller-supplied `user_id` forwarded verbatim
-is a cross-caller read inside the same tenant — the isolation guard cannot catch
-it, because the engine has no tenant axis at all.
+On the public surface these are filled from the request's **verified caller**
+(the `?user_id=` the explicit-user-id change requires, which must equal the
+principal) and **rejected if present in the request body** (`extra="forbid"`
+on bodies, explicit omission from the query model). A caller-supplied value
+forwarded verbatim would be a cross-caller impersonation inside the same
+tenant — the isolation guard cannot catch it, because the engine has no
+tenant axis at all. _Amended 2026-08-09: on a shared bot the acting caller
+may be a collaborator, so the stamped id is the actor's, not necessarily the
+owner's._
 
 The same applies to the `engine=` override on `/api/sessions` and
 `/api/models`: **the bot's active engine is authoritative.** Do not expose it.
@@ -507,7 +518,11 @@ does not add it (rule C2)._
   `personal` bots only**; `service` gets `501`. `BotType` is
   `Literal["personal", "service"]` and PR #494 already lets an external tenant
   create either, so this is live, not hypothetical. The other three groups
-  serve both types.
+  serve both types. _Superseded twice: PR #880 (2026-08-07) served a service
+  bot's unshared draft across all five groups, and the 2026-08-09 access
+  expansion (`specs/2026-08-09-openapi-v1-access-expansion/`) replaced the
+  shared-bot refusal with the operator adjudication and made the
+  verify/online stages addressable (`?owner_id=`, `?stage=`)._
 
   Connection was added to this ruling during review, and for the sessions
   group's reason rather than one of its own. The socket it publishes is not

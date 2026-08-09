@@ -93,8 +93,9 @@ class _FakeConnections:
         #: builds that got past bot resolution — i.e. would reach a device
         self.built: list[str] = []
 
-    def build(self, *, bot_id, owner_id):
-        self._relay.resolve_bot(bot_id, owner_id)  # raises for a foreign bot
+    def build(self, *, bot_id, owner_id, caller_id, stage):
+        # raises for a foreign bot or a non-operator caller
+        self._relay.resolve_bot(bot_id, owner_id, caller_id)
         self.built.append(bot_id)
         raise AssertionError("unreachable in these tests — resolution must fail")
 

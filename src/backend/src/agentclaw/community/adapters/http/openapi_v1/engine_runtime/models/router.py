@@ -1,7 +1,9 @@
 """Models group — ``/openapi/v1/bots/models/{bot_id}``.
 
-**Private bots only** — private personal bots, and a service bot's
-pre-publication draft workspace; see ``engine_runtime/gating.py``.
+An **operator console**: served to the addressed bot's owner and its
+member-level collaborators, for the stage the request names (``?stage=``,
+draft by default), and device-wide — see ``engine_runtime/gating.py`` and
+``core/engine_runtime/gate.py``.
 """
 
 from __future__ import annotations
@@ -17,6 +19,13 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.models.schemas import (
     Model,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -47,14 +56,23 @@ def _map_model(data: dict[str, Any]) -> Model:
 async def list_models(
     bot_id: str,
     page: PageParamsDep,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET", path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
@@ -76,8 +94,10 @@ async def list_models(
 async def get_model(
     bot_id: str,
     model_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[Model]:
     """Get one model by id.
@@ -92,9 +112,16 @@ async def get_model(
     # A model id never contains a dot segment.
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
-    facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="models")
+    facts = await resolve_operable_bot(
+        relay,
+        bot_id,
+        caller_id=user_id,
+        owner_id=owner_id,
+        stage=stage.value,
+        surface="models",
+    )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
+        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="GET",
         path=f"/api/models/{model_id}",
     )

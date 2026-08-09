@@ -18,8 +18,15 @@ from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResul
 class EngineRuntimeRelayProtocol(Protocol):
     """Forward one public runtime request to a bot's engine adapter."""
 
-    def resolve_bot(self, bot_id: str, owner_id: str) -> BotFacts:
-        """Return the caller's bot facts, or raise ``BotNotFoundError``.
+    def resolve_bot(self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts:
+        """Return the addressed bot's facts, or raise ``BotNotFoundError``.
+
+        Resolves ``(bot_id, owner_id)``, then adjudicates whether
+        ``caller_id`` may operate the resolved bot — its owner, or a
+        collaborator at member level or above; anyone else gets the same
+        masked ``BotNotFoundError`` an absent bot raises. ``caller_id`` must
+        come from the authenticated principal; ``owner_id`` is the owner the
+        request addresses and may name someone else.
 
         Exposed because handlers must branch on bot facts *before* deciding
         whether to forward at all — the sessions group reads ``bot_type``, the
@@ -29,7 +36,9 @@ class EngineRuntimeRelayProtocol(Protocol):
         """
         ...
 
-    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str) -> BotFacts:
+    async def resolve_bot_off_loop(
+        self, bot_id: str, owner_id: str, caller_id: str
+    ) -> BotFacts:
         """:meth:`resolve_bot`, run in a worker thread.
 
         The form handlers should use: the resolve is synchronous database work
@@ -50,21 +59,24 @@ class EngineRuntimeRelayProtocol(Protocol):
         timeout: float | None = None,
         enveloped: bool = True,
         facts: BotFacts | None = None,
-        draft_device: bool = False,
+        stage: str,
     ) -> EngineResult:
-        """Issue ``method path`` against the caller's bot's engine adapter.
+        """Issue ``method path`` against the addressed bot's engine adapter.
 
         ``enveloped=False`` for the one engine route that answers with a raw
         payload instead of the standard envelope (``GET /api/engine/status``).
 
         ``facts`` reuses a resolve a gating handler already paid for; ``None``
-        resolves here. Only a value this relay returned for the same
-        ``bot_id``/``owner_id`` is safe — it stands in for the ownership proof.
+        resolves here with the owner as the caller. Only a value this relay
+        returned for the same ``bot_id``/``owner_id`` is safe — it stands in
+        for the ownership proof.
 
-        ``draft_device=True`` addresses a ``service`` bot's pre-publication
-        draft binding instead of its published runtime; inert for a personal
-        bot. The sessions group passes it — that surface operates the owner's
-        draft workspace, and the published runtime is a multi-caller device.
+        ``stage`` names which of a ``service`` bot's runtimes this call
+        addresses: the draft workspace (``ac_bots.binding_id``) or a published
+        stage's live binding. Required with no default, so the stage a
+        handler gated on and the stage it forwards to cannot silently
+        diverge. Ignored by a personal bot — refusing a published stage on
+        one is the gate's job, before any device work.
         """
         ...
 

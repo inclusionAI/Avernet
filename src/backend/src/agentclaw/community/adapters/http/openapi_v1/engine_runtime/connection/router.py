@@ -16,6 +16,13 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.sche
     Connection,
     Socket,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
+    RuntimeStage,
+)
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
+    OwnerIdDep,
+    StageQuery,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -33,8 +40,10 @@ router = APIRouter(prefix="/openapi/v1/bots/connection", tags=["connection"])
 @envelope_errors
 async def get_connection(
     bot_id: str,
-    owner_id: UserIdDep,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
+    stage: StageQuery = RuntimeStage.DRAFT,
     connections: EngineConnectionServiceProtocol = Injected(
         EngineConnectionServiceProtocol
     ),
@@ -53,7 +62,11 @@ async def get_connection(
     # signature — which ``test_service_api_conformance`` pins, coroutine status
     # included — the same on both sides.
     result = await asyncio.to_thread(
-        connections.build, bot_id=bot_id, owner_id=owner_id
+        connections.build,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        caller_id=user_id,
+        stage=stage.value,
     )
     return envelope(
         Connection(
