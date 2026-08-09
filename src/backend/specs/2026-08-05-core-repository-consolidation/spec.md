@@ -67,15 +67,26 @@ repository bodies moved in.
    which none of these do.
 
    The investigation found live drift: the `SkillRepository` Protocol
-   (`core/skill_center/services/repositories.py:95,100`) declares
-   `add_default_skill_exclusion` and `remove_default_skill_exclusion`, and the
-   bound implementation (`plugins/skill_repository.py`, `class SkillRepository`)
-   implements neither. Both members are duplicated on the sibling
-   `SkillSetRepository` Protocol, which *is* implemented, and every caller
+   (`core/skill_center/services/repositories.py`) declares
+   `add_default_skill_exclusion`, `remove_default_skill_exclusion`, and
+   `remove_all_default_skill_exclusions`, and the bound implementation
+   (`plugins/skill_repository.py`, `class SkillRepository`) implements none of
+   them. All three are duplicated on the sibling `SkillSetRepository` Protocol,
+   which *is* implemented (`plugins/skill_repository.py:1927` sits inside
+   `class SkillSetRepository`, which starts at line 1157), and every caller
    reaches them through `skill_set_repo`. Any caller that resolved the
-   `SkillRepository` Protocol and called either member would raise
+   `SkillRepository` Protocol and called one of them would raise
    `AttributeError` in production — exactly the failure mode this feature is
    meant to make impossible.
+
+   **This is not a historical accident that has stopped happening.** The spec
+   originally recorded two drifted members. On the `dev` rebase of 2026-08-08,
+   `remove_all_default_skill_exclusions` was added to *both* Protocols by
+   `feat(backend): integrate REL20260806 bot and Skills updates (#894)` and
+   implemented on only one — reproducing the same copy/paste exactly, and taking
+   the count from two to three. Nothing in CI noticed. The drift rate is the
+   argument for R2: a contract that cannot be checked will keep drifting at
+   whatever rate the team edits it.
 
 3. **There is no single correct answer for new code.** Protocols are spread
    across nine filename conventions:
@@ -246,11 +257,15 @@ Existing `@runtime_checkable` decorators are retained where present so structura
 
 ### R3 — Contract drift resolved
 
-The `SkillRepository` Protocol's declaration of `add_default_skill_exclusion`
-and `remove_default_skill_exclusion` must be reconciled with its implementation
-before R2 can hold — under R2 the current state fails at construction. The
-resolution must not change behaviour for any live caller (all of which reach
-these members through `SkillSetRepository`).
+The `SkillRepository` Protocol's declaration of `add_default_skill_exclusion`,
+`remove_default_skill_exclusion`, and `remove_all_default_skill_exclusions` must
+be reconciled with its implementation before R2 can hold — under R2 the current
+state fails at construction. The resolution must not change behaviour for any
+live caller (all of which reach these members through `SkillSetRepository`).
+
+Re-derive this set at implementation time rather than trusting the list above:
+it grew from two members to three between the spec being written and the first
+`dev` rebase, and it will keep growing until R2 lands.
 
 ### R3b — Missing contracts authored
 
@@ -342,10 +357,46 @@ at one commit.
 
 Recorded before any file moves, so post-move numbers are comparable:
 
-- `tests/community/architecture/`: **120 passed** (local, clean `dev`).
+- `tests/community/architecture/`: **120 passed** — measured on `dev` @ `dd02f82`
+  and re-measured unchanged after the 2026-08-08 rebase onto `dev` @ `2de13dc`.
 - CI on this spec's own PR (`dev` + one Markdown file): **all 7 checks green** —
   Backend / BaaS / Engine / Gateway / BCS unit tests, BCS e2e, and Singlebox
-  coverage. Per-module coverage figures from that run are in C4.
+  coverage. Per-module coverage figures from that run are in C4, with the
+  staleness caveat noted there.
+
+### C0b — Re-derivation after the 2026-08-08 `dev` rebase
+
+`dev` advanced 16 commits / 234 files / ~15k insertions. The whole classification
+was re-derived rather than assumed. **The structural findings all held:**
+
+| Claim | Status after rebase |
+| --- | --- |
+| 44 non-`__init__` modules at the top level of `plugins/` | unchanged — 4 modified, none added or removed |
+| 36 plugin-layer repositories / 8 non-repositories | unchanged, same members |
+| 7 in-core repositories | unchanged, same members |
+| 46 Protocols | unchanged — members were *added* to existing Protocols, but no new repository Protocol class appeared |
+| R7: 5 bodies importing ORM models from `plugins/local/` | unchanged, same 5 files |
+| R3b: `BotChatDbRepository` constructed directly at 3 sites | unchanged, same 3 sites |
+| 108 test modules importing a moved path; 49 under `tests/community/plugins/` | unchanged |
+| architecture suite green | unchanged, 120 passed |
+
+**What did change:**
+
+- The `SkillRepository` drift grew from two members to three (see Motivation).
+- `harness`'s `core_min_percent` was re-pinned 41.30 → 40.86, invalidating that
+  row of C4's table and supplying the re-pin precedent now cited there.
+- Vendor-name exposure grew: **27** of the 36 plugin-layer repository modules now
+  name `ZDAS` in a docstring, up from 26. The 7 in-core ones remain vendor-clean.
+- Oversized-module pressure increased. `skill_repository.py` 2331 → 2423 lines
+  (already allowlisted). `bot_repository.py` 901 → **954**, now 46 lines below the
+  1000-line cap and not allowlisted. `skills_pool_layout_repository.py` sits at
+  **exactly 1000** — the guard fails at `> 1000`, so a single added line breaks
+  it. The move must not add a line to either file; if a relocated import block
+  grows one of them, the fix is to shorten it, not to allowlist the file.
+- A new guard, `tests/community/framework/test_no_mock_in_endpoint_tests.py`,
+  forbids `unittest.mock` / `monkeypatch` under `tests/*/endpoints/`. It does not
+  touch the repository tests today, but it is path-keyed: the D3 test relocation
+  must not land any repository test under an `endpoints/` directory.
 
 ### C1 — Architecture guards (baseline: 120 passed)
 
@@ -354,7 +405,7 @@ tree will trip at least four guards, each requiring a real fix rather than a
 suppression:
 
 1. **`test_no_data_infra_vendor_in_core.py`** — bans the literal `ZDAS` in
-   `core/`. 26 of the 36 plugin-layer repository modules name `ZDAS` in a
+   `core/`. 27 of the 36 plugin-layer repository modules name `ZDAS` in a
    docstring (`skill_repository.py` five times); the 7 in-core ones are already
    clean, since the guard passes today. The docstrings must be neutralized to
    capability language; the guard must not be weakened and the allowlist must
@@ -430,9 +481,18 @@ PR) — it is only the *local* pre-push path that gates it behind
 spec's own PR (run 31011880791, `singlebox coverage gate passed`), which measures
 `dev` + one Markdown file and is therefore a true pre-move baseline:
 
+> **Superseded in part by the 2026-08-08 `dev` rebase.** The table below is the
+> baseline measured on `dev` @ `dd02f82`. It reproduced identically across two CI
+> runs, so these were real margins rather than jitter. But `dev` has since moved
+> 16 commits, and `harness`'s threshold was re-pinned 41.30 → 40.86 in that
+> window, so the `harness` row is stale and the others must be re-confirmed from
+> the CI run on the rebased branch before the plan relies on them. The *shape* of
+> the finding — two modules with almost no headroom, `bot_chat` losing half its
+> tree — is what carries forward; the digits are not.
+
 | Module | `core_min_percent` | measured | headroom | affected by this move? |
 | --- | ---: | ---: | ---: | --- |
-| `harness` | 41.30 | 41.44 | **+0.14** | yes — `repository_protocol.py` (279 lines) leaves |
+| `harness` | 41.30 → **now 40.86** | 41.44 (stale) | **+0.14 at the time** | yes — `repository_protocol.py` (279 lines) leaves |
 | `expert_chat` | 63.49 | 65.26 | **+1.77** | yes — 2 Protocol files (172 lines) leave |
 | `access` | 42.80 | 45.68 | +2.88 | yes — `repository.py` (38 lines) leaves |
 | `bot_chat` | 67.48 | 71.26 | +3.78 | yes — **both implementations (1,770 lines) leave** |
@@ -463,6 +523,18 @@ paths — so any re-pin must be justified file-by-file in the PR, derived from a
 fresh run, and must never be achieved by trimming `core_paths`. If a module's
 number drops because real coverage was lost rather than because the denominator
 moved, the correct answer is to fix the coverage, not the threshold.
+
+**There is an established in-repo precedent for exactly this, and the plan should
+imitate it rather than invent a format.** `singlebox_coverage_modules.yaml`
+carries the `harness` threshold's history as inline comments — `41.59 → 41.30`,
+then `41.30 → 40.86` on the 2026-08-08 rebase. Each entry names the commit that
+moved it, identifies the specific functions that left the reachable set, explains
+*why* they became structurally uncoverable by acceptance, states the measured
+value, and asserts "no production Core path excluded, no test-only call added".
+The 40.86 entry even records a pending reversal: singlebox has since gained a
+fixture-backed MCPCenter, so "the floor stays at the last measured value until CI
+re-measures with the fixture". That is the bar — a re-pin is acceptable when it
+is documented to that standard, and not otherwise.
 
 ### C5 — Test blast radius
 
