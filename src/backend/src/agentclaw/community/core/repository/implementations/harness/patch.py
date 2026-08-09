@@ -19,13 +19,13 @@ from agentclaw.community.core.harness.models import Layer, PatchDefinition
 from agentclaw.community.core.harness.sqlite_models import HarnessPatchModel
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository as HarnessPatchRepositoryProtocol
 
 logger = get_logger()
 
 
 class HarnessPatchRepository(
-    HarnessPatchRepository,
+    HarnessPatchRepositoryProtocol,
 ):
     """Unified ``HarnessPatchRepository`` Protocol implementation."""
 

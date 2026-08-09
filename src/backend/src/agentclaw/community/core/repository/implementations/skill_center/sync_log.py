@@ -27,11 +27,11 @@ from sqlalchemy import func
 
 from agentclaw.community.core.models.skill_center_sync_log import SkillCenterSyncLog
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.skill_center import SkillCenterSyncLogRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCenterSyncLogRepository as SkillCenterSyncLogRepositoryProtocol
 
 
 class SkillCenterSyncLogRepository(
-    SkillCenterSyncLogRepository,
+    SkillCenterSyncLogRepositoryProtocol,
 ):
     """Unified ``SkillCenterSyncLogRepository`` Protocol implementation."""
 

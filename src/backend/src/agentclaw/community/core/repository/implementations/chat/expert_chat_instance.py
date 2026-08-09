@@ -38,14 +38,14 @@ from sqlalchemy import func
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository as ExpertChatInstanceRepositoryProtocol
 
 
 logger = get_logger()
 
 
 class ExpertChatInstanceRepository(
-    ExpertChatInstanceRepository,
+    ExpertChatInstanceRepositoryProtocol,
 ):
     """Unified ``ExpertChatInstanceRepository`` Protocol implementation.
 

@@ -56,7 +56,10 @@ from agentclaw.community.core.skill_center.errors import ActiveSkillSetReference
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository, SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillRepository as SkillRepositoryProtocol,
+    SkillSetRepository as SkillSetRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 
 logger = get_logger()
@@ -161,7 +164,7 @@ def _mcp_assoc_to_dict(m) -> dict:
 
 
 class SkillRepository(
-    SkillRepository,
+    SkillRepositoryProtocol,
     SkillsPoolSkillRepositoryProtocol,
 ):
     """Unified ORM ``SkillRepository`` — faithful prod port."""
@@ -1152,7 +1155,7 @@ class SkillRepository(
 
 
 class SkillSetRepository(
-    SkillSetRepository,
+    SkillSetRepositoryProtocol,
 ):
     """Unified ORM ``SkillSetRepository`` — faithful prod port."""
 

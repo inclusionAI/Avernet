@@ -48,7 +48,7 @@ from agentclaw.community.core.access.sqlite_models import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.identity import PolicyRepository
+from agentclaw.community.core.repository.protocols.identity import PolicyRepository as PolicyRepositoryProtocol
 
 logger = get_logger()
 
@@ -75,7 +75,7 @@ def _user_to_record(row: UserInfo) -> UserInfoRecord:
 
 
 class PolicyRepository(
-    PolicyRepository,
+    PolicyRepositoryProtocol,
 ):
     """Unified ORM ``PolicyRepository`` implementation."""
 

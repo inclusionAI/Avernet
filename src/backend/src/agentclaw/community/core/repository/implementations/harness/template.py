@@ -46,14 +46,14 @@ from agentclaw.community.core.harness.models import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository as HarnessTemplateRepositoryProtocol
 
 
 logger = get_logger()
 
 
 class HarnessTemplateRepository(
-    HarnessTemplateRepository,
+    HarnessTemplateRepositoryProtocol,
 ):
     """Unified ORM ``HarnessTemplateRepository`` implementation."""
 

@@ -29,14 +29,14 @@ from sqlalchemy import func
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository as SkillMemberRepositoryProtocol
 
 
 logger = get_logger()
 
 
 class SkillMemberRepository(
-    SkillMemberRepository,
+    SkillMemberRepositoryProtocol,
 ):
     """Unified ``SkillMemberRepository`` Protocol implementation."""
 

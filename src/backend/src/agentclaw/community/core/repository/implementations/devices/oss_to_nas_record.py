@@ -26,7 +26,7 @@ from sqlalchemy import func
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository as OssToNasRecordRepositoryProtocol
 
 
 logger = get_logger()
@@ -41,7 +41,7 @@ _ALLOWED_UPDATE_FIELDS = {
 
 
 class OssToNasRecordRepository(
-    OssToNasRecordRepository,
+    OssToNasRecordRepositoryProtocol,
 ):
     """Unified ``OssToNasRecordRepository`` Protocol implementation."""
 

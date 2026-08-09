@@ -51,13 +51,13 @@ from agentclaw.community.core.harness.sqlite_models import HarnessScanRecordMode
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository as HarnessScanRecordRepositoryProtocol
 
 logger = get_logger()
 
 
 class HarnessScanRecordRepository(
-    HarnessScanRecordRepository,
+    HarnessScanRecordRepositoryProtocol,
 ):
     """Unified ORM ``HarnessScanRecordRepository`` implementation."""
 

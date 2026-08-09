@@ -21,7 +21,7 @@ from injector import inject
 from sqlalchemy import func, select
 
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository as SkillPropagationLogRepositoryProtocol
 
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
 _ALLOWED_UPDATE_FIELDS = {
@@ -47,7 +47,7 @@ def _as_datetime(db_now) -> datetime:
 
 
 class SkillPropagationLogRepository(
-    SkillPropagationLogRepository,
+    SkillPropagationLogRepositoryProtocol,
 ):
     """Unified ``SkillPropagationLogRepository`` Protocol implementation."""
 

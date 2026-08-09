@@ -26,7 +26,7 @@ from injector import inject
 from sqlalchemy import func
 
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository
+from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository as UserMCPConfigRepositoryProtocol
 
 
 def _normalise_extra_config(value: Any) -> str:
@@ -39,7 +39,7 @@ def _normalise_extra_config(value: Any) -> str:
 
 
 class UserMCPConfigRepository(
-    UserMCPConfigRepository,
+    UserMCPConfigRepositoryProtocol,
 ):
     """Unified ``UserMCPConfigRepository`` Protocol implementation."""
 

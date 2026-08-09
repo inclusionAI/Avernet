@@ -19,7 +19,7 @@ from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository
+from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository as QualityTaskRepositoryProtocol
 
 
 logger = get_logger()
@@ -54,7 +54,7 @@ def _row_to_record(row) -> QualityTaskRecord | None:
 
 
 class QualityTaskRepository(
-    QualityTaskRepository,
+    QualityTaskRepositoryProtocol,
 ):
     """Unified ``QualityTaskRepository`` Protocol implementation."""
 

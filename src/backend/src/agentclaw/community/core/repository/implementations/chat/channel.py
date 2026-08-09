@@ -27,7 +27,7 @@ from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository as ChannelRepositoryProtocol
 
 
 logger = get_logger()
@@ -61,7 +61,7 @@ def _row_to_record(row) -> ChannelRecord | None:
 
 
 class ChannelRepository(
-    ChannelRepository,
+    ChannelRepositoryProtocol,
 ):
     """Unified ``ChannelRepository`` Protocol implementation."""
 

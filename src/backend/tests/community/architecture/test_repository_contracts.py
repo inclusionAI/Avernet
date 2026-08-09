@@ -148,6 +148,45 @@ def test_protocols_hold_no_implementations() -> None:
     )
 
 
+def test_no_implementation_shadows_the_contract_it_inherits() -> None:
+    """``class BotRepository(BotRepository)`` breaks the navigation it declares.
+
+    20 implementations share a name with their contract. Written as a bare
+    import, the class head reads ``class X(X)`` — legal Python, because the base
+    is evaluated before the new binding exists, but the name resolves to two
+    different objects depending on where you stand. Static analysers give up:
+    PyCharm reports "Redeclared 'X' defined above without usage" and *Go to
+    Implementation* finds nothing, which is the one thing this package exists to
+    provide. Importing the contract ``as XProtocol`` fixes it with no runtime
+    change.
+    """
+    offenders: list[str] = []
+    for path in _py_files(_IMPLEMENTATIONS):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        protocol_imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module and "repository.protocols" in node.module
+            for alias in node.names
+            if alias.asname is None
+        }
+        for cls in tree.body:
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for base in cls.bases:
+                if isinstance(base, ast.Name) and base.id == cls.name \
+                        and base.id in protocol_imports:
+                    offenders.append(f"{_rel(path)}:{cls.lineno} class {cls.name}({cls.name})")
+    assert not offenders, (
+        "Implementations whose base class shadows their own name — 'go to "
+        "implementation' cannot resolve these. Import the contract under an "
+        "alias instead:\n"
+        "    from ...protocols.<domain> import X as XProtocol\n"
+        "    class X(XProtocol):\n  " + "\n  ".join(offenders)
+    )
+
+
 def _declared_provides() -> set[str]:
     """The ``provides`` list from the package README's Context Boundary block."""
     text = (_REPO_ROOT / "README.md").read_text(encoding="utf-8")

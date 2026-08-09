@@ -49,7 +49,7 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository as BotRepositoryProtocol
 
 logger = get_logger()
 
@@ -76,7 +76,7 @@ _JSON_FIELDS = ("share_policy", "ext")
 
 
 class BotRepository(
-    BotRepository,
+    BotRepositoryProtocol,
 ):
     """Unified ORM ``BotRepository`` implementation."""
 

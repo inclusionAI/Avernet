@@ -17,13 +17,13 @@ from sqlalchemy import func
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.bot_management.repository.models import TemplateModel
-from agentclaw.community.core.repository.protocols.bot import TemplateRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository as TemplateRepositoryProtocol
 
 logger = get_logger()
 
 
 class TemplateRepository(
-    TemplateRepository,
+    TemplateRepositoryProtocol,
 ):
     """Unified ORM-backed TemplateRepository.
 

@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_management.render_screen.models import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
-from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
+from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository as RenderScreenRepositoryProtocol
 
 logger = get_logger()
 
@@ -45,7 +45,7 @@ def _model_to_record(row) -> RenderScreenRecord:
 
 
 class RenderScreenRepository(
-    RenderScreenRepository,
+    RenderScreenRepositoryProtocol,
 ):
     """Unified ``RenderScreenRepository`` Protocol implementation."""
 

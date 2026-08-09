@@ -18,11 +18,11 @@ from injector import inject
 from sqlalchemy import func
 
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository as SkillCategoryRepositoryProtocol
 
 
 class SkillCategoryRepository(
-    SkillCategoryRepository,
+    SkillCategoryRepositoryProtocol,
 ):
     """Unified ``SkillCategoryRepository`` Protocol implementation."""
 
