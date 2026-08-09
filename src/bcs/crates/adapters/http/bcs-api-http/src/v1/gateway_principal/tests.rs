@@ -677,3 +677,68 @@ fn public_verify_uses_the_current_system_time() {
 
     assert!(verifier().verify(&token).is_ok());
 }
+
+#[test]
+fn wrong_issuer_and_audience_log_specific_mismatch() {
+    for (claim, value, needle) in [
+        ("iss", "other-gateway", "issuer mismatch"),
+        ("aud", "backend", "audience mismatch"),
+    ] {
+        let mut claims = valid_claims();
+        claims[claim] = json!(value);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        let logs = capture_logs(|| {
+            assert_eq!(
+                verifier().verify_at(&token, NOW),
+                Err(GatewayPrincipalVerificationError::InvalidClaims),
+            );
+        });
+        assert!(logs.contains(needle), "missing {needle:?} in:\n{logs}");
+        assert!(
+            !logs.contains("claims are invalid"),
+            "generic decode log should not fire for {claim} mismatch:\n{logs}"
+        );
+    }
+}
+
+#[test]
+fn rejects_array_valued_iss_and_aud() {
+    // RFC 7519 permits `aud` as a string or array; jsonwebtoken accepts the
+    // array form against set_audience. The gateway-principal contract
+    // requires the exact single-string iss/aud (contract.md: iss=gateway,
+    // aud=bcs), so array-form claims must be rejected by shape regardless of
+    // whether the value matches. The shape log must classify the failure
+    // without leaking the array contents (contract.md: no claim value logged).
+    let fixture = fixture();
+    let verifier = verifier_from(&fixture);
+    // The array includes the configured value so `decode` accepts it (forcing
+    // the shape guard, not value validation, to reject); the marker element
+    // proves the array contents are not logged.
+    for (claim, configured, marker) in [
+        ("iss", fixture.issuer.clone(), "SECRET_ISS_ARRAY_MARKER"),
+        ("aud", fixture.audience.clone(), "SECRET_AUD_ARRAY_MARKER"),
+    ] {
+        let mut claims = valid_claims();
+        claims[claim] = json!([configured, marker]);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        let logs = capture_logs(|| {
+            assert_eq!(
+                verifier.verify_at(&token, NOW),
+                Err(GatewayPrincipalVerificationError::InvalidClaims),
+                "array-form {claim} must be rejected (exact-string contract)",
+            );
+        });
+        assert!(
+            logs.contains("must be a single string"),
+            "shape log missing for {claim}:\n{logs}"
+        );
+        assert!(
+            logs.contains("observed=array"),
+            "observed=array missing for {claim}:\n{logs}"
+        );
+        assert!(
+            !logs.contains(marker),
+            "array contents leaked into log for {claim}:\n{logs}"
+        );
+    }
+}
