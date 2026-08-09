@@ -113,7 +113,7 @@
   - [x] `pytest tests/community/adapters/http/openapi_v1/` is green.
 - **Depends on:** Tasks 3, 4
 
-## Task 6: Pin the contract with a convention test
+## Task 6: Pin the contract with a convention test  [x]
 
 - **Goal:** A later operation that breaks the rule fails the build, not review.
 - **Files:**
@@ -126,14 +126,14 @@
   carry the parameter.
 - **Done when:** asserted against the generated document, in the shape of
   `test_path_convention.py`:
-  - [ ] All 56 user-scoped operations require `user_id`, and it is `in: query` on
+  - [x] All 56 user-scoped operations require `user_id`, and it is `in: query` on
         every one.
-  - [ ] The exempt set is *exactly* the four documented addresses — a fifth fails
+  - [x] The exempt set is *exactly* the four documented addresses — a fifth fails
         here.
-  - [ ] `user_id` appears in no request body schema and in no path template.
-  - [ ] `bot_id`'s placement is unchanged from `HEAD` on all 65 operations.
-  - [ ] Bot Logs gains nothing: no parameter, no 403.
-  - [ ] 403 is documented on exactly the 56, and `403 not in ERROR_RESPONSES`.
+  - [x] `user_id` appears in no request body schema and in no path template.
+  - [x] `bot_id`'s placement is unchanged from `HEAD` on all 65 operations.
+  - [x] Bot Logs gains nothing: no parameter, no 403.
+  - [x] 403 is documented on exactly the 56, and `403 not in ERROR_RESPONSES`.
   - [x] Behaviour: another user's id is 403; two rejected ids give
         byte-identical bodies; a missing parameter is 422; no verified caller is
         401 **even when the parameter is also missing**. _(landed in Group A)_
