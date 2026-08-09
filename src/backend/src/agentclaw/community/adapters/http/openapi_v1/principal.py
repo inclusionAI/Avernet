@@ -121,14 +121,35 @@ def caller_owner_id(principal: Principal) -> str:
     return str(user_id)
 
 
+#: How much of a rejected id reaches the log. Long enough to identify a
+#: misconfigured partner integration, short enough that a caller cannot choose
+#: how many bytes each refusal costs.
+_LOGGED_ID_LIMIT = 128
+
+
+def _for_log(user_id: str) -> str:
+    """The rejected id as one escaped, bounded token."""
+    if len(user_id) <= _LOGGED_ID_LIMIT:
+        return repr(user_id)
+    return f"{user_id[:_LOGGED_ID_LIMIT]!r}…(+{len(user_id) - _LOGGED_ID_LIMIT})"
+
+
 async def require_user_id(
     principal: Annotated[Principal, Depends(require_principal)],
     user_id: Annotated[
         str,
         Query(
+            # ``min_length`` only, deliberately. It has a counterpart at the
+            # identity boundary — ``verify_principal_token`` refuses a blank
+            # subject id — so it can never reject a caller the credential
+            # accepts. An upper bound has no such counterpart: ``GatewayUser.id``
+            # is an unconstrained ``str``, so a cap here would 422 a caller whose
+            # id is longer than it *even when the value matches the signed
+            # principal*, locking them out of all 56 operations. That is a change
+            # to who may call, which this change promises not to make. The log
+            # line below is bounded instead — see ``_for_log``.
             alias=USER_ID_QUERY,
             min_length=1,
-            max_length=256,
             description=USER_ID_DESCRIPTION,
         ),
     ],
@@ -156,20 +177,20 @@ async def require_user_id(
         # fixed "Forbidden", so this line is an operator's only record of which
         # user a partner integration asked for.
         #
-        # The rejected value is quoted with ``%r``, and that is not decoration.
-        # This branch runs *only* when the parameter is not the caller's, so by
-        # construction the value is one the caller chose and the server refused
-        # — up to 256 characters of arbitrary text, newlines included. Formatted
-        # raw it would let the party being refused append convincing extra lines
-        # to the log and poison the audit trail of refusals. ``repr`` escapes
-        # them, so a forged line arrives as one visibly-quoted string.
-        # ``app.py``'s 422 handler drops the caller's raw input for the same
-        # reason; this keeps it because *which* user was named is the whole
-        # diagnostic value here, and escaping is enough to make it safe.
+        # The rejected value goes through ``_for_log``, and that is not
+        # decoration. This branch runs *only* when the parameter is not the
+        # caller's, so by construction the value is one the caller chose and the
+        # server refused — arbitrary text, unbounded now that the request-level
+        # cap is gone, newlines included. Formatted raw it would let the party
+        # being refused append convincing extra lines to the log and poison the
+        # audit trail of refusals, and pad each one to any length they like.
+        # ``app.py``'s 422 handler drops the caller's raw input entirely for the
+        # same reason; this keeps a bounded, escaped form because *which* user
+        # was named is the whole diagnostic value here.
         logger.warning(
-            "%s=%r does not match the verified caller %s",
+            "%s=%s does not match the verified caller %s",
             USER_ID_QUERY,
-            user_id,
+            _for_log(user_id),
             caller,
         )
         raise UserIdMismatchError("request user id is not the verified caller")

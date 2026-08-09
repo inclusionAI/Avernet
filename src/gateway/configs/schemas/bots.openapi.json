@@ -4240,7 +4240,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -4355,7 +4354,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -4512,7 +4510,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -4656,7 +4653,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -4812,7 +4808,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -4949,7 +4944,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5178,7 +5172,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5324,7 +5317,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5470,7 +5462,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5616,7 +5607,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5762,7 +5752,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -5896,7 +5885,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -6028,7 +6016,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7043,7 +7030,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7167,7 +7153,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7303,7 +7288,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7548,7 +7532,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7703,7 +7686,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -7894,7 +7876,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8020,7 +8001,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8183,7 +8163,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8320,7 +8299,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8469,7 +8447,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8604,7 +8581,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8739,7 +8715,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -8886,7 +8861,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9022,7 +8996,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9191,7 +9164,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9306,7 +9278,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9451,7 +9422,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9584,7 +9554,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9717,7 +9686,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -9862,7 +9830,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10024,7 +9991,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10213,7 +10179,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10357,7 +10322,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10522,7 +10486,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10675,7 +10638,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10828,7 +10790,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -10993,7 +10954,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11173,7 +11133,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11398,7 +11357,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11544,7 +11502,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11707,7 +11664,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11831,7 +11787,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -11957,7 +11912,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12083,7 +12037,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12209,7 +12162,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12333,7 +12285,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12457,7 +12408,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12681,7 +12631,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12807,7 +12756,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -12931,7 +12879,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -13069,7 +13016,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -13195,7 +13141,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"
@@ -13321,7 +13266,6 @@
             "required": true,
             "schema": {
               "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "maxLength": 256,
               "minLength": 1,
               "title": "User Id",
               "type": "string"

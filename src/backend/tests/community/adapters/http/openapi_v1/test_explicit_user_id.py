@@ -20,6 +20,7 @@ has changed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import pytest
@@ -54,7 +55,7 @@ _PROBE = f"{PUBLIC_API_PREFIX}/bots/_probe"
 
 
 @pytest.fixture
-def client() -> TestClient:
+def probe_app() -> FastAPI:
     """One route shaped exactly like a real user-scoped handler, and nothing else.
 
     A probe rather than a mounted group, following ``test_principal_seam.py``:
@@ -85,9 +86,14 @@ def client() -> TestClient:
     app.add_exception_handler(UserIdMismatchError, _user_id_mismatch_handler)
     app.add_exception_handler(RequestValidationError, _validation_error_handler)
     app.dependency_overrides[require_principal] = lambda: {"user_id": _CALLER}
+    return app
+
+
+@pytest.fixture
+def client(probe_app: FastAPI) -> TestClient:
     # The response is what these tests are about, so observe it rather than
     # letting an unhandled exception be re-raised into the test.
-    return TestClient(app, raise_server_exceptions=False)
+    return TestClient(probe_app, raise_server_exceptions=False)
 
 
 # ── what the caller gets ────────────────────────────────────────────────────
@@ -150,6 +156,46 @@ def test_no_verified_caller_is_still_a_401_whatever_the_parameter_says(client):
     response = client.get(_PROBE, params={USER_ID_QUERY: _CALLER})
 
     assert response.status_code == 401
+
+
+def test_a_long_subject_id_is_not_locked_out(probe_app):
+    """No upper bound on the parameter, because the identity boundary has none.
+
+    ``GatewayUser.id`` is an unconstrained ``str`` and the verifier refuses only
+    a *blank* subject id, so any cap here would reject a caller whose credential
+    the gateway accepts — a 422 on all 56 operations for a value that matches
+    the signed principal exactly. ``min_length=1`` is safe for the opposite
+    reason: it has a counterpart at that boundary.
+    """
+    long_id = "u-" + "x" * 4000
+    probe_app.dependency_overrides[require_principal] = lambda: {"user_id": long_id}
+    client = TestClient(probe_app, raise_server_exceptions=False)
+
+    response = client.get(_PROBE, params={USER_ID_QUERY: long_id})
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"user_id": long_id}
+
+
+def test_a_rejected_id_cannot_choose_how_much_it_logs(caplog):
+    """The bound moved from the request to the log, so it still has one.
+
+    Removing the cap means a refused caller controls an unbounded string. It is
+    escaped (no forged lines) and truncated (no choosing how many bytes each
+    refusal costs), and the truncation says how much it dropped so a reader is
+    not misled about what was sent.
+    """
+    flood = "z" * 10_000
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(UserIdMismatchError):
+            asyncio.run(
+                require_user_id(principal={"user_id": _CALLER}, user_id=flood)
+            )
+
+    logged = "\n".join(record.getMessage() for record in caplog.records)
+    assert len(logged) < 500, "a caller must not choose the size of the log line"
+    assert "(+9872)" in logged, "and the reader is told how much was dropped"
 
 
 # ── the seam itself ─────────────────────────────────────────────────────────
