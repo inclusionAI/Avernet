@@ -9,7 +9,7 @@ Spec: `spec.md` · Plan: `plan.md` · Issue: [#569](https://github.com/inclusion
 - **Files:** `core/task_queue/repository/models.py`, `core/task_queue/sql/2026_08_04_task_queue_idempotency.sql` (new dir + file)
 - **Done when:**
   - [x] Both columns exist on `TaskQueueModel` as `String(190), nullable=True` with comments.
-  - [x] `__table_args__` carries `Index("uk_env_task_type_active_idem", "env", "task_type", "active_idempotency_key", unique=True)`.
+  - [x] `__table_args__` carries `Index("uk_env_task_type_active_idempotency_key", "env", "task_type", "active_idempotency_key", unique=True)`.
   - [x] The `.sql` file mirrors the ORM exactly and uses the `GLOBAL` index keyword, matching `core/service_bot/sql/ac_bot_publish.sql:22-26`.
   - [x] The file header states the DDL must be applied before the code that writes the columns, and that no backfill is required.
   - [x] `Base.metadata.create_all()` builds the table with the index on SQLite (existing `repo` fixture still constructs). Verified: index reports `unique=1` over `['env', 'task_type', 'active_idempotency_key']`; 21 existing tests pass unchanged.

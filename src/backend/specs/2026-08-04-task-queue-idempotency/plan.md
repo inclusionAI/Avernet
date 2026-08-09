@@ -41,7 +41,7 @@ ALTER TABLE `ac_task_queue`
     COMMENT '调用方提供的入队去重键；NULL 表示不去重',
   ADD COLUMN `active_idempotency_key` varchar(190) DEFAULT NULL
     COMMENT '去重键的执行副本；进入终态时置 NULL 以释放该键',
-  ADD UNIQUE KEY `uk_env_task_type_active_idem`
+  ADD UNIQUE KEY `uk_env_task_type_active_idempotency_key`
     (`env`, `task_type`, `active_idempotency_key`) GLOBAL;
 ```
 
@@ -77,7 +77,7 @@ resolved; no column needs shortening.
 +        # Active-only enqueue dedup. NULL active key = opted out; engines treat
 +        # NULLs as distinct in a unique index, which is what makes it opt-in.
 +        Index(
-+            "uk_env_task_type_active_idem",
++            "uk_env_task_type_active_idempotency_key",
 +            "env", "task_type", "active_idempotency_key",
 +            unique=True,
 +        ),
@@ -171,11 +171,11 @@ window between the failed insert and the lookup, leaving nothing to return.
 ```python
 # plugins/task_queue_repository.py (new module-level helper)
 def _is_active_idem_conflict(exc: IntegrityError) -> bool:
-    """True only for uk_env_task_type_active_idem.
+    """True only for uk_env_task_type_active_idempotency_key.
 
     Portable across both engines because they name the violation differently:
     MySQL/OceanBase report the *index* ("Duplicate entry … for key
-    'uk_env_task_type_active_idem'"); SQLite reports the *columns* ("UNIQUE
+    'uk_env_task_type_active_idempotency_key'"); SQLite reports the *columns* ("UNIQUE
     constraint failed: ac_task_queue.env, ac_task_queue.task_type, …").
     """
 ```

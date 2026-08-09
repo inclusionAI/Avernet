@@ -155,7 +155,7 @@ ALTER TABLE ac_task_queue
     COMMENT 'caller-supplied submission dedup key; NULL = opted out (never deduped)',
   ADD COLUMN active_idempotency_key VARCHAR(190) NULL
     COMMENT 'enforcement copy; NULLed on every terminal transition to release the key',
-  ADD UNIQUE INDEX uk_env_task_type_active_idem (env, task_type, active_idempotency_key);
+  ADD UNIQUE INDEX uk_env_task_type_active_idempotency_key (env, task_type, active_idempotency_key);
 ```
 
 - `idempotency_key` is the **durable audit** value. It is written once at
@@ -206,7 +206,7 @@ under `utf8mb4` is **1240 bytes**. That fits InnoDB's 3072-byte limit under
 the 767-byte limit under `REDUNDANT`/`COMPACT`**. Before shipping, confirm the
 prod `ac_task_queue` row format and OceanBase's index key-length limit. If the
 limit is 767 bytes, the fallback is to shorten `task_type` in the index
-(`uk_env_task_type_active_idem (env, task_type(40), active_idempotency_key(100))`)
+(`uk_env_task_type_active_idempotency_key (env, task_type(40), active_idempotency_key(100))`)
 — a prefix index still enforces uniqueness correctly here only if the prefixes
 are non-truncating, so prefer raising the row format over shortening.
 
@@ -244,7 +244,7 @@ Two correctness requirements, both of which need explicit test coverage:
 - **Scope the `IntegrityError` to this constraint.** A blanket `except
   IntegrityError` would silently convert an unrelated constraint violation into
   a bogus "duplicate" and return someone else's row. The handler must confirm
-  the violated constraint is `uk_env_task_type_active_idem` and re-raise
+  the violated constraint is `uk_env_task_type_active_idempotency_key` and re-raise
   otherwise.
 - **Leave the transaction usable.** A failed `INSERT` poisons the enclosing
   `orm_session()` transaction; the re-`SELECT` must run on a clean transaction
