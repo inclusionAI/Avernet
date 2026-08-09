@@ -166,6 +166,24 @@ impl GatewayPrincipalTokenVerifier {
                     GatewayPrincipalVerificationError::InvalidClaims
                 }
             })?;
+
+        for claim in ["iss", "aud"] {
+            let observed = match token_data.claims.get(claim) {
+                Some(Value::String(_)) => continue,
+                Some(Value::Array(_)) => "array",
+                Some(_) => "non_string",
+                None => "missing",
+            };
+            warn!(
+                claim = %claim,
+                observed = %observed,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal claim must be a single string"
+            );
+            return Err(GatewayPrincipalVerificationError::InvalidClaims);
+        }
+
         let claims: GatewayClaims = serde_path_to_error::deserialize(
             token_data.claims.into_deserializer(),
         )
