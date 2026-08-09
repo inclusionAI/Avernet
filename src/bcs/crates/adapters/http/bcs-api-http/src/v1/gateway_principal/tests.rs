@@ -677,3 +677,26 @@ fn public_verify_uses_the_current_system_time() {
 
     assert!(verifier().verify(&token).is_ok());
 }
+
+#[test]
+fn wrong_issuer_and_audience_log_specific_mismatch() {
+    for (claim, value, needle) in [
+        ("iss", "other-gateway", "issuer mismatch"),
+        ("aud", "backend", "audience mismatch"),
+    ] {
+        let mut claims = valid_claims();
+        claims[claim] = json!(value);
+        let token = mint_with(header("JWT", "bare"), &claims, TEST_KEY);
+        let logs = capture_logs(|| {
+            assert_eq!(
+                verifier().verify_at(&token, NOW),
+                Err(GatewayPrincipalVerificationError::InvalidClaims),
+            );
+        });
+        assert!(logs.contains(needle), "missing {needle:?} in:\n{logs}");
+        assert!(
+            !logs.contains("claims are invalid"),
+            "generic decode log should not fire for {claim} mismatch:\n{logs}"
+        );
+    }
+}

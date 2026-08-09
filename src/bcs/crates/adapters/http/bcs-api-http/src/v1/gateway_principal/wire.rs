@@ -3,8 +3,6 @@ use serde_json::Value;
 
 #[derive(Deserialize)]
 pub(super) struct GatewayClaims {
-    pub iss: String,
-    pub aud: String,
     pub iat: u64,
     pub exp: u64,
     pub principals: Vec<Value>,

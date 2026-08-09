@@ -138,6 +138,24 @@ impl GatewayPrincipalTokenVerifier {
                     );
                     GatewayPrincipalVerificationError::InvalidSignature
                 }
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                    warn!(
+                        expected_iss = %self.trust.issuer,
+                        kid = ?header.kid,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token issuer mismatch"
+                    );
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
+                jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                    warn!(
+                        expected_aud = %self.trust.audience,
+                        kid = ?header.kid,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token audience mismatch"
+                    );
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
                 other => {
                     warn!(
                         kid = ?header.kid,
@@ -173,24 +191,6 @@ impl GatewayPrincipalTokenVerifier {
             GatewayPrincipalVerificationError::InvalidClaims
         })?;
 
-        if claims.iss != self.trust.issuer {
-            warn!(
-                expected_iss = %self.trust.issuer,
-                kid = ?header.kid,
-                token_fingerprint = %token_fingerprint,
-                "Gateway Principal token issuer mismatch"
-            );
-            return Err(GatewayPrincipalVerificationError::InvalidClaims);
-        }
-        if claims.aud != self.trust.audience {
-            warn!(
-                expected_aud = %self.trust.audience,
-                kid = ?header.kid,
-                token_fingerprint = %token_fingerprint,
-                "Gateway Principal token audience mismatch"
-            );
-            return Err(GatewayPrincipalVerificationError::InvalidClaims);
-        }
         if let Err(e) = validate_times(claims.iat, claims.exp, now) {
             warn!(
                 now,
