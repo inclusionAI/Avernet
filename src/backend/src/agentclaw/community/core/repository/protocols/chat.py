@@ -344,7 +344,7 @@ class BotChatDbRepositoryProtocol(Protocol):
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
-        query_scope: QueryScope = QueryScope.OWNER,
+        query_scope: QueryScope = ...,   # default: QueryScope.OWNER
     ) -> tuple[list[ConversationSession], int]:
         """List traces from DB with pagination."""
         ...
@@ -367,7 +367,7 @@ class BotChatDbRepositoryProtocol(Protocol):
         group_id: str | None = None,
         match_mode: str = "exact",
         include_output_match: bool = False,
-        query_scope: QueryScope = QueryScope.OWNER,
+        query_scope: QueryScope = ...,   # default: QueryScope.OWNER
     ) -> tuple[list[ConversationSession], int]:
         ...
 
