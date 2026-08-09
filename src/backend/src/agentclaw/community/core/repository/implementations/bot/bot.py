@@ -1,4 +1,4 @@
-"""Unified Bot repository (prod the relational store + local SQLite).
+"""Unified Bot repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``BotRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:

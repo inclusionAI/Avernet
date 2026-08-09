@@ -1,4 +1,4 @@
-"""Unified SkillPropagationLog repository (prod the relational store + local SQLite).
+"""Unified SkillPropagationLog repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``SkillPropagationLogRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:

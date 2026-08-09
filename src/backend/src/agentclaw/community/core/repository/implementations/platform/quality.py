@@ -1,4 +1,4 @@
-"""Unified Quality Task repository (prod the relational store + local SQLite).
+"""Unified Quality Task repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``QualityTaskRepository`` Protocol. The
 only per-environment difference is the injected :class:`DatabasePlugin`:

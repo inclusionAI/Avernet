@@ -1,4 +1,4 @@
-"""Unified HarnessScanRecord repository (prod the relational store + local SQLite).
+"""Unified HarnessScanRecord repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``HarnessScanRecordRepository``
 Protocol. The only per-environment difference is the injected

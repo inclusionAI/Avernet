@@ -1,4 +1,4 @@
-"""协作锁 Repository (prod the relational store + local SQLite).
+"""协作锁 Repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``BotCollabLockRepositoryProtocol`` Protocol.
 The only per-environment difference is the injected :class:`DatabasePlugin`:

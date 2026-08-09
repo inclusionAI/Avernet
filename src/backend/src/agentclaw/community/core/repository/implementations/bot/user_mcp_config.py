@@ -1,4 +1,4 @@
-"""Unified UserMCPConfig repository (prod the relational store + local SQLite).
+"""Unified UserMCPConfig repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``UserMCPConfigRepository`` Protocol.
 The only per-environment difference is the injected

@@ -1,4 +1,4 @@
-"""Unified BotFriend repository (prod the relational store + local SQLite).
+"""Unified BotFriend repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``BotFriendRepositoryProtocol``. The
 only per-environment difference is the injected

@@ -1,4 +1,4 @@
-"""Unified ExpertChat repository (prod the relational store + local SQLite).
+"""Unified ExpertChat repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``ExpertChatRepository`` Protocol.
 The only per-environment difference is the injected

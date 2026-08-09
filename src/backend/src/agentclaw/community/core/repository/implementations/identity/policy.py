@@ -1,4 +1,4 @@
-"""Unified access-control PolicyRepository (prod the relational store + local SQLite).
+"""Unified access-control PolicyRepository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``PolicyRepository`` Protocol
 (tables ``ac_access_control_policy`` + ``ac_user_info``, plus reads of

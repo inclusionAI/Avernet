@@ -1,4 +1,4 @@
-"""Unified Template repository (prod the relational store + local SQLite).
+"""Unified Template repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``TemplateRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:
@@ -28,7 +28,7 @@ class TemplateRepository(
     """Unified ORM-backed TemplateRepository.
 
     Uses DatabasePlugin for database session management.
-    Compatible with both prod (OceanBase/the relational store) and local (SQLite) modes.
+    Compatible with both prod (OceanBase) and local (SQLite) modes.
     """
 
     @inject

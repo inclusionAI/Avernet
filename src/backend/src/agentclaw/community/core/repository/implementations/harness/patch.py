@@ -1,4 +1,4 @@
-"""Unified HarnessPatch repository (prod the relational store + local SQLite).
+"""Unified HarnessPatch repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``HarnessPatchRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:

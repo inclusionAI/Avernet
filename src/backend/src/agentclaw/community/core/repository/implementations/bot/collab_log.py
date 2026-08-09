@@ -1,4 +1,4 @@
-"""协作操作日志 Repository (prod the relational store + local SQLite).
+"""协作操作日志 Repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``BotCollabLogRepositoryProtocol`` Protocol.
 The only per-environment difference is the injected :class:`DatabasePlugin`:

@@ -1,4 +1,4 @@
-"""Unified system-config repository (prod the relational store + local SQLite).
+"""Unified system-config repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``ConfigRepositoryProtocol`` (two
 tables: ``ac_config_category`` + ``ac_config_item``). The only

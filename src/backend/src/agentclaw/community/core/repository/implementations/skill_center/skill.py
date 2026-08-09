@@ -1,4 +1,4 @@
-"""Unified Skill / SkillSet repositories (prod the relational store + local SQLite).
+"""Unified Skill / SkillSet repositories (prod OceanBase + local SQLite).
 
 Two ORM implementations behind the ``SkillRepository`` and
 ``SkillSetRepository`` Protocols. The only per-environment difference

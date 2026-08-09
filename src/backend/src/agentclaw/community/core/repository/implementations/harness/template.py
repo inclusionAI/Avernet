@@ -1,4 +1,4 @@
-"""Unified HarnessTemplate repository (prod the relational store + local SQLite).
+"""Unified HarnessTemplate repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``HarnessTemplateRepository``
 Protocol. The only per-environment difference is the injected

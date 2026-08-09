@@ -1,4 +1,4 @@
-"""Unified SkillMember repository (prod the relational store + local SQLite).
+"""Unified SkillMember repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``SkillMemberRepository`` Protocol.
 The only per-environment difference is the injected

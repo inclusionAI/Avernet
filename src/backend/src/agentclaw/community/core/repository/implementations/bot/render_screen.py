@@ -1,4 +1,4 @@
-"""Unified RenderScreen repository (prod the relational store + local SQLite).
+"""Unified RenderScreen repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``RenderScreenRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:

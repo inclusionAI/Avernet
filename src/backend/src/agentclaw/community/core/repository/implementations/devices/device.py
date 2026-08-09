@@ -1,4 +1,4 @@
-"""Unified DeviceBindingRepository (prod the relational store + local SQLite).
+"""Unified DeviceBindingRepository (prod OceanBase + local SQLite).
 
 The **last** DB-repository twin pair (S5 — closes the unification
 program). One ORM implementation behind the

@@ -1,4 +1,4 @@
-"""Unified HarnessPatchRecord repository (prod the relational store + local SQLite).
+"""Unified HarnessPatchRecord repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``HarnessPatchRecordRepository``
 Protocol. The only per-environment difference is the injected

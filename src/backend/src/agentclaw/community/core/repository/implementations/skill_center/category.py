@@ -1,4 +1,4 @@
-"""Unified SkillCategory repository (prod the relational store + local SQLite).
+"""Unified SkillCategory repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``SkillCategoryRepository``. The only
 per-environment difference is the injected :class:`DatabasePlugin`:

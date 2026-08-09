@@ -1,4 +1,4 @@
-"""Unified Resource repository (prod the relational store + local SQLite).
+"""Unified Resource repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``ResourceRepositoryProtocol``.
 The only per-environment difference is the injected

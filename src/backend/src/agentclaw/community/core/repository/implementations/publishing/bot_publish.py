@@ -1,4 +1,4 @@
-"""Unified BotPublish repository (prod the relational store + local SQLite).
+"""Unified BotPublish repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind ``BotPublishRepositoryProtocol``. The
 only per-environment difference is the injected

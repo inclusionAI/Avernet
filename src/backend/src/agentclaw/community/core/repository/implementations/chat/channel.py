@@ -1,4 +1,4 @@
-"""Unified Channel repository (prod the relational store + local SQLite).
+"""Unified Channel repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``ChannelRepository`` Protocol. The
 only per-environment difference is the injected :class:`DatabasePlugin`:

@@ -1,4 +1,4 @@
-"""Unified OssToNasRecord repository (prod the relational store + local SQLite).
+"""Unified OssToNasRecord repository (prod OceanBase + local SQLite).
 
 One ORM implementation behind the ``OssToNasRecordRepository``
 Protocol. The only per-environment difference is the injected
