@@ -29,23 +29,30 @@ the `NULL` opt-out.
 
 ## Data Model Changes
 
-```sql
--- Schema change (provisioned out of band; models.py is the source of truth).
--- Apply BEFORE deploying Backend code that writes these columns.
--- Existing rows take NULL in both columns; NULLs are distinct in a unique
--- index, so no existing row can collide and no backfill or scrub is required.
+Provisioned out of band; `repository/models.py` is the source of truth and no
+DDL is checked in. What a deployment must end up with:
 
-ALTER TABLE `ac_task_queue`
-  ADD COLUMN `idempotency_key` varchar(190) DEFAULT NULL
-    COMMENT '调用方提供的入队去重键；NULL 表示不去重',
-  ADD COLUMN `active_idempotency_key` varchar(190) DEFAULT NULL
-    COMMENT '去重键的执行副本；进入终态时置 NULL 以释放该键',
-  ADD UNIQUE KEY `uk_env_task_type_active_idempotency_key`
-    (`env`, `task_type`, `active_idempotency_key`) GLOBAL;
-```
+| Element | Requirement |
+| --- | --- |
+| `idempotency_key` | `varchar(190)` nullable; `utf8mb4_bin` on MySQL/OceanBase |
+| `active_idempotency_key` | `varchar(190)` nullable; `utf8mb4_bin` on MySQL/OceanBase |
+| `task_type` | also `utf8mb4_bin` there — the index's other scope column |
+| unique index | `uk_env_task_type_active_idempotency_key (env, task_type, active_idempotency_key)`, `GLOBAL` on OceanBase |
+| `env` | deliberately left on the table default |
 
-`GLOBAL` matches the existing OceanBase index convention in
-`core/service_bot/sql/ac_bot_publish.sql:22-26`.
+Apply before deploying the release that writes these columns. Existing rows take
+`NULL` in both, and `NULL`s are distinct in a unique index, so no existing row
+can collide and no backfill or scrub is required.
+
+> The collations are **not** cosmetic and are the part most easily lost when
+> transcribing: `utf8mb4_bin` is what stops `publish:Bot-A:poll` and
+> `publish:bot-a:poll` being one entry in the dedup index. It settles case but
+> not trailing spaces — that half is closed in Python. Applying it to
+> `task_type` on an already-provisioned table changes an *existing* column, so
+> it rewrites data rather than being metadata-only.
+
+`GLOBAL` matches the existing OceanBase index convention used elsewhere in the
+repo (`core/service_bot/sql/ac_bot_publish.sql`).
 
 **Index key length is not a blocker.** The composite key is
 `(20 + 100 + 190) × 4 = 1240` bytes under `utf8mb4`. `ac_bot_publish` already

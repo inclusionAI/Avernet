@@ -149,14 +149,18 @@ for example `publish:1234:online_release`, `skills_pool:prod:e-9:bot-7`,
 Two columns, because active-only cannot be expressed as a plain unique index
 without one:
 
-```sql
-ALTER TABLE ac_task_queue
-  ADD COLUMN idempotency_key VARCHAR(190) NULL
-    COMMENT 'caller-supplied submission dedup key; NULL = opted out (never deduped)',
-  ADD COLUMN active_idempotency_key VARCHAR(190) NULL
-    COMMENT 'enforcement copy; NULLed on every terminal transition to release the key',
-  ADD UNIQUE INDEX uk_env_task_type_active_idempotency_key (env, task_type, active_idempotency_key);
-```
+| Addition | Shape |
+| --- | --- |
+| `idempotency_key` | `VARCHAR(190) NULL` — durable audit value |
+| `active_idempotency_key` | `VARCHAR(190) NULL` — enforcement value |
+| unique index | `uk_env_task_type_active_idempotency_key (env, task_type, active_idempotency_key)` |
+
+> No DDL is reproduced here. `repository/models.py` is the source of truth for
+> the schema, including the collations that turned out to be load-bearing (both
+> key columns *and* `task_type` pin `utf8mb4_bin` on MySQL/OceanBase — see the
+> index comment there). A copy in this document would be a second definition
+> that drifts, and an executable-looking block that omits the collations would
+> be actively wrong to run.
 
 - `idempotency_key` is the **durable audit** value. It is written once at
   enqueue and never cleared, so "which task handled key X?" stays answerable
