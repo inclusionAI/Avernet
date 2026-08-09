@@ -13,16 +13,16 @@ commit that file.
 
 ---
 
-## Task 1: Re-derive the moving set from the current tree
+## Task 1: Re-derive the moving set from the current tree  `[x]`
 - **Goal:** Regenerate the classification and drift lists against `dev` at
   implementation time, because both have already moved once.
 - **Files:** scratch scripts only; no tree changes.
 - **Done when:**
-  - [ ] The 44 top-level `plugins/` modules re-classified; the 36/8 split confirmed or the delta reported.
-  - [ ] The in-core set re-confirmed (7 implementations).
-  - [ ] The `SkillRepository` drifted-member set re-derived by AST diff (was 2, now 3 — expect further growth).
-  - [ ] Any new repository or Protocol added on `dev` since 2026-08-08 is reported before proceeding.
-  - [ ] `pytest tests/community/architecture/ -q` green as the pre-move baseline.
+  - [x] The 44 top-level `plugins/` modules re-classified; **36/8 split unchanged**, same 8 non-repositories.
+  - [x] The in-core set re-confirmed — **7 implementations**, unchanged.
+  - [x] The `SkillRepository` drifted-member set re-derived by AST diff — still **3**: `add_default_skill_exclusion`, `remove_default_skill_exclusion`, `remove_all_default_skill_exclusions`.
+  - [x] Rebased onto `dev` @ `5cdb614` (2 further commits: #902, #789). #789 touched `core/task_queue/repository/protocol.py` and `plugins/task_queue_repository.py` but **added no new Protocol class** — the moving set is unchanged.
+  - [x] `pytest tests/community/architecture/ -q` → **120 passed** (pre-move baseline).
 - **Depends on:** —
 
 ## Task 2: Separate the six co-located domain types
