@@ -11,13 +11,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schemas import (
     ApprovalModeInfo,
     ApprovalModeSet,
@@ -26,7 +22,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.approvals.schem
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     ApprovalMode,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -43,7 +39,6 @@ from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/openapi/v1/bots/approvals", tags=["approvals"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 #: Engine capability a mode *change* needs. ``approval.get`` is defined
 #: separately and gates only the read, so this is the one that decides whether
@@ -90,7 +85,7 @@ def _reject_refused_set(raw: Any) -> None:
 @envelope_errors
 async def get_approval_mode(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     session_key: Annotated[str, Query(description="Session to read the mode for.")],
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
@@ -98,7 +93,6 @@ async def get_approval_mode(
     """Read the approval mode in force for a session."""
     # Publicly a GET with a query parameter; the engine models the same read as
     # a POST with a body.
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
@@ -115,14 +109,13 @@ async def get_approval_mode(
 async def set_approval_mode(
     bot_id: str,
     body: ApprovalModeSet,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[ApprovalState]:
     """Set the approval mode for a session."""
     # The enum's value is forwarded verbatim: all three are already in the
     # engine's accept-set, so no translation is needed and none is applied.
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
@@ -142,7 +135,7 @@ async def set_approval_mode(
 @envelope_errors
 async def list_approval_modes(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[ApprovalModeInfo]]:
@@ -165,7 +158,6 @@ async def list_approval_modes(
     #
     # The list is served from the public enum rather than relayed, because the
     # engine's descriptions are Chinese and this surface promises English.
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="approvals")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,

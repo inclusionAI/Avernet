@@ -18,12 +18,14 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_connection_service import (
@@ -114,7 +116,7 @@ def client(relay: FakeRelay, connections: _FakeConnections):
         app.include_router(group)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    return user_scoped_client(app, OWNER)
 
 
 def test_all_sixteen_routes_are_covered():

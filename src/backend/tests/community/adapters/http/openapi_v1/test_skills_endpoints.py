@@ -15,6 +15,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
@@ -152,7 +155,7 @@ def _client(
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
-    return TestClient(app)
+    return user_scoped_client(app, "actor")
 
 
 def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
@@ -194,7 +197,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
-    client = TestClient(app)
+    client = user_scoped_client(app, "actor")
     response = client.post(
         "/openapi/v1/bots/skills/upload?bot_id=bot-1",
         content=b"PK\x03\x04",
@@ -503,7 +506,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
     app.add_middleware(AvernetTenantMiddleware)
     app.include_router(router)
     attach_injector(app, Injector([Bindings()]))
-    client = TestClient(app)
+    client = user_scoped_client(app, "owner")
     try:
         visible = client.get(
             "/openapi/v1/bots/skills?bot_id=bot",

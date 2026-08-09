@@ -643,6 +643,83 @@ contract overview in **PR #363** (`docs/api-endpoints.zh-CN.md`, a Chinese
 endpoint reference by totalfrank — still open/draft as of 2026-07-29; kept here
 as reference).
 
+## Naming the end user (`?user_id=`)
+
+**Every operation that scopes to a user takes a required `user_id` query
+parameter.** Not a body field, not a path segment — the query string, whatever
+the method, whatever the body.
+
+```text
+GET    /openapi/v1/bots/b-1?user_id=u-42
+PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
+DELETE /openapi/v1/bots/b-1?user_id=u-42
+POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+```
+
+**Why one placement.** The user id is not an attribute of any resource on this
+surface — it is *who the call is for*: the same value on every operation and the
+same meaning on a read as on a write. A request body describes the resource, so
+putting it there makes it read as a property of the thing (in a `PUT
+…/bots/{bot_id}` payload, beside `bot_name`, it looks like a field you are
+setting on the bot). A path segment *names* the resource, so
+`/bots/{bot_id}/users/{user_id}` would claim to address a user beneath a bot —
+inverting the ownership and describing something the operation does not return.
+
+Three alternatives were considered and rejected, recorded so the question is not
+reopened from scratch (`specs/2026-08-08-openapi-v1-explicit-user-id/plan.md`):
+
+| Rejected | Why |
+| --- | --- |
+| Body field on the 11 JSON-body writes | Needed a three-row exception table for the writes whose body this API does not define — the two raw-byte uploads and the free-form `PUT …/engine-config` — and split one concept across two placements on the same resource |
+| Path segment | Inverts ownership as above; the user-first form `/openapi/v1/users/{user_id}/…` is coherent but closed, because the first segment after `/openapi/v1` is the gateway's **domain selector** |
+| `X-Avernet-User-Id` header | Uniform and matches the gateway's delegation sketch (auth design §15), but makes the user transport metadata rather than an argument of the operation |
+
+**`bot_id` is untouched.** It stays in the path where it addresses a bot, and in
+the query string where it is a parameter. This change moved none of them.
+
+**What it does not change.** The named user must still be the verified caller.
+Naming anyone else is a `403` with a fixed `"Forbidden"` — the body says nothing
+about the user asked for, and two rejected ids give byte-identical responses. A
+request with no verified principal still answers `401`, exactly as before. The
+whole point is to have the contract ready for App-on-behalf-of *before* that
+caller exists; admitting it is the delegation workstream (auth design §15), and
+the single line it relaxes is the equality check in
+`openapi_v1/principal.py::require_user_id`.
+
+**Four operations take no `user_id`,** because they have no user dimension to
+scope by. They still require an authenticated caller — that is
+`require_principal`'s job — they just have no user-shaped answer to give:
+
+| Operation | Why it takes none |
+| --- | --- |
+| `GET /openapi/v1/bots/check-name` | Name uniqueness is checked across the tenant; `check_bot_name_exists` takes only the name |
+| `GET /openapi/v1/bots/mcp/servers` | Marketplace catalogue — identical for every caller in the tenant |
+| `GET /openapi/v1/bots/mcp/servers/{server_code}` | Same |
+| `GET /openapi/v1/bots/mcp/tenants` | Same |
+
+Note what is *not* on that list: `list_resources`, `create_resource`,
+`get_resource` and `update_resource` also do not use the value, but they take it
+anyway. They are user-scoped in principle and merely fail to enforce it today —
+they scope on a caller-supplied `bot_id` without checking the caller owns that
+bot, the gap `specs/2026-08-02-public-api-user-only-principal/` records. Closing
+it later should be a change to those handlers, not a required parameter added to
+four public operations.
+
+**Bot Logs is a different exclusion, and the sharpest thing to know here.**
+`GET /openapi/v1/bots/logs/traces` has taken a required `user_id` since #692 —
+but there it means *whose traces to read*, a filter a caller presenting both a
+user and an App identity may point at someone else. Here it means *whose call
+this is*, and pointing it at someone else is a 403. **Same spelling, opposite
+contract**, and the published document carries both. Do not "unify" them without
+deciding which meaning the address should have.
+
+`tests/…/openapi_v1/test_explicit_user_id.py` asserts all of the above against
+the generated document — the 56 that take it, the 4 that do not, that `user_id`
+is never a body field or a path segment, and that `bot_id`'s placement is
+unchanged — so a route that breaks the rule fails there rather than in review.
+
+---
+
 ## Addressing rule
 
 **Every operation is addressed `/openapi/v1/bots/<component>/…`.** The
@@ -983,6 +1060,16 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
 ---
 
 ## Changelog (append a dated line whenever you move the board)
+
+- **2026-08-09** — **The public surface now names its end user explicitly.** 56
+  of the 65 operations take a required `user_id` query parameter instead of
+  deriving the owner from the verified principal; naming another user is a
+  `403`. Four operations with no user dimension (`check-name`, the three MCP
+  catalogue reads) take none, and Bot Logs is untouched — its own `user_id`
+  means the opposite thing. `bot_id` moved nowhere. Nothing about who may call
+  what changed: this readies the contract for App-on-behalf-of, it does not
+  admit it. See **Naming the end user** above and
+  `specs/2026-08-08-openapi-v1-explicit-user-id/`.
 
 - **2026-08-04** — **Skills Track B integration/release gate implementation and
   CI are complete, but Track B is not release-complete.** The served OpenAPI is

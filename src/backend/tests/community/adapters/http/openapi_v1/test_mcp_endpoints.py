@@ -17,12 +17,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.mcp.router import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
+from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.api.mcp_auth_service import MCPAuthServiceProtocol
 from agentclaw.community.api.mcp_config_service import MCPConfigServiceProtocol
 from agentclaw.community.api.mcp_market_service import MCPMarketServiceProtocol
@@ -99,7 +103,8 @@ def client(market, auth, config, sync):
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    mount_public_error_handlers(app)
+    return user_scoped_client(app, "u1")
 
 
 def _ok(resp, code=200000):
@@ -212,11 +217,26 @@ def test_projection_reads_transport_protocol_from_endpoints(client, market):
 # ── permission ──────────────────────────────────────────────────────
 
 
-def test_permission_uses_caller_identity_only(client, auth):
-    # Even with a spoofed ?user_id=, the service is queried for the principal.
-    _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather/permissions?user_id=evil"))
+def test_permission_uses_the_request_user_id(client, auth):
+    """The owner is the request's ``user_id`` — and only the caller's own.
+
+    This test used to assert the opposite half of the same guarantee: a spoofed
+    ``?user_id=evil`` was *ignored*, and the service queried for the principal.
+    Now the parameter is the contract, so a spoofed one is refused outright
+    rather than silently dropped — strictly stronger, and the service never runs.
+    """
+    spoofed = client.get(
+        "/openapi/v1/bots/mcp/servers/mcp.weather/permissions",
+        params={"user_id": "evil"},
+    )
+    assert spoofed.status_code == 403
+    assert auth.check_mcp_permission_detail.call_args is None, (
+        "the refusal must happen before the service is reached"
+    )
+
+    _ok(client.get("/openapi/v1/bots/mcp/servers/mcp.weather/permissions"))
     args = auth.check_mcp_permission_detail.call_args.args
-    assert args[0] == "u1"  # owner from principal, not the query param
+    assert args[0] == "u1"  # the request's user_id, which must be the caller's
 
 
 def test_permission_shape(client):
@@ -365,7 +385,48 @@ def test_put_config_rejects_dev_endpoint_env_as_422(client):
 
 
 def test_missing_principal_is_401(client):
-    client.app.dependency_overrides[require_principal] = lambda: None
-    resp = client.get("/openapi/v1/bots/mcp/servers")
-    assert resp.status_code == 401
-    assert resp.json()["code"] == 401000
+    """The catalogue reads are gated by ``require_principal`` and nothing else.
+
+    They take no ``user_id``, so unlike the rest of the surface there is no
+    second consumer of the principal to fail on. The override therefore has to
+    *raise* rather than return ``None`` — that is what the real
+    ``require_principal`` does when no caller verifies, and returning ``None``
+    would be simulating a state production never reaches while removing the only
+    guard these three operations have.
+    """
+
+    def _no_caller():
+        raise MissingPrincipalError("no verified caller for this request")
+
+    client.app.dependency_overrides[require_principal] = _no_caller
+    for path in (
+        "/openapi/v1/bots/mcp/servers",
+        "/openapi/v1/bots/mcp/servers/mcp.weather",
+        "/openapi/v1/bots/mcp/tenants",
+    ):
+        resp = client.get(path)
+        assert resp.status_code == 401, path
+        assert resp.json()["code"] == 401000
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/bots/mcp/servers",
+        "/openapi/v1/bots/mcp/servers/mcp.weather",
+        "/openapi/v1/bots/mcp/tenants",
+    ],
+)
+def test_the_catalogue_reads_need_no_user_id(client, path):
+    """All three MCP catalogue reads answer with the parameter genuinely absent.
+
+    ``user_id=None`` is how ``user_scoped_client`` is told to omit it — passing
+    an empty string would send ``?user_id=`` and prove something weaker, since a
+    user-scoped route rejects that on ``min_length=1`` too.
+
+    (The fourth exempt operation, ``check-name``, lives in the bots group and is
+    covered in ``test_bots_endpoints.py``.)
+    """
+    response = client.get(path, params={"user_id": None})
+
+    assert response.status_code == 200, response.json()

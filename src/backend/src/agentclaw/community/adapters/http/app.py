@@ -328,6 +328,7 @@ from agentclaw.community.adapters.http.error_logging import (  # noqa: E402
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (  # noqa: E402
     MissingPrincipalError,
+    UserIdMismatchError,
 )
 from agentclaw.community.core.gateway_principal import (  # noqa: E402
     PrincipalVerificationError,
@@ -601,6 +602,39 @@ async def _principal_error_handler(request: Request, exc: Exception) -> JSONResp
     return JSONResponse(
         status_code=401,
         content={"detail": "Unauthorized"},
+        headers=_trace_headers(request),
+    )
+
+
+@app.exception_handler(UserIdMismatchError)
+async def _user_id_mismatch_handler(
+    request: Request, exc: UserIdMismatchError,
+) -> JSONResponse:
+    """Answer a request that named a user its caller may not act for — 403.
+
+    Registered as a concrete type for the same reason as the handler above: it
+    is raised in ``require_user_id``, a **dependency** every user-scoped public
+    route declares, so ``@envelope_errors`` never sees it and letting it reach
+    the ``Exception`` catch-all would answer correctly and then re-raise through
+    ``ServerErrorMiddleware``, adding an ASGI traceback to every occurrence.
+
+    Which ids disagreed is already logged by ``require_user_id``; this line
+    records that the request was refused, and where.
+    """
+    logger.warning(
+        "[Public 403] %s on %s %s: %s%s",
+        type(exc).__name__, request.method, request.url.path, exc,
+        params_suffix(request),
+    )
+    mapped = _public_mapped_error(request, exc)
+    if mapped is not None:
+        return mapped
+    # Unreachable while the dependency is only mounted on the public surface;
+    # kept so a future internal caller of the same seam gets the ``{"detail":
+    # ...}`` shape its clients parse rather than an Envelope.
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Forbidden"},
         headers=_trace_headers(request),
     )
 

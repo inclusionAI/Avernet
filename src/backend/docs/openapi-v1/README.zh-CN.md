@@ -472,6 +472,73 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 **PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 截至
 2026-07-29 仍是 open/draft；此处作为参考保留）中的 v1 契约总览做了交叉核对。
 
+## 显式指定终端用户（`?user_id=`）
+
+**每一个按用户作用域的操作，都带一个必填的 `user_id` query 参数。** 不是 body 字段，
+也不是路径段 —— 就放 query string，无论什么方法、无论有没有 body。
+
+```text
+GET    /openapi/v1/bots/b-1?user_id=u-42
+PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
+DELETE /openapi/v1/bots/b-1?user_id=u-42
+POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+```
+
+**为什么只有一种位置。** `user_id` 不是这个面上任何资源的属性，它表示*这次调用是为谁
+发起的*：在每个操作上都是同一个值，在读和写上含义完全一致。请求 body 描述的是被操作
+的资源，把它放进去就会读成资源的一个属性（在 `PUT …/bots/{bot_id}` 的 body 里挨着
+`bot_name`，看起来就像在给 Agent 设置这个字段）。路径段*命名*资源，所以
+`/bots/{bot_id}/users/{user_id}` 会声称在寻址「Agent 名下的某个用户」—— 归属关系反了，
+而且描述的不是该操作实际返回的东西。
+
+三种替代方案已评估并否决，记录在此以免同一个问题被从头再讨论一遍
+（`specs/2026-08-08-openapi-v1-explicit-user-id/plan.md`）：
+
+| 已否决 | 原因 |
+| --- | --- |
+| 放进 11 个 JSON body 写操作的 body | 对于 body 不由本 API 定义的写操作需要一张三行例外表 —— 两个裸字节上传，以及自由格式的 `PUT …/engine-config` —— 并且会让同一个资源上的同一个概念分裂成两种位置 |
+| 放进路径 | 如上，归属关系反了；用户在前的 `/openapi/v1/users/{user_id}/…` 形式本身自洽，但此处走不通：`/openapi/v1` 之后的第一段是网关的**域选择器** |
+| `X-Avernet-User-Id` header | 统一，且与网关的委托草案一致（auth design §15），但会让用户变成传输层元数据，而不是操作的一个参数 |
+
+**`bot_id` 不动。** 它在寻址 Agent 的地方留在路径里，作为参数的地方留在 query 里。
+本次改动没有挪动任何一个。
+
+**没有改变的是什么。** 被指定的用户仍然必须是已验证的调用方本人。指定其他人一律
+`403` + 固定的 `"Forbidden"` —— 响应体不透露被指定的用户是谁，两个不同的被拒 id 得到
+逐字节相同的响应。没有已验证 principal 的请求依旧是 `401`，与之前完全一致。这件事的
+全部意义在于：在「App 代表用户调用」这个调用方出现*之前*，先把契约准备好；真正放行它
+是委托工作流（auth design §15），而它要放宽的那一行，就是
+`openapi_v1/principal.py::require_user_id` 里的相等性判断。
+
+**有四个操作不带 `user_id`**，因为它们根本没有可按用户切分的维度。它们仍然要求已认证
+的调用方 —— 那是 `require_principal` 的职责 —— 只是给不出按用户区分的答案：
+
+| 操作 | 为什么不带 |
+| --- | --- |
+| `GET /openapi/v1/bots/check-name` | 重名是在整个租户范围内判断的；`check_bot_name_exists` 只接受名字 |
+| `GET /openapi/v1/bots/mcp/servers` | 市场目录 —— 对租户内每个调用方都相同 |
+| `GET /openapi/v1/bots/mcp/servers/{server_code}` | 同上 |
+| `GET /openapi/v1/bots/mcp/tenants` | 同上 |
+
+注意*不在*这张表里的：`list_resources`、`create_resource`、`get_resource`、
+`update_resource` 同样没有用到这个值，但它们仍然带。它们在原则上是按用户作用域的，只是
+今天还没有真正校验 —— 它们按调用方传入的 `bot_id` 作用域，却不检查调用方是否拥有该
+Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的那个缺口。以后
+补上它应该是改这几个 handler，而不是给四个公共操作新增一个必填参数。
+
+**Bot Logs 属于另一种排除，也是这里最需要留意的一点。**
+`GET /openapi/v1/bots/logs/traces` 从 #692 起就带一个必填的 `user_id` —— 但在那里它的
+含义是*要读谁的 trace*，是一个过滤条件，同时持有 User 与 App 身份的调用方可以把它指向
+别人。在这里它的含义是*这次调用是为谁发起的*，指向别人就是 403。**同一个拼写，相反的
+契约**，而且发布出去的文档里两者都在。不要在没有先决定「这个地址上它该是哪个含义」之前
+就去「统一」它们。
+
+`tests/…/openapi_v1/test_explicit_user_id.py` 针对生成的文档断言了以上全部 —— 带它的
+56 个、不带它的 4 个、`user_id` 从不作为 body 字段或路径段出现、以及 `bot_id` 的位置
+没有变化 —— 所以破坏该规则的路由会在那里失败，而不是等到 review。
+
+---
+
 ## 寻址规则
 
 **每个操作的地址都是 `/openapi/v1/bots/<component>/…`。** 组件的**字面**名称在前；
@@ -768,6 +835,13 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-09** —— **公共面现在显式指定终端用户。** 65 个操作中的 56 个改为接受必填的
+  `user_id` query 参数，不再从已验证 principal 推导 owner；指定其他用户返回 `403`。四个
+  没有用户维度的操作（`check-name`、三个 MCP 目录读）不带该参数，Bot Logs 保持不变 ——
+  它自己的 `user_id` 是相反的含义。`bot_id` 没有挪动。谁可以调用什么完全没有改变：这是
+  为「App 代表用户调用」准备契约，而不是放行它。详见上文 **显式指定终端用户** 与
+  `specs/2026-08-08-openapi-v1-explicit-user-id/`。
 
 - **2026-08-04** —— **Skills Track B integration/release gate 的实现与 CI 已完成，但不等于
   release complete。** Served OpenAPI 现锁定为恰好六个 Bot-owned Local Skill 操作；旧的

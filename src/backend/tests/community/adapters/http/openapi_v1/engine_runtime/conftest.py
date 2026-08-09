@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
@@ -120,7 +123,7 @@ def make_client(relay):
         app.include_router(router)
         app.dependency_overrides[require_principal] = lambda: principal
         attach_injector(app, Injector([_M()]))
-        return TestClient(app)
+        return user_scoped_client(app, OWNER)
 
     return _build
 

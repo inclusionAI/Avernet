@@ -138,7 +138,7 @@ async def test_list_routines_returns_envelope_page():
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -177,7 +177,7 @@ async def test_list_routines_asks_for_the_draft_stage_only():
 
     await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -198,7 +198,7 @@ async def test_list_routines_paginates_items():
 
     env = await list_routines(
         page=PageParams(page=2, page_size=1),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -215,7 +215,7 @@ async def test_list_routines_handles_empty_data_list():
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -238,7 +238,7 @@ async def test_list_routines_handles_dict_data_envelope():
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -256,7 +256,7 @@ async def test_list_routines_reads_x_trace_id_from_request():
 
     env = await list_routines(
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         status=None,
         factory=service,
@@ -305,7 +305,7 @@ async def test_create_routine_returns_201_envelope():
 
     env = await create_routine(
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         factory=service,
         request=_request_without_trace(),
     )
@@ -334,7 +334,7 @@ async def test_create_routine_uses_body_bot_id_for_owner_and_call():
 
     await create_routine(
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         factory=service,
         request=_request_without_trace(),
     )
@@ -362,7 +362,7 @@ async def test_create_routine_passes_schedule_as_cron_string():
 
     await create_routine(
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         factory=service,
         request=_request_without_trace(),
     )
@@ -388,7 +388,7 @@ async def test_create_routine_defaults_timezone_when_null():
 
     await create_routine(
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         factory=service,
         request=_request_without_trace(),
     )
@@ -409,7 +409,7 @@ async def test_create_routine_reads_x_trace_id_from_request():
 
     env = await create_routine(
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         factory=service,
         request=request,
     )
@@ -430,7 +430,7 @@ async def test_create_routine_500_when_service_returns_no_data():
     with pytest.raises(HTTPException) as exc:
         await create_routine(
             body=body,
-            principal={"user_id": "u1"},
+            owner_id="u1",
             factory=service,
             request=_request_without_trace(),
         )
@@ -471,7 +471,7 @@ async def test_get_routine_returns_envelope_routine():
 
     env = await get_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -500,7 +500,7 @@ async def test_get_routine_404_when_data_missing():
     with pytest.raises(HTTPException) as exc:
         await get_routine(
             routine_id="t1",
-            principal={"user_id": "u1"},
+            owner_id="u1",
             bot_id="bot-x",
             factory=service,
             request=_request_without_trace(),
@@ -516,7 +516,7 @@ async def test_get_routine_reads_x_trace_id_from_request():
 
     env = await get_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=request,
@@ -562,7 +562,7 @@ async def test_update_routine_returns_envelope_routine():
     env = await update_routine(
         routine_id="t1",
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -592,7 +592,7 @@ async def test_update_routine_passes_partial_body_and_schedule_string():
     await update_routine(
         routine_id="t1",
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -621,7 +621,7 @@ async def test_update_routine_omits_unset_fields_from_body():
     await update_routine(
         routine_id="t1",
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -645,7 +645,7 @@ async def test_update_routine_404_when_data_missing():
         await update_routine(
             routine_id="t1",
             body=body,
-            principal={"user_id": "u1"},
+            owner_id="u1",
             bot_id="bot-x",
             factory=service,
             request=_request_without_trace(),
@@ -662,7 +662,7 @@ async def test_update_routine_reads_x_trace_id_from_request():
     env = await update_routine(
         routine_id="t1",
         body=body,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=request,
@@ -748,7 +748,7 @@ async def test_delete_routine_returns_envelope_deleted_true():
 
     env = await delete_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -777,7 +777,7 @@ async def test_delete_routine_returns_404_when_success_false():
     with pytest.raises(HTTPException) as exc:
         await delete_routine(
             routine_id="t1",
-            principal={"user_id": "u1"},
+            owner_id="u1",
             bot_id="bot-x",
             factory=service,
             request=_request_without_trace(),
@@ -792,7 +792,7 @@ async def test_delete_routine_reads_x_trace_id_from_request():
 
     env = await delete_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=request,
@@ -839,7 +839,7 @@ async def test_run_routine_returns_completed_status_when_ran():
 
     env = await run_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -870,7 +870,7 @@ async def test_run_routine_returns_failed_status_when_reason():
 
     env = await run_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -886,7 +886,7 @@ async def test_run_routine_returns_unknown_status_when_no_reason():
 
     env = await run_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -902,7 +902,7 @@ async def test_run_routine_reads_x_trace_id_from_request():
 
     env = await run_routine(
         routine_id="t1",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=request,
@@ -962,7 +962,7 @@ async def test_list_routine_runs_returns_envelope_page_mapped_from_runs():
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -997,7 +997,7 @@ async def test_list_routine_runs_paginates_items():
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=2, page_size=2),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -1014,7 +1014,7 @@ async def test_list_routine_runs_handles_empty_runs():
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),
@@ -1033,7 +1033,7 @@ async def test_list_routine_runs_reads_x_trace_id_from_request():
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=request,
@@ -1055,7 +1055,7 @@ async def test_list_routine_runs_handles_bare_data_list_defensively():
     env = await list_routine_runs(
         routine_id="t1",
         page=PageParams(page=1, page_size=20),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         bot_id="bot-x",
         factory=service,
         request=_request_without_trace(),

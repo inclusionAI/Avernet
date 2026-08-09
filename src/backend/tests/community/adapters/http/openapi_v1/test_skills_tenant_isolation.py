@@ -7,8 +7,10 @@ import time
 import zipfile
 
 import jwt
-from fastapi.testclient import TestClient
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
 from agentclaw.community.core.bot_management.repository.protocol import BotRepository
 from agentclaw.community.core.skill_center.services.repositories import SkillRepository
@@ -152,7 +154,7 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
         )
 
     headers = {PRINCIPAL_HEADER: _principal(_TENANT_B)}
-    client = TestClient(app_with_testing_modules)
+    client = user_scoped_client(app_with_testing_modules, _OWNER)
     own_list = client.get(f"/openapi/v1/bots/skills?bot_id={_BOT_ID}", headers=headers)
     assert own_list.status_code == 200
     assert own_list.json()["data"]["total"] == 1

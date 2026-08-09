@@ -4083,7 +4083,7 @@
         "type": "object"
       },
       "SkillUpload": {
-        "description": "Response for a first-time Skill upload.",
+        "description": "Response for a Skill create or same-name package replacement.",
         "properties": {
           "operation": {
             "enum": [
@@ -4232,6 +4232,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4264,6 +4276,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -4324,6 +4346,20 @@
       "post": {
         "description": "Create a bot (201), or return 202 + a Passport iframe when authorization is needed.\n\nEngine-specific inputs belong in ``BotCreateSpec.extra_properties``, but\nnothing downstream reads that bag yet, so the request model does not expose\nan ``engine_options`` field for it — see :class:`BotCreate`.",
         "operationId": "create_bot_openapi_v1_bots_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -4374,6 +4410,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -4456,6 +4502,18 @@
               "title": "Session Key",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4488,6 +4546,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -4577,6 +4645,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -4619,6 +4699,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -4710,6 +4800,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4742,6 +4844,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -4824,6 +4936,20 @@
       "get": {
         "description": "Get the caller's bot-creation quota ceiling.\n\nResolved through the same method creation enforces, not\n``PolicyService.get_bots_ceiling`` directly: that one falls back to its own\nhardcoded default of 5, while creation falls back to the configured\n``max_devices_per_entity``. Reading it directly would advertise 5 to a caller\nwhose deployment allows (or rejects at) a different number.",
         "operationId": "get_bots_ceiling_openapi_v1_bots_ceiling_get",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4854,6 +4980,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5028,6 +5164,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5060,6 +5208,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5151,6 +5309,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5183,6 +5353,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5274,6 +5454,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5306,6 +5498,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5397,6 +5599,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5429,6 +5643,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5509,7 +5733,7 @@
     },
     "/openapi/v1/bots/identity/{bot_id}": {
       "get": {
-        "description": "List a bot's identity files and whether each exists.\n\nI2: entity_type/entity_id/operator_id come from the authenticated\nprincipal via ``caller_owner_id`` (personal bot owner = caller).",
+        "description": "List a bot's identity files and whether each exists.\n\nI2: entity_type/entity_id/operator_id come from the authenticated\nrequest's ``user_id`` parameter (personal bot owner = the named user).",
         "operationId": "list_bot_identity_files_openapi_v1_bots_identity__bot_id__get",
         "parameters": [
           {
@@ -5518,6 +5742,18 @@
             "required": true,
             "schema": {
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -5552,6 +5788,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5612,7 +5858,7 @@
     },
     "/openapi/v1/bots/identity/{bot_id}/{file_type}": {
       "get": {
-        "description": "Read one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``caller_owner_id`` (personal bot owner = caller). I3: ``publish_id`` is\nnot exposed — only draft-device reads (``get_bot_file`` default branch).\nThe service's ``validate_file_type`` requires the physical ``<type>.md``\nform (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is\nre-suffixed before forwarding.",
+        "description": "Read one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``UserIdDep`` (personal bot owner = the named user). I3: ``publish_id`` is\nnot exposed — only draft-device reads (``get_bot_file`` default branch).\nThe service's ``validate_file_type`` requires the physical ``<type>.md``\nform (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is\nre-suffixed before forwarding.",
         "operationId": "get_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__get",
         "parameters": [
           {
@@ -5630,6 +5876,18 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/IdentityFileType"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -5663,6 +5921,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -5721,7 +5989,7 @@
         ]
       },
       "put": {
-        "description": "Overwrite one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``caller_owner_id`` as above; ``validate_file_type`` requires the\n``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).",
+        "description": "Overwrite one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``UserIdDep`` as above; ``validate_file_type`` requires the\n``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).",
         "operationId": "update_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__put",
         "parameters": [
           {
@@ -5739,6 +6007,18 @@
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/IdentityFileType"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
             }
           }
         ],
@@ -5782,6 +6062,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -6732,6 +7022,18 @@
               "title": "Server Code",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6764,6 +7066,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -6833,6 +7145,18 @@
               "title": "Server Code",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -6875,6 +7199,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -6935,7 +7269,7 @@
     },
     "/openapi/v1/bots/mcp/servers/{server_code}/permissions": {
       "get": {
-        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's permission — the identity comes from the principal, never\na caller-supplied id (the internal route takes a ``user_id`` query param; this\none must not, or a caller could probe another identity's grants).\n\n**Fail-open, by decision (spec Open Question 1).** When the marketplace\nlookup errors, ``check_mcp_permission_detail`` reports the caller *as\npermitted*. This surface preserves that rather than failing closed: the\nendpoint is advisory — the MCP server itself is the enforcement point — so a\nwrong \"yes\" during an upstream outage costs one failed call, whereas failing\nclosed would make a marketplace outage look like a permission revocation.",
+        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's own permission. The identity is the request's required\n``user_id``, and it is refused unless it names the verified caller — so this\nstill cannot be pointed at someone else to probe their grants, which is the\nproperty the internal route's free-form ``user_id`` query param does not\nhave. The parameter states whose permission is being asked about; it does\nnot widen whose it may be.\n\n**Fail-open, by decision (spec Open Question 1).** When the marketplace\nlookup errors, ``check_mcp_permission_detail`` reports the caller *as\npermitted*. This surface preserves that rather than failing closed: the\nendpoint is advisory — the MCP server itself is the enforcement point — so a\nwrong \"yes\" during an upstream outage costs one failed call, whereas failing\nclosed would make a marketplace outage look like a permission revocation.",
         "operationId": "check_mcp_permission_openapi_v1_bots_mcp_servers__server_code__permissions_get",
         "parameters": [
           {
@@ -6944,6 +7278,18 @@
             "required": true,
             "schema": {
               "title": "Server Code",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -6978,6 +7324,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7168,6 +7524,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7200,6 +7568,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7300,6 +7678,18 @@
               "title": "Model Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7332,6 +7722,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7468,6 +7868,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7500,6 +7912,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7571,6 +7993,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -7613,6 +8047,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7673,7 +8117,7 @@
     },
     "/openapi/v1/bots/resources/check-name": {
       "get": {
-        "description": "Check whether a resource name is available.\n\n``parent_path`` / ``user_id`` / ``exclude_id`` from the legacy signature\nare intentionally not exposed on the openapi contract yet — Direction A\n(principal → user_id) will wire ``user_id`` once it lands. For now the\nservice treats them as None.",
+        "description": "Check whether a resource name is available.\n\n``user_id`` is the request's own required parameter, forwarded to the\nservice — the wiring the older note here said was still pending.\n``parent_path`` and ``exclude_id`` from the legacy signature remain\nunexposed on this contract and are passed as None: resources are bot-scoped,\nso there is no parent path to qualify the name with.",
         "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
         "parameters": [
           {
@@ -7711,6 +8155,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7743,6 +8199,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7803,7 +8269,7 @@
     },
     "/openapi/v1/bots/resources/upload": {
       "post": {
-        "description": "Upload a file's raw bytes as a new resource.\n\ndevice_fs is resolved per-bot; upload_file is async and raises\nDuplicateResourceError on duplicate name → 409 (via @envelope_errors).\nowner_id comes from the verified principal (``caller_owner_id``),\nfail-closed — mirroring the bots router.",
+        "description": "Upload a file's raw bytes as a new resource.\n\ndevice_fs is resolved per-bot; upload_file is async and raises\nDuplicateResourceError on duplicate name → 409 (via @envelope_errors).\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router.",
         "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
         "parameters": [
           {
@@ -7823,6 +8289,18 @@
             "schema": {
               "description": "Bot ID this resource belongs to.",
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -7869,6 +8347,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -7929,7 +8417,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}": {
       "delete": {
-        "description": "Delete a resource (file → device FS, link/folder → DB soft-delete).\n\nowner_id comes from the verified principal (``caller_owner_id``),\nfail-closed. device_fs is resolved per-bot ONLY for FILE resources — a\nlink/folder soft-delete never touches device_fs, so it must not fail on an\nunbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no\nbinding). The injected deps (factory, resolver, device_fs_dispatcher) stay\nout of the served OpenAPI schema — see test_public_namespace.py.",
+        "description": "Delete a resource (file → device FS, link/folder → DB soft-delete).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed. device_fs is resolved per-bot ONLY for FILE resources — a\nlink/folder soft-delete never touches device_fs, so it must not fail on an\nunbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no\nbinding). The injected deps (factory, resolver, device_fs_dispatcher) stay\nout of the served OpenAPI schema — see test_public_namespace.py.",
         "operationId": "delete_resource_openapi_v1_bots_resources__resource_id__delete",
         "parameters": [
           {
@@ -7949,6 +8437,18 @@
             "schema": {
               "description": "Bot ID this resource belongs to.",
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -7983,6 +8483,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8063,6 +8573,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8095,6 +8617,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8175,6 +8707,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -8217,6 +8761,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8277,7 +8831,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}/download": {
       "get": {
-        "description": "Download a resource's bytes (raw, not enveloped).\n\nowner_id comes from the verified principal (``caller_owner_id``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up — only a file has bytes, but the\nhandler can't tell the type before the service reads the row). Service\nreturns ``(bytes, mime)`` or ``None`` → 404.",
+        "description": "Download a resource's bytes (raw, not enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up — only a file has bytes, but the\nhandler can't tell the type before the service reads the row). Service\nreturns ``(bytes, mime)`` or ``None`` → 404.",
         "operationId": "download_resource_openapi_v1_bots_resources__resource_id__download_get",
         "parameters": [
           {
@@ -8297,6 +8851,18 @@
             "schema": {
               "description": "Bot ID this resource belongs to.",
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -8330,6 +8896,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8390,7 +8966,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}/preview": {
       "get": {
-        "description": "Get a resource preview (text-ified content, enveloped).\n\nowner_id comes from the verified principal (``caller_owner_id``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)\n→ 413 via @envelope_errors; a None result is not-found / not-a-file /\nread-failure → 404.",
+        "description": "Get a resource preview (text-ified content, enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)\n→ 413 via @envelope_errors; a None result is not-found / not-a-file /\nread-failure → 404.",
         "operationId": "preview_resource_openapi_v1_bots_resources__resource_id__preview_get",
         "parameters": [
           {
@@ -8410,6 +8986,18 @@
             "schema": {
               "description": "Bot ID this resource belongs to.",
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -8444,6 +9032,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8558,6 +9156,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8590,6 +9200,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8650,6 +9270,20 @@
       "post": {
         "description": "Create a routine.\n\nTranslates the openapi ``RoutineCreate`` body into the engine adapter\ncron body shape: ``schedule`` is the raw cron expression STRING (not\nthe nested ``{kind,expr,tz}`` dict — the adapter wraps it on read in\n``device_adapter_transport._build_item``), and ``timezone`` defaults\nto ``Asia/Shanghai`` to match legacy ``cron/router.py``'s create path.",
         "operationId": "create_routine_openapi_v1_bots_routines_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8690,6 +9324,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8770,6 +9414,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8802,6 +9458,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8860,7 +9526,7 @@
         ]
       },
       "get": {
-        "description": "Get a routine.\n\nC3: the path carries only ``routine_id`` (no routine table to\nreverse-map to a bot), so ``bot_id`` is a required query. Owner\nidentity comes from the authenticated principal via\n``caller_owner_id``. Missing/non-dict ``data`` collapses to 404.",
+        "description": "Get a routine.\n\nC3: the path carries only ``routine_id`` (no routine table to\nreverse-map to a bot), so ``bot_id`` is a required query. Owner\nidentity comes from the authenticated principal via\n``UserIdDep``. Missing/non-dict ``data`` collapses to 404.",
         "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
         "parameters": [
           {
@@ -8878,6 +9544,18 @@
             "required": true,
             "schema": {
               "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -8912,6 +9590,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -8990,6 +9678,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -9032,6 +9732,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9112,6 +9822,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9144,6 +9866,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9251,6 +9983,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9283,6 +10027,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9417,6 +10171,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9449,6 +10215,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9538,6 +10314,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -9580,6 +10368,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9680,6 +10478,18 @@
               "title": "Session Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9712,6 +10522,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9810,6 +10630,18 @@
               "title": "Session Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -9842,6 +10674,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -9940,6 +10782,18 @@
               "title": "Session Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -9982,6 +10836,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10082,6 +10946,18 @@
               "title": "Session Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10114,6 +10990,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10239,6 +11125,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10271,6 +11169,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10441,6 +11349,18 @@
               "title": "Page Size",
               "type": "integer"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10473,6 +11393,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10564,6 +11494,18 @@
               "description": "Verified Bot owner locator.",
               "title": "Owner Entity Id"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -10618,6 +11560,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10693,7 +11645,7 @@
     },
     "/openapi/v1/bots/skills/{skill_id}": {
       "delete": {
-        "description": "Delete one Inactive Local Skill selected by its Skill ID.",
+        "description": "Delete one inactive Bot-owned Local Skill by deployment-wide ID.",
         "operationId": "delete_skill_openapi_v1_bots_skills__skill_id__delete",
         "parameters": [
           {
@@ -10702,6 +11654,18 @@
             "required": true,
             "schema": {
               "title": "Skill Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
               "type": "string"
             }
           }
@@ -10736,6 +11700,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10805,6 +11779,18 @@
               "title": "Skill Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10837,6 +11823,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -10908,6 +11904,18 @@
               "title": "Skill Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -10940,6 +11948,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11011,6 +12029,18 @@
               "title": "Skill Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11043,6 +12073,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11114,6 +12154,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11146,6 +12198,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11215,6 +12277,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11247,6 +12321,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11316,6 +12400,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -11358,6 +12454,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11517,6 +12623,18 @@
               ],
               "title": "Bot Type"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11549,6 +12667,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11620,6 +12748,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11652,6 +12792,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11721,6 +12871,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -11765,6 +12927,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11836,6 +13008,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11868,6 +13052,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -11939,6 +13133,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -11971,6 +13177,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {
@@ -12042,6 +13258,18 @@
               "title": "Bot Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -12074,6 +13302,16 @@
               }
             },
             "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
           },
           "404": {
             "content": {

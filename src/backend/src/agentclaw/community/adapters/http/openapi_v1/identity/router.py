@@ -12,14 +12,11 @@ openapi_v1 and not reachable through this API.
 
 from __future__ import annotations
 
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
-from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import Principal
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -44,23 +41,20 @@ from .schemas import (
 
 router = APIRouter(prefix="/openapi/v1/bots/identity", tags=["identity"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
 
 @router.get("/{bot_id}", response_model=Envelope[IdentityFileList])
 @envelope_errors
 async def list_bot_identity_files(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFileList]:
     """List a bot's identity files and whether each exists.
 
     I2: entity_type/entity_id/operator_id come from the authenticated
-    principal via ``caller_owner_id`` (personal bot owner = caller).
+    request's ``user_id`` parameter (personal bot owner = the named user).
     """
-    owner_id = caller_owner_id(principal)
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     presence = await identity_service.list_bot_files(
@@ -88,20 +82,19 @@ async def list_bot_identity_files(
 async def get_bot_identity_file(
     bot_id: str,
     file_type: IdentityFileType,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFile]:
     """Read one identity file of a bot.
 
     I2: entity params come from the authenticated principal via
-    ``caller_owner_id`` (personal bot owner = caller). I3: ``publish_id`` is
+    ``UserIdDep`` (personal bot owner = the named user). I3: ``publish_id`` is
     not exposed — only draft-device reads (``get_bot_file`` default branch).
     The service's ``validate_file_type`` requires the physical ``<type>.md``
     form (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is
     re-suffixed before forwarding.
     """
-    owner_id = caller_owner_id(principal)
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"
@@ -134,17 +127,16 @@ async def update_bot_identity_file(
     bot_id: str,
     file_type: IdentityFileType,
     body: IdentityFileWrite,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     identity_service: IdentityService = Injected(IdentityService),
 ) -> Envelope[IdentityFileRef]:
     """Overwrite one identity file of a bot.
 
     I2: entity params come from the authenticated principal via
-    ``caller_owner_id`` as above; ``validate_file_type`` requires the
+    ``UserIdDep`` as above; ``validate_file_type`` requires the
     ``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).
     """
-    owner_id = caller_owner_id(principal)
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
     file_type_md = f"{file_type.value}.md"

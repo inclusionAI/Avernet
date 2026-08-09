@@ -11,21 +11,17 @@ fixed at creation (``PUT /openapi/v1/bots/{bot_id}`` rejects it), and
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.engine.schemas import (
     EngineCapabilities,
     EngineInfo,
     EngineStatus,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -38,8 +34,6 @@ from agentclaw.community.core.engine_runtime.errors import EngineUpstreamError
 from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/openapi/v1/bots/engine", tags=["engine"])
-
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 
 def _names(raw: Any) -> list[str]:
@@ -61,12 +55,11 @@ def _names(raw: Any) -> list[str]:
 @envelope_errors
 async def get_engine_status(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineStatus]:
     """Runtime state of the bot's engine."""
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     # enveloped=False: this engine route answers with its status payload raw —
     # no `success` key and no `data` wrapper. The only such route wrapped here.
@@ -93,7 +86,7 @@ async def get_engine_status(
 @envelope_errors
 async def get_engine_capabilities(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[EngineCapabilities]:
@@ -102,7 +95,6 @@ async def get_engine_capabilities(
     The discovery endpoint for these groups: capabilities differ per bot, so the
     same request can succeed for one of your bots and be refused for another.
     """
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
@@ -128,13 +120,12 @@ async def get_engine_capabilities(
 @envelope_errors
 async def list_available_engines(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
 ) -> Envelope[list[EngineInfo]]:
     """Engines available on this bot, with the active one marked."""
     # Publicly a noun; the engine models the same read under a verb path.
-    owner_id = caller_owner_id(principal)
     facts = await resolve_operable_bot(relay, bot_id, owner_id, surface="engine")
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, draft_device=True,
