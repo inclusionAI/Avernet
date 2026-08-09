@@ -67,19 +67,22 @@ time, is what stops the next category from inventing a third convention.
       of its request, and the published API description says so.
 - [ ] The parameter is required, not optional — an operation cannot be called
       without naming its user.
+- [ ] An operation that has no user dimension at all does **not** take it. The
+      exempt set is small, listed with a reason each, and pinned by a test, so a
+      later addition to it is a deliberate edit rather than a drift.
 - [ ] The five Bot Logs operations are unchanged: they never derived a user from
       the credential, and the one that is user-scoped already names its user.
-- [ ] Where an operation takes a bot id as a *parameter* (rather than as part of
-      its address), the bot id follows the same placement rule as the user id,
-      so the two are never in different places on the same request.
 
 **Placement is one stated rule, not a per-category habit**
 
-- [ ] A single rule decides where a scoping parameter goes, it is written down
-      where an engineer adding an endpoint will find it, and a test fails if a
-      new operation breaks it.
-- [ ] Requests whose body is defined by this API carry the parameter in the
-      body; every other request carries it in the query string.
+- [ ] A single rule decides where the user id goes, it is written down where an
+      engineer adding an endpoint will find it, and a test fails if a new
+      operation breaks it.
+- [ ] The user id is a query parameter on every operation that takes it —
+      whatever the method, whatever the body. There is no second placement to
+      learn and no exception table.
+- [ ] The bot id is untouched: it stays in the path where it addresses a bot and
+      in the query string where it is a parameter.
 
 **Behaviour is unchanged**
 
@@ -101,37 +104,56 @@ time, is what stops the next category from inventing a third convention.
 ## In Scope
 
 - The 52 public operations that derive a user id from the verified principal.
-- The 8 further operations that require a caller principal but do not use the
-  user id (4 assert it and discard it; 4 declare it and never ask): they take
-  the parameter too, so a client sends one request shape across the surface.
-- The bot id, wherever it is a request parameter rather than part of the
-  address, so both scoping parameters obey the one rule.
+- The 4 operations that declare a caller principal but never derive an owner —
+  `list_resources`, `create_resource`, `get_resource`, `update_resource`. They
+  take the parameter too. Not for uniformity: they are user-scoped in principle
+  and merely fail to enforce it today (the gap the 2026-08-02 spec records), so
+  closing that gap later should not have to add a required parameter to four
+  public operations.
 - The published API description, and the developer-facing docs for this surface.
+
+**56 operations take the user id.**
 
 ## Out of Scope
 
+- **The 4 operations with no user dimension.** `check_bot_name` answers a
+  tenant-wide uniqueness question; `list_mcp_servers`, `list_mcp_tenants` and
+  `get_mcp_server` read a marketplace catalogue that is identical for every
+  caller in the tenant. None of them has a user-shaped answer to give, now or
+  later, so none of them asks for one. An authenticated caller is still
+  required — that is the principal's job, not this parameter's.
+- **The bot id.** It stays exactly where it is on every operation. Where it
+  addresses a bot it is part of the address; where it is a parameter it is
+  already a query parameter, which is where this change puts the user id too.
 - **Admitting App-on-behalf-of callers.** Which credentials the surface accepts
   is unchanged: a request with no verified user principal still fails. This
   change makes the contract ready for that work; it does not do it.
 - **Relaxing the agreement between the named user and the caller.** Naming
   another user is refused. Deciding when an App *may* name another user is the
   delegation workstream (auth design §15).
-- **Re-addressing any endpoint.** Paths do not change; a bot id that is part of
-  an operation's address stays there.
+- **Re-addressing any endpoint.** Paths do not change.
 - The internal `/api/...` surface, the gateway's own configuration, and the
   Bot Logs group.
 
-## Open Questions
+## Decisions
 
-_None blocking._ Two decisions were made rather than deferred, and are recorded
-here so they can be overturned in review rather than discovered in the diff:
+Settled in review rather than left open:
 
-1. **Operations that do not scope by a user still require the parameter.** Four
-   catalogue reads and four bot-scoped resource operations do not use a user id.
-   Requiring it anyway keeps one request shape across the surface, at the cost of
-   asking for a value those eight operations ignore. The alternative — omitting
-   it exactly there — makes a client learn which 8 of 60 operations differ.
-2. **A mismatch is refused rather than resolved.** Preferring the request's value
+1. **The user id is a query parameter everywhere, never a body field.** A body
+   describes the resource being acted on; the user id describes who the call is
+   for. It is the same value on every operation and identical in meaning on a
+   read and a write, so splitting it by method would put one concept in two
+   places — and in a `PUT …/bots/{bot_id}` payload, beside `bot_name`, it would
+   read as a property being set on the bot. Placing it by method also buys
+   nothing on log hygiene, since the majority of operations are reads that carry
+   it in the query string regardless.
+2. **The user id is never a path segment.** A path names the resource an
+   operation acts on; `/bots/{bot_id}/users/{user_id}` would claim to address a
+   user beneath a bot, which inverts the ownership and does not describe what
+   the endpoint returns. A user-first address (`/users/{user_id}/bots/…`) is a
+   coherent design in the abstract but closed here: the first segment after
+   `/openapi/v1` is the gateway's domain selector.
+3. **A mismatch is refused rather than resolved.** Preferring the request's value
    would let any verified user read another's data; preferring the credential's
    would answer a request the caller did not make. Refusing is the only option
    that leaves today's behaviour exactly as it is.
