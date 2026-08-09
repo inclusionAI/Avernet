@@ -227,8 +227,10 @@ async def get_mcp_server(
 
 
 @router.get(
-    "/servers/{server_code}/permissions", response_model=Envelope[McpPermission]
-, responses=USER_SCOPED_403)
+    "/servers/{server_code}/permissions",
+    response_model=Envelope[McpPermission],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def check_mcp_permission(
     server_code: str,

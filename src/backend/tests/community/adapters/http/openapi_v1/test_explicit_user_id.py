@@ -263,7 +263,10 @@ def _param(operation: dict, name: str) -> dict | None:
 
 
 def _user_scoped(path: str, method: str) -> bool:
-    return not path.startswith(_LOGS_PREFIX) and (method, path) not in _NO_USER_DIMENSION
+    return (
+        not path.startswith(_LOGS_PREFIX)
+        and (method, path) not in _NO_USER_DIMENSION
+    )
 
 
 def test_every_user_scoped_operation_requires_user_id_in_the_query():

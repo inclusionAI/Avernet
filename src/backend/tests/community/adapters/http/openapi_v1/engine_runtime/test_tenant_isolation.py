@@ -18,14 +18,12 @@ from contextlib import contextmanager
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from tests.community.adapters.http.openapi_v1.conftest import (
-    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1 import _ENGINE_RUNTIME_GROUPS

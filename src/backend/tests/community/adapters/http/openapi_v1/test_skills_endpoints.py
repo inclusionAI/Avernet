@@ -16,7 +16,6 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
 from tests.community.adapters.http.openapi_v1.conftest import (
-    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (

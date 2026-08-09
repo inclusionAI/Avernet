@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
@@ -153,6 +152,20 @@ def test_list_bots_filters_reach_service(client, svc):
     assert kw["engine"] == "teclaw"
     assert kw["status"] == "ACTIVE"
     assert kw["page"] == 2 and kw["page_size"] == 5
+
+
+def test_check_name_needs_no_user_id(client):
+    """The one bots operation with no user dimension answers without one.
+
+    Name uniqueness is checked across the tenant, so there is nothing to scope
+    by. ``user_id=None`` is how ``user_scoped_client`` is told to omit the
+    parameter rather than send it empty.
+    """
+    response = client.get(
+        "/openapi/v1/bots/check-name", params={"name": "Foo", "user_id": None}
+    )
+
+    assert response.status_code == 200, response.json()
 
 
 def test_check_name(client):

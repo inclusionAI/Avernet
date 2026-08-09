@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
@@ -400,12 +399,34 @@ def test_missing_principal_is_401(client):
         raise MissingPrincipalError("no verified caller for this request")
 
     client.app.dependency_overrides[require_principal] = _no_caller
-    resp = client.get("/openapi/v1/bots/mcp/servers")
-    assert resp.status_code == 401
-    assert resp.json()["code"] == 401000
+    for path in (
+        "/openapi/v1/bots/mcp/servers",
+        "/openapi/v1/bots/mcp/servers/mcp.weather",
+        "/openapi/v1/bots/mcp/tenants",
+    ):
+        resp = client.get(path)
+        assert resp.status_code == 401, path
+        assert resp.json()["code"] == 401000
 
 
-def test_the_catalogue_reads_need_no_user_id(client):
-    """The four exempt operations answer without one — the contract says so."""
-    for path in ("/openapi/v1/bots/mcp/servers", "/openapi/v1/bots/mcp/tenants"):
-        assert client.get(path, params={"user_id": None}).status_code == 200
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/openapi/v1/bots/mcp/servers",
+        "/openapi/v1/bots/mcp/servers/mcp.weather",
+        "/openapi/v1/bots/mcp/tenants",
+    ],
+)
+def test_the_catalogue_reads_need_no_user_id(client, path):
+    """All three MCP catalogue reads answer with the parameter genuinely absent.
+
+    ``user_id=None`` is how ``user_scoped_client`` is told to omit it — passing
+    an empty string would send ``?user_id=`` and prove something weaker, since a
+    user-scoped route rejects that on ``min_length=1`` too.
+
+    (The fourth exempt operation, ``check-name``, lives in the bots group and is
+    covered in ``test_bots_endpoints.py``.)
+    """
+    response = client.get(path, params={"user_id": None})
+
+    assert response.status_code == 200, response.json()

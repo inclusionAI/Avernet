@@ -7,10 +7,8 @@ import time
 import zipfile
 
 import jwt
-from fastapi.testclient import TestClient
 
 from tests.community.adapters.http.openapi_v1.conftest import (
-    mount_public_error_handlers,
     user_scoped_client,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER

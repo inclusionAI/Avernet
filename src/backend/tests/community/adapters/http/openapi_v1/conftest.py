@@ -27,19 +27,38 @@ def user_scoped_client(app: FastAPI, user_id: str, **kwargs) -> TestClient:
     caught it would have failed for a reason nowhere near the cause. A per-call
     ``params=`` has the same behaviour.
 
-    So the inline query and any per-call ``params`` are parsed and merged here,
-    and ``user_id`` is only defaulted — a test that passes its own (to assert
-    the 403, say) keeps it.
+    So the inline query and any per-call ``params`` are merged here — and the
+    merge has to be as lossless as the bug it replaces, or this helper
+    reintroduces the same silence on the one path every call site now takes:
+
+    - ``keep_blank_values=True``, so ``?keyword=`` stays an empty string rather
+      than disappearing and turning a "passed through as empty" test into an
+      unfiltered one that passes for the wrong reason;
+    - repeated keys are kept as a list, so ``?tag=a&tag=b`` does not collapse
+      to the last one.
+
+    ``user_id`` is only defaulted, so a test can pass its own to assert the 403.
+    Passing ``user_id=None`` explicitly **omits** it — the only way to exercise
+    an operation that takes none.
     """
     client = TestClient(app, **kwargs)
     inner = client.request
 
     def request(method: str, url, **kw):
         parts = urlsplit(str(url))
-        merged = dict(parse_qsl(parts.query))
+        merged: dict[str, object] = {}
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            if key in merged:
+                existing = merged[key]
+                merged[key] = [*existing, value] if isinstance(existing, list) else [
+                    existing,
+                    value,
+                ]
+            else:
+                merged[key] = value
         merged.update(kw.pop("params", None) or {})
         merged.setdefault(USER_ID_QUERY, user_id)
-        kw["params"] = merged
+        kw["params"] = {k: v for k, v in merged.items() if v is not None}
         return inner(method, urlunsplit(parts._replace(query="")), **kw)
 
     client.request = request  # type: ignore[method-assign]
