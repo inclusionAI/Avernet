@@ -7,7 +7,7 @@
 > as `5cdb614`; implementation bases on `dev`. Note the handlers there bind
 > `UserIdDep` to a local named `owner_id` — Task 3 renames it.
 
-## Task 1: Replace the shared-bot refusal with the operator adjudication  `[ ]`
+## Task 1: Replace the shared-bot refusal with the operator adjudication  `[x]`
 
 - **Goal:** One place that answers "may this caller operate that bot?" —
   owner, or collaborator ≥ MEMBER; anyone else gets the masked 404.

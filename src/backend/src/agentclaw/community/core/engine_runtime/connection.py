@@ -33,9 +33,11 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineUpstreamError,
 )
-from agentclaw.community.core.engine_runtime.gate import require_operable_bot
+from agentclaw.community.core.engine_runtime.gate import (
+    require_bot_operator,
+    require_operable_bot,
+)
 from agentclaw.community.core.engine_runtime.models import ConnectionResult, SocketInfo
-from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
 from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.log import get_logger
 
@@ -157,33 +159,29 @@ class EngineConnectionService:
         """Return the bot's usable sockets.
 
         ``owner_id`` must be the authenticated principal: the bot is resolved
-        owner-scoped here and the resolved owner is passed on as the operator.
-        That matters because ``DeviceService.get_device_connection`` applies a
-        *wider* permission model of its own — public bots and collaborators —
-        and this surface is owner-only. Resolving first means the wider check
-        can never widen it.
+        owner-scoped here, then the shared operator adjudication decides
+        whether the caller may hold the channel. ``DeviceService.
+        get_device_connection`` applies a permission model of its own — one
+        that also admits any caller to a *public* bot — and adjudicating first
+        with the stricter rule means that model can never widen this surface.
         """
         bot = self._bot_service.get_bot(bot_id, owner_id)
         # The socket this endpoint publishes is **not** chat-scoped, however it
         # is labelled: the engine's ``hello`` advertises the ``sessions.*`` and
         # ``exec.approvals`` methods and grants ``operator.admin``, so the
         # credential is an operator channel over every session on the device.
-        # The shared gate admits exactly the bots whose device only the owner
-        # reaches — see ``gate.py`` for the full rule, including why a service
-        # bot's *draft* device (the one ``_active_binding_id`` resolves) is in
-        # that set. Gated here rather than in the router because the rule is
+        # The shared gate decides who may hold one — see ``gate.py`` for the
+        # full rule. Gated here rather than in the router because the rule is
         # about what may be *composed*, not about how it is served: any future
         # caller of ``build`` is covered without repeating the check.
-        require_operable_bot(
-            str(bot.get("bot_type") or ""),
-            is_shared=bot_is_shared(
-                bot,
-                self._collaborator_repo,
-                bot_id=str(bot.get("bot_id") or bot_id),
-                owner_id=str(bot.get("owner_id") or owner_id),
-            ),
-            surface="connections",
+        require_bot_operator(
+            self._collaborator_repo,
+            bot_pk=int(bot.get("id") or 0),
+            bot_id=str(bot.get("bot_id") or bot_id),
+            caller_id=owner_id,
+            owner_id=str(bot.get("owner_id") or owner_id),
         )
+        require_operable_bot(str(bot.get("bot_type") or ""), surface="connections")
         engine = str(bot.get("active_engine") or "")
 
         binding_id = self._active_binding_id(bot_id, owner_id)

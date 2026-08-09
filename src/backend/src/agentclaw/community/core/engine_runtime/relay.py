@@ -45,9 +45,11 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineResourceNotFoundError,
     EngineUpstreamError,
 )
+from agentclaw.community.core.engine_runtime.gate import require_bot_operator
 from agentclaw.community.core.engine_runtime.models import BotFacts, EngineResult
-from agentclaw.community.core.engine_runtime.sharing import bot_is_shared
-from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
 from agentclaw.community.core.service_bot.repository.models import (
     PublishStatus,
     select_stage_bind_id,
@@ -93,17 +95,23 @@ class EngineRuntimeRelay:
 
     # ── resolution ────────────────────────────────────────────────────────
 
-    def resolve_bot(self, bot_id: str, owner_id: str) -> BotFacts:
+    def resolve_bot(self, bot_id: str, owner_id: str, caller_id: str) -> BotFacts:
         """Return the few bot facts handlers need, or raise.
 
-        **The isolation seam.** ``BotService.get_bot`` goes through
-        ``get_by_id_and_owner``, so a bot belonging to someone else — or to
-        another tenant, which the Track A guard on ``BotModel`` filters out
-        before ownership is even considered — raises ``BotNotFoundError``. The
-        adapter maps that to a masked 404 indistinguishable from "no such bot".
+        **The isolation seam, in two steps.** ``BotService.get_bot`` resolves
+        ``(bot_id, owner_id)`` through ``get_by_id_and_owner``, so a bot that
+        does not exist under that owner — or belongs to another tenant, which
+        the Track A guard on ``BotModel`` filters out before ownership is even
+        considered — raises ``BotNotFoundError``. Then
+        :func:`require_bot_operator` decides whether *this caller* may operate
+        the resolved bot: the owner, or a collaborator at member level or
+        above; anyone else raises the same ``BotNotFoundError``, so a refused
+        non-operator cannot tell a bot they may not operate from one that does
+        not exist. The adapter maps both to a masked 404.
 
-        ``owner_id`` must come from the authenticated principal. Passing a
-        caller-supplied value turns this check into a formality.
+        ``caller_id`` must come from the authenticated principal; ``owner_id``
+        is the owner the request *addresses* and may name someone else — the
+        adjudication is exactly what makes that safe.
 
         Returns :class:`BotFacts`, **not** the raw record. ``get_bot`` attaches
         ``device_binding`` — ``device_id``, ``device_provider``, ``device_props``
@@ -114,34 +122,38 @@ class EngineRuntimeRelay:
         bot = self._bot_service.get_bot(bot_id, owner_id)
         resolved_id = str(bot.get("bot_id") or bot_id)
         resolved_owner = str(bot.get("owner_id") or owner_id)
+        require_bot_operator(
+            self._collaborator_repo,
+            bot_pk=int(bot.get("id") or 0),
+            bot_id=resolved_id,
+            caller_id=caller_id,
+            owner_id=resolved_owner,
+        )
         return BotFacts(
             bot_id=resolved_id,
             bot_type=str(bot.get("bot_type") or ""),
             active_engine=str(bot.get("active_engine") or ""),
+            owner_id=resolved_owner,
             bot_pk=int(bot.get("id") or 0),
-            is_shared=bot_is_shared(
-                bot,
-                self._collaborator_repo,
-                bot_id=resolved_id,
-                owner_id=resolved_owner,
-            ),
         )
 
-    async def resolve_bot_off_loop(self, bot_id: str, owner_id: str) -> BotFacts:
+    async def resolve_bot_off_loop(
+        self, bot_id: str, owner_id: str, caller_id: str
+    ) -> BotFacts:
         """:meth:`resolve_bot`, run in a worker thread.
 
         ``resolve_bot`` is synchronous and not cheap: ``BotService.get_bot``
         does an owner-scoped row read, a device-binding fetch and a template
-        fetch, and :meth:`_is_shared` may add a collaborator query. Running
-        that inline parks the event loop for the length of one slow database
-        round trip and stalls every unrelated request on the worker — the same
-        reason :meth:`call` already offloads device resolution.
+        fetch, and the operator adjudication may add a collaborator query.
+        Running that inline parks the event loop for the length of one slow
+        database round trip and stalls every unrelated request on the worker —
+        the same reason :meth:`call` already offloads device resolution.
 
         Handlers that gate on bot facts before forwarding use this, then hand
         the result to :meth:`call` as ``facts`` so the bot is resolved once per
         request rather than once per gate plus once per forward.
         """
-        return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id)
+        return await asyncio.to_thread(self.resolve_bot, bot_id, owner_id, caller_id)
 
     def _resolve_device(
         self, bot_id: str, owner_id: str, facts: BotFacts, draft_device: bool
@@ -278,9 +290,15 @@ class EngineRuntimeRelay:
 
         Kept together so :meth:`call` offloads once rather than twice. The
         order is the isolation order: ``resolve_bot`` raises for a bot the
-        caller does not own, before any device is touched.
+        caller may not operate, before any device is touched. On this path the
+        caller *is* the owner: a route that serves someone other than the
+        bot's owner must adjudicate the real caller first and pass ``facts``.
         """
-        resolved = facts if facts is not None else self.resolve_bot(bot_id, owner_id)
+        resolved = (
+            facts
+            if facts is not None
+            else self.resolve_bot(bot_id, owner_id, owner_id)
+        )
         return self._resolve_device(bot_id, owner_id, resolved, draft_device)
 
     # ── forwarding ────────────────────────────────────────────────────────

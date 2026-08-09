@@ -23,6 +23,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
+  - agentclaw.community.core.bot_collaborator.models
   - agentclaw.community.core.bot_collaborator.repository.protocol
   - agentclaw.community.core.bot_management.services.bot_service
   - agentclaw.community.core.devices.errors
