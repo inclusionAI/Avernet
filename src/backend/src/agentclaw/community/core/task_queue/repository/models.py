@@ -179,7 +179,7 @@ class TaskQueueModel(Base):
         # utf8mb4_bin is PAD SPACE, so it settles case but not trailing spaces;
         # HandlerRegistry.register rejects task types that differ only that way.
         Index(
-            "uk_env_task_type_active_idem",
+            "uk_env_task_type_active_idempotency_key",
             "env",
             "task_type",
             "active_idempotency_key",

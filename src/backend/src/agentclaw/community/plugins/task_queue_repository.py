@@ -77,7 +77,7 @@ logger = get_logger()
 #: The unique index backing active-only enqueue dedup. Named here because the
 #: two engines report a violation of it differently and both spellings must be
 #: recognised — see :func:`_is_active_idem_conflict`.
-_ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idem"
+_ACTIVE_IDEM_INDEX = "uk_env_task_type_active_idempotency_key"
 
 #: How many times :meth:`TaskQueueRepository.enqueue` will try to insert a keyed
 #: task. A further attempt is only ever reached when the conflicting row went
@@ -205,7 +205,7 @@ def _is_active_idem_conflict(exc: IntegrityError) -> bool:
 
     - MySQL / OceanBase report the **index**::
 
-          Duplicate entry 'dev-demo-k1' for key 'uk_env_task_type_active_idem'
+          Duplicate entry 'dev-demo-k1' for key 'uk_env_task_type_active_idempotency_key'
 
     - SQLite reports the **columns**::
 

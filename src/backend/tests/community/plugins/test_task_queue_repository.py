@@ -451,7 +451,7 @@ def test_is_active_idem_conflict_recognises_both_engine_message_forms():
     # MySQL / OceanBase name the index.
     assert _is_active_idem_conflict(
         err("(1062, \"Duplicate entry 'dev-demo-k1' for key "
-            "'uk_env_task_type_active_idem'\")")
+            "'uk_env_task_type_active_idempotency_key'\")")
     )
     # SQLite names the columns.
     assert _is_active_idem_conflict(

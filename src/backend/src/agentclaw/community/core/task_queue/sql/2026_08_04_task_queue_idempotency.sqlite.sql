@@ -20,5 +20,5 @@ ALTER TABLE ac_task_queue ADD COLUMN idempotency_key varchar(190) DEFAULT NULL;
 
 ALTER TABLE ac_task_queue ADD COLUMN active_idempotency_key varchar(190) DEFAULT NULL;
 
-CREATE UNIQUE INDEX uk_env_task_type_active_idem
+CREATE UNIQUE INDEX uk_env_task_type_active_idempotency_key
   ON ac_task_queue (env, task_type, active_idempotency_key);

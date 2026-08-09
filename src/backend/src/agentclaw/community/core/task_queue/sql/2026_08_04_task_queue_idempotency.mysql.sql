@@ -27,5 +27,5 @@ ALTER TABLE `ac_task_queue`
     COMMENT 'caller-supplied enqueue dedup key; NULL = opted out (audit only)',
   ADD COLUMN `active_idempotency_key` varchar(190) COLLATE utf8mb4_bin DEFAULT NULL
     COMMENT 'enforcement copy of idempotency_key; NULLed on terminal to release it',
-  ADD UNIQUE KEY `uk_env_task_type_active_idem`
+  ADD UNIQUE KEY `uk_env_task_type_active_idempotency_key`
     (`env`, `task_type`, `active_idempotency_key`);
