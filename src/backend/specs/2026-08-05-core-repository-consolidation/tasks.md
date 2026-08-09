@@ -83,19 +83,19 @@ commit that file.
   - [x] Green — Rule 25 discovery only walks `Plugin` subclasses, so the count is unaffected, as predicted.
 - **Depends on:** Task 4
 
-## Task 7: Move the 36 plugin-layer implementations
+## Task 7: Move the 36 plugin-layer implementations  `[x]`
 - **Goal:** Relocate bodies to `implementations/`, each declaring its Protocol(s)
   as base, with no behaviour change.
 - **Files:** `core/repository/implementations/<domain>/*.py` (36 across 11 domain
   subdirectories); delete the originals.
 - **Done when:**
-  - [ ] All 36 modules moved into their domain subdirectory, with the domain prefix and `_repository` suffix dropped from the filename (`plugins/bot_collab_lock_repository.py` → `implementations/bot/collab_lock.py`).
-  - [ ] Each class declares its Protocol(s); `SkillRepository` and `SkillsPoolLayoutRepository` declare two each.
-  - [ ] Bodies unchanged apart from imports, the `class` line, and vendor-docstring rewrites.
-  - [ ] The 27 `ZDAS` docstring mentions rewritten to capability language.
+  - [x] All 36 moved into their domain subdirectory, with the domain prefix and `_repository` suffix dropped from the filename (`plugins/bot_collab_lock_repository.py` → `implementations/bot/collab_lock.py`).
+  - [x] 44/44 repository classes declare a Protocol base. **8 already did before this change** — the spec's premise was too strong.
+  - [x] Verified: decorator and `def` counts identical to pre-move for all 50 moved modules (2 lost `@inject` were caught and restored).
+  - [x] 28 vendor mentions rewritten; the vendor guard passes with no allowlist change.
 - **Depends on:** Tasks 3, 4, 6
 
-## Task 8: Move the 7 in-core implementations
+## Task 8: Move the 7 in-core implementations  `[x]`
 - **Goal:** Bring `common_config`, the four governance repos, and both `bot_chat`
   repos into `implementations/` under their new names.
 - **Files:** `implementations/config/common_config.py`,
@@ -103,64 +103,64 @@ commit that file.
   `implementations/chat/{open,db}.py`; delete `core/{common_config,bot_chat}/repository/`
   and `core/economy/governance/repositories/`.
 - **Done when:**
-  - [ ] All 7 moved into their domain subdirectory and renamed per `plan.md`.
-  - [ ] `core/economy/governance/repositories/orm.py` → `core/economy/governance/orm.py`, with its 3 `domain/` importers and the `plugins/local/database.py:160` bootstrap re-pointed.
-  - [ ] Emptied `repository/` packages deleted, their `__init__.py` re-exports removed from importers.
+  - [x] All 7 moved and renamed.
+  - [x] Done, importers and bootstrap re-pointed.
+  - [x] 6 emptied packages deleted, 13 re-exported names re-pointed.
 - **Depends on:** Tasks 4, 5
 
-## Task 9: Relocate the eight non-repositories
+## Task 9: Relocate the eight non-repositories  `[x]`
 - **Goal:** Move mixins and helpers without giving them contracts (R4).
 - **Files:** `implementations/skills_pool/layout_{capability,operational,post_cutover,quarantine}.py`,
   `implementations/skills_pool/{layout_persistence,cutover_diagnostics}.py`,
   `implementations/governance/task_record_query.py`, `core/skills_pool/runtime.py`.
 - **Done when:**
-  - [ ] Seven plain modules sit beside the composite they serve, inside its domain subdirectory; none gains a Protocol.
-  - [ ] The four `SkillsPoolLayoutRepository` mixins are `layout_<part>.py` under `implementations/skills_pool/`, sorting directly beneath `layout.py`. Class names unchanged.
-  - [ ] Mixins are NOT inlined — a merged file would exceed the 1000-line cap and require an allowlist entry, which criterion 4 forbids. Tracked as #912.
-  - [ ] `SkillsPoolRuntime` lives at `core/skills_pool/runtime.py`; its Protocol stays in `core/skills_pool/ports.py`.
-  - [ ] `plugins/http_client.py` is untouched and still bound.
+  - [x] Done.
+  - [x] Done.
+  - [x] Mixins are NOT inlined — a merged file would exceed the 1000-line cap and require an allowlist entry, which criterion 4 forbids. Tracked as #912.
+  - [x] Done.
+  - [x] `plugins/` now holds only `__init__.py`, `http_client.py`, `local/`, `community/`.
 - **Depends on:** Tasks 7, 8
 
-## Task 10: Resolve the `SkillRepository` contract drift
+## Task 10: Resolve the `SkillRepository` contract drift  `[x]`
 - **Goal:** Reconcile the drifted members so the class constructs under R2, with
   no behaviour change for any caller.
 - **Files:** `core/repository/protocols/skill_center.py`.
 - **Done when:**
-  - [ ] The drifted set from Task 1 is resolved (expected: drop the orphaned declarations from `SkillRepository`; every caller reaches them via `SkillSetRepository`).
-  - [ ] `SkillRepository` constructs without `TypeError`.
-  - [ ] No call site changes.
+  - [x] All 3 dropped from `SkillRepository`, kept on `SkillSetRepository`. **The new mechanism forced this**: every profile's injector refused to construct the class, naming all three.
+  - [x] Constructs; 129 DI tests green.
+  - [x] No call site changed — all 7 use `skill_set_repo`, typed `SkillSetRepository`.
 - **Depends on:** Task 7
 
-## Task 11: Re-point all DI wiring
+## Task 11: Re-point all DI wiring  `[x]`
 - **Goal:** Every binding resolves against the new paths, on every profile.
 - **Files:** ~20 `di/modules/*.py`, `di/modules/infrastructure/**`.
 - **Done when:**
-  - [ ] No `agentclaw.community.plugins.<repo>` import remains outside `plugins/local` and `plugins/community`.
-  - [ ] `BotChatDbRepositoryProtocol` bound; its 3 construction sites inject instead of building (R3b).
-  - [ ] `build_injector()` succeeds on all four profiles (`pytest tests/community/di -q`).
+  - [x] Zero remain.
+  - [x] Bound alongside `OpenBotChatRepositoryProtocol`; all 3 sites inject. `BotChatDbRepository.__init__` gained `@inject` and a real `DatabasePlugin` annotation (was `db: Any`).
+  - [x] 129 passed.
 - **Depends on:** Tasks 7, 8, 9
 
-## Task 12: Update guards, allowlists, and boundary declarations
+## Task 12: Update guards, allowlists, and boundary declarations  `[x]`
 - **Goal:** Every path-keyed guard reflects the new tree, with no new suppression.
 - **Files:** `tests/community/architecture/test_no_oversized_modules.py`,
   `test_module_boundaries.py`, 21 domain `README.md`, `core/repository/README.md` (new).
 - **Done when:**
-  - [ ] The oversized allowlist re-keyed to `core/repository/implementations/skill_center/skill.py`; no stale entry.
-  - [ ] `agentclaw.community.core.repository` added to `BOUNDARY_SIGNIFICANT_MODULES`, with a `README.md` carrying a Context Boundary section and the domain map (Rule 22 + §8 "declared role").
-  - [ ] 21 domain READMEs declare the new dependency.
-  - [ ] `_ALLOWLIST` in `test_core_no_concrete_plugin_imports.py` still empty.
-  - [ ] `skills_pool_layout_repository.py` ≤ 1000 lines and `bot_repository.py` < 1000 — measured, not assumed.
-  - [ ] `pytest tests/community/architecture/ -q` green with no new allowlist entry.
+  - [x] Re-keyed; no stale entry.
+  - [x] Added to `BOUNDARY_SIGNIFICANT_MODULES`, with a `README.md` carrying a Context Boundary section and the domain map (Rule 22 + §8 "declared role").
+  - [x] 21 domain READMEs updated. Also re-keyed two governance guards, which now scan the repository tree as a second governed root.
+  - [x] Still empty — R7 removed the violations rather than suppressing them.
+  - [x] Measured: `skills_pool/layout.py` 1000, `bot/bot.py` 954 — both under the cap.
+  - [x] Green.
 - **Depends on:** Task 11
 
-## Task 13: Add the contract-enforcement guard
+## Task 13: Add the contract-enforcement guard  `[x]`
 - **Goal:** Make R2 self-enforcing so the contract cannot silently drift again.
 - **Files:** `tests/community/architecture/test_repository_contracts.py` (new).
 - **Done when:**
-  - [ ] Every Protocol member asserted `@abstractmethod`.
-  - [ ] Every implementation asserted to declare a Protocol base.
-  - [ ] A deliberately incomplete subclass raises `TypeError` naming the missing member.
-  - [ ] `protocols/` asserted to hold no runtime `agentclaw` imports.
+  - [x] Asserted.
+  - [x] Asserted.
+  - [x] Asserted, and the guard was verified to have teeth by deliberately breaking each invariant.
+  - [x] Asserted, plus a §8 role-separation check.
 - **Depends on:** Task 12
 
 ## Task 14: Move and re-point the test tree

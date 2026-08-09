@@ -6,7 +6,7 @@ import aiohttp
 from injector import inject
 
 from agentclaw.community.core.bot_chat.errors import LangfuseAPIError, SessionNotFoundError
-from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
+from agentclaw.community.core.repository.protocols.chat import BotChatDbRepositoryProtocol
 from agentclaw.community.core.bot_chat.query_support import QueryScope
 from agentclaw.community.core.bot_chat.schemas import (
     ConversationDetail,
@@ -318,13 +318,18 @@ class BotChatService:
     """Service for querying bot conversation sessions."""
 
     @inject
-    def __init__(self, db: DatabasePlugin, config: BotChatConfig) -> None:
+    def __init__(
+        self,
+        db: DatabasePlugin,
+        config: BotChatConfig,
+        db_repo: BotChatDbRepositoryProtocol,
+    ) -> None:
         """Initialize service with DatabasePlugin + BotChatConfig (Langfuse)."""
         self._db = db
         self._langfuse_base_url = config.langfuse_base_url
         self._langfuse_public_key = config.langfuse_public_key
         self._langfuse_secret_key = config.langfuse_secret_key
-        self._db_repo = BotChatDbRepository(db)
+        self._db_repo = db_repo
 
     def _get_log_source(self, log_source: str | None) -> str:
         """Determine effective log source.

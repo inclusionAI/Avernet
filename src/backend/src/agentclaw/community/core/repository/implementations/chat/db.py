@@ -7,6 +7,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 from typing import Any
 
+from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_chat.models import (
@@ -36,6 +37,7 @@ from agentclaw.community.core.bot_chat.schemas import (
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.utils.env_utils import get_current_env
+from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.core.repository.protocols.chat import BotChatDbRepositoryProtocol
 
 _OUTPUT_PREVIEW_LENGTH = 500
@@ -117,7 +119,8 @@ class BotChatDbRepository(
 ):
     """Synchronous DB repository for bot-chat queries."""
 
-    def __init__(self, db: Any) -> None:
+    @inject
+    def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
     def _safe_json_loads(self, value: str | None, default: Any = None) -> Any:
