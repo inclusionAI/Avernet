@@ -45,7 +45,28 @@ Four operations are exempt because they have no user dimension to scope by:
 ``list_mcp_servers`` / ``list_mcp_tenants`` / ``get_mcp_server`` read a
 marketplace catalogue that is identical for every caller in the tenant. They
 still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just have
-no user-shaped answer to give.
+no user-shaped answer to give. The load-test group is exempt on the same
+grounds and for the plainest reason of all: it reads and writes nothing.
+
+Planes
+------
+
+Every group here served HTTP only until the load-test group added a WebSocket.
+That changes nothing about the rule above — ``_PUBLIC_AUTH`` reaches a socket
+route as it reaches any other, and ``require_principal`` verifies the same
+signed header the gateway puts in a handshake — but two mechanical facts follow
+from it. A WebSocket route has no OpenAPI representation, so it appears in none
+of the generated-document assertions and its address is governed by
+``test_loadtest_endpoints.py`` instead; and the response tables below are an
+HTTP notion, so attaching one to a group with socket routes describes only its
+HTTP half.
+
+One thing the socket plane does **not** currently get: ``AvernetTenantMiddleware``
+and the public access log both return early on a non-HTTP scope, so a WebSocket
+runs under the *default* tenant and leaves no access line. That is harmless for
+a route that reads and writes nothing — the only socket route here — and it is
+the first thing to fix before adding one that does, because a tenant-scoped
+read under the default tenant is a data-isolation failure, not a missing log.
 
 The Bot Logs group is a different exclusion, and the sharpest thing to know
 about this rule. ``GET …/bots/logs/traces`` already takes a required
@@ -91,6 +112,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
+from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .resources import router as resources_router
@@ -103,7 +125,9 @@ from .skills import router as skills_router
 PUBLIC_API_PREFIX = "/openapi/v1"
 
 # The groups that answer no 403, because no route in them is scoped by the
-# *caller's* user: Bot Logs never derived a user from the credential at all.
+# *caller's* user: Bot Logs never derived a user from the credential at all, and
+# the load-test group has nothing to scope — its two endpoints answer a constant
+# and echo their input, so they touch no user's data on the way.
 #
 # It is not that Bot Logs has no `user_id` — `GET …/bots/logs/traces` has taken
 # a required one since #692. It means something else there, and the difference
@@ -116,6 +140,7 @@ PUBLIC_API_PREFIX = "/openapi/v1"
 # provide. See the note in the spec's Out of Scope.
 _GROUPS_WITHOUT_CALLER_SCOPE = [
     logs_router,
+    loadtest_router,
 ]
 
 # The groups where SOME routes take a `user_id` and some do not — `bots`

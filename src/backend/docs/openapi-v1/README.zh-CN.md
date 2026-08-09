@@ -626,8 +626,8 @@ id 恰好等于某个组件名，它在该地址上就不可达。这个集合�
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity  logs
-mcp  models  resources  routines  sessions  skills
+approvals  ceiling  check-name  connection  engine  identity  loadtest
+logs  mcp  models  resources  routines  sessions  skills
 ```
 
 **先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。

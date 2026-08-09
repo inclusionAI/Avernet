@@ -6,7 +6,9 @@ backend end of that contract. It holds the two seams the rest of the public
 surface was built against, and nothing else changes when they go live:
 
 - :func:`require_principal` — the FastAPI dependency every public route already
-  declares. Returns the verified caller, or raises so the route answers ``401``.
+  declares. Returns the verified caller, or raises so the route answers ``401``
+  (a WebSocket handshake is refused with close code ``1008`` instead — same
+  rule, and the only shape a handshake can be refused in).
 - :func:`resolve_avernet_tenant` — the data-isolation tenant for the request,
   read by ``AvernetTenantMiddleware`` before any route runs.
 
@@ -42,7 +44,9 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, WebSocketException
+from starlette.requests import HTTPConnection
+from starlette.status import WS_1008_POLICY_VIOLATION
 
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
@@ -82,26 +86,45 @@ _UNSET = _Unset()
 Principal = VerifiedCaller
 
 
-def resolve_caller(request: Request) -> VerifiedCaller | None:
-    """Verify the forwarded principal once per request, caching the outcome.
+def _verb(connection: HTTPConnection) -> str:
+    """What to call this connection in a log line.
+
+    The HTTP method where there is one, and the literal ``WEBSOCKET`` on the
+    socket plane — the same word the gateway's route table qualifies a socket
+    rule with, so a refusal here and the rule that let the handshake through are
+    greppable by the same token. A WebSocket scope carries no ``method`` key at
+    all, so this is a substitution rather than a default.
+    """
+    return connection.scope.get("method") or "WEBSOCKET"
+
+
+def resolve_caller(connection: HTTPConnection) -> VerifiedCaller | None:
+    """Verify the forwarded principal once per connection, caching the outcome.
 
     ``None`` means "no caller we can trust" — absent header or failed
     verification, deliberately indistinguishable to the caller. The cache holds
     ``None`` too, so a failed verification is not retried on the same request.
+
+    Takes an :class:`HTTPConnection` rather than a ``Request`` because both
+    planes of this surface arrive here: the gateway signs the same
+    ``X-Avernet-Principal`` into a WebSocket handshake's headers as into an HTTP
+    request's, and a handshake is where a socket's credential is checked. The
+    body of the function never needed anything narrower — headers and
+    ``state`` are what it reads, and both belong to the base class.
     """
-    cached = getattr(request.state, _CALLER_STATE_ATTR, _UNSET)
+    cached = getattr(connection.state, _CALLER_STATE_ATTR, _UNSET)
     if cached is not _UNSET:
         return cached
 
-    caller = _verify_from_headers(request)
-    setattr(request.state, _CALLER_STATE_ATTR, caller)
+    caller = _verify_from_headers(connection)
+    setattr(connection.state, _CALLER_STATE_ATTR, caller)
     return caller
 
 
-def _verify_from_headers(request: Request) -> VerifiedCaller | None:
-    """Verify the request's principal header, logging why if it fails."""
+def _verify_from_headers(connection: HTTPConnection) -> VerifiedCaller | None:
+    """Verify the connection's principal header, logging why if it fails."""
     config = get_principal_verifier_config()
-    token = request.headers.get(PRINCIPAL_HEADER, "").strip()
+    token = connection.headers.get(PRINCIPAL_HEADER, "").strip()
     if not token:
         # Distinguished from a rejected token, and on its own log line, because
         # the two point at completely different things. A *missing* header is
@@ -115,8 +138,8 @@ def _verify_from_headers(request: Request) -> VerifiedCaller | None:
             "no %s header on %s %s (request did not arrive through the "
             "gateway's authenticated path; verifier key fp=%s)",
             PRINCIPAL_HEADER,
-            request.method,
-            request.url.path,
+            _verb(connection),
+            connection.url.path,
             config.key_fingerprint,
         )
         return None
@@ -133,17 +156,37 @@ def _verify_from_headers(request: Request) -> VerifiedCaller | None:
         # the header is unauthenticated and can say anything a forger likes.
         logger.warning(
             "rejected forwarded principal on %s %s: %s",
-            request.method,
-            request.url.path,
+            _verb(connection),
+            connection.url.path,
             exc,
         )
         return None
 
 
-async def require_principal(request: Request) -> Principal:
-    """Return the verified caller, or raise :class:`MissingPrincipalError` (401)."""
-    caller = resolve_caller(request)
+async def require_principal(connection: HTTPConnection) -> Principal:
+    """Return the verified caller, or refuse the connection.
+
+    One dependency for both planes, because the surface's rule is one rule:
+    every public route requires an authenticated caller. Only the *shape* of the
+    refusal differs, and it has to — an HTTP request is answered with a body and
+    a status, and a WebSocket handshake has neither:
+
+    - HTTP → :class:`MissingPrincipalError`, which ``app.py``'s handler turns
+      into the surface's ``401`` envelope, exactly as before.
+    - WebSocket → :class:`~fastapi.WebSocketException` with ``1008``
+      (policy violation). Raised before the endpoint runs, so the socket is
+      never accepted and Starlette refuses the handshake instead of opening a
+      connection it would immediately have to close.
+
+    Both say only "no caller we can trust"; which half of verification failed is
+    logged above and never returned, on either plane.
+    """
+    caller = resolve_caller(connection)
     if caller is None:
+        if connection.scope["type"] == "websocket":
+            raise WebSocketException(
+                code=WS_1008_POLICY_VIOLATION, reason="Unauthorized"
+            )
         raise MissingPrincipalError("no verified caller for this request")
     return caller
 

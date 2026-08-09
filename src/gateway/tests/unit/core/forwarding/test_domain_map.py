@@ -106,6 +106,49 @@ def test_shipped_config_routes_collaboration_verbatim_to_bcs() -> None:
     assert websocket_requirement == {}
 
 
+def test_shipped_config_routes_the_load_test_socket_to_the_backend() -> None:
+    """The load-test echo is reachable on the socket plane, and authenticated.
+
+    Both halves matter, and neither is inferable from the `bots` domain. That
+    domain declares no `protocols`, so it serves HTTP only and a handshake under
+    `/openapi/v1/bots/**` resolves to nothing without an entry of its own — the
+    socket would be refused with "no route for path" while its HTTP sibling
+    worked, which is exactly the asymmetry a load run would misread as a
+    backend fault.
+
+    And the prefix appears nowhere in `route_security`, so it inherits
+    `/openapi/v1/bots/**` — user required. Asserted rather than assumed: the
+    `messages` socket a few lines below in the shipped config IS exempted, so
+    "a socket under bots is unauthenticated" is a live and wrong generalisation
+    to make here. A load test measuring an exempted path measures a path no
+    caller can take.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
+
+    socket = dm.websocket_domain_for("/openapi/v1/bots/loadtest/ws/echo")
+    assert socket is not None
+    assert socket.server.name == "backend"
+    assert socket.serves_websocket and not socket.serves_http
+    # No rewrite: the backend serves this address itself, so only the origin
+    # changes and the path travels byte for byte.
+    assert socket.rewrite is None
+    assert socket.upstream_path("/openapi/v1/bots/loadtest/ws/echo") == (
+        "/openapi/v1/bots/loadtest/ws/echo"
+    )
+
+    # Socket-only, so the group's HTTP half is still the `bots` domain's — the
+    # same split the messages socket relies on.
+    hello = dm.http_domain_for("/openapi/v1/bots/loadtest/hello")
+    assert hello is not None and hello.name == "bots"
+    assert dm.websocket_domain_for("/openapi/v1/bots/loadtest/hello") is None
+
+    security = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    requirement = security.resolve("WEBSOCKET", "/openapi/v1/bots/loadtest/ws/echo")
+    assert requirement is not None
+    assert requirement[PrincipalType.USER] is Presence.REQUIRED
+
+
 def test_shipped_config_routes_bcsfuse_clean_paths() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     dm = DomainMap.from_config(raw["user_config"]["upstreams"], variables=_VARS)
