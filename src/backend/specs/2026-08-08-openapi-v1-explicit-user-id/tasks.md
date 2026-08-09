@@ -139,20 +139,20 @@
         401 **even when the parameter is also missing**. _(landed in Group A)_
 - **Depends on:** Task 5
 
-## Task 7: Write the rule where the next author will find it
+## Task 7: Write the rule where the next author will find it  [x]
 
 - **Goal:** The convention is documented, not just enforced.
 - **Files:** `src/backend/docs/openapi-v1/README.md` (and the `.zh-CN`
   counterpart if it mirrors this section)
 - **Done when:**
-  - [ ] The placement rule, the four exemptions with a reason each, and the 403
+  - [x] The placement rule, the four exemptions with a reason each, and the 403
         are described in the handoff doc.
-  - [ ] The rejected alternatives are recorded in one short paragraph — body
+  - [x] The rejected alternatives are recorded in one short paragraph — body
         field, path segment, header — so the question is not reopened from
         scratch.
-  - [ ] The changelog and status board record this change, per the doc's own
+  - [x] The changelog and status board record this change, per the doc's own
         "if your change moved a checkbox, move it here too" rule.
-  - [ ] The doc says plainly what did **not** change: who may call, and what a
+  - [x] The doc says plainly what did **not** change: who may call, and what a
         request with no verified user principal answers.
 - **Depends on:** Task 6
 
