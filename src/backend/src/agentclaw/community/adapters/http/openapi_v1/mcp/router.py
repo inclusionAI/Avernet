@@ -22,13 +22,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     USER_SCOPED_403,
     Envelope,
     Page,
     PageParamsDep,
+)
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
@@ -140,7 +143,16 @@ def _to_config(cfg: Any) -> McpConfig:
 # ── Marketplace ─────────────────────────────────────────────────────
 
 
-@router.get("/servers", response_model=Envelope[Page[McpServer]])
+@router.get(
+    "/servers",
+    response_model=Envelope[Page[McpServer]],
+    # Authenticated, but not user-scoped. Declared on the route rather than
+    # inherited from ``build_public_router`` so the guard is visible where the
+    # operation is, and so ``test_public_routes_require_principal`` can see it:
+    # that test walks each route's own dependant, which a group-level
+    # dependency does not appear in.
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def list_mcp_servers(
     request: Request,
@@ -171,7 +183,12 @@ async def list_mcp_servers(
     return page(result.get("total", len(items)), items, request)
 
 
-@router.get("/tenants", response_model=Envelope[list[McpTenant]])
+@router.get(
+    "/tenants",
+    response_model=Envelope[list[McpTenant]],
+    # Authenticated, not user-scoped — see /servers.
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def list_mcp_tenants(
     request: Request,
@@ -184,7 +201,12 @@ async def list_mcp_tenants(
     return envelope(tenants, request)
 
 
-@router.get("/servers/{server_code}", response_model=Envelope[McpServerDetail])
+@router.get(
+    "/servers/{server_code}",
+    response_model=Envelope[McpServerDetail],
+    # Authenticated, not user-scoped — see /servers.
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def get_mcp_server(
     server_code: str,

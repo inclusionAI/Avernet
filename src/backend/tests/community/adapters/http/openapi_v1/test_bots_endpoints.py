@@ -18,6 +18,10 @@ from injector import Injector, Module
 
 import importlib
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.bots.router import router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
@@ -115,7 +119,8 @@ def client(svc, policy, passport, engine_config, bot_repo, skill_set_factory, au
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "u1"}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    mount_public_error_handlers(app)
+    return user_scoped_client(app, "u1")
 
 
 def _ok(resp, code=200000):

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -32,6 +32,9 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import (
     validate_engine_cluster,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngineError
+from agentclaw.community.adapters.http.openapi_v1.dependencies import (
+    require_principal,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
@@ -299,7 +302,16 @@ async def list_bots(
     return page(result["total"], items, request)
 
 
-@router.get("/check-name", response_model=Envelope[NameCheck])
+@router.get(
+    "/check-name",
+    response_model=Envelope[NameCheck],
+    # Authenticated, but not user-scoped. Declared on the route rather than
+    # inherited from ``build_public_router`` so the guard is visible where the
+    # operation is, and so ``test_public_routes_require_principal`` can see it:
+    # that test walks each route's own dependant, which a group-level
+    # dependency does not appear in.
+    dependencies=[Depends(require_principal)],
+)
 @envelope_errors
 async def check_bot_name(
     name: str,

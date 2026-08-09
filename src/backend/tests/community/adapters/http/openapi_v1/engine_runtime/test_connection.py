@@ -8,6 +8,10 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    mount_public_error_handlers,
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection import (
     router,
@@ -75,7 +79,7 @@ def client(relay, connections):
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    return user_scoped_client(app, OWNER)
 
 
 def _caps(*supported: str) -> EngineResult:

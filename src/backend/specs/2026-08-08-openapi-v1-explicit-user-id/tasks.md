@@ -88,29 +88,29 @@
         operations without `user_id`, and they are those four.
 - **Depends on:** Task 2
 
-## Task 5: Bring the existing suite to the new contract
+## Task 5: Bring the existing suite to the new contract  [x]
 
 - **Goal:** The 499 existing openapi_v1 tests exercise the new request shape.
 - **Files:** `src/backend/tests/community/adapters/http/openapi_v1/**`
 - **Done when:**
-  - [ ] Confirm `httpx` merges a client's default `params` into every request; if
+  - [x] Confirm `httpx` merges a client's default `params` into every request; if
         it does, set `client.params = {"user_id": …}` once per `TestClient`, and
         if not, add one helper that does the same job in one place.
-  - [ ] Tests for the four exempt operations do **not** send the parameter, and
+  - [x] Tests for the four exempt operations do **not** send the parameter, and
         one asserts that sending it is still accepted as an unknown query
         parameter rather than becoming a silent scope.
-  - [ ] The four `principal=None` cases in `resources/test_resources_handlers.py`
+  - [x] The four `principal=None` cases in `resources/test_resources_handlers.py`
         exercise the seam rather than four handlers, and still pin "no silent
         bot-derived owner".
-  - [ ] Direct-invocation tests (`identity`, `routines`, `resources`) pass the
+  - [x] Direct-invocation tests (`identity`, `routines`, `resources`) pass the
         resolved id, and their docstrings no longer describe a principal
         argument.
-  - [ ] Pre-handler failures are answered by importing `app.py`'s real handlers,
+  - [x] Pre-handler failures are answered by importing `app.py`'s real handlers,
         not by re-implementing them in a fixture.
-  - [ ] `test_sessions.py:507` and `test_approvals.py:94` are **unchanged and
+  - [x] `test_sessions.py:507` and `test_approvals.py:94` are **unchanged and
         green** — a caller-supplied `user_id` in the body is still a 422, because
         the body still forbids it. Confirm this rather than assuming it.
-  - [ ] `pytest tests/community/adapters/http/openapi_v1/` is green.
+  - [x] `pytest tests/community/adapters/http/openapi_v1/` is green.
 - **Depends on:** Tasks 3, 4
 
 ## Task 6: Pin the contract with a convention test
