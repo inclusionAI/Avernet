@@ -309,6 +309,7 @@ def test_teclaw_publish_task_is_reclaimed_after_worker_restart():
             baas_service=baas,
             device_binding_repo=binding_repo,
             passport_plugin=MagicMock(),
+            credentials_admins_writer=MagicMock(),
         )
     )
     record = w.enqueue(

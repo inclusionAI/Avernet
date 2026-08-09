@@ -44,6 +44,9 @@ from agentclaw.community.core.bot_collaborator.protocols import (
 )
 from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
+from agentclaw.community.core.bot_collaborator.services.credentials_admins_writer import (
+    DeviceCredentialsAdminsWriter,
+)
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
@@ -382,12 +385,14 @@ class BotManagementModule(Module):
         baas_service: BaasService,
         device_binding_repo: DeviceBindingRepository,
         passport_plugin: PassportPlugin,
+        credentials_admins_writer: DeviceCredentialsAdminsWriter,
     ) -> TeclawPublishTaskLifecycle:
         return TeclawPublishTaskLifecycle(
             registry=registry,
             baas_service=baas_service,
             device_binding_repo=device_binding_repo,
             passport_plugin=passport_plugin,
+            credentials_admins_writer=credentials_admins_writer,
         )
 
     @singleton

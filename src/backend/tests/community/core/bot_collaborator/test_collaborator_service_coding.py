@@ -55,8 +55,7 @@ def service(collaborator_repo, bot_repo, template_service):
         collaborator_repo=collaborator_repo,
         bot_repo=bot_repo,
         passport_plugin=Mock(),
-        resolver_provider=lambda: Mock(),
-        device_fs_dispatcher_provider=lambda: Mock(),
+        credentials_admins_writer=Mock(),
         member_management_capability_service=MemberManagementCapabilityService(
             engine_capabilities=(AICodingMemberManagementCapability(template_service),),
         ),
@@ -187,14 +186,11 @@ def test_add_collaborator_bot_not_found(service, bot_repo):
 # credentials-sync leg is a clean no-op and we stay focused on the passport leg.
 
 def _service_for_sync(passport):
-    resolver = Mock()
-    resolver.resolve_for_bot.side_effect = RuntimeError("no device in test")
     return CollaboratorService(
         collaborator_repo=Mock(),
         bot_repo=Mock(),
         passport_plugin=passport,
-        resolver_provider=lambda: resolver,
-        device_fs_dispatcher_provider=lambda: Mock(),
+        credentials_admins_writer=Mock(),
     )
 
 
@@ -229,6 +225,42 @@ def test_on_collaboration_changed_passport_failure_is_swallowed():
     svc.on_collaboration_changed("bot1", "owner1", env="dev")
 
     passport.update_passport.assert_called_once()
+
+
+# ── on_collaboration_changed: delegates the .credentials admins write to the
+#    DeviceCredentialsAdminsWriter (the teclaw service-bot admins-sync fix) ──
+
+
+class _RecordingWriter:
+    """Records sync_on_change calls — stands in for the credentials writer."""
+
+    def __init__(self) -> None:
+        self.sync_calls: list[tuple[str, str, list[str]]] = []
+
+    def sync_on_change(self, bot_id: str, owner_id: str, admins: list[str]) -> None:
+        self.sync_calls.append((bot_id, owner_id, list(admins)))
+
+
+def test_on_collaboration_changed_delegates_admins_to_credentials_writer():
+    writer = _RecordingWriter()
+    collaborator_repo = Mock()
+    collaborator_repo.list_by_bot.return_value = [
+        _admin_record("admin001"),
+        _admin_record("admin002"),
+    ]
+    bot_repo = Mock()
+    bot_repo.get_by_id_and_owner.return_value = {"bot_id": "bot1", "owner_id": "owner1"}
+    svc = CollaboratorService(
+        collaborator_repo=collaborator_repo,
+        bot_repo=bot_repo,
+        passport_plugin=Mock(),
+        credentials_admins_writer=writer,
+    )
+
+    svc.on_collaboration_changed("bot1", "owner1", env="dev")
+
+    # admins (role=admin) computed from the collaborator list are handed to the writer
+    assert writer.sync_calls == [("bot1", "owner1", ["admin001", "admin002"])]
 
 
 def _collaborator_record(user_id: str = MEMBER) -> CollaboratorRecord:

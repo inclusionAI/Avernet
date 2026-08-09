@@ -147,6 +147,7 @@ def _handler(*, clock=lambda: 200.0):
         baas_service=baas,
         device_binding_repo=binding_repo,
         passport_plugin=passport,
+        credentials_admins_writer=MagicMock(),
         poll_delay_seconds=10.0,
         clock=clock,
     )
@@ -414,6 +415,7 @@ def test_terminal_publish_does_not_overwrite_binding_released_during_poll(sqlite
         baas_service=baas,
         device_binding_repo=binding_repo,
         passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     assert handler.handle(_payload(binding_id=binding_id)) == Complete()
@@ -438,6 +440,7 @@ def test_terminal_publish_does_not_overwrite_new_publish_id_during_poll(sqlite_d
         baas_service=baas,
         device_binding_repo=binding_repo,
         passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     assert handler.handle(_payload(binding_id=binding_id)) == Complete()
@@ -503,6 +506,7 @@ def test_lifecycle_registers_handler():
         baas_service=MagicMock(),
         device_binding_repo=MagicMock(),
         passport_plugin=MagicMock(),
+        credentials_admins_writer=MagicMock(),
     )
 
     asyncio.run(lifecycle.bootstrap())
@@ -566,3 +570,94 @@ def test_binding_read_failure_returns_retry():
     assert isinstance(outcome, Retry)
     assert "binding db down" in outcome.error
     baas.get_publish_progress.assert_not_called()
+
+
+# ── post-publish admins seed into the online container's .credentials ────────
+
+
+class _RecordingCredsWriter:
+    """Records seed_for_publish calls; optionally raises to test Retry."""
+
+    def __init__(self, *, raise_on_seed: BaseException | None = None) -> None:
+        self.seed_calls: list[tuple[int, str, str]] = []
+        self._raise = raise_on_seed
+
+    def seed_for_publish(self, binding_id: int, bot_id: str, owner_id: str) -> None:
+        self.seed_calls.append((binding_id, bot_id, owner_id))
+        if self._raise is not None:
+            raise self._raise
+
+
+def _handler_with_writer(writer, *, clock=lambda: 200.0):
+    baas = MagicMock()
+    binding_repo = MagicMock()
+    binding_repo.get_by_id.return_value = _binding()
+    binding_repo.transition_teclaw_publish_terminal.return_value = True
+    passport = MagicMock()
+    passport.query_token.return_value = "passport-token"
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = [
+        {"device_uuid": "DEVICE-1", "paas_device_id": "TECLAW_1@4"}
+    ]
+    handler = TeclawPublishTaskHandler(
+        baas_service=baas,
+        device_binding_repo=binding_repo,
+        passport_plugin=passport,
+        credentials_admins_writer=writer,
+        poll_delay_seconds=10.0,
+        clock=clock,
+    )
+    return handler, baas, binding_repo, passport, writer
+
+
+def test_success_seeds_admins_into_the_started_container():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+
+    assert handler.handle(_payload()) == Complete()
+
+    # token delivered, then admins seeded into the ONLINE binding (id=77, owner staff-1)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+    assert writer.seed_calls == [(77, "b1", "staff-1")]
+
+
+def test_active_binding_replays_admins_seed_after_crash():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    binding_repo.get_by_id.return_value = _binding(status="ACTIVE")
+
+    assert handler.handle(_payload()) == Complete()
+
+    # crash-resume replays both token delivery and admins seed (both idempotent)
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+    assert writer.seed_calls == [(77, "b1", "staff-1")]
+
+
+def test_admins_seed_failure_retries_without_losing_token_delivery():
+    writer = _RecordingCredsWriter(raise_on_seed=RuntimeError("credentials write down"))
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+
+    outcome = handler.handle(_payload())
+
+    assert isinstance(outcome, Retry)
+    assert "seed admins" in outcome.error
+    # token was still delivered (its own durability); seed failure does not roll it back
+    baas.update_teclaw_outbound_rule_by_bot_uuid.assert_called_once_with(
+        "BOT-x", agent_pass_token="passport-token"
+    )
+
+
+def test_admins_seed_not_run_when_devices_not_ready():
+    writer = _RecordingCredsWriter()
+    handler, baas, binding_repo, passport, writer = _handler_with_writer(writer)
+    baas.get_publish_progress.return_value = {"status": "SUCCESS"}
+    baas.update_teclaw_outbound_rule_by_bot_uuid.return_value = []  # devices not ready
+
+    assert handler.handle(_payload()) == Reschedule(10.0)
+    # never seed before the device is ready
+    assert writer.seed_calls == []
