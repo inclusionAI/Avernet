@@ -1125,29 +1125,8 @@ const BotControllerImpl = {
     };
   },
 
-  /**
-   * 切换 Bot 引擎
-   * POST /api/bots/switch-engine
-   * 权限：OWNER（按文档现有接口变更）。协作场景下需要传 owner_id，让后端按 bot 归属鉴权。
-   */
-  switchBotEngine: async (
-    body: {
-      bot_id: string;
-      user_id: string;
-      engine_type: EngineType;
-      owner_id?: string;
-    },
-    options?: { [key: string]: any },
-  ): Promise<CreateBotResponse> => {
-    const { bot_id, owner_id, ...rest } = body;
-    return request<CreateBotResponse>('/api/bots/switch-engine', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      ...(owner_id ? { params: { owner_id } } : {}),
-      data: { bot_id, ...rest },
-      ...(options || {}),
-    });
-  },
+  // 没有 switchBotEngine：Bot 的引擎在创建时固定（inclusionAI/Avernet#914），
+  // 后端已不再提供 POST /api/bots/switch-engine。换引擎意味着新建一个 Bot。
 
   /**
    * 获取 Bot 连接信息
@@ -1493,7 +1472,6 @@ export const listBots = BotControllerImpl.listBots;
 export const restartBot = BotControllerImpl.restartBot;
 export const resetBot = BotControllerImpl.resetBot;
 export const switchBot = BotControllerImpl.switchBot;
-export const switchBotEngine = BotControllerImpl.switchBotEngine;
 export const getBotConnection = BotControllerImpl.getBotConnection;
 export const searchBotsByConditions = BotControllerImpl.searchBotsByConditions;
 export const setBotPublic = BotControllerImpl.setBotPublic;

@@ -456,7 +456,11 @@ class ExpertChatService:
             user_id: 用户ID（caller 身份,权限校验 + builder device_affinity 用）
 
         Returns:
-            连接信息，含 url、headers、use_proxy、engine_type 等字段
+            连接信息，含 url、headers、use_proxy、engine_type 等字段。
+            ``engine_type`` 最终源自 bot 记录的 ``active_engine``；Bot 的引擎在创建时
+            固定（inclusionAI/Avernet#914），后端与 engine 都不存在在创建后改写
+            ``ac_bots.active_engine`` 的路径，因此 service bot 用 draft 记录描述已发布
+            runtime 是成立的 —— 两者必然是同一个引擎。
 
         Raises:
             ChatPermissionError: 非 owner / 非 public / 非 collaborator

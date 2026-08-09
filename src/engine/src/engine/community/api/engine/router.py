@@ -1,13 +1,18 @@
 """/api/engine/* — engine management HTTP endpoints (M4, doc §18.2).
 
 Thin wrapper over `EngineManager` that lets the frontend introspect
-capabilities, list registered engines, switch at runtime, and restart the
-current engine. Business logic lives on the manager; this module only maps
-HTTP concerns (status codes, response envelopes) onto its surface.
+capabilities, list registered engines, and restart the current engine.
+Business logic lives on the manager; this module only maps HTTP concerns
+(status codes, response envelopes) onto its surface.
+
+There is deliberately no `POST /switch`. A bot's engine is fixed at creation
+(inclusionAI/Avernet#914), so swapping the engine under a running bot is not a
+supported operation — the runtime that consumers derive from the bot record
+would stop describing the process actually serving it. Retired 2026-08-09.
 
 Error shape mirrors the rest of the web layer:
   200  — success (`{"success": True, ...}`)
-  400  — bad request (unknown engine name)
+  400  — bad request
   409  — conflict (active connections; retry with `force=true`)
   500  — internal error
 """
@@ -18,7 +23,7 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from engine.community.api.engine.schemas import EngineRestartRequest, EngineSwitchRequest
+from engine.community.api.engine.schemas import EngineRestartRequest
 from engine.community.manager import EngineManager
 
 log = logging.getLogger("engine-web")
@@ -66,22 +71,6 @@ async def list_registered_engines() -> dict:
             "engines": manager.get_registered_engines(),
         },
     }
-
-
-@router.post("/switch")
-async def engine_switch(request: EngineSwitchRequest):
-    """Swap the active engine at runtime. 409 if active connections block it."""
-    manager = EngineManager.get_instance()
-    try:
-        result = await manager.switch(request.engine, force=request.force)
-        return {"success": True, **result}
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"success": False, "error": str(e)})
-    except RuntimeError as e:
-        return JSONResponse(status_code=409, content={"success": False, "error": str(e)})
-    except Exception as e:
-        log.exception(f"Engine switch failed: {e}")
-        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @router.post("/restart")

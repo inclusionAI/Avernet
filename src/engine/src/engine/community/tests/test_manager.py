@@ -290,57 +290,20 @@ class TestInitialize:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# switch()
+# switch() — retired
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class TestSwitch:
-    @pytest.mark.asyncio
-    async def test_unregistered_target_raises(
-        self, manager: EngineManager, patch_manager_deps
-    ):
-        with pytest.raises(ValueError, match="Unsupported engine type"):
-            await manager.switch("nonexistent")
+class TestSwitchIsRetired:
+    """A bot's engine is fixed at creation (inclusionAI/Avernet#914).
 
-    @pytest.mark.asyncio
-    async def test_same_engine_is_noop(
-        self, manager: EngineManager, patch_manager_deps
-    ):
-        result = await manager.switch("fake")
-        assert result == {
-            "switched": False,
-            "engine": "fake",
-            "reason": "already active",
-        }
+    The manager used to expose ``switch()``; it was removed so the invariant is
+    structural rather than conventional. Asserted here so a re-introduction has
+    to argue with a failing test.
+    """
 
-    @pytest.mark.asyncio
-    async def test_happy_path_deactivates_then_activates(
-        self,
-        registry: EngineRegistry,
-        patch_manager_deps,
-    ):
-        # Register a second engine alongside fake.
-        class _Fake2(_FakeEngine):
-            name = "fake2"
-
-        registry.register(_Fake2)
-        EngineManager.reset_instance()
-        mgr = EngineManager("fake", registry=registry)
-
-        await mgr.initialize()
-        first = mgr._active_engine
-        assert isinstance(first, _FakeEngine)
-
-        result = await mgr.switch("fake2")
-
-        assert result["switched"] is True
-        assert result["engine"] == "fake2"
-        assert result["previous"] == "fake"
-        # Old engine was shut down; new engine was initialized.
-        assert first.shutdown_called == 1
-        assert isinstance(mgr._active_engine, _Fake2)
-        assert mgr._active_engine.initialized == 1
-        assert mgr.engine == "fake2"
+    def test_manager_exposes_no_switch(self, manager: EngineManager):
+        assert not hasattr(manager, "switch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

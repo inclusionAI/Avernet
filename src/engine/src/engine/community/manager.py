@@ -15,9 +15,9 @@ without having to import the registry module directly.
 
 Responsibilities the manager still owns on top of the engine:
 - Engine subprocess lifecycle
-- WebSocket server singleton reset across switches (the server is generic,
-  but its per-connection state cache must be dropped when the active engine
-  changes)
+- WebSocket server singleton reset across restarts (the server is generic,
+  but its per-connection state cache must be dropped when the engine process
+  is replaced)
 - Cron polling — engine-agnostic worker that runs above the plugin boundary.
   Engine-specific cron workers (e.g. OpenClaw's SystemEvent replacement
   monitor) live inside the engine's own `initialize()` / `shutdown()`.
@@ -84,13 +84,13 @@ class EngineManager:
         self._transition: dict[str, Any] | None = None
         self._last_init_error: str | None = None
         # Lifecycle phase used by readiness():
-        #   "starting"        — actively in initialize/switch/restart, before
+        #   "starting"        — actively in initialize/restart, before
         #                       the subprocess start step has been attempted
         #   "start_attempted" — we tried to start the subprocess and waited
         #                       for it (succeeded, timed out, or raised); the
         #                       enclosing init coroutine is still running
-        #   "completed"       — initialize/switch/restart returned cleanly
-        #   "failed"          — initialize/switch/restart raised
+        #   "completed"       — initialize/restart returned cleanly
+        #   "failed"          — initialize/restart raised
         self._init_phase: str = "starting"
 
     @classmethod
@@ -199,8 +199,8 @@ class EngineManager:
         `engine=None` returns the active engine's capabilities (after initialize()
         has run). Passing a name returns the declared capabilities of a registered
         engine without activating it — used by `/api/engine/capabilities?engine=X`
-        so the frontend can preview what a non-active engine would support before
-        switching.
+        so a caller can inspect what a registered but non-active engine declares
+        (e.g. to decide which engine to create a bot on).
 
         For the inspection path, the engine is instantiated with empty config so
         `cls.capabilities` can be evaluated. Engines whose constructor needs
@@ -503,124 +503,12 @@ class EngineManager:
 
         self._init_phase = "completed"
 
-    async def switch(self, target: str, force: bool = False) -> dict:
-        """
-        切换到目标引擎。
-
-        Args:
-            target: 目标引擎名称（必须在 registry 中注册）
-            force: 是否强制切换（忽略活跃连接）
-
-        Returns:
-            切换结果 dict
-
-        Raises:
-            ValueError: target 未注册
-            RuntimeError: 有活跃连接且非 force
-        """
-        # 先做 alias 规范化：允许调用方传 "aicoding" / "claude_code" / "ClaudeCode"，
-        # 避免上层每次都要知道 canonical 拼写。未知名字维持原样，落到下面的
-        # registry 白名单校验 —— 没注册就直接报 ValueError。
-        from engine.community.core.engine.naming import normalize
-
-        canonical = normalize(target) or target
-        target = canonical
-
-        if not self._registry.has(target):
-            raise ValueError(
-                f"Unsupported engine type: {target}. "
-                f"Registered: {list(self._registry.names())}"
-            )
-
-        if target == self._engine:
-            return {
-                "switched": False,
-                "engine": self._engine,
-                "reason": "already active",
-            }
-
-        async with self._lock:
-            old_engine = self._engine
-            log.info(f"Switching engine: {old_engine} -> {target} (force={force})")
-            self._set_transition(
-                operation="switching",
-                from_engine=old_engine,
-                to_engine=target,
-                phase="validating",
-            )
-            self._init_phase = "starting"
-            self._last_init_error = None
-
-            try:
-                active = self._get_active_connections()
-                if active > 0 and not force:
-                    raise RuntimeError(
-                        f"有 {active} 个活跃 WebSocket 连接，使用 force=true 强制切换"
-                    )
-
-                # 停止 cron 服务（先停 cron，对齐 shutdown() 的顺序 —
-                # 和 startup 顺序严格相反：先拆最外层的后台服务，再拆引擎）
-                self._set_transition_phase("stopping_cron")
-                await self._stop_cron_services()
-
-                self._set_transition_phase("deactivating_engine")
-                await self._deactivate_engine()
-
-                self._set_transition_phase("starting_target_process")
-                from engine.community.process import create_engine_process
-
-                new_process = create_engine_process(target)
-                try:
-                    await new_process.start()
-                finally:
-                    self._init_phase = "start_attempted"
-
-                # TODO: Cross-engine state cleanup is deferred until the
-                # multi-engine design work — see
-                # `project_engine_switch_cleanup.md` in memory.
-                sync_result: dict = {}
-
-                self._set_transition_phase("resetting_server")
-                self._reset_server()
-
-                self._set_transition_phase("stopping_previous_process")
-                if self._process:
-                    await self._process.stop()
-
-                self._set_transition_phase("updating_engine")
-                self._process = new_process
-                # The manager owns the live active-engine slot; a switch just
-                # mutates it. No write-back to a config global: under DI the
-                # manager singleton is the single source of truth for the
-                # current engine, and a fresh process re-seeds from
-                # EngineConfig.default_engine (runtime switches are soft state).
-                self._engine = target
-
-                self._set_transition_phase("activating_engine")
-                await self._activate_engine(target)
-
-                # 启动新引擎的 cron 服务
-                self._set_transition_phase("starting_cron")
-                await self._start_cron_services()
-
-                # 保存当前引擎标记
-                self._save_last_engine(target)
-
-                self._set_transition_phase("finalizing")
-                log.info(f"Engine switched: {old_engine} -> {target}")
-                self._init_phase = "completed"
-                return {
-                    "switched": True,
-                    "engine": target,
-                    "previous": old_engine,
-                    "sync": sync_result,
-                }
-            except Exception as e:
-                self._set_transition_error(str(e))
-                self._init_phase = "failed"
-                raise
-            finally:
-                self._clear_transition()
+    # There is deliberately no ``switch()``. A bot's engine is fixed at
+    # creation (inclusionAI/Avernet#914): the backend has no path that mutates
+    # ``ac_bots.active_engine`` and the public surface rejects ``engine`` on
+    # update, so a live engine swap would leave every consumer that derives a
+    # runtime from the bot record describing a process that is no longer there.
+    # ``restart()`` below restarts the *same* engine, which stays supported.
 
     async def restart(self, force: bool = False) -> dict:
         async with self._lock:
@@ -757,7 +645,7 @@ class EngineManager:
     # can only land on `completed × {alive,dead}`. The `starting` and
     # `start_attempted` rows are reachable only if initialize() is ever made
     # non-blocking; the `failed` rows are reachable only via mid-life
-    # switch()/restart() failures (the server is already up by then). Kept
+    # restart() failures (the server is already up by then). Kept
     # as the full table so the contract is stable across those scenarios.
     _READINESS_TABLE: dict[tuple[str, bool], tuple[str, str]] = {
         ("starting", True): ("starting", "引擎已启动，初始化中"),
@@ -856,11 +744,11 @@ class EngineManager:
             return 0
 
     def _reset_server(self) -> None:
-        """Drop WebSocket server singletons across engine switch/restart.
+        """Drop WebSocket server singletons across an engine restart.
 
         Resets both the engine-agnostic server (per-connection AuthContext
         cache) and the AiCoding-specific server (plugin / client references)
-        so stale state doesn't leak across engine boundaries.
+        so stale state doesn't leak across engine process boundaries.
         """
         try:
             from engine.community.api.transport.ws_server import reset_server

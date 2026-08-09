@@ -8,12 +8,13 @@ Two of these are genuinely process-wide singletons; the third is per-engine.
   Optional semantics). Singleton.
 - ``Callable[[str], EngineProcessSettings]`` — a **per-engine resolver**, NOT a
   baked instance. Process settings describe how to start/stop a specific
-  engine's subprocess, and the active engine can change at runtime via
-  ``EngineManager.switch()`` — so binding one engine's settings as a singleton
-  would be stale after a switch. Consumers inject the resolver and call it with
-  the engine name they actually need (the manager's current engine at
-  process-creation time). This mirrors backend's ``Callable[[], X]`` provider
-  patterns.
+  engine's subprocess, and one engine's settings are not another's. A runtime
+  engine swap is no longer possible (inclusionAI/Avernet#914 retired
+  ``EngineManager.switch()``), but the resolver stays a resolver: the registry
+  holds several engines and a baked singleton would answer for the wrong one.
+  Consumers inject the resolver and call it with the engine name they actually
+  need (the manager's current engine at process-creation time). This mirrors
+  backend's ``Callable[[], X]`` provider patterns.
 """
 from __future__ import annotations
 
@@ -53,8 +54,8 @@ class ProcessModule(Module):
     ) -> Callable[[str], EngineProcessSettings]:
         """Resolve `EngineProcessSettings` by engine name, on demand.
 
-        Per-engine (not a singleton instance) so switching engines picks up the
-        right subprocess config. Backed by the pure
+        Per-engine (not a singleton instance) so each engine picks up its own
+        subprocess config. Backed by the pure
         `load_engine_process_settings` reader (engine.json + env, no module
         global).
         """

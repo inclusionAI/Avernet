@@ -159,7 +159,9 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 >
 > `engine/switch` 与 `engine/restart` 刻意排除 —— 包装 `switch` 等于给 #494 在
 > `PUT /openapi/v1/bots/{bot_id}` 上的 `engine` 不可变裁定开后门，包装 `restart`
-> 会让同一个 bot 有两个重启动词。`session-favorites` 与 `/api/openclaw` HTTP
+> 会让同一个 bot 有两个重启动词。自 #914 起，两侧都已经没有 `switch` 可包装：
+> engine 路由与后端的 `POST /api/bots/switch-engine` 一并下线，Bot 的引擎在创建时
+> 固定这一点从此是结构性的。`session-favorites` 与 `/api/openclaw` HTTP
 > 三件套是**延后，不是取消**（两者以后再加都是增量）。理由见 `engine-surface.zh-CN.md`。
 >
 > **routines 是 Track C 的样板，而不是 Track B 的。** 后端 `/api/cron` →
@@ -977,6 +979,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
      engine 的帧格式。
   5. **两处排除是契约决策，不是偷懒。** 包装 `engine/switch` 会成为绕过 #494
      `engine` 不可变裁定的后门；包装 `engine/restart` 会让同一个 bot 有两个重启动词。
+     （#914 之后 `switch` 已被整体下线，第一条排除在构造上已不再需要。）
 
   完整清单、逐端点映射，以及每一条未包装 engine 路由的裁定：
   **[`engine-surface.zh-CN.md`](engine-surface.zh-CN.md)**。看板变动：新增 Track C

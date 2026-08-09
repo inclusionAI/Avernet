@@ -184,6 +184,12 @@ class EngineConnectionService:
             ),
             surface="connections",
         )
+        # A bot's engine is fixed at creation (inclusionAI/Avernet#914): no path
+        # in backend or engine mutates ``ac_bots.active_engine`` after the
+        # insert. That is what lets the socket path be derived from the *record*
+        # rather than probed from the running device — for a service bot the
+        # record is the draft's, and the released runtime it describes is the
+        # same engine because no switch can have happened in between.
         engine = str(bot.get("active_engine") or "")
 
         binding_id = self._active_binding_id(bot_id, owner_id)

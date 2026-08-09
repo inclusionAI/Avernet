@@ -71,7 +71,8 @@ class BotServiceProtocol(Protocol):
 
     def restart_bot(self, *args: Any, **kwargs: Any) -> Any: ...
 
-    def switch_engine(self, *args: Any, **kwargs: Any) -> Any: ...
+    # No ``switch_engine``: a bot's engine is fixed at creation
+    # (inclusionAI/Avernet#914), so ``active_engine`` has no mutator.
 
     def release_bot_for_others(self, *args: Any, **kwargs: Any) -> Any: ...
 

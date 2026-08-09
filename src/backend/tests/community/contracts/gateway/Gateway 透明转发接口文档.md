@@ -227,7 +227,7 @@
 | `GET /api/v1/engine/{target}/models/{model_id}` | * | `/proxypass/{target}/api/models/{model_id}` | 模型详情 |
 | `GET /api/v1/engine/{target}/engine/status` | * | `/proxypass/{target}/api/engine/status` | 引擎状态 |
 | `POST /api/v1/engine/{target}/engine/restart` | * | `/proxypass/{target}/api/engine/restart` | 重启引擎 |
-| `POST /api/v1/engine/{target}/engine/switch` | * | `/proxypass/{target}/api/engine/switch` | 切换引擎 |
+| ~~`POST /api/v1/engine/{target}/engine/switch`~~ | * | `/proxypass/{target}/api/engine/switch` | **已下线** —— 引擎侧路由已删除（inclusionAI/Avernet#914，Bot 引擎创建后不可变）。Gateway 仍配着该规则，转发只会打到 404 |
 
 **参数明细：**
 
@@ -244,7 +244,7 @@
 | `GET /api/v1/engine/{target}/models/{model_id}` | path: `target`, `model_id`; Header: `X-PROXYPASS-TOKEN` | 同 models 列表单条 |
 | `GET /api/v1/engine/{target}/engine/status` | path: `target`; Header: `X-PROXYPASS-TOKEN` | `{engine(str), active_connections(int), process: {running(bool), pid, exit_code(int), last_error, command_enabled(bool), managed_process(bool)}, transition}` |
 | `POST /api/v1/engine/{target}/engine/restart` | path: `target`; Header: `X-PROXYPASS-TOKEN`; body: `{}` | `{success, data: {status: "restarting"}}` |
-| `POST /api/v1/engine/{target}/engine/switch` | path: `target`; Header: `X-PROXYPASS-TOKEN`; body: `engine_type`* | `{success, data: {engine_type, status: "switching"}}` |
+| ~~`POST /api/v1/engine/{target}/engine/switch`~~ | —— | **已下线**，上游无对应路由 |
 
 ---
 

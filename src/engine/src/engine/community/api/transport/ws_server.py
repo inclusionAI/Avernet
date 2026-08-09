@@ -1427,7 +1427,7 @@ def get_server() -> EngineWebSocketServer:
 
 
 def reset_server() -> None:
-    """Drop the singleton — called during engine switch/restart."""
+    """Drop the singleton — called during an engine restart."""
     global _server
     _server = None
 
@@ -1435,7 +1435,7 @@ def reset_server() -> None:
 # ── Extra reset callbacks (corp → community, one-way) ────────────────────────
 # The community runtime imports zero corp code; corp registers its own WS-server
 # reset (e.g. the AiCoding server) here at bootstrap. `EngineManager._reset_server`
-# runs these across engine switch/restart without naming any corp module.
+# runs these across an engine restart without naming any corp module.
 _server_reset_callbacks: list[Callable[[], None]] = []
 
 

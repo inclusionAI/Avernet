@@ -123,6 +123,14 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 > （`extra="forbid"` → 422）；包装 `switch` 等于给那条裁定开后门。而
 > `POST /openapi/v1/bots/{bot_id}/restart` 本身就会重新置备设备，包装 `restart`
 > 会让同一个 bot 拥有两个影响范围不同的重启动词。_2026-07-30 决定。_
+>
+> **`switch` 现在已经不存在，也就无从包装。** #914 直接下线了 engine 侧的
+> `POST /api/engine/switch` 与 `EngineManager.switch()`，以及后端的
+> `POST /api/bots/switch-engine` 与 `BotService.switch_engine`。Bot 的引擎在创建
+> 时固定，这一点从「约定」变成了「结构」：两个进程里都不再有任何路径会在 insert
+> 之后改写 `ac_bots.active_engine`。正因如此，connection 端点、`ExpertChatService`
+> 与发布状态描述从 bot 记录推导引擎才是**正确**的，而不只是「通常正确」。
+> _2026-08-09 决定。_
 
 ### models（2）—— engine `/api/models`
 
@@ -407,6 +415,11 @@ _已被取代的旧说明（2026-08-03 之前）：这些组原本比 `{bot_id}`
   以后可增量加回。
 - **2026-07-30 —— 排除 `engine/switch` 与 `engine/restart`**，以保住 #494 的引擎
   不可变裁定，并避免出现两个重启动词。
+- **2026-08-09 —— 引擎切换整体下线（#914）。** 上一条只是把 `switch` 挡在**公共**面
+  之外；现在连内部还能在创建后切换引擎的路径也一并删除了 —— engine 侧的
+  `POST /api/engine/switch` 与 `EngineManager.switch()`，以及后端的
+  `POST /api/bots/switch-engine` 与 `BotService.switch_engine`。引擎不可变从此是
+  结构性的。要换引擎，就新建一个 Bot。
 - **2026-07-30 —— `session-favorites` 与 `/api/openclaw` HTTP 三件套
   （外加 default-config、zero-check）延后**，不是取消。两者都是增量的：以后再加
   不会破坏任何已发布的契约。

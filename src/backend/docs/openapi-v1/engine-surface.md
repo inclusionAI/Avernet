@@ -151,6 +151,15 @@ Two things about this group are not the shape a reader would assume:
 > ruling. And `POST /openapi/v1/bots/{bot_id}/restart` already re-provisions the
 > device, so wrapping `restart` would give one bot two restart verbs with
 > different blast radii. _Decided 2026-07-30._
+>
+> **`switch` no longer exists to wrap.** #914 retired the engine route itself
+> (`POST /api/engine/switch`), `EngineManager.switch()`, and the backend's
+> `POST /api/bots/switch-engine` / `BotService.switch_engine`. A bot's engine is
+> now fixed at creation *structurally* rather than by convention: nothing in
+> either process mutates `ac_bots.active_engine` after the insert. That is what
+> makes the engine-from-bot-record derivation in the connection endpoint,
+> `ExpertChatService`, and the publish status descriptions correct rather than
+> merely usually-correct. _Decided 2026-08-09._
 
 ### models (2) — engine `/api/models`
 
@@ -500,6 +509,13 @@ does not add it (rule C2)._
   need node inventory on the public surface. Additive later.
 - **2026-07-30 — `engine/switch` and `engine/restart` excluded**, to preserve
   #494's engine-immutability ruling and avoid two restart verbs.
+- **2026-08-09 — engine switching retired outright (#914).** The exclusion above
+  kept `switch` off the *public* surface; the internal paths that could still
+  switch an engine after creation are now gone too — the engine's
+  `POST /api/engine/switch` and `EngineManager.switch()`, and the backend's
+  `POST /api/bots/switch-engine` and `BotService.switch_engine`. Engine
+  immutability is structural now. Changing a bot's engine means creating a new
+  bot.
 - **2026-07-30 — `session-favorites` and the `/api/openclaw` HTTP trio
   (+ default-config, zero-check) deferred**, not cancelled. Both are additive:
   adding them later breaks no published contract.

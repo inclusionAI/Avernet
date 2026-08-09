@@ -128,7 +128,6 @@ def mock_bot_service():
     svc.delete_bot.return_value = None
     svc.restart_bot.return_value = BOT_SAMPLE
     svc.check_bot_name_exists.return_value = False
-    svc.switch_engine.return_value = BOT_SAMPLE
     svc.get_engine_paths.return_value = {"openclaw": "/some/path"}
     svc.get_bot_work_path.return_value = "/some/path"
     svc.get_bot_config_path.return_value = "/some/config"
@@ -868,53 +867,24 @@ class TestRestartBot:
 
 
 # ---------------------------------------------------------------------------
-# POST /api/bots/switch-engine
+# POST /api/bots/switch-engine — retired (inclusionAI/Avernet#914)
 # ---------------------------------------------------------------------------
 
-class TestSwitchEngine:
-    def test_success(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
+class TestSwitchEngineIsRetired:
+    """A bot's engine is fixed at creation, so the route must stay gone.
 
-    def test_missing_bot_id(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
+    ``PUT /openapi/v1/bots/{bot_id}`` already rejects ``engine`` and the public
+    engine surface never wrapped ``engine/switch``; this internal route was the
+    last path that mutated ``ac_bots.active_engine`` after creation.
+    """
 
-    def test_missing_engine_type(self, client):
-        tc, svc, _ = client
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default"})
-        assert resp.json()["error_code"] == 400
-
-    def test_bot_not_found(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotNotFoundError("nope")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "missing", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 404
-
-    def test_service_error(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = BotServiceError("fail")
-        resp = tc.post("/api/bots/switch-engine", json={"bot_id": "default", "engine_type": "openclaw"})
-        assert resp.json()["error_code"] == 400
-
-    def test_default_teclaw_error_preserves_business_message(self, client):
-        tc, svc, _ = client
-        svc.switch_engine.side_effect = DefaultBotTeclawNotAllowedError()
-
-        resp = tc.post(
-            "/api/bots/switch-engine",
-            json={"bot_id": "default", "engine_type": "teclaw"},
-        )
-
-        assert resp.json() == {
-            "success": False,
-            "message": DEFAULT_BOT_TECLAW_NOT_ALLOWED_MESSAGE,
-            "error_code": 400,
-            "data": None,
-        }
+    def test_route_is_not_registered(self, client):
+        tc, _svc, _ = client
+        # Asserted against the route table rather than a response code: the
+        # literal path is shadowed by `/api/bots/{bot_id}`, so a request would
+        # answer 405 whether or not a switch handler exists.
+        paths = {getattr(r, "path", None) for r in tc.app.routes}
+        assert "/api/bots/switch-engine" not in paths
 
 
 # ---------------------------------------------------------------------------

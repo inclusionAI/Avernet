@@ -557,6 +557,10 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             "bot_id": bot_id,
             "owner_id": owner_id,
             "bot_type": bot.get("bot_type", "personal"),
+            # ``bot`` is the *source* (draft) record, and this describes a
+            # released runtime — sound because a bot's engine is fixed at
+            # creation (inclusionAI/Avernet#914). Nothing switches an engine
+            # after the insert, so draft and release always name the same one.
             "engine_type": bot.get("active_engine", ""),
             "template_type": bot.get("template_type", ""),
             "active_runtime_engine_type": active_runtime_engine_type,

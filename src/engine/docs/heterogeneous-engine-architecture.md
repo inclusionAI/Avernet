@@ -4,6 +4,13 @@
 
 本文档定义 Engine 模块如何支持异构引擎（OpenClaw、Hermes Agent、Claude Code 等），确保所有引擎统一支持 Session、Chat、MCP、Skills、Approval、File、Node 等核心能力，并定义前后端协作规范。
 
+> **运行时切换引擎已下线（inclusionAI/Avernet#914，2026-08-09）。**
+> Bot 的引擎在创建时固定：`POST /api/engine/switch`、`EngineManager.switch()`，
+> 以及后端的 `POST /api/bots/switch-engine` 与 `BotService.switch_engine` 均已删除。
+> 异构引擎本身仍然成立 —— 不同的 Bot 可以跑在不同的引擎上，engine 侧仍然注册多个
+> 引擎、仍然可以逐个查询能力 —— 变的只是「同一个 Bot 换引擎」这件事：它现在意味着
+> 新建一个 Bot。本文中带 ~~删除线~~ 标注的切换相关示例保留为历史记录，不要照着实现。
+
 ---
 
 ## 目录
@@ -3940,7 +3947,7 @@ interface EngineState {
   setCapabilities: (caps: EngineCapabilities) => void;
   setRegisteredEngines: (engines: string[]) => void;
   
-  // 切换引擎
+  // ~~切换引擎~~ —— 已下线（#914），保留为历史示例
   switchEngine: (target: EngineType, force?: boolean) => Promise<void>;
   restartEngine: (force?: boolean) => Promise<void>;
 }
@@ -4010,6 +4017,8 @@ const ENGINE_INFO: Record<EngineType, { name: string; description: string; icon:
   'claude-code': { name: 'Claude Code', description: '本地代码助手', icon: '⚡' },
 };
 
+// 注意：EngineSelector 的「切换」交互已下线（#914）。engine 列表与能力查询仍然有效，
+// 但选中一个引擎不再切换当前 Bot —— 换引擎请新建 Bot。以下保留为历史示例。
 export function EngineSelector() {
   const { 
     activeEngine, 
@@ -4122,7 +4131,7 @@ export const EngineController = {
     return request<ApiResponse<EngineCapabilities>>(url, { method: 'GET' });
   },
 
-  // 切换引擎
+  // ~~切换引擎~~ —— 已下线（#914）：engine 侧不再提供 /api/engine/switch
   switch: (target: EngineType, force: boolean = false) =>
     request<ApiResponse<{ switched: boolean; engine: string }>>('/api/engine/switch', {
       method: 'POST',
@@ -4376,12 +4385,7 @@ async def get_engine_capabilities(engine: str = None):
         "data": caps.to_dict() if caps else None,
     }
 
-@router.post("/switch")
-async def switch_engine(target: str, force: bool = False):
-    """切换引擎"""
-    manager = EngineManager.get_instance()
-    result = await manager.switch(target, force)
-    return {"success": True, "data": result}
+# POST /switch 已删除（#914）：Bot 的引擎在创建时固定，manager 也不再有 switch()。
 
 @router.post("/restart")
 async def restart_engine(force: bool = False):

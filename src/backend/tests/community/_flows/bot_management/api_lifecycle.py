@@ -261,13 +261,6 @@ BOT_MANAGEMENT_LIFECYCLE_FLOWS: list[FlowCase] = [
             ),
             FlowStep(
                 method="POST",
-                path="/api/bots/switch-engine",
-                body={"bot_id": "{bot_id}", "owner_id": "{owner_id}", "engine_type": "openclaw"},
-                expect_status=200,
-                expect={"success": True, "data": {"active_engine": "openclaw"}},
-            ),
-            FlowStep(
-                method="POST",
                 path="/api/bots/{bot_id}/restart",
                 expect_status=200,
                 expect={"success": True},

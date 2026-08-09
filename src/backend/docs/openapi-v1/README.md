@@ -184,7 +184,10 @@ DDL. Full ruling and per-endpoint mapping in
 > `engine/switch` and `engine/restart` are deliberately excluded — wrapping
 > `switch` would be a back door around #494's `engine`-immutability ruling on
 > `PUT /openapi/v1/bots/{bot_id}`, and `restart` would give one bot two restart
-> verbs. `session-favorites` and the `/api/openclaw` HTTP trio are **deferred,
+> verbs. Since #914 there is no `switch` left to wrap on either side: the engine
+> route and the backend's `POST /api/bots/switch-engine` were both retired, so a
+> bot's engine is fixed at creation structurally. `session-favorites` and the
+> `/api/openclaw` HTTP trio are **deferred,
 > not cancelled** (both additive later). Reasons in `engine-surface.md`.
 >
 > **Routines is Track C's worked precedent, not a Track B one.** Backend
@@ -1243,7 +1246,8 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
      `POST /chat`, no SSE relay of the engine's frame format.
   5. **Two exclusions are contract decisions, not laziness.** `engine/switch`
      would be a back door around #494's `engine`-immutability ruling, and
-     `engine/restart` would give one bot two restart verbs.
+     `engine/restart` would give one bot two restart verbs. (#914 later retired
+     `switch` everywhere, so the first exclusion is now moot by construction.)
 
   Full inventory, per-endpoint mapping and the ruling on every non-wrapped
   engine route: **[`engine-surface.md`](engine-surface.md)**. Board moved: Track

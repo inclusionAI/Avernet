@@ -16,7 +16,10 @@
 - GET  /api/v1/engine/{target}/models — 模型列表
 - GET  /api/v1/engine/{target}/engine/status — 引擎状态
 - POST /api/v1/engine/{target}/engine/restart — 重启引擎
-- POST /api/v1/engine/{target}/engine/switch — 切换引擎
+
+不含 engine/switch：Bot 的引擎在创建时固定（inclusionAI/Avernet#914），引擎侧的
+``POST /api/engine/switch`` 已下线。Gateway 仍配着这条转发规则（见
+`Gateway 透明转发接口文档.md`），但上游已无对应路由，因此这里不再冻结它的响应契约。
 """
 from __future__ import annotations
 
@@ -237,27 +240,6 @@ class TestEngineRestart:
         assert_has_fields(body, {"success": bool, "data": (dict, list, type(None))}, label="POST engine/restart response")
         assert_has_fields(body["data"], {"status": str}, label="POST engine/restart data")
         assert body["data"]["status"] == "restarting"
-
-
-class TestEngineSwitch:
-    """POST /proxypass/{target}/api/engine/switch — 切换引擎。"""
-
-    @responses.activate
-    def test_engine_switch_schema(self):
-        responses.add(
-            responses.POST,
-            f"{PROXY_BASE}/proxypass/{TARGET}/api/engine/switch",
-            json={"success": True, "data": {"engine_type": "aicoding", "status": "switching"}},
-            status=200,
-        )
-        resp = requests.post(
-            f"{PROXY_BASE}/proxypass/{TARGET}/api/engine/switch",
-            json={"engine_type": "aicoding"},
-            headers={"X-PROXYPASS-TOKEN": "test-token"},
-        )
-        body = resp.json()
-        assert_has_fields(body, {"success": bool, "data": (dict, list, type(None))}, label="POST engine/switch response")
-        assert_has_fields(body["data"], {"engine_type": str, "status": str}, label="POST engine/switch data")
 
 
 class TestUpdateSession:

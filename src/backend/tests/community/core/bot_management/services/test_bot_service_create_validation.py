@@ -365,20 +365,18 @@ class TestCreateBotPersistsConfiguredEngines:
     """A bot's enabled-engine list must be able to contain its own engine.
 
     ``create_bot`` used to persist the static ``SUPPORTED_ENGINE_TYPES`` while
-    validation and ``switch_engine`` both consult ``_get_engine_types()`` (the
-    ``ENGINE_TYPES`` env). On a deployment that enables ``teclaw``, a teclaw bot
-    was stored with an ``engine_types`` list omitting teclaw — so switching away
-    and back was permanently rejected by ``switch_engine``'s per-bot check.
+    validation consults ``_get_engine_types()`` (the ``ENGINE_TYPES`` env). On a
+    deployment that enables ``teclaw``, a teclaw bot was stored with an
+    ``engine_types`` list omitting teclaw — a row contradicting itself.
     """
 
     def test_active_engine_is_always_in_its_own_enabled_list(self, monkeypatch):
         """R15/F50: never persist a row whose active engine is not in its list.
 
-        ``switch_engine`` validates against the bot's persisted ``engine_types``,
-        so a row violating this can never return to the engine it was created
-        on. The invariant held by accident while the static list was persisted
-        (it contains ``DEFAULT_ENGINE_TYPE``); persisting the configured
-        registry broke it wherever the two differ.
+        A row violating this describes a bot running an engine its own record
+        says is not enabled for it. The invariant held by accident while the
+        static list was persisted (it contains ``DEFAULT_ENGINE_TYPE``);
+        persisting the configured registry broke it wherever the two differ.
         """
         monkeypatch.setenv("ENGINE_TYPES", "teclaw")
         svc = _make_service(max_bots=10, current_bots=0)
@@ -446,8 +444,8 @@ class TestCreateBotPersistsConfiguredEngines:
         assert svc._repository.insert.called, "create never reached persistence"
         persisted = svc._repository.insert.call_args[0][0]
         assert "teclaw" in persisted["engine_types"], persisted["engine_types"]
-        # The active engine is always in its own enabled list — the invariant
-        # switch_engine depends on.
+        # The active engine is always in its own enabled list, so the row never
+        # contradicts itself.
         assert persisted["active_engine"] in persisted["engine_types"]
 
 

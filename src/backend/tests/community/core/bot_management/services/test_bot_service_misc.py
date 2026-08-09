@@ -1,6 +1,6 @@
 """Unit tests for BotService misc methods.
 
-Covers: get_bot, switch_engine, delete_bot, update_bot_ext,
+Covers: get_bot, delete_bot, update_bot_ext,
 check_bot_name_exists, generate_bot_id.
 """
 from __future__ import annotations
@@ -295,110 +295,22 @@ class TestGetBot:
 
 
 # ===========================================================================
-# switch_engine
+# switch_engine — retired (inclusionAI/Avernet#914)
 # ===========================================================================
 
 
-class TestSwitchEngine:
+class TestSwitchEngineIsRetired:
+    """``BotService`` must expose no mutator for ``active_engine``.
 
-    def test_raises_when_user_id_empty(self):
+    A bot's engine is fixed at creation. The connection endpoint,
+    ``ExpertChatService`` and the publish status descriptions all derive a
+    bot's runtime from its record, and that derivation is only sound while the
+    engine never changes.
+    """
+
+    def test_service_has_no_switch_engine(self):
         svc = _make_service()
-        with pytest.raises(BotServiceError, match="User ID is required"):
-            svc.switch_engine("bot001", "", "openclaw")
-
-    def test_raises_for_invalid_engine_type(self):
-        svc = _make_service()
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw"],
-        ):
-            with pytest.raises(BotServiceError, match="Invalid engine type"):
-                svc.switch_engine("bot001", "user001", "nonexistent")
-
-    def test_raises_when_bot_not_found(self):
-        svc = _make_service()
-        svc._repository.get_by_id_and_owner.return_value = None
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw"],
-        ):
-            with pytest.raises(BotNotFoundError):
-                svc.switch_engine("bot001", "user001", "openclaw")
-
-    def test_raises_when_engine_not_enabled_for_bot(self):
-        svc = _make_service()
-        bot = _make_bot(engine_types=["moltis"])
-        svc._repository.get_by_id_and_owner.return_value = bot
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw"],
-        ):
-            with pytest.raises(BotServiceError, match="not enabled"):
-                svc.switch_engine("bot001", "user001", "openclaw")
-
-    def test_rejects_switching_default_bot_to_teclaw(self):
-        svc = _make_service()
-        bot = _make_bot(
-            bot_id="default",
-            engine_types=["moltis", "openclaw", "teclaw"],
-        )
-        svc._repository.get_by_id_and_owner.return_value = bot
-
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw", "teclaw"],
-        ):
-            with pytest.raises(DefaultBotTeclawNotAllowedError):
-                svc.switch_engine("default", "user001", "teclaw")
-
-        svc._repository.update_by_owner.assert_not_called()
-
-    def test_allows_switching_non_default_bot_to_teclaw(self):
-        svc = _make_service()
-        bot = _make_bot(engine_types=["moltis", "openclaw", "teclaw"])
-        updated_bot = {**bot, "active_engine": "teclaw", "binding_id": None}
-        svc._repository.get_by_id_and_owner.return_value = bot
-        svc._repository.update_by_owner.return_value = updated_bot
-
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw", "teclaw"],
-        ):
-            result = svc.switch_engine("bot001", "user001", "teclaw")
-
-        assert result["active_engine"] == "teclaw"
-        svc._repository.update_by_owner.assert_called_once()
-
-    def test_switches_engine_successfully(self):
-        svc = _make_service()
-        bot = _make_bot(engine_types=["moltis", "openclaw"])
-        updated_bot = {**bot, "active_engine": "openclaw", "binding_id": None}
-        svc._repository.get_by_id_and_owner.return_value = bot
-        svc._repository.update_by_owner.return_value = updated_bot
-
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw"],
-        ):
-            result = svc.switch_engine("bot001", "user001", "openclaw")
-
-        svc._repository.update_by_owner.assert_called_once()
-        call_args = svc._repository.update_by_owner.call_args
-        assert call_args[0][2]["active_engine"] == "openclaw"
-        assert result["active_engine"] == "openclaw"
-
-    def test_update_failure_wraps_exception(self):
-        svc = _make_service()
-        bot = _make_bot(engine_types=["moltis", "openclaw"])
-        svc._repository.get_by_id_and_owner.return_value = bot
-        svc._repository.update_by_owner.side_effect = RuntimeError("db error")
-
-        with patch(
-            "agentclaw.community.core.bot_management.services.bot_service._get_engine_types",
-            return_value=["moltis", "openclaw"],
-        ):
-            with pytest.raises(BotServiceError, match="Failed to switch engine"):
-                svc.switch_engine("bot001", "user001", "openclaw")
+        assert not hasattr(svc, "switch_engine")
 
 
 # ===========================================================================

@@ -2,7 +2,8 @@
 
 Covers:
 - `EngineManager.get_capabilities()` / `get_registered_engines()` (unit)
-- `/api/engine/status|capabilities|list|switch|restart` (HTTP contract)
+- `/api/engine/status|capabilities|list|restart` (HTTP contract), plus the
+  absence of the retired `/api/engine/switch`
 - `engine.community.api.caps.check_capability` (supported/limited/unsupported branches)
 
 The tests bypass the singleton by constructing an EngineManager directly and
@@ -239,34 +240,18 @@ class TestEngineStatusEndpoint:
         assert "process" in body
 
 
-class TestEngineSwitchEndpoint:
-    def test_switch_to_unknown_engine_returns_400(self, client: TestClient):
-        resp = client.post(
-            "/api/engine/switch", json={"engine": "does-not-exist"}
-        )
-        assert resp.status_code == 400
-        assert resp.json()["success"] is False
+class TestEngineSwitchEndpointIsRetired:
+    """`POST /api/engine/switch` was removed — inclusionAI/Avernet#914.
 
-    def test_switch_to_same_engine_returns_already_active(
-        self, client: TestClient, manager: EngineManager
-    ):
-        resp = client.post("/api/engine/switch", json={"engine": "rich"})
-        # Same-engine short-circuits in manager.switch(); no exception raised.
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["switched"] is False
-        assert body["engine"] == "rich"
+    A bot's engine is fixed at creation, so there is no runtime engine swap to
+    expose. The route must stay gone: consumers derive a bot's runtime from its
+    record, and a live swap would make that derivation describe the wrong
+    process.
+    """
 
-    def test_switch_conflict_returns_409(
-        self, client: TestClient, manager: EngineManager, monkeypatch
-    ):
-        async def _raise_conflict(target, force=False):
-            raise RuntimeError(f"active connections block switch to {target}")
-
-        monkeypatch.setattr(manager, "switch", _raise_conflict)
+    def test_switch_route_is_not_registered(self, client: TestClient):
         resp = client.post("/api/engine/switch", json={"engine": "poor"})
-        assert resp.status_code == 409
-        assert "active connections" in resp.json()["error"]
+        assert resp.status_code == 404
 
 
 class TestEngineRestartEndpoint:
