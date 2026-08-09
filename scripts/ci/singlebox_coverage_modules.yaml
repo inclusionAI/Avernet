@@ -117,6 +117,14 @@ modules:
       - tests/community/acceptance/bot_chat
     core_paths:
       - src/agentclaw/community/core/bot_chat/
+      # The two bot-chat repository bodies moved to the consolidated repository
+      # package (spec 2026-08-05-core-repository-consolidation). They are the
+      # same code, exercised by the same acceptance flows — only the module path
+      # changed — so the denominator follows them rather than silently shrinking.
+      # Listed per-file because implementations/chat/ also holds expert_chat and
+      # channel repositories, which belong to other modules' denominators.
+      - src/agentclaw/community/core/repository/implementations/chat/open.py
+      - src/agentclaw/community/core/repository/implementations/chat/db.py
     router_api:
       status: applicable
       reason: The Langfuse health route is external-service dependent and is outside the local singlebox denominator.

@@ -58,7 +58,7 @@ pytestmark = pytest.mark.integration
 class _FileSqliteDB:
     """File-backed sqlite that inherits the ``ac_bots`` ORM guard wiring.
 
-    Mirrors the helper in ``tests/community/plugins/test_bot_tenant_isolation.py``;
+    Mirrors the helper in ``tests/community/repository/bot/test_bot_tenant_isolation.py``;
     the community ORM Session registers the ``before_insert`` +
     ``do_orm_execute`` guards eagerly at import time (plugin_api/models.py),
     so every ORM read in this module is filtered by

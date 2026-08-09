@@ -318,12 +318,8 @@ class BotChatService:
     """Service for querying bot conversation sessions."""
 
     @inject
-    def __init__(
-        self,
-        db: DatabasePlugin,
-        config: BotChatConfig,
-        db_repo: BotChatDbRepositoryProtocol,
-    ) -> None:
+    def __init__(self, db: DatabasePlugin, config: BotChatConfig,
+                 db_repo: BotChatDbRepositoryProtocol) -> None:
         """Initialize service with DatabasePlugin + BotChatConfig (Langfuse)."""
         self._db = db
         self._langfuse_base_url = config.langfuse_base_url

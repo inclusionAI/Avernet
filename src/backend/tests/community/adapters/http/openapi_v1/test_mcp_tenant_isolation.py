@@ -1,6 +1,6 @@
 """Cross-tenant isolation for the public MCP config path (Track B, Task 7).
 
-Stage 5 (`tests/community/plugins/test_user_mcp_config_tenant_isolation.py`)
+Stage 5 (`tests/community/repository/bot/test_user_mcp_config_tenant_isolation.py`)
 proves the guard at the repository. This proves it through the exact layer the
 public handlers use: `core/mcp/config_flow.read_unified_config` /
 `write_unified_config`, driven against a **real** `MCPConfigService` + real

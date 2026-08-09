@@ -570,6 +570,38 @@ fresh run, and must never be achieved by trimming `core_paths`. If a module's
 number drops because real coverage was lost rather than because the denominator
 moved, the correct answer is to fix the coverage, not the threshold.
 
+### C4a — What actually happened (post-move CI)
+
+Exactly one module breached, and it was the one C4 named as the largest
+perturbation: **`bot_chat` measured 65.63% against its 67.48% floor**, having lost
+1,770 of its 3,565 `core_paths` lines when both repository bodies moved out.
+
+**It was fixed by restoring the denominator, not by lowering the threshold.**
+`core_paths` is a prefix list, so the two moved files were added back to
+`bot_chat`'s entry. This is strictly stronger than a re-pin:
+
+- No threshold was weakened; the 67.48% floor stands untouched.
+- No production Core path was excluded — one that would otherwise have silently
+  dropped out was *retained*.
+- It reflects what actually happened: the code and its acceptance flows are
+  unchanged, only the module path moved, so the denominator should follow it.
+
+They are listed per-file rather than as the `implementations/chat/` directory,
+because that directory also holds the `expert_chat` and `channel` repositories,
+which belong to other modules' denominators.
+
+Re-pinning remained available and was not used. The precedent below stands for
+the case where a denominator genuinely shrinks — code that leaves the reachable
+set — rather than one where it merely moves.
+
+**Not fully restored, and why.** Five other modules (`access`,
+`bot_collaborator`, `devices`, `expert_chat`, `harness`) also lost Protocol lines
+to the move. None breached — protocol stubs sit near their modules' averages and
+every one had headroom. Restoring theirs faithfully would need `protocols/chat.py`
+and `protocols/identity.py` split per sub-domain, since each serves several
+coverage modules; the domain grouping deliberately does not do that. The residual
+denominator drift is recorded here rather than papered over.
+
 **There is an established in-repo precedent for exactly this, and the plan should
 imitate it rather than invent a format.** `singlebox_coverage_modules.yaml`
 carries the `harness` threshold's history as inline comments — `41.59 → 41.30`,

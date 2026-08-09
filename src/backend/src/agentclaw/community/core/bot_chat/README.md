@@ -12,6 +12,7 @@ provides:
 consumes:
   - "(low fanout — mostly self-contained today)"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.chat    # repository contracts consumed by this module
   - agentclaw.community.core.repository.implementations.chat.db    # repository contracts consumed by this module
   - agentclaw.community.core.repository.implementations.chat.open    # repository contracts consumed by this module
   - agentclaw.community.core.bot_collaborator
