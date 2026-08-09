@@ -161,11 +161,24 @@ def _declared_provides() -> set[str]:
     return set(yaml.safe_load(fence.group(1))["provides"])
 
 
+def _is_contract(node: ast.ClassDef) -> bool:
+    """A contract is a Protocol or an ABC — both are consumed as bases.
+
+    Not every contract in ``protocols/`` is a ``Protocol``:
+    ``PublishOperationRepository`` is an ``ABC``, and it is public surface for
+    exactly the same reason. Selecting on ``Protocol`` alone silently dropped it
+    from the required set.
+    """
+    return _is_protocol(node) or any(
+        isinstance(b, ast.Name) and b.id == "ABC" for b in node.bases
+    )
+
+
 def _public_surface() -> set[str]:
-    """Every Protocol and every non-mixin repository class in the package."""
+    """Every contract and every non-mixin repository class in the package."""
     names: set[str] = set()
     for path in _py_files(_PROTOCOLS):
-        names.update(c.name for c in _classes(path) if _is_protocol(c))
+        names.update(c.name for c in _classes(path) if _is_contract(c))
     for path in _py_files(_IMPLEMENTATIONS):
         names.update(
             c.name for c in _classes(path)
