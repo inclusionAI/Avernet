@@ -119,6 +119,11 @@
 - **Files:**
   `src/backend/tests/community/adapters/http/openapi_v1/test_explicit_user_id.py`
   (new)
+- **Note:** the *behavioural* half of this file was pulled forward into Group A
+  (commit "cover the user-id seam"), because the changed-line coverage gate fails
+  a group that adds code whose tests land two groups later. What remains here is
+  the document-level half — the assertions that need the operations to actually
+  carry the parameter.
 - **Done when:** asserted against the generated document, in the shape of
   `test_path_convention.py`:
   - [ ] All 56 user-scoped operations require `user_id`, and it is `in: query` on
@@ -129,9 +134,9 @@
   - [ ] `bot_id`'s placement is unchanged from `HEAD` on all 65 operations.
   - [ ] Bot Logs gains nothing: no parameter, no 403.
   - [ ] 403 is documented on exactly the 56, and `403 not in ERROR_RESPONSES`.
-  - [ ] Behaviour: another user's id is 403; two rejected ids give
+  - [x] Behaviour: another user's id is 403; two rejected ids give
         byte-identical bodies; a missing parameter is 422; no verified caller is
-        401 **even when the parameter is also missing**.
+        401 **even when the parameter is also missing**. _(landed in Group A)_
 - **Depends on:** Task 5
 
 ## Task 7: Write the rule where the next author will find it
