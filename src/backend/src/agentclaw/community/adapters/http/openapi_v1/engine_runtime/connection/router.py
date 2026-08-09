@@ -8,20 +8,15 @@ this API, so the engine's frame format never becomes a public contract.
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Envelope
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection.schemas import (
     Connection,
     Socket,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -33,21 +28,18 @@ from agentclaw.community.di import Injected
 
 router = APIRouter(prefix="/openapi/v1/bots/connection", tags=["connection"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
-
 
 @router.get("/{bot_id}", response_model=Envelope[Connection])
 @envelope_errors
 async def get_connection(
     bot_id: str,
-    principal: PrincipalDep,
+    owner_id: UserIdDep,
     request: Request,
     connections: EngineConnectionServiceProtocol = Injected(
         EngineConnectionServiceProtocol
     ),
 ) -> Envelope[Connection]:
     """Get usable socket connections for a bot."""
-    owner_id = caller_owner_id(principal)
     # No capability probe: the only socket offered is chat, derived from the
     # bot's active engine, which is a backend fact. The terminal socket that
     # once needed one was removed — the spec excludes an interactive shell from

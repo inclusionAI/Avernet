@@ -47,24 +47,24 @@
   - [x] `test_openapi_error_schema.py` still passes untouched.
 - **Depends on:** Task 1
 
-## Task 3: Convert the 41 operations in the nine unexempted groups
+## Task 3: Convert the 41 operations in the nine unexempted groups  [x]
 
 - **Goal:** Every operation in a group with no exemption takes its user from the
   request.
 - **Files:** `…/openapi_v1/{resources,routines,skills,identity}/router.py`,
   `…/openapi_v1/engine_runtime/{sessions,engine,models,approvals,connection}/router.py`
 - **Done when:**
-  - [ ] Handlers take `user_id: UserIdDep` in the position `principal:
+  - [x] Handlers take `user_id: UserIdDep` in the position `principal:
         PrincipalDep` occupied, and pass it where `owner_id` / `actor_id` went.
-  - [ ] The four `resources` handlers that do not use it (`list_resources`,
+  - [x] The four `resources` handlers that do not use it (`list_resources`,
         `create_resource`, `get_resource`, `update_resource`) declare it and
         `del` it, with a comment saying they are the *not-yet-enforced* case —
         the gap `specs/2026-08-02-public-api-user-only-principal/` records — not
         the no-user-dimension case.
-  - [ ] No router in this set imports `caller_owner_id`.
-  - [ ] Every module docstring or comment describing identity as coming from the
+  - [x] No router in this set imports `caller_owner_id`.
+  - [x] Every module docstring or comment describing identity as coming from the
         principal is corrected.
-  - [ ] `ruff check --select E,F,W` is clean on the package: no dead import left
+  - [x] `ruff check --select E,F,W` is clean on the package: no dead import left
         behind, no new `E501`.
 - **Depends on:** Task 2
 

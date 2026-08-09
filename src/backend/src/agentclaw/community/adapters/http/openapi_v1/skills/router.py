@@ -8,9 +8,9 @@ non-public surfaces.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query, Request, Response
+from fastapi import APIRouter, Body, Query, Request, Response
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Deleted,
@@ -19,11 +19,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.dependencies import (
-    Principal,
-    require_principal,
-)
-from agentclaw.community.adapters.http.openapi_v1.principal import caller_owner_id
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -48,7 +44,6 @@ from .schemas import Skill, SkillState, SkillUpload
 
 router = APIRouter(prefix="/openapi/v1/bots/skills", tags=["skills"])
 
-PrincipalDep = Annotated[Principal, Depends(require_principal)]
 
 def _tags(value: Any) -> list[str]:
     if isinstance(value, list):
@@ -79,7 +74,7 @@ def _to_skill(record: dict[str, Any]) -> Skill:
 @envelope_errors
 async def list_skills(
     page: PageParamsDep,
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID whose Local Skills are listed."),
     owner_entity_id: str | None = Query(
@@ -92,7 +87,6 @@ async def list_skills(
     ),
 ) -> Envelope[Page[Skill]]:
     """List exact Bot-owned Local Skills from database desired state."""
-    actor_id = caller_owner_id(principal)
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
         owner_id=owner_entity_id or actor_id,
@@ -109,7 +103,7 @@ async def list_skills(
 @envelope_errors
 async def get_skill(
     skill_id: str,
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     query_service: LocalSkillQueryServiceProtocol = Injected(
         LocalSkillQueryServiceProtocol
@@ -117,7 +111,7 @@ async def get_skill(
 ) -> Envelope[Skill]:
     """Get public metadata for one Local Skill; the Skill ID selects its Bot."""
     record = query_service.get_local_skill(
-        skill_id=skill_id, actor_id=caller_owner_id(principal)
+        skill_id=skill_id, actor_id=actor_id
     )
     return envelope(_to_skill(record), request)
 
@@ -149,7 +143,7 @@ async def get_skill(
 )
 @envelope_errors
 async def upload_skill(
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     response: Response,
     package: bytes = Body(..., media_type="application/zip"),
@@ -167,7 +161,6 @@ async def upload_skill(
         != "application/zip"
     ):
         raise LocalSkillInvalidPackageError()
-    actor_id = caller_owner_id(principal)
     result = await upload_service.upload_local_skill(
         bot_id=bot_id,
         owner_id=owner_entity_id or actor_id,
@@ -192,7 +185,7 @@ async def upload_skill(
 @envelope_errors
 async def activate_skill(
     skill_id: str,
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     state_service: LocalSkillStateServiceProtocol = Injected(
         LocalSkillStateServiceProtocol
@@ -200,7 +193,7 @@ async def activate_skill(
 ) -> Envelope[SkillState]:
     """Activate one Bot-owned Local Skill and synchronously reconcile runtime."""
     result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=caller_owner_id(principal), active=True
+        skill_id=skill_id, actor_id=actor_id, active=True
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -215,7 +208,7 @@ async def activate_skill(
 @envelope_errors
 async def deactivate_skill(
     skill_id: str,
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     state_service: LocalSkillStateServiceProtocol = Injected(
         LocalSkillStateServiceProtocol
@@ -223,7 +216,7 @@ async def deactivate_skill(
 ) -> Envelope[SkillState]:
     """Deactivate one Bot-owned Local Skill and synchronously reconcile runtime."""
     result = await state_service.set_local_skill_active(
-        skill_id=skill_id, actor_id=caller_owner_id(principal), active=False
+        skill_id=skill_id, actor_id=actor_id, active=False
     )
     return envelope(
         SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
@@ -235,7 +228,7 @@ async def deactivate_skill(
 @envelope_errors
 async def delete_skill(
     skill_id: str,
-    principal: PrincipalDep,
+    actor_id: UserIdDep,
     request: Request,
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
@@ -243,6 +236,6 @@ async def delete_skill(
 ) -> Envelope[Deleted]:
     """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
     await delete_service.delete_local_skill(
-        skill_id=skill_id, actor_id=caller_owner_id(principal)
+        skill_id=skill_id, actor_id=actor_id
     )
     return envelope(Deleted(), request)
