@@ -28,9 +28,7 @@ from agentclaw.community.core.bot_management.repository.models import (
     BotRestartLockModel,
     BotRestartLockRecord,
 )
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRestartLockRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 

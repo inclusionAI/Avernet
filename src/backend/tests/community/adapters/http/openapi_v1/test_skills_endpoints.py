@@ -50,9 +50,7 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
 from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import (
-    DefaultSkillsetSkillExclusion,
-)
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.plugins.skill_repository import (
     SkillRepository,
     SkillSetRepository,

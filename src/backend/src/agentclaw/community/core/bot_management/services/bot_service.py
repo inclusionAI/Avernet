@@ -37,9 +37,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
     from agentclaw.community.core.bot_management.services.bcn_service import BcnService
     from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-        BotPublishRepositoryProtocol,
-    )
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
@@ -59,16 +57,14 @@ if TYPE_CHECKING:
     from agentclaw.community.di import config as cfg
     from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-    BotRestartLockRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
     DEFAULT_IMAGE_POLICY_VALUE,
     IMAGE_POLICY_ON_ACTIVE_KEY,
 )
 from agentclaw.community.core.bot_collaborator.models import CollaboratorRole
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE, _get_engine_types
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
@@ -96,10 +92,8 @@ from agentclaw.community.core.devices.errors import (
     DeviceAllocateError,
 )
 from agentclaw.community.core.devices.models import AllocatedDevice, DeviceAllocationMode, DeviceBindingStatus, OperatorContext, SynlinkMappingInfo
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.devices.services.device_service import (
     ARCA_DEVICE_PROVIDER,

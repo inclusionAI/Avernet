@@ -8,9 +8,7 @@ from uuid import uuid4
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.skills_pool.operation_models import (
     BatchPromotionEvidence,
@@ -22,9 +20,7 @@ from agentclaw.community.core.skills_pool.operation_models import (
     RolloutOwnerEntry,
     WhitelistMutationResult,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_config import (
     CONTROL_KEYS,
     ENGINE_PROMOTION_ORDER,
@@ -34,9 +30,7 @@ from agentclaw.community.core.skills_pool.rollout_gate import (
     SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
     SKILLS_POOL_ROLLOUT_PARAM_CODE,
 )
-from agentclaw.community.core.skills_pool.rollout_repository import (
-    SkillsPoolRolloutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolRolloutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayout,

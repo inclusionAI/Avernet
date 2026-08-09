@@ -13,9 +13,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PublishTaskLifecycle,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.core.task_queue.repository.protocol import (
-    TaskQueueRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,

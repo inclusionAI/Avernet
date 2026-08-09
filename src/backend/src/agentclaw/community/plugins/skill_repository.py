@@ -52,9 +52,7 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.log import get_logger
-from agentclaw.community.core.skill_center.services.repositories import (
-    ActiveSkillSetReferenceError,
-)
+from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
@@ -409,9 +407,7 @@ class SkillRepository:
         keyword: str | None,
     ) -> tuple[int, list[dict]]:
         """Page exact Bot-owned ``local://`` rows by desired active state."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             excluded = (
@@ -457,9 +453,7 @@ class SkillRepository:
         self, *, skill_id: str, bot_id: str, user_id: str
     ) -> dict | None:
         """Return one exact Bot-owned ``local://`` row or no row."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             excluded = (
@@ -790,9 +784,7 @@ class SkillRepository:
     ) -> int | None:
         """Atomically delete one inactive Local Skill and commit its purge."""
         from agentclaw.community.core.models import SkillSetSkill
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
         from agentclaw.community.core.skill_center.local_skill_cleanup import (
             LocalSkillCleanupWorkModel,
         )
@@ -1683,17 +1675,10 @@ class SkillSetRepository:
         # DefaultSkillsetMcpExclusion is a shared SQLAlchemy ``Base``
         # declarative model with __tablename__ =
         # "ac_default_skillset_mcp_exclusion" and the genuine unique
-        # Index uk_user_bot_skillset_mcp — it maps to the real prod
-        # table and emits valid INSERT/upsert on OceanBase as well as
-        # SQLite. Its module path (plugins/local/sqlite_models)
-        # is a sibling import within plugins/, not a prod->local
-        # layering breach; this is the same accepted pattern as S3
-        # (config AcConfigCategory / policy EntityDeviceBinding).
-        # TODO(repo-unify): relocate these shared models out of
-        # plugins/local/ so the path stops implying local-only.
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetMcpExclusion,
-        )
+        # Index uk_user_bot_skillset_mcp — it maps to the real table
+        # and emits a valid INSERT/upsert on OceanBase as well as
+        # SQLite. It is owned by the skill_center domain.
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 
         with self._db.orm_session() as db:
             # Dialect branch (not mode branch): both arms perform the
@@ -1766,9 +1751,7 @@ class SkillSetRepository:
         skill_set_id: int,
         server_code: str,
     ) -> bool:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetMcpExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 
         with self._db.orm_session() as db:
             rowcount = (
@@ -1788,9 +1771,7 @@ class SkillSetRepository:
     def get_excluded_mcps(
         self, user_id: str, bot_id: str, skill_set_id: int
     ) -> list:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetMcpExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 
         with self._db.orm_session() as db:
             rows = (
@@ -1808,9 +1789,7 @@ class SkillSetRepository:
     def get_all_excluded_mcps(
         self, user_id: str, bot_id: str
     ) -> list:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetMcpExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion
 
         with self._db.orm_session() as db:
             rows = (
@@ -1840,9 +1819,7 @@ class SkillSetRepository:
         On duplicate (uk_user_bot_skillset_skill) the row is updated
         with a new ``excluded_at`` / ``gmt_modified`` timestamp.
         """
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             dialect = db.get_bind().dialect.name
@@ -1905,9 +1882,7 @@ class SkillSetRepository:
         skill_id: int,
     ) -> bool:
         """Delete a skill exclusion row (used for rollback)."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             rowcount = (
@@ -1928,9 +1903,7 @@ class SkillSetRepository:
         self, user_id: str, bot_id: str, skill_id: int
     ) -> bool:
         """Clear stale exclusions left behind by a former default SkillSet."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             rowcount = (
@@ -1948,9 +1921,7 @@ class SkillSetRepository:
         self, user_id: str, bot_id: str, skill_set_id: int
     ) -> list:
         """Return skill_id list excluded by (user, bot, skill_set)."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             rows = (
@@ -1970,9 +1941,7 @@ class SkillSetRepository:
     ) -> list:
         """Return skill_id list excluded by (user, bot) across all
         default skill sets."""
-        from agentclaw.community.plugins.local.sqlite_models import (
-            DefaultSkillsetSkillExclusion,
-        )
+        from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 
         with self._db.orm_session() as db:
             rows = (

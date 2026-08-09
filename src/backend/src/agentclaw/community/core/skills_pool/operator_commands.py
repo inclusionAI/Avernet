@@ -13,9 +13,7 @@ from agentclaw.community.core.skills_pool.reconcile_task import (
     SKILLS_POOL_RECONCILE_TASK,
     build_skills_pool_reconcile_payload,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,

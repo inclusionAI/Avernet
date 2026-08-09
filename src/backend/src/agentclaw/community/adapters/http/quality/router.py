@@ -26,7 +26,7 @@ from agentclaw.community.core.bot_collaborator.interceptor import (
     PermissionParams,
     with_interceptors,
 )
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 

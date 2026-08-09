@@ -14,10 +14,8 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     local_skill_name,
 )
 from agentclaw.community.core.skills_pool.models import PoolCutoverStatus
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,

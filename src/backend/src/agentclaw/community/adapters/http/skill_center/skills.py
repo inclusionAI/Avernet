@@ -80,10 +80,8 @@ from agentclaw.community.adapters.http.skill_center.schemas import (
     VersionListResponse,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
 from agentclaw.community.core.skill_center.constants import LOCK_HELD_ERRORS
 from agentclaw.community.core.skill_center.errors import (
@@ -95,10 +93,8 @@ from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditPausedError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.di import Injected
 from agentclaw.community.api.skill_member_service import SkillMemberServiceProtocol

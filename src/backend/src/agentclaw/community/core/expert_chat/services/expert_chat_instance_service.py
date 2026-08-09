@@ -33,7 +33,7 @@ from typing import Any, Dict, Optional
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.caller_identity.contracts import CallerIdentityStage
 from agentclaw.community.core.caller_identity.protocols import (
@@ -42,15 +42,13 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerTokenProviderProtocol,
 )
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
     ConnectionError,
 )
 from agentclaw.community.core.expert_chat.repository import ExpertChatInstanceRepository
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.service_bot.services.baas_service import (
     BaasService,

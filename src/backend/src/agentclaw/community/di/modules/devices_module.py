@@ -41,7 +41,7 @@ from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.oss_to_nas_migration_service import OssToNasMigrationServiceProtocol
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
@@ -53,10 +53,8 @@ from agentclaw.community.core.devices.protocols import (
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_config import (
     ArcaBotCreateBaasRolloutConfigProvider,
 )
@@ -95,12 +93,8 @@ from agentclaw.community.core.devices.services.oss_to_nas_switch_service import 
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
 from agentclaw.community.core.notify.protocol import NotifyBotLister
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,

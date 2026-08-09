@@ -13,7 +13,7 @@ from agentclaw.community.core.bot_collaborator.models import BotCollaboratorMode
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel, CrossTenantInsertError
 from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration

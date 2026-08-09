@@ -1,9 +1,7 @@
 """Endpoint tests for GET /api/service-bot/publish/{bot_id}/binding."""
 from __future__ import annotations
 
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from tests.community.framework import (
     CaseInput,
@@ -22,8 +20,8 @@ _ENDPOINT = "/api/service-bot/publish/{bot_id}/binding"
 def _seed_binding_happy(world) -> None:
     """Seed a bot and a publish record for binding query."""
     from tests.community.factories.access import make_staff_user
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 
     make_staff_user(world, user_id=_OWNER)
 

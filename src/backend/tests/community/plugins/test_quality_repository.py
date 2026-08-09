@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from agentclaw.community.core.quality.repositories import QualityTaskRecord
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.plugins.quality_repository import (
     QualityTaskRepository,
     _row_to_record,

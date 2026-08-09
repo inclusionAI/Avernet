@@ -17,10 +17,8 @@ from agentclaw.community.api.skills_pool_rollback_service import (
 from agentclaw.community.api.skills_pool_rollout_service import (
     SkillsPoolRolloutServiceProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.skills_pool.claim_service import (
     SkillsPoolMigrationClaimService,
 )
@@ -34,15 +32,11 @@ from agentclaw.community.core.skills_pool.operations import (
 from agentclaw.community.core.skills_pool.operator_commands import (
     SkillsPoolOperatorCommands,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_gate import (
     SkillsPoolRolloutGate,
 )
-from agentclaw.community.core.skills_pool.rollout_repository import (
-    SkillsPoolRolloutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolRolloutRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileService,
 )
@@ -50,15 +44,10 @@ from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileTaskHandler,
     SkillsPoolReconcileWakeupListener,
 )
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
-from agentclaw.community.core.skills_pool.quarantine import (
-    QuarantineRepositoryProtocol,
-    SkillsPoolQuarantineCleanupTaskHandler,
-    SkillsPoolQuarantineService,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+from agentclaw.community.core.skills_pool.quarantine import SkillsPoolQuarantineCleanupTaskHandler, SkillsPoolQuarantineService
+from agentclaw.community.core.repository.protocols.skills_pool import QuarantineRepositoryProtocol
 from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRecoveryService,
     SkillsPoolRollbackService,

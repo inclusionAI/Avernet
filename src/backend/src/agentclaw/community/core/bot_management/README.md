@@ -29,6 +29,11 @@ consumes:
   - "HandlerRegistry"
   - "CommonConfigService"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.platform    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator

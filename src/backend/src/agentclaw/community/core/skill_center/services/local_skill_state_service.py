@@ -11,7 +11,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillEditPausedError,
     LocalSkillNotFoundError,
@@ -20,10 +20,8 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
 )
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,

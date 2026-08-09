@@ -7,7 +7,7 @@ import pytest
 
 from agentclaw.community.core.skill_center.local_skill_cleanup import LocalSkillCleanupWorkModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 
 
 def test_cleanup_repository_persists_and_progresses_one_bot_scoped_work_item(world) -> None:

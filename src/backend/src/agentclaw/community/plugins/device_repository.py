@@ -80,15 +80,13 @@ from typing import Any
 from injector import inject
 from sqlalchemy import func
 
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository as _DeviceBindingRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository as _DeviceBindingRepositoryProtocol
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()

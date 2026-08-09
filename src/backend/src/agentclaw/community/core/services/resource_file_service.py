@@ -34,7 +34,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.config_compose.teclaw_paths import WORKSPACE_NS
 from agentclaw.community.core.devices.services.device_context import (
     ConnInfoBuildError,
@@ -50,9 +50,7 @@ from agentclaw.community.core.resources.services.file_service import (
     MAX_FILE_SIZE,
     FileNode,
 )
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.log import get_logger

@@ -25,42 +25,42 @@ commit that file.
   - [x] `pytest tests/community/architecture/ -q` → **120 passed** (pre-move baseline).
 - **Depends on:** —
 
-## Task 2: Separate the six co-located domain types
+## Task 2: Separate the six co-located domain types  `[x]`
 - **Goal:** Move records and errors out of Protocol source files so `protocols/`
   can be contract-only.
 - **Files:** `core/quality/models.py` (new), `core/channel/models.py` (new),
   `core/caller_identity/contracts.py`, `core/skill_center/errors.py`,
   `core/bot_management/errors.py`, plus their importers.
 - **Done when:**
-  - [ ] `QualityTaskRecord`, `ChannelRecord`, `CallerIdentityLockMismatchError`, `CallerIdentityEngineChangedError`, `ActiveSkillSetReferenceError`, `BotLookupAmbiguousError` each live in a non-Protocol module.
-  - [ ] All 4–12 external importers of each re-point.
-  - [ ] `pytest tests/community -q` green (no behaviour change).
+  - [x] All six moved: `QualityTaskRecord`→`quality/models.py`, `ChannelRecord`→`channel/models.py`, the two caller-identity errors→`caller_identity/contracts.py`, `ActiveSkillSetReferenceError`→`skill_center/errors.py`, `BotLookupAmbiguousError`→`bot_management/errors.py`.
+  - [x] 33 importer files re-pointed.
+  - [x] Verified with Task 3 in one suite run.
 - **Depends on:** Task 1
 
-## Task 3: Relocate the five shared ORM models out of `plugins/local/`
+## Task 3: Relocate the five shared ORM models out of `plugins/local/`  `[x]`
 - **Goal:** Remove the Rule-14 layering violation at its root (R7).
 - **Files:** `core/devices/repository/models.py` (new), `core/skill_center/orm.py`
   (new), `core/system_config/orm.py` (new); delete
   `plugins/local/sqlite_models.py`, `plugins/local/system_config_models.py`.
 - **Done when:**
-  - [ ] The 5 model classes moved with `__tablename__` and columns byte-identical.
-  - [ ] `plugins/local/database.py:150` bootstrap imports re-pointed (all three new modules).
-  - [ ] `plugins/local/device_lifecycle.py` and the 12 test modules importing `EntityDeviceBinding` re-pointed.
-  - [ ] Local SQLite boot creates every table it did before (`pytest tests/community/plugins/local/test_database_bootstrap_*.py`).
+  - [x] All 5 moved; `__tablename__` verified identical (`ac_entity_device_binding`, `ac_default_skillset_{mcp,skill}_exclusion`, `ac_config_{category,item}`).
+  - [x] Bootstrap re-pointed to all three new modules; the tenant-guard registration followed the skill_center models.
+  - [x] 22 importers re-pointed across the three model groups.
+  - [x] Bootstrap tests green. Also removed the now-satisfied `TODO(repo-unify)` in `skill_repository.py` and two stale path-keyed allowlist entries in `test_local_plugins_use_baas.py`.
 - **Depends on:** Task 1
 
-## Task 4: Create `core/repository/protocols/` with abstract contracts
+## Task 4: Create `core/repository/protocols/` with abstract contracts  `[x]`
 - **Goal:** All 46 Protocols in 11 domain modules, every member
   `@abstractmethod`, zero runtime domain imports.
 - **Files:** `core/repository/protocols/*.py` (11 new — `bot`, `chat`, `skill_center`,
   `skills_pool`, `governance`, `harness`, `platform`, `identity`, `devices`,
   `publishing`, `config`), `core/repository/__init__.py`.
 - **Done when:**
-  - [ ] All 46 Protocols present, each in the domain module named in `plan.md`; `@runtime_checkable` preserved where it exists today.
-  - [ ] Every public member carries `@abstractmethod`.
-  - [ ] Every module opens `from __future__ import annotations`; every `agentclaw` import sits under `if TYPE_CHECKING:`.
-  - [ ] `QuarantineRepositoryProtocol` split out of `core/skills_pool/quarantine.py`, leaving its services behind.
-  - [ ] Each module imports cleanly in isolation (`python -c "import ..."` per module).
+  - [x] 44 of 46 present (the 2 new chat contracts are Task 5); **399 `@abstractmethod` inserted**; `@runtime_checkable` preserved.
+  - [x] Verified by AST across all modules.
+  - [x] Verified: **zero runtime `agentclaw` imports** anywhere in `protocols/`.
+  - [x] Split out; `quarantine.py` keeps its 13 other defs. 26 emptied source modules deleted, 5 trimmed, **481 importer files re-pointed**.
+  - [x] All 11 import standalone. `protocols/bot` became a **package** (1265 lines > the Rule 9 cap); its `__init__` re-exports so importers are unchanged.
 - **Depends on:** Task 2
 
 ## Task 5: Author the two missing chat Protocols

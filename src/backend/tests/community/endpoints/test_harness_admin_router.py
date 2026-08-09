@@ -19,11 +19,9 @@ from agentclaw.community.core.harness.models import (
     PatchTarget,
     FindingsReport,
 )
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
@@ -281,9 +279,7 @@ class TestAdminApplyByRecordId:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -316,10 +312,8 @@ class TestAdminApplyPatchIdListSuccess:
 
     def test_apply_patch_id_list_success(self, client, world):
         """Applying patches by patch_id_list returns success."""
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRepository,
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_repo = client.app.state.injector.get(HarnessPatchRepository)
         patch_record_repo = client.app.state.injector.get(
@@ -370,10 +364,8 @@ class TestAdminApplyRecordIdSuccess:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-            HarnessPatchRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -431,9 +423,7 @@ class TestAdminApplyPatchEngineError:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
         from agentclaw.community.core.harness.services.patch_engine import PatchEngineError
 
         patch_record_repo = client.app.state.injector.get(
@@ -476,9 +466,7 @@ class TestAdminApplyRecordPreviewed:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -534,9 +522,7 @@ class TestAdminApplyServerError:
             PatchStatus,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -578,9 +564,7 @@ class TestAdminApplyRecordOtherBadStatus:
             PatchRecord as DomainPatchRecord,
             PatchTarget,
         )
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_record_repo = client.app.state.injector.get(
             HarnessPatchRecordRepository
@@ -655,10 +639,8 @@ class TestAdminApplyPatchIdListEmptyContent:
     def test_apply_patch_empty_content(self, client, world):
         """A patch with no content (empty operations list) is still submitted
         to engine.apply — the endpoint does not enforce non-empty ops."""
-        from agentclaw.community.core.harness.repository_protocol import (
-            HarnessPatchRepository,
-            HarnessPatchRecordRepository,
-        )
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+        from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
         patch_repo = client.app.state.injector.get(HarnessPatchRepository)
         patch_record_repo = client.app.state.injector.get(

@@ -9,10 +9,8 @@ from typing import Annotated, Any
 
 from injector import inject
 
-from agentclaw.community.core.quality.repositories import (
-    QualityTaskRepository,
-    QualityTaskRecord,
-)
+from agentclaw.community.core.repository.protocols.platform import QualityTaskRepository
+from agentclaw.community.core.quality.models import QualityTaskRecord
 from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import HttpClient, QUALIFIER_MASA_AGENT_EVAL

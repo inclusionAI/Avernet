@@ -11,13 +11,9 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 
 

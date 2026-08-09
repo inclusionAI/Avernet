@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_collaborator.models import (
     BotCollabLogRecord,
     BotCollabLogModel,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env

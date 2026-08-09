@@ -15,7 +15,7 @@ Tests the following endpoints from ``adapters/http/bot_collaborator/router.py``:
 from __future__ import annotations
 
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
-from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot, make_collaborator
 from tests.community.framework import (
@@ -422,7 +422,7 @@ def _seed_bot_with_deleted_lock(world):
     To trigger the race condition path (lines 128-134), we need acquire_lock
     to fail while get_lock_info shows no lock.
     """
-    from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLockRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 
     _seed_bot_for_add_collab_lock(world)
 
@@ -670,8 +670,8 @@ def remove_collaborator_not_found():
 
 def _assert_current_user_left(response, world):
     """Assert current collaborator was removed after leaving collaboration."""
-    from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.utils.env_utils import get_current_env
 
     bot_repo = world.get(BotRepository)

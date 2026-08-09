@@ -1,10 +1,18 @@
-"""Bot friend repository protocol - 业务层内部抽象。
+"""Repository contracts owned by the ``bot`` domain.
 
-定义 BotFriend 数据访问的接口，供 Service 层依赖注入使用。
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
-from typing import List, Optional, Dict, Any, Protocol
+from __future__ import annotations
 
-from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey
+from abc import abstractmethod
+from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_public.repository.models import BotFriendQueryKey
 
 
 class BotFriendRepositoryProtocol(Protocol):
@@ -17,6 +25,7 @@ class BotFriendRepositoryProtocol(Protocol):
     # Insert Operations
     # ========================================================================
 
+    @abstractmethod
     def insert(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         创建好友申请记录。
@@ -40,6 +49,7 @@ class BotFriendRepositoryProtocol(Protocol):
     # Query Operations
     # ========================================================================
 
+    @abstractmethod
     def get_by_id(self, record_id: int) -> Optional[Dict[str, Any]]:
         """
         根据ID获取好友申请记录。
@@ -52,6 +62,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_entity_ids_batch(
         self,
         keys: List[BotFriendQueryKey]
@@ -67,6 +78,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_entity_ids(
         self,
         requester_entity_id: str,
@@ -86,6 +98,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_requester(
         self,
         requester_entity_id: str,
@@ -111,6 +124,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_target(
         self,
         target_entity_id: str,
@@ -132,6 +146,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_target_bot_id(
         self,
         target_bot_id: str,
@@ -153,6 +168,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_approved_friends_for_bot(
         self,
         bot_id: str,
@@ -175,6 +191,7 @@ class BotFriendRepositoryProtocol(Protocol):
     # Update Operations
     # ========================================================================
 
+    @abstractmethod
     def accept(
         self,
         record_id: int,
@@ -194,6 +211,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def reject(
         self,
         record_id: int,
@@ -215,6 +233,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def cancel(
         self,
         record_id: int,
@@ -234,6 +253,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def soft_delete(self, record_id: int) -> bool:
         """
         软删除记录（通过更新状态为CANCELLED）。
@@ -250,6 +270,7 @@ class BotFriendRepositoryProtocol(Protocol):
     # Approval Operations
     # ========================================================================
 
+    @abstractmethod
     def create_approval(
         self,
         record_id: int,
@@ -267,6 +288,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_approval_by_uuid(
         self,
         record_id: int,
@@ -284,6 +306,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def update_approval_status(
         self,
         record_id: int,
@@ -305,6 +328,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_latest_approval(self, record_id: int) -> Optional[Dict[str, Any]]:
         """
         获取最新的审批单。
@@ -317,6 +341,7 @@ class BotFriendRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_approvals(self, record_id: int) -> List[Dict[str, Any]]:
         """
         获取所有审批单列表。
@@ -333,6 +358,7 @@ class BotFriendRepositoryProtocol(Protocol):
     # Internal Update Methods (for plugins use)
     # ========================================================================
 
+    @abstractmethod
     def _update_status_and_ext(
         self,
         record_id: int,

@@ -13,9 +13,7 @@ from agentclaw.community.core.caller_identity.models import (
     BotMcpCallConfigModel,
     McpCallType,
 )
-from agentclaw.community.core.caller_identity.repository import (
-    CallerIdentityLockMismatchError,
-)
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityLockMismatchError
 from agentclaw.community.core.caller_identity.contracts import (
     CallerIdentityIrreversibleError,
 )

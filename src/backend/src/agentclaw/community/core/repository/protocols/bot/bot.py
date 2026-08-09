@@ -1,15 +1,19 @@
-"""BotRepository Protocol.
+"""Repository contracts owned by the ``bot`` domain.
 
-Defines the abstract interface for bot persistence operations.
-Implementations are provided in plugins/local and plugins/prod.
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
+from abc import abstractmethod
+from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
-
-class BotLookupAmbiguousError(RuntimeError):
-    """A caller-specific Bot lookup matched more than one live row."""
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_management.render_screen.models import RenderScreenRecord
+    from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 
 
 @runtime_checkable
@@ -21,10 +25,12 @@ class BotRepository(Protocol):
     OceanBase and local SQLite via the injected DatabasePlugin.
     """
 
+    @abstractmethod
     def insert(self, bot_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new bot record."""
         ...
 
+    @abstractmethod
     def get_by_id_and_owner(
         self,
         bot_id: str,
@@ -43,12 +49,14 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_live_by_id_owner_and_env(
         self, *, bot_id: str, owner_id: str, env: str
     ) -> list[dict[str, Any]]:
         """Get all live exact matches in an explicitly selected environment."""
         ...
 
+    @abstractmethod
     def update_ext_by_id_owner_and_env(
         self,
         *,
@@ -60,6 +68,7 @@ class BotRepository(Protocol):
         """Update ``ext`` only when exactly one live explicit-env row matches."""
         ...
 
+    @abstractmethod
     def get_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get bot by bot_id only (no owner check).
 
@@ -68,16 +77,19 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_id_and_entity(
         self, bot_id: str, entity_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get one live Bot by exact bot and entity identifiers in this env."""
         ...
 
+    @abstractmethod
     def get_unique_by_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
         """Get one live Bot by id or raise when the caller scope is ambiguous."""
         ...
 
+    @abstractmethod
     def list_by_owner(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
@@ -90,12 +102,14 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots owned by the user or collaboratively managed by the user."""
         ...
 
+    @abstractmethod
     def list_by_entity(
         self,
         entity_id: Optional[str] = None,
@@ -106,6 +120,7 @@ class BotRepository(Protocol):
         """List bots by entity with pagination."""
         ...
 
+    @abstractmethod
     def list_by_conditions(
         self,
         public: Optional[str] = None,
@@ -127,6 +142,7 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_search(
         self,
         public: Optional[str] = None,
@@ -137,12 +153,14 @@ class BotRepository(Protocol):
         """List bots with pagination and search."""
         ...
 
+    @abstractmethod
     def list_public_bots_by_owner_bot_pairs(
         self, pairs: List[tuple[str, str]]
     ) -> List[Dict[str, Any]]:
         """Live public bots matching any ``(bot_id, owner_id)`` pair, this env."""
         ...
 
+    @abstractmethod
     def list_domain_bots(
         self,
         page: int | None = None,
@@ -157,12 +175,14 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def update_by_owner(
         self, bot_id: str, owner_id: str, update_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Update bot record by bot_id and owner_id."""
         ...
 
+    @abstractmethod
     def compare_and_set_ext(
         self,
         *,
@@ -174,10 +194,12 @@ class BotRepository(Protocol):
         """Replace ``ext`` only when the full stored value is unchanged."""
         ...
 
+    @abstractmethod
     def soft_delete_by_owner(self, bot_id: str, owner_id: str) -> bool:
         """Soft delete a bot by bot_id and owner_id."""
         ...
 
+    @abstractmethod
     def count_by_owner(self, owner_id: str, exclude_bot_type: str | None = None) -> int:
         """Count bots by owner_id.
 
@@ -191,38 +213,46 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         """Check if a bot with specific bot_id exists for the owner."""
         ...
 
+    @abstractmethod
     def exists_by_owner_and_bot_type(self, owner_id: str, bot_type: str) -> bool:
         """Check if the owner has a live Bot of the requested type."""
         ...
 
+    @abstractmethod
     def exists_by_bot_name(self, bot_name: str) -> bool:
         """Check if a bot with specific bot_name exists globally."""
         ...
 
+    @abstractmethod
     def get_by_bot_name(self, bot_name: str) -> Optional[Dict[str, Any]]:
         """Get bot by bot_name."""
         ...
 
+    @abstractmethod
     def get_by_binding_id(self, binding_id: int) -> Optional[Dict[str, Any]]:
         """Get bot by binding_id."""
         ...
 
+    @abstractmethod
     def get_device_provider_by_bot_id_and_owner(
         self, bot_id: str, owner_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get device_provider info by bot_id and owner_id."""
         ...
 
+    @abstractmethod
     def get_device_provider_by_bot_id(
         self, bot_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get device_provider info by bot_id (no owner_id required)."""
         ...
 
+    @abstractmethod
     def search_bots(
         self,
         key: Optional[str] = None,
@@ -263,6 +293,7 @@ class BotRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_active_bots_by_entity(
         self,
         entity_id: str,
@@ -293,6 +324,7 @@ class BotRestartLockRepositoryProtocol(Protocol):
     on both prod OceanBase and local SQLite via the injected DatabasePlugin.
     """
 
+    @abstractmethod
     def acquire(
         self, env: str, entity_id: str, bot_id: str, holder_user_id: str
     ) -> Optional[BotRestartLockRecord]:
@@ -306,12 +338,14 @@ class BotRestartLockRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get(
         self, env: str, entity_id: str, bot_id: str
     ) -> Optional[BotRestartLockRecord]:
         """Return the lock row for ``(env, entity_id, bot_id)`` if present."""
         ...
 
+    @abstractmethod
     def get_if_stale(
         self, env: str, entity_id: str, bot_id: str, ttl_seconds: int
     ) -> Optional[BotRestartLockRecord]:
@@ -323,6 +357,7 @@ class BotRestartLockRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def release(
         self, env: str, entity_id: str, bot_id: str, lock_token: str
     ) -> bool:
@@ -333,4 +368,152 @@ class BotRestartLockRepositoryProtocol(Protocol):
         a different holder acquired after ours was reaped (the stale-reaper and
         late-async-release races). Returns ``True`` if a row was deleted.
         """
+        ...
+
+
+@runtime_checkable
+class TemplateRepository(Protocol):
+    """Protocol for template repository implementations.
+
+    Implementation: a single unified ORM body
+    (plugins.template_repository.TemplateRepository) runs on both prod
+    OceanBase and local SQLite via the injected DatabasePlugin.
+    """
+
+    @abstractmethod
+    def insert(self, template_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new template record.
+
+        Args:
+            template_data: Dictionary with template fields (bot_id, ext, etc.)
+
+        Returns:
+            Created template record as dictionary
+        """
+        ...
+
+    @abstractmethod
+    def get_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
+        """Get template by bot_id.
+
+        Args:
+            bot_id: Bot ID
+
+        Returns:
+            Template record as dictionary, or None if not found
+        """
+        ...
+
+    @abstractmethod
+    def update_by_bot_id(self, bot_id: str, update_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update template by bot_id.
+
+        Args:
+            bot_id: Bot ID
+            update_data: Dictionary with fields to update
+
+        Returns:
+            Updated template record as dictionary, or None if not found
+        """
+        ...
+
+    @abstractmethod
+    def delete_by_bot_id(self, bot_id: str) -> bool:
+        """Delete template by bot_id.
+
+        Args:
+            bot_id: Bot ID
+
+        Returns:
+            True if deleted, False if not found
+        """
+        ...
+
+    @abstractmethod
+    def exists_by_bot_id(self, bot_id: str) -> bool:
+        """Check if a template exists for the given bot_id.
+
+        Args:
+            bot_id: Bot ID
+
+        Returns:
+            True if template exists, False otherwise
+        """
+        ...
+
+    @abstractmethod
+    def list_by_bot_ids(self, bot_ids: List[str]) -> List[Dict[str, Any]]:
+        """List templates by bot IDs.
+
+        Args:
+            bot_ids: Bot IDs
+
+        Returns:
+            List of template records
+        """
+        ...
+
+    @abstractmethod
+    def list_by_architect_bot_id(self, architect_bot_id: str) -> List[Dict[str, Any]]:
+        """List templates whose ext JSON contains the given architect_bot_id.
+
+        Used to find all application coding bots associated with a
+        domain architect bot.
+
+        Args:
+            architect_bot_id: The architect bot's bot_id
+
+        Returns:
+            List of template records
+        """
+        ...
+
+
+@runtime_checkable
+class RenderScreenRepository(Protocol):
+    """Render screen repository interface.
+
+    Implementation: a single unified ORM repository
+    ``plugins.render_screen_repository.RenderScreenRepository`` that
+    runs on both the corp store (prod) and SQLite (local) — the only difference is
+    the injected ``DatabasePlugin`` (``orm_session()``).
+    """
+
+    @abstractmethod
+    def insert(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        name: str,
+        cdn_url: str,
+        creator_id: str,
+    ) -> int:
+        """插入一条 CDN 配置，返回新记录 id。"""
+        ...
+
+    @abstractmethod
+    def list_by_bot_id(self, *, bot_id: str, owner_id: str) -> list[RenderScreenRecord]:
+        """查询某 Bot 下所有未删除的 CDN 配置。"""
+        ...
+
+    @abstractmethod
+    def get_by_id(self, record_id: int) -> RenderScreenRecord | None:
+        """根据 id 查询单条记录。"""
+        ...
+
+    @abstractmethod
+    def update_by_id(
+        self,
+        *,
+        record_id: int,
+        name: str,
+        cdn_url: str,
+    ) -> None:
+        """更新 name 和 cdn_url。"""
+        ...
+
+    @abstractmethod
+    def delete_by_id(self, *, record_id: int) -> None:
+        """软删除（is_delete=1）。"""
         ...

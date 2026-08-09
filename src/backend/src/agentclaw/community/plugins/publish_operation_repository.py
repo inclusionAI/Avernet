@@ -27,9 +27,7 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationRecord,
     PublishOperationState,
 )
-from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-    PublishOperationRepository,
-)
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env

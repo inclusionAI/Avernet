@@ -23,7 +23,7 @@ from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.device_repository import DeviceRepository
 from agentclaw.community.plugins.local import database as local_db_mod
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
 pytestmark = pytest.mark.integration
 

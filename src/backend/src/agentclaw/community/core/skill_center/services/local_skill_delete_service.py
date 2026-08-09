@@ -13,7 +13,7 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillActiveError,
     LocalSkillEditPausedError,
@@ -25,19 +25,15 @@ from agentclaw.community.core.skill_center.factories import (
     LocalSkillQuarantineRepairError,
     SkillServiceFactory,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    ActiveSkillSetReferenceError,
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
 )
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
-from agentclaw.community.plugin_api.local_skill_cleanup import (
-    LocalSkillCleanupRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (

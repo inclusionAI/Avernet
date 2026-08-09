@@ -18,9 +18,9 @@ from typing import cast  # noqa: UP035 - injector binding key must match provide
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.protocols import BotQueryProtocol
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_device_accessor import BaasDeviceAccessor
 from agentclaw.community.core.devices.services.baas_device_service import BaasDeviceService
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -29,9 +29,7 @@ from agentclaw.community.core.devices.services.device_service import (
     DeviceService,
 )
 from agentclaw.community.core.devices.services.device_service_router import DeviceServiceRouter
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 

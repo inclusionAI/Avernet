@@ -14,7 +14,7 @@ from agentclaw.community.core.service_bot.types import PublishStage
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.service_bot.services.publish_flow_service import PublishFlowService
 
 logger = get_logger()

@@ -1,13 +1,13 @@
-"""SQLAlchemy ORM models for system configuration tables (local/SQLite mode).
+"""SQLAlchemy ORM models owned by the system_config domain.
 
-两表设计：
-- AcConfigCategory: 分类目录表 (ac_config_category)
-- AcConfigItem: 配置项表 (ac_config_item)
+两表设计：``AcConfigCategory`` (ac_config_category) 与 ``AcConfigItem``
+(ac_config_item)，配置项通过 ``parent_id`` 关联分类目录。
 
-配置项通过 parent_id 关联分类目录。
+Relocated out of ``plugins/local/system_config_models.py`` — these map real
+tables on every runtime, not local-only ones.
 """
-
 from sqlalchemy import Column, Integer, String, Text, DateTime, Index, UniqueConstraint, ForeignKey, func
+
 from agentclaw.community.core.base import Base
 
 

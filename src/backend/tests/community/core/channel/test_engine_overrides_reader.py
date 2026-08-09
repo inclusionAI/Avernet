@@ -12,7 +12,7 @@ import pytest
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
-from agentclaw.community.core.channel.services.repositories import ChannelRecord
+from agentclaw.community.core.channel.models import ChannelRecord
 
 pytestmark = pytest.mark.unit
 

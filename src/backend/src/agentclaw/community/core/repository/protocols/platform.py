@@ -1,40 +1,20 @@
-"""Repository interface for the task queue.
+"""Repository contracts owned by the ``platform`` domain.
 
-This is a **business** repository, so it lives in ``core/`` (not
-``plugin_api/``). The concrete unified ORM implementation
-(``plugins/task_queue_repository.py``) satisfies this Protocol structurally and
-runs on SQLite (local) and OceanBase (prod) via the injected
-``DatabasePlugin.orm_session()``.
-
-**The database owns all timing.** Callers pass *durations* (delays / lease /
-deadline, in seconds); the repository turns them into absolute timestamps using
-the DB clock (``now()``), and every eligibility / lease / deadline comparison
-is evaluated DB-side too. No Python-generated ``now`` ever crosses this
-boundary — so clock skew between worker pods cannot affect claim, lease, or
-deadline decisions.
-
-Idempotency is enforced at **two** points, answering two different questions.
-
-**Claim time — "who runs it?"** A row-level compare-and-swap UPDATE whose
-predicate only matches an unclaimed (or lease-expired) row, so across N racing
-workers each task is won by at most one. Past-deadline candidates are marked
-``TIMED_OUT`` instead of claimed. ``complete`` / ``reschedule`` / ``fail`` are
-CAS-guarded on ``claimed_by == worker_id AND status == RUNNING`` so a worker
-that lost its lease cannot clobber a task another worker took over.
-
-**Enqueue time — "should this row exist at all?"** Opt-in, via
-``idempotency_key``. See :meth:`TaskQueueRepositoryProtocol.enqueue`. A caller
-that supplies no key gets exactly the old behavior: every enqueue is a new row.
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Protocol, runtime_checkable
+from abc import abstractmethod
+from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.task_queue.types import (
-    EnqueueResult,
-    TaskRecord,
-    TaskStatus,
-)
+if TYPE_CHECKING:
+    from agentclaw.community.core.quality.models import QualityTaskRecord
+    from agentclaw.community.core.session_resources.types import SessionResourceRecord
+    from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord, TaskStatus
 
 
 @runtime_checkable
@@ -42,6 +22,7 @@ class TaskQueueRepositoryProtocol(Protocol):
     """Durable store for queued tasks with DB-level single-claimer semantics."""
 
     # ── enqueue ─────────────────────────────────────────────────────────
+    @abstractmethod
     def enqueue(
         self,
         *,
@@ -129,6 +110,7 @@ class TaskQueueRepositoryProtocol(Protocol):
         ...
 
     # ── claim (the single-winner CAS) ───────────────────────────────────
+    @abstractmethod
     def claim_batch(
         self,
         *,
@@ -154,11 +136,13 @@ class TaskQueueRepositoryProtocol(Protocol):
         ...
 
     # ── outcome transitions (CAS-guarded on the holder) ─────────────────
+    @abstractmethod
     def complete(self, *, task_id: int, worker_id: str) -> bool:
         """Mark a held task ``SUCCEEDED``. Returns ``False`` if this worker no
         longer holds it (lost lease / already terminal)."""
         ...
 
+    @abstractmethod
     def reschedule(
         self,
         *,
@@ -180,11 +164,13 @@ class TaskQueueRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def fail(self, *, task_id: int, worker_id: str, error: str) -> bool:
         """Mark a held task terminally ``FAILED`` with ``error``. Returns
         ``False`` if this worker no longer holds it."""
         ...
 
+    @abstractmethod
     def renew_lease(self, *, task_id: int, worker_id: str, lease_seconds: int) -> bool:
         """Extend a held task's lease to ``now() + lease_seconds`` (DB clock).
 
@@ -197,10 +183,227 @@ class TaskQueueRepositoryProtocol(Protocol):
         ...
 
     # ── diagnosis / tests ───────────────────────────────────────────────
+    @abstractmethod
     def get_by_id(self, task_id: int) -> Optional[TaskRecord]:
         """Return the task by id, or ``None``."""
         ...
 
+    @abstractmethod
     def list_by_status(self, *, status: TaskStatus, env: str) -> List[TaskRecord]:
         """Return all tasks in ``status`` for ``env`` (diagnosis / tests)."""
         ...
+
+
+@runtime_checkable
+class QualityTaskRepository(Protocol):
+    """Protocol for quality task repository implementations.
+
+    Implementation: a single unified ORM body at
+    ``plugins.quality_repository.QualityTaskRepository`` (runs on both
+    the corp store and SQLite via the injected ``DatabasePlugin``).
+    """
+
+    @abstractmethod
+    def list_by_conditions(
+        self,
+        *,
+        task_type: str,
+        biz_type: str,
+        bot_id: str | None = None,
+        owner_id: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[QualityTaskRecord], int]:
+        """List quality tasks by conditions with pagination.
+
+        Args:
+            task_type: Task type filter (required, e.g., "eval")
+            biz_type: Business type filter (required, e.g., "service_bot_single")
+            bot_id: Optional bot ID filter
+            owner_id: Optional owner ID filter
+            page: Page number (1-indexed)
+            page_size: Page size
+
+        Returns:
+            Tuple of (list of records, total count)
+        """
+        ...
+
+    @abstractmethod
+    def get_by_uuid(self, uuid: str) -> QualityTaskRecord | None:
+        """Get a quality task by UUID.
+
+        Args:
+            uuid: Task UUID
+
+        Returns:
+            QualityTaskRecord if found, None otherwise
+        """
+        ...
+
+    @abstractmethod
+    def get_by_id(self, id: int) -> QualityTaskRecord | None:
+        """Get a quality task by ID.
+
+        Args:
+            id: Task ID (primary key)
+
+        Returns:
+            QualityTaskRecord if found, None otherwise
+        """
+        ...
+
+    @abstractmethod
+    def create(
+        self,
+        *,
+        uuid: str | None = None,
+        task_type: str,
+        biz_type: str,
+        bot_id: str | None = None,
+        owner_id: str | None = None,
+        ext: dict[str, Any] | None = None,
+        operator_id: str | None = None,
+    ) -> QualityTaskRecord:
+        """Create a new quality task.
+
+        Args:
+            uuid: Optional task UUID
+            task_type: Task type
+            biz_type: Business type
+            bot_id: Optional bot ID
+            owner_id: Optional owner ID
+            ext: Optional extension data (JSON)
+            operator_id: Optional operator ID
+
+        Returns:
+            Created QualityTaskRecord
+        """
+        ...
+
+    @abstractmethod
+    def update_status(
+        self, id: int, status: str, ext: dict[str, Any] | None = None
+    ) -> QualityTaskRecord | None:
+        """Update the status of a quality task.
+
+        Args:
+            id: Task ID (primary key)
+            status: New status
+            ext: Optional extension data to merge/update
+
+        Returns:
+            Updated QualityTaskRecord if found, None otherwise
+        """
+        ...
+
+    @abstractmethod
+    def update_ext(self, id: int, ext: dict[str, Any]) -> QualityTaskRecord | None:
+        """Update only the ext field of a quality task.
+
+        Args:
+            id: Task ID (primary key)
+            ext: Extension data to merge/update
+
+        Returns:
+            Updated QualityTaskRecord if found, None otherwise
+        """
+        ...
+
+
+class ResourceRepositoryProtocol(Protocol):
+    """Persistent storage for resources (files, URLs, nodes)."""
+
+    @abstractmethod
+    def get_by_id(self, resource_id: str) -> Optional[dict]:
+        """Fetch a single resource by primary key, or None."""
+        ...
+
+    @abstractmethod
+    def get_by_path(self, path: str, bolt_id: Optional[str] = None) -> Optional[dict]:
+        """Fetch a FILE resource by its stored filesystem path."""
+        ...
+
+    @abstractmethod
+    def list_resources(
+        self,
+        resource_type: Optional[str] = None,
+        parent_path: Optional[str] = None,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        bolt_id: Optional[str] = None,
+    ) -> List[dict]:
+        """List resources matching the given filters."""
+        ...
+
+    @abstractmethod
+    def create(self, resource_data: dict) -> dict:
+        """Insert a new resource and return the stored representation."""
+        ...
+
+    @abstractmethod
+    def update(self, resource_id: str, resource_data: dict) -> Optional[dict]:
+        """Update fields on an existing resource, or None if missing."""
+        ...
+
+    @abstractmethod
+    def delete(self, resource_id: str) -> bool:
+        """Soft-delete (status=deleted). Returns True if a row was updated."""
+        ...
+
+    @abstractmethod
+    def hard_delete(self, resource_id: str) -> bool:
+        """Physically remove the row."""
+        ...
+
+    @abstractmethod
+    def count_resources(
+        self,
+        resource_type: Optional[str] = None,
+        parent_path: Optional[str] = None,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        bolt_id: Optional[str] = None,
+    ) -> int:
+        """Count resources matching the given filters."""
+        ...
+
+
+@runtime_checkable
+class SessionResourceRepositoryProtocol(Protocol):
+    @abstractmethod
+    def create(self, record: SessionResourceRecord) -> SessionResourceRecord: ...
+
+    @abstractmethod
+    def get_by_resource_id(self, resource_id: str) -> SessionResourceRecord | None: ...
+
+    @abstractmethod
+    def get_owned(
+        self,
+        resource_id: str,
+        owner_id: str,
+        bot_id: str,
+        session_key_hash: str,
+    ) -> SessionResourceRecord | None: ...
+    @abstractmethod
+    def list_owned(
+        self,
+        owner_id: str,
+        bot_id: str,
+        session_key_hash: str,
+    ) -> list[SessionResourceRecord]: ...
+
+    @abstractmethod
+    def cas_start_materialization(self, **kwargs) -> SessionResourceRecord | None: ...
+
+    @abstractmethod
+    def cas_finish_materialization(self, **kwargs) -> SessionResourceRecord | None: ...
+
+    @abstractmethod
+    def soft_delete(
+        self,
+        resource_id: str,
+        owner_id: str,
+        bot_id: str,
+        session_key_hash: str,
+    ) -> SessionResourceRecord | None: ...

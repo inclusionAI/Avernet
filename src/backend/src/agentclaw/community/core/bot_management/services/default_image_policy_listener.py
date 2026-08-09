@@ -4,18 +4,14 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     DEFAULT_TECLAW_ENGINE_TYPES,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.events.types import DeviceAliveEvent
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     persist_default_image_policy,
 )

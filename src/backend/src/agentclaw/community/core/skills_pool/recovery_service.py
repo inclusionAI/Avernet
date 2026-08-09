@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     RuntimeLayoutProbeStatus,
 )
@@ -27,18 +25,14 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
     local_skill_name,
 )
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SKILLS_POOL_RECONCILE_DEADLINE_SECONDS,
     SKILLS_POOL_RECONCILE_TASK,
     build_skills_pool_reconcile_payload,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     SkillLayoutPhase,

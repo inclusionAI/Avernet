@@ -14,10 +14,7 @@ from agentclaw.community.core.caller_identity.models import (
     BotMcpCallConfigModel,
     McpCallType,
 )
-from agentclaw.community.core.caller_identity.repository import (
-    CallerIdentityEngineChangedError,
-    CallerIdentityLockMismatchError,
-)
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel

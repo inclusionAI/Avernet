@@ -455,9 +455,7 @@ class CollaboratorPermissionInterceptor:
             return None
 
         try:
-            from agentclaw.community.core.bot_management.repository.protocol import (
-                BotRepository,
-            )
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             repo = ctx.injector.get(BotRepository)
             bot = repo.get_by_id(bot_id)
             if (
@@ -541,7 +539,7 @@ class CollaboratorPermissionInterceptor:
         if injector is None:
             return None
         try:
-            from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLogRepositoryProtocol
+            from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
             return injector.get(BotCollabLogRepositoryProtocol)
         except Exception:
             return None

@@ -23,7 +23,7 @@ from agentclaw.community.core.channel.services.channel_service import ChannelSer
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
-from agentclaw.community.core.channel.services.repositories import ChannelRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugins.channel_repository import (
     ChannelRepository as UnifiedChannelRepository,

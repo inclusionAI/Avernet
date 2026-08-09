@@ -41,9 +41,7 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from sqlalchemy import and_, func, or_
 
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import (
     ApprovalStatus,
     ApprovalType,

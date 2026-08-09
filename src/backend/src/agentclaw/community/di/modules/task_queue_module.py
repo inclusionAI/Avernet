@@ -15,7 +15,7 @@ enables it.
 """
 from injector import Binder, Module, singleton
 
-from agentclaw.community.core.task_queue.repository.protocol import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.task_queue.services.worker import TaskWorker

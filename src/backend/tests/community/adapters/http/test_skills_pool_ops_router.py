@@ -39,9 +39,7 @@ from agentclaw.community.core.skills_pool.rollout_gate import (
     SKILLS_POOL_ROLLOUT_BUSINESS_CODE,
     SKILLS_POOL_ROLLOUT_PARAM_CODE,
 )
-from agentclaw.community.core.skills_pool.rollout_repository import (
-    SkillsPoolRolloutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolRolloutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope
 from agentclaw.community.plugin_api.database import DatabasePlugin
 

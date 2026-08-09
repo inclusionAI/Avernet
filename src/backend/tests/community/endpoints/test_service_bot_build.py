@@ -22,7 +22,7 @@ from __future__ import annotations
 import subprocess
 
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
 )

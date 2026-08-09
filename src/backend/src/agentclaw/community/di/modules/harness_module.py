@@ -16,12 +16,10 @@ from agentclaw.community.api.content_scanner_service import ContentScannerProtoc
 from agentclaw.community.api.patch_engine_service import PatchEngineProtocol
 from agentclaw.community.api.patch_library_service import PatchLibraryProtocol
 from agentclaw.community.api.patch_planner_service import PatchPlannerProtocol
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-    HarnessTemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessTemplateRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.content_scanner import ContentScanner
 from agentclaw.community.core.harness.services.llm import LLM

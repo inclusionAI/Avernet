@@ -145,10 +145,7 @@ class PolicyRepository:
     def get_config_by_key(
         self, *, config_key: str, category: str, env: str
     ) -> ConfigItemRecord | None:
-        from agentclaw.community.plugins.local.system_config_models import (
-            AcConfigCategory,
-            AcConfigItem,
-        )
+        from agentclaw.community.core.system_config.orm import AcConfigCategory, AcConfigItem
 
         logger.info(
             "[get_config_by_key] config_key=%s category=%s env=%s",
@@ -177,9 +174,7 @@ class PolicyRepository:
             )
 
     def count_active_devices(self, *, env: str) -> int:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            EntityDeviceBinding,
-        )
+        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
         with self._db.orm_session() as db:
             return (

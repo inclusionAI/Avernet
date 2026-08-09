@@ -23,7 +23,7 @@ from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.resources.factory import ResourceServiceFactory
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugins.resource_repository import (
     ResourceRepository as UnifiedResourceRepository,

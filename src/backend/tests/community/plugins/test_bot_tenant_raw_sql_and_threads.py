@@ -24,7 +24,7 @@ from agentclaw.community.core.service_bot.repository.models import BotPublishMod
 from agentclaw.community.di.config import BcsFuseConfig
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import (
     DEFAULT_AVERNET_TENANT,
     avernet_tenant_scope,

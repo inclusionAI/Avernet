@@ -43,9 +43,7 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from sqlalchemy import and_, func, or_
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -668,9 +666,7 @@ class BotRepository:
     def get_device_provider_by_bot_id_and_owner(
         self, bot_id: str, owner_id: str
     ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            EntityDeviceBinding,
-        )
+        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
         with self._db.orm_session() as db:
             row = (
@@ -700,9 +696,7 @@ class BotRepository:
     def get_device_provider_by_bot_id(
         self, bot_id: str
     ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.plugins.local.sqlite_models import (
-            EntityDeviceBinding,
-        )
+        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
         with self._db.orm_session() as db:
             row = (
@@ -752,9 +746,7 @@ class BotRepository:
         from agentclaw.community.core.service_bot.repository.models import (
             BotPublishModel,
         )
-        from agentclaw.community.plugins.local.sqlite_models import (
-            EntityDeviceBinding,
-        )
+        from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
         env = get_current_env()
         with self._db.orm_session() as db:

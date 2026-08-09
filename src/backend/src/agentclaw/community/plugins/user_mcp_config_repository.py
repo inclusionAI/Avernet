@@ -25,9 +25,7 @@ from typing import Any, List, Optional
 from injector import inject
 from sqlalchemy import func
 
-from agentclaw.community.core.mcp.services.repositories import (
-    UserMCPConfigRepository as UserMCPConfigRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import UserMCPConfigRepository as UserMCPConfigRepositoryProtocol
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 

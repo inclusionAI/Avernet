@@ -21,11 +21,9 @@ bot 名字和 ``active_engine`` 从 ``BotRepository`` / ``ac_bots`` 解析。只
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.notify.constants import NOTIFY_SUPPORTED_ENGINES
 from agentclaw.community.core.notify.protocol import NotifyTarget
 from agentclaw.community.log import get_logger

@@ -49,7 +49,7 @@ from agentclaw.community.core.services.identity import IdentityService
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
 from agentclaw.community.plugins.device_repository import DeviceRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 pytestmark = pytest.mark.integration

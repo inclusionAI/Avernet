@@ -93,7 +93,7 @@ def _app(skill_service):
             from agentclaw.community.api.skill_parameter_service_factory import (
                 SkillParameterServiceFactoryProtocol,
             )
-            from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
                 CollaboratorLockService,
             )
@@ -106,9 +106,7 @@ def _app(skill_service):
             from agentclaw.community.core.skill_center.factories import (
                 SkillServiceFactory,
             )
-            from agentclaw.community.core.skill_center.services.repositories import (
-                SkillRepository,
-            )
+            from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
             from agentclaw.community.core.workspace.path_factory import (
                 WorkspacePathFactory,
             )
@@ -493,8 +491,8 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     bot_repo = injector.get(BotRepository)
     bot_repo.get_by_id.return_value = {
@@ -555,7 +553,7 @@ def test_parameter_route_rejects_request_bot_mismatch_before_device_access(
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     injector.get(SkillRepository).get_by_id.return_value = lookup_svc.get_skill.return_value
     parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
@@ -576,7 +574,7 @@ def test_parameter_route_rejects_private_skill_without_bot_binding():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -619,11 +617,11 @@ def test_parameter_routes_reject_non_admin_collaborator(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     injector.get(SkillRepository).get_by_id.return_value = skill
     injector.get(BotRepository).get_by_id.return_value = {
@@ -660,11 +658,11 @@ def test_parameter_route_returns_structured_error_without_active_binding():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context import (
         DeviceNotBoundError,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -713,8 +711,8 @@ def test_shared_market_skill_parameters_use_requested_bot_owner(
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     lookup_svc.parse_local_skill_config = AsyncMock(return_value=None)
@@ -762,8 +760,8 @@ def test_parameter_route_scopes_duplicate_default_bot_by_entity():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -809,11 +807,11 @@ def test_parameter_route_scopes_duplicate_default_bot_by_entity():
 def test_parameter_post_keeps_edit_lock_enforcement():
     """敏感请求体不入审计，但写操作仍必须持有 Bot 编辑锁。"""
 
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
         CollaboratorLockService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -856,11 +854,11 @@ def test_parameter_routes_fail_closed_when_permission_service_errors(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {

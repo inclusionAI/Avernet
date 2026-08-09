@@ -19,15 +19,13 @@ from typing import Callable, Optional, TYPE_CHECKING
 
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.skill_center.services.git_sync import GitSyncService
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillCategoryRepository,
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.path_resolution import (
     build_pool_local_path_adapter,

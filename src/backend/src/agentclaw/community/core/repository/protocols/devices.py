@@ -1,18 +1,18 @@
-"""Device Binding Repository Protocol — 业务数据访问接口.
+"""Repository contracts owned by the ``devices`` domain.
 
-根据 README.md FAQ:
-  Q: 业务 Repository 接口（如 SkillRepository）放哪里？
-  A: 放在 core/<module>/ 内部，不放 plugin_api/。plugin_api/ 只放纯基础设施接口。
-
-DeviceBindingRepository 包含设备绑定的 CRUD 操作和业务语义方法，
-属于设备领域的业务抽象，因此放在 core/ 层内部。
-
-纯基础设施接口（如 DatabasePlugin、CachePlugin）仍保留在 plugin_api/ 层。
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
+from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from abc import abstractmethod
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
+if TYPE_CHECKING:
+    from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 
 
 @runtime_checkable
@@ -23,6 +23,7 @@ class DeviceBindingRepository(Protocol):
     实现类必须提供完整的方法实现。
     """
 
+    @abstractmethod
     def insert_binding(
         self,
         *,
@@ -54,10 +55,12 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_id(self, binding_id: int) -> DeviceBindingRecord | None:
         """根据绑定ID获取设备绑定记录."""
         ...
 
+    @abstractmethod
     def get_active_by_bot_and_owner(
         self, bot_id: str, owner_id: str
     ) -> "DeviceBindingRecord | None":
@@ -72,10 +75,12 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_device_id(self, device_id: str) -> DeviceBindingRecord | None:
         """根据设备ID获取最新的设备绑定记录."""
         ...
 
+    @abstractmethod
     def release_binding(
         self,
         *,
@@ -86,14 +91,17 @@ class DeviceBindingRepository(Protocol):
         """释放设备，标记绑定记录为 RELEASED 状态."""
         ...
 
+    @abstractmethod
     def update_status(self, *, binding_id: int, status: str) -> None:
         """更新设备绑定状态."""
         ...
 
+    @abstractmethod
     def update_status_and_alive_at(self, *, binding_id: int, status: str) -> None:
         """更新设备状态并刷新 alive 时间戳."""
         ...
 
+    @abstractmethod
     def update_device_props(self, *, binding_id: int, props: dict[str, Any]) -> None:
         """合并 ``props`` 到绑定的 device_props（保留其它键）。
 
@@ -104,6 +112,7 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def transition_teclaw_publish_terminal(
         self,
         *,
@@ -124,6 +133,7 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_bindings(
         self,
         *,
@@ -143,6 +153,7 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_active_caller_instance_bindings(
         self,
         *,
@@ -158,6 +169,7 @@ class DeviceBindingRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def count_non_released_bindings(
         self,
         *,
@@ -168,14 +180,17 @@ class DeviceBindingRepository(Protocol):
         """统计非释放状态的设备数量（用于配额检查）."""
         ...
 
+    @abstractmethod
     def exists_device_id(self, *, device_id: str) -> bool:
         """检查设备ID是否已存在."""
         ...
 
+    @abstractmethod
     def get_released_binding(self, *, device_id: str) -> DeviceBindingRecord | None:
         """获取已释放状态的设备绑定记录（用于重新申请时复用）."""
         ...
 
+    @abstractmethod
     def reuse_binding(
         self,
         *,
@@ -188,40 +203,42 @@ class DeviceBindingRepository(Protocol):
         """重用已释放的设备绑定记录."""
         ...
 
+    @abstractmethod
     def get_active_engine_by_device_id(self, *, device_id: str) -> str:
         """通过设备ID获取Bot的 active_engine."""
         ...
 
+    @abstractmethod
     def batch_update_env(self, *, binding_ids: list[int], env: str) -> int:
         """批量更新环境字段."""
         ...
 
+    @abstractmethod
     def get_by_ids(self, binding_ids: list[int]) -> list[DeviceBindingRecord]:
         """根据ID列表批量获取绑定记录."""
         ...
 
+    @abstractmethod
     def update_bot_start_status(self, *, binding_id: int, status: str, message: str | None) -> None:
         """更新 ac_bots 表 ext 字段中的启动状态."""
         ...
 
+    @abstractmethod
     def update_bot_status_on_device_active(self, *, binding_id: int) -> None:
         """设备变 ACTIVE 时更新关联 Bot 状态为 ACTIVE（仅当 Bot 当前状态为 PENDING 时）."""
         ...
 
+    @abstractmethod
     def update_bot_status_on_device_failed(self, *, binding_id: int) -> None:
         """设备变 FAILED 时更新关联 Bot 状态为 FAILED."""
         ...
 
 
-# =============================================================================
-# OssToNasRecordRepository — ac_oss_to_nas_record 表 CRUD 接口
-# 实现见 plugins/{prod,local}/oss_to_nas_record_repository.py
-# =============================================================================
-
 @runtime_checkable
 class OssToNasRecordRepository(Protocol):
     """OSS → NAS 迁移记录仓库接口."""
 
+    @abstractmethod
     def get_record(
         self,
         staff_no: str,
@@ -235,6 +252,7 @@ class OssToNasRecordRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def query_records_by_batch(
         self,
         env: str,
@@ -245,6 +263,7 @@ class OssToNasRecordRepository(Protocol):
         """按批次查询迁移记录，可按 storage_status 过滤."""
         ...
 
+    @abstractmethod
     def update_status(
         self,
         staff_no: str,
@@ -255,6 +274,7 @@ class OssToNasRecordRepository(Protocol):
         """更新单条记录的 storage_status."""
         ...
 
+    @abstractmethod
     def insert_record(
         self,
         staff_no: str,
@@ -268,6 +288,7 @@ class OssToNasRecordRepository(Protocol):
         """插入一条迁移记录."""
         ...
 
+    @abstractmethod
     def update_record(
         self,
         staff_no: str,
@@ -278,6 +299,7 @@ class OssToNasRecordRepository(Protocol):
         """更新单条记录的指定字段，返回更新后的记录."""
         ...
 
+    @abstractmethod
     def delete_record(
         self,
         staff_no: str,
@@ -287,6 +309,7 @@ class OssToNasRecordRepository(Protocol):
         """删除单条迁移记录，返回是否删除成功."""
         ...
 
+    @abstractmethod
     def batch_update_status(
         self,
         env: str,

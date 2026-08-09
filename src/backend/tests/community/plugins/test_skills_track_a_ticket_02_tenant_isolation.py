@@ -10,10 +10,7 @@ from agentclaw.community.core.skills_pool.repository.models import (
     BotSkillLayoutStateModel,
 )
 from agentclaw.community.core.skills_pool.types import SkillLayout
-from agentclaw.community.plugins.local.sqlite_models import (
-    DefaultSkillsetMcpExclusion,
-    DefaultSkillsetSkillExclusion,
-)
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion
 from agentclaw.community.plugins.skill_repository import SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.avernet_tenant_guard import CrossTenantInsertError

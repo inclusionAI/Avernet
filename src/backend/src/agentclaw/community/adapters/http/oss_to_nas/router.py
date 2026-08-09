@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import require_operator
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
-from agentclaw.community.core.devices.repository.protocol import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 

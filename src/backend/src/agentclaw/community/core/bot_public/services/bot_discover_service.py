@@ -7,7 +7,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 import requests
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:

@@ -17,6 +17,10 @@ consumes:
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.publishing    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skills_pool    # repository contracts consumed by this module
   - agentclaw.community.core.common_config
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.channel    # per-stage engine_overrides (DingTalk channels) reader at verify/online promotion

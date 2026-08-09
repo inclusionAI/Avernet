@@ -65,7 +65,7 @@ def _sync_market_di_app(mock_ctx, sync_repo_result):
 
     class _TestModule(Module):
         def configure(self, binder):
-            from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.skill_center.factories import SkillServiceFactory
             from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 

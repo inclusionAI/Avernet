@@ -24,11 +24,9 @@ from agentclaw.community.core.harness.models import (
 from agentclaw.community.core.harness.services.bot_profile import BotProfile
 from agentclaw.community.core.harness.services.llm import LLM
 from agentclaw.community.core.harness.services.patch_library import PatchLibrary
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessPatchRecordRepository,
-    HarnessPatchRepository,
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRepository
+from agentclaw.community.core.repository.protocols.harness import HarnessPatchRecordRepository
 
 
 def _align_trailing_newline(dst: str, src: str) -> str:

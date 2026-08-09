@@ -10,7 +10,7 @@ from agentclaw.community.core.devices.models import DeviceBindingStatus as DBS
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 
 logger = get_logger()
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
@@ -38,7 +38,7 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
     mcp_network_priority_for,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,

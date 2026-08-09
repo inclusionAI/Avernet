@@ -11,9 +11,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.session_resources.repository.protocol import (
-    SessionResourceRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.types import (
     SessionResourceStatus,
     TransferApiVersion,

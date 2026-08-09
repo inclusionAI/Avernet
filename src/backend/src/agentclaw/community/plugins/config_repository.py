@@ -49,10 +49,7 @@ from agentclaw.community.core.system_config.models import (
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugins.local.system_config_models import (
-    AcConfigCategory,
-    AcConfigItem,
-)
+from agentclaw.community.core.system_config.orm import AcConfigCategory, AcConfigItem
 
 logger = get_logger()
 

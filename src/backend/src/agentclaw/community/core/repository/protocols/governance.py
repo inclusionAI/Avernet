@@ -1,35 +1,21 @@
-"""Protocol definitions for the economy/governance subsystem.
+"""Repository contracts owned by the ``governance`` domain.
 
-Repository Protocols (core consumer contracts for 4 repos).
-
-Repository Protocols express **what Services depend on**, not the full
-method surface of the concrete implementation.  Scan-internal optimisation
-queries (``list_scheduled_due`` etc.) and admin diagnostics (``count_by_*``,
-``delete_by_*``) remain on the concrete class — they are not part of the
-core consumer contract.
-
-Notification dispatch is now handled by the generic ``NotifySenderPlugin``
-Protocol in ``plugin_api/notify_sender.py``, migrated out of this module
-(B11 Phase A: governance-notify-abstraction).
-
-Rule 14: DI binds Protocol → Concrete; Service imports Protocol only.
-Rule 20: Every Protocol has local/ + prod/ implementations.
-Rule 21: Every Protocol has Noop/Mock for testing.
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
 from __future__ import annotations
 
+from abc import abstractmethod
 from datetime import datetime
-from typing import Any, Protocol, runtime_checkable, TYPE_CHECKING
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.economy.governance.domain.notification import GovernanceNotification
     from agentclaw.community.core.economy.governance.domain.ticket import GovernanceTicket
     from agentclaw.community.core.economy.governance.domain.whitelist import WhitelistEntry
-
-
-# ---------------------------------------------------------------------------
-# Repository Protocols (Rule 14 / Rule 20 / Rule 21)
-# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
@@ -42,26 +28,32 @@ class TaskRecordRepositoryProtocol(Protocol):
     """
 
     # ── 查 ──
+    @abstractmethod
     def find_by_ticket_id(self, ticket_id: str) -> GovernanceTicket | None:
         """Find a ticket by its stable UUID."""
         ...
 
+    @abstractmethod
     def find_active_ticket(self, active_worker: str) -> GovernanceTicket | None:
         """Find the active ticket for a worker (owner_id:bot_id)."""
         ...
 
+    @abstractmethod
     def find_ticket_by_notification_id(self, notification_id: str) -> GovernanceTicket | None:
         """Find a ticket via its notify_log's notification_id."""
         ...
 
+    @abstractmethod
     def find_latest_closed_by_worker(self, worker_id: str) -> GovernanceTicket | None:
         """Find most recently closed ticket for a worker (cooldown check)."""
         ...
 
+    @abstractmethod
     def find_observed_ticket(self, worker_id: str) -> GovernanceTicket | None:
         """Find the active OBSERVED ticket for a worker (whitelist observation)."""
         ...
 
+    @abstractmethod
     def find_latest_tickets_by_worker_keys(
         self, worker_keys: list[str],
     ) -> dict[str, GovernanceTicket]:
@@ -69,11 +61,13 @@ class TaskRecordRepositoryProtocol(Protocol):
         ...
 
     # ── 存 ──
+    @abstractmethod
     def add_ticket(self, row: Any) -> str:
         """Insert a new ticket row. Returns ticket_id."""
         ...
 
     # ── 列表查询 ──
+    @abstractmethod
     def list_tickets_by_owner_and_statuses(
         self,
         owner_id: str,
@@ -85,6 +79,7 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Owner's tickets in the given statuses, newest first, paged."""
         ...
 
+    @abstractmethod
     def list_tickets_by_statuses(
         self,
         statuses: list[str],
@@ -99,6 +94,7 @@ class TaskRecordRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def count_tickets_by_statuses(
         self,
         statuses: list[str],
@@ -107,14 +103,17 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Count tickets in given statuses (cross-owner; list 配套统计)。"""
         ...
 
+    @abstractmethod
     def list_remindable_tickets(self, now: datetime) -> list[GovernanceTicket]:
         """Find tickets eligible for reminder creation (§7.3.2)."""
         ...
 
+    @abstractmethod
     def list_scheduled_due(self, now: datetime) -> list[GovernanceTicket]:
         """Find scheduled tickets where mute_until <= now."""
         ...
 
+    @abstractmethod
     def list_auto_silence_eligible(
         self,
         *,
@@ -123,6 +122,7 @@ class TaskRecordRepositoryProtocol(Protocol):
         """Find open tickets eligible for auto-silence convergence (§7.2.6)."""
         ...
 
+    @abstractmethod
     def count_active_open(self) -> int:
         """Count all active open tickets."""
         ...
@@ -133,6 +133,7 @@ class TaskRecordRepositoryProtocol(Protocol):
     # 下方 9 个语义 command 的定义已在 Task 9 删除;双 grep 守卫(repo 无
     # 状态机推进入口 / 除豁免外无 governance_status= 字面量)锁住。
 
+    @abstractmethod
     def save_ticket(self, ticket: GovernanceTicket) -> bool:
         """持久化(已改生命周期态的)领域模型回库(find→apply_to→commit)。
 
@@ -141,6 +142,7 @@ class TaskRecordRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def _save_ticket_with_snapshot(self, ticket: GovernanceTicket) -> bool:
         """持久化快照变更的模型(to_orm 全量写,含快照 + 生命周期)。
 
@@ -149,6 +151,7 @@ class TaskRecordRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def bulk_close_open(
         self,
         *,
@@ -173,10 +176,12 @@ class NotifyLogRepositoryProtocol(Protocol):
     """
 
     # ── 单行查找 ──
+    @abstractmethod
     def get_by_notification_id(self, notification_id: str) -> GovernanceNotification | None:
         """Fetch a notify_log by notification_id."""
         ...
 
+    @abstractmethod
     def get_by_notification_id_and_owner(
         self, notification_id: str, owner_id: str,
     ) -> GovernanceNotification | None:
@@ -184,16 +189,19 @@ class NotifyLogRepositoryProtocol(Protocol):
         ...
 
     # ── 列表查询 ──
+    @abstractmethod
     def list_pending_for_cron(self) -> list[GovernanceNotification]:
         """All pending notifies for cron to pick up and send."""
         ...
 
+    @abstractmethod
     def list_pending_by_worker(
         self, worker_id: str,
     ) -> list[GovernanceNotification]:
         """Pending notifies scoped to one worker (owner_id:bot_id) — for deliver_by_worker."""
         ...
 
+    @abstractmethod
     def list_by_owner_and_statuses(
         self,
         owner_id: str,
@@ -205,29 +213,35 @@ class NotifyLogRepositoryProtocol(Protocol):
         """Owner's notify_log rows in the given statuses, newest first, paged."""
         ...
 
+    @abstractmethod
     def has_pending_or_sending_reminder(self, ticket_id: str) -> bool:
         """Check if a ticket already has a pending/sending reminder (dedup)."""
         ...
 
+    @abstractmethod
     def list_distinct_bot_owner(
         self, bot_ids: list[str],
     ) -> list[tuple[str, str]]:
         """Distinct (bot_id, owner_id) pairs for the given bot_ids."""
         ...
 
+    @abstractmethod
     def count_pending(self) -> int:
         """Count open/muted notifications awaiting a response."""
         ...
 
+    @abstractmethod
     def count_open_muted(self) -> int:
         """Count all open/muted records (regardless of response)."""
         ...
 
     # ── 投递操作 ──
+    @abstractmethod
     def add_notification(self, row: Any) -> str:
         """Insert a new notify_log row. Returns notification_id."""
         ...
 
+    @abstractmethod
     def save_notification(self, notification: GovernanceNotification) -> bool:
         """Persist a (mutated) domain notification back (领域往返写回原语)。
 
@@ -236,10 +250,12 @@ class NotifyLogRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def claim_pending(self, notification_id: str, now: datetime) -> bool:
         """Atomic claim: UPDATE pending → sending."""
         ...
 
+    @abstractmethod
     def mark_sent(
         self,
         notification_id: str,
@@ -249,6 +265,7 @@ class NotifyLogRepositoryProtocol(Protocol):
         """Mark a sending notify as sent after successful delivery."""
         ...
 
+    @abstractmethod
     def mark_send_failed(
         self,
         notification_id: str,
@@ -258,12 +275,14 @@ class NotifyLogRepositoryProtocol(Protocol):
         """Mark a sending notify as failed or revert to pending."""
         ...
 
+    @abstractmethod
     def cancel_pending_by_ticket(self, ticket_id: str) -> int:
         """Cancel all pending notifies for a ticket. Returns rows cancelled."""
         ...
 
     # ── 批量关闭 (替代 Service 中 orm_session 直查) ──
 
+    @abstractmethod
     def bulk_close_open_muted(
         self,
         *,
@@ -275,6 +294,7 @@ class NotifyLogRepositoryProtocol(Protocol):
         """批量关闭 open/muted 通知。返回受影响行数。"""
         ...
 
+    @abstractmethod
     def bulk_cancel_by_bots(
         self,
         bot_ids: list[str],
@@ -286,6 +306,7 @@ class NotifyLogRepositoryProtocol(Protocol):
         """批量取消指定 bot 的 open/muted 通知。返回受影响行数。"""
         ...
 
+    @abstractmethod
     def update_delivery_status(
         self,
         notification_id: str,
@@ -310,6 +331,7 @@ class NotifyLogRepositoryProtocol(Protocol):
 class AuditRepositoryProtocol(Protocol):
     """审计仓储 — append-only 写入 + 最新 scan 时间查询。"""
 
+    @abstractmethod
     def add_audit(
         self,
         run_id: str,
@@ -339,6 +361,7 @@ class AuditRepositoryProtocol(Protocol):
 class WhitelistRepositoryProtocol(Protocol):
     """白名单仓储 — 点查、单条增删、按 owner 分页。"""
 
+    @abstractmethod
     def is_whitelisted(
         self,
         bot_id: str,
@@ -349,6 +372,7 @@ class WhitelistRepositoryProtocol(Protocol):
         """点查: (bot_id, owner_id) 是否在有效白名单中。"""
         ...
 
+    @abstractmethod
     def add(
         self,
         *,
@@ -363,6 +387,7 @@ class WhitelistRepositoryProtocol(Protocol):
         """添加单条白名单。幂等: UK 冲突时返回已有条目。"""
         ...
 
+    @abstractmethod
     def remove(
         self,
         *,
@@ -373,6 +398,7 @@ class WhitelistRepositoryProtocol(Protocol):
         """删除单条白名单。True=已删除, False=不存在。"""
         ...
 
+    @abstractmethod
     def list_by_owner(
         self,
         owner_id: str,
@@ -384,6 +410,7 @@ class WhitelistRepositoryProtocol(Protocol):
         """按 owner_id 分页查询白名单条目。"""
         ...
 
+    @abstractmethod
     def count_by_type(
         self,
         *,
@@ -392,6 +419,7 @@ class WhitelistRepositoryProtocol(Protocol):
         """Count whitelist entries of a given type."""
         ...
 
+    @abstractmethod
     def list_all(
         self,
         *,

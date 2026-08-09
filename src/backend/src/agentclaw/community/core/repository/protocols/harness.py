@@ -1,31 +1,40 @@
-"""Harness Repository Protocols.
+"""Repository contracts owned by the ``harness`` domain.
 
-Business-scoped repository protocols for harness domain entities.
-Placed in core/ (not plugins/) because they carry harness domain semantics.
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from abc import abstractmethod
+from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.harness.models import FindingsReport, PatchDefinition, PatchRecord, PatchTemplate, PatchStatus
+if TYPE_CHECKING:
+    from agentclaw.community.core.harness.models import FindingsReport, PatchDefinition, PatchRecord, PatchStatus, PatchTemplate
 
 
 @runtime_checkable
 class HarnessTemplateRepository(Protocol):
     """CRUD for ac_harness_patch_template."""
 
+    @abstractmethod
     def create(self, tpl: PatchTemplate) -> PatchTemplate:
         """Insert and return the created template with id populated."""
         ...
 
+    @abstractmethod
     def get_by_id(self, tpl_id: int) -> PatchTemplate | None:
         """Fetch by primary key."""
         ...
 
+    @abstractmethod
     def get_by_name(self, name: str, env: str) -> PatchTemplate | None:
         """Fetch by unique name+env."""
         ...
 
+    @abstractmethod
     def list(
         self,
         layer: str | None = None,
@@ -37,14 +46,17 @@ class HarnessTemplateRepository(Protocol):
         """Return (items, total_count)."""
         ...
 
+    @abstractmethod
     def update(self, tpl_id: int, **fields) -> PatchTemplate | None:
         """Partial update by id."""
         ...
 
+    @abstractmethod
     def soft_delete(self, tpl_id: int) -> bool:
         """Set status='deprecated'."""
         ...
 
+    @abstractmethod
     def load_all_active(self) -> list[PatchTemplate]:
         """Return all active templates (for in-memory index rebuild)."""
         ...
@@ -60,6 +72,7 @@ class HarnessScanRecordRepository(Protocol):
 
     # ── publish-API methods ───────────────────────────────────
 
+    @abstractmethod
     def get_latest_dim_records(
         self,
         bot_id: str,
@@ -77,6 +90,7 @@ class HarnessScanRecordRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_dim_history(
         self,
         bot_id: str,
@@ -101,6 +115,7 @@ class HarnessScanRecordRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def batch_create(
         self,
         bot_id: str,
@@ -119,6 +134,7 @@ class HarnessScanRecordRepository(Protocol):
         """
         ...
 
+    @abstractmethod
     def offline_batch(
         self,
         bot_id: str,
@@ -144,14 +160,17 @@ class HarnessScanRecordRepository(Protocol):
 
     # ── diagnose-API methods ──────────────────────────────────
 
+    @abstractmethod
     def create(self, report: FindingsReport) -> int:
         """Insert a scan record from FindingsReport, return the scan_id."""
         ...
 
+    @abstractmethod
     def get_by_id(self, scan_id: int) -> dict | None:
         """Fetch a scan record by primary key."""
         ...
 
+    @abstractmethod
     def get_recent(
         self,
         bot_id: str,
@@ -162,6 +181,7 @@ class HarnessScanRecordRepository(Protocol):
         """Fetch the most recent completed scan for a bot."""
         ...
 
+    @abstractmethod
     def list_records(
         self,
         bot_id: str,
@@ -175,6 +195,7 @@ class HarnessScanRecordRepository(Protocol):
         """Return paginated scan records + total count."""
         ...
 
+    @abstractmethod
     def update_status(
         self,
         scan_id: int,
@@ -184,6 +205,7 @@ class HarnessScanRecordRepository(Protocol):
         """Update scan record status."""
         ...
 
+    @abstractmethod
     def complete(
         self,
         scan_id: int,
@@ -192,6 +214,7 @@ class HarnessScanRecordRepository(Protocol):
         """Update an existing scan record with completed FindingsReport data."""
         ...
 
+    @abstractmethod
     def update_findings(
         self,
         scan_id: int,
@@ -204,6 +227,7 @@ class HarnessScanRecordRepository(Protocol):
         """Incrementally update findings for a running scan (mid-scan progress)."""
         ...
 
+    @abstractmethod
     def update_patch_ids(
         self,
         scan_id: int,
@@ -213,6 +237,7 @@ class HarnessScanRecordRepository(Protocol):
         """Update patch_ids and enriched findings (with patch_id per check_item) for a scan."""
         ...
 
+    @abstractmethod
     def has_active_scan(
         self,
         bot_id: str,
@@ -233,22 +258,27 @@ class HarnessScanRecordRepository(Protocol):
 class HarnessPatchRecordRepository(Protocol):
     """CRUD for ac_harness_patch_record."""
 
+    @abstractmethod
     def create(self, record: PatchRecord) -> int:
         """Insert and return the created record with id populated."""
         ...
 
+    @abstractmethod
     def get_by_id(self, record_id: int) -> PatchRecord | None:
         """Fetch by primary key."""
         ...
 
+    @abstractmethod
     def list_by_bot(self, bot_id: str, entity_id: str, status: str | None = None) -> list[PatchRecord]:
         """Fetch all patch records for a bot, optionally filtered by status."""
         ...
 
+    @abstractmethod
     def get_by_patch_id(self, patch_id: int) -> PatchRecord | None:
         """Fetch by patch_id (ac_harness_patch.id foreign key)."""
         ...
 
+    @abstractmethod
     def update_status(self, record_id: int, status: PatchStatus, failed_reason: str | None = None) -> None:
         """Update record status."""
         ...
@@ -258,22 +288,27 @@ class HarnessPatchRecordRepository(Protocol):
 class HarnessPatchRepository(Protocol):
     """CRUD for ac_harness_patch."""
 
+    @abstractmethod
     def create(self, patch: PatchDefinition) -> int:
         """Insert and return the created patch with id populated."""
         ...
 
+    @abstractmethod
     def get_by_id(self, patch_id: int) -> PatchDefinition | None:
         """Fetch by primary key."""
         ...
 
+    @abstractmethod
     def list_by_ids(self, patch_ids: list[int]) -> list[PatchDefinition]:
         """Fetch multiple patches by their IDs (batch query)."""
         ...
 
+    @abstractmethod
     def list_by_record(self, record_id: int) -> list[PatchDefinition]:
         """Fetch all patches linked to a scan/diagnose record_id."""
         ...
 
+    @abstractmethod
     def update_is_applied(self, patch_id: int, is_applied: bool) -> None:
         """Update patch is_applied status."""
         ...

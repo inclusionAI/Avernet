@@ -25,12 +25,10 @@ import inspect
 
 import pytest
 
-from agentclaw.community.core.economy.governance.domain.protocols import (
-    AuditRepositoryProtocol,
-    NotifyLogRepositoryProtocol,
-    TaskRecordRepositoryProtocol,
-    WhitelistRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.governance import WhitelistRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import TaskRecordRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import NotifyLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import AuditRepositoryProtocol
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,
 )

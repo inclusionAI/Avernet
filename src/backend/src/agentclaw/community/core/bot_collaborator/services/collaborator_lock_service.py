@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, LockInfoResult, SessionLockInfoResult
-from agentclaw.community.core.bot_collaborator.repository.protocol import BotCollabLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:

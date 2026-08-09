@@ -4,10 +4,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
 
 @pytest.fixture(autouse=True)

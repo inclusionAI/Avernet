@@ -20,8 +20,8 @@ import time
 
 import pytest
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from tests.community._flows.resources.api_lifecycle import RESOURCES_LIFECYCLE_FLOWS
 from tests.community.framework.flow_runner import run_flow
 

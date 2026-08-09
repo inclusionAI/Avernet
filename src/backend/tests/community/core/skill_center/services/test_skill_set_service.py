@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
 
-from agentclaw.community.core.skill_center.services.repositories import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 
 
 def _edit_guard():

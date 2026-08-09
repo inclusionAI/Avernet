@@ -1,14 +1,18 @@
-"""Bot 协作者 Repository Protocol - 业务层内部抽象。
+"""Repository contracts owned by the ``bot`` domain.
 
-定义 Bot 协作者数据访问的接口，供 Service 层依赖注入使用。
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
 """
-from typing import List, Optional, Protocol, Dict, Any
+from __future__ import annotations
 
-from agentclaw.community.core.bot_collaborator.models import (
-    CollaboratorRecord,
-    BotCollabLogRecord,
-    BotCollabLockRecord,
-)
+from abc import abstractmethod
+from typing import Any, Dict, List, Optional, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_collaborator.models import BotCollabLockRecord, BotCollabLogRecord, CollaboratorRecord
 
 
 class CollaboratorRepositoryProtocol(Protocol):
@@ -26,6 +30,7 @@ class CollaboratorRepositoryProtocol(Protocol):
     # Insert Operations
     # ========================================================================
 
+    @abstractmethod
     def insert(self, data: Dict[str, Any]) -> CollaboratorRecord:
         """创建协作者记录。
 
@@ -52,6 +57,7 @@ class CollaboratorRepositoryProtocol(Protocol):
     # Query Operations
     # ========================================================================
 
+    @abstractmethod
     def get_by_id(self, collaborator_id: int) -> Optional[CollaboratorRecord]:
         """根据ID获取协作者记录。
 
@@ -63,6 +69,7 @@ class CollaboratorRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_by_bot_and_user(
         self,
         bot_pk: int,
@@ -81,6 +88,7 @@ class CollaboratorRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_bot(
         self,
         bot_id: str,
@@ -101,6 +109,7 @@ class CollaboratorRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_user(
         self,
         user_id: str,
@@ -117,6 +126,7 @@ class CollaboratorRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def get_user_role(
         self,
         bot_pk: int,
@@ -139,6 +149,7 @@ class CollaboratorRepositoryProtocol(Protocol):
     # Update Operations
     # ========================================================================
 
+    @abstractmethod
     def update(
         self,
         collaborator_id: int,
@@ -163,6 +174,7 @@ class CollaboratorRepositoryProtocol(Protocol):
     # Delete Operations
     # ========================================================================
 
+    @abstractmethod
     def delete(self, collaborator_id: int) -> bool:
         """删除协作者记录。
 
@@ -174,6 +186,7 @@ class CollaboratorRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def delete_by_bot(self, bot_pk: int, env: str) -> int:
         """删除Bot的所有协作者记录。
 
@@ -201,6 +214,7 @@ class BotCollabLogRepositoryProtocol(Protocol):
     # Insert Operations
     # ========================================================================
 
+    @abstractmethod
     def insert(self, data: Dict[str, Any]) -> BotCollabLogRecord:
         """创建协作操作日志记录。
 
@@ -221,6 +235,7 @@ class BotCollabLogRepositoryProtocol(Protocol):
     # Query Operations
     # ========================================================================
 
+    @abstractmethod
     def list_by_bot(
         self,
         bot_id: str,
@@ -239,6 +254,7 @@ class BotCollabLogRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_operator(
         self,
         operator_id: str,
@@ -270,6 +286,7 @@ class BotCollabLockRepositoryProtocol(Protocol):
     # Insert Operations
     # ========================================================================
 
+    @abstractmethod
     def acquire(self, lock_key: str, holder_user_id: str) -> BotCollabLockRecord:
         """获取协作锁。
 
@@ -289,6 +306,7 @@ class BotCollabLockRepositoryProtocol(Protocol):
     # Query Operations
     # ========================================================================
 
+    @abstractmethod
     def get_by_key(self, lock_key: str) -> Optional[BotCollabLockRecord]:
         """根据锁键查询锁记录。
 
@@ -300,6 +318,7 @@ class BotCollabLockRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def is_locked(self, lock_key: str) -> bool:
         """检查锁是否存在。
 
@@ -311,6 +330,7 @@ class BotCollabLockRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def list_by_holder(
         self,
         holder_user_id: str,
@@ -329,6 +349,7 @@ class BotCollabLockRepositoryProtocol(Protocol):
     # Delete Operations
     # ========================================================================
 
+    @abstractmethod
     def release(self, lock_key: str) -> bool:
         """释放协作锁。
 

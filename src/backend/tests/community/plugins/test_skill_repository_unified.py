@@ -20,16 +20,11 @@ from agentclaw.community.core.models import Skill, SkillSet, SkillSetSkill
 from agentclaw.community.core.skill_center.local_skill_cleanup import (
     LocalSkillCleanupWorkModel,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    ActiveSkillSetReferenceError,
-)
+from agentclaw.community.core.skill_center.errors import ActiveSkillSetReferenceError
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import AcSkillMember
 from agentclaw.community.plugin_api.models import BotModel
-from agentclaw.community.plugins.local.sqlite_models import (
-    DefaultSkillsetMcpExclusion,
-    DefaultSkillsetSkillExclusion,
-)
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetMcpExclusion, DefaultSkillsetSkillExclusion
 from agentclaw.community.plugins.skill_repository import (
     SkillRepository,
     SkillSetRepository,

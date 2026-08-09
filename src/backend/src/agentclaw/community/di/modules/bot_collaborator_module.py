@@ -22,11 +22,9 @@ from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol,
     CollaboratorServiceProtocol as CoreCollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-    BotCollabLogRepositoryProtocol,
-    BotCollabLockRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import CollaboratorService
 from agentclaw.community.core.bot_collaborator.services.aicoding.member_management_capability import (
     AICodingMemberManagementCapability,
@@ -35,7 +33,7 @@ from agentclaw.community.core.bot_collaborator.services.member_management_capabi
     MemberManagementCapabilityService,
 )
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import CollaboratorLockService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher

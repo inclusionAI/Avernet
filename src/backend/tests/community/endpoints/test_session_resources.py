@@ -16,13 +16,9 @@ from urllib.parse import urlparse
 
 from injector import singleton
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
-from agentclaw.community.core.session_resources.repository.protocol import (
-    SessionResourceRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import SessionResourceRepositoryProtocol
 from agentclaw.community.core.session_resources.types import (
     SessionResourceRecord,
     SessionResourceStatus,

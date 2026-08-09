@@ -1,25 +1,33 @@
-"""Skills Pool Bot 布局状态仓库的业务边界。"""
+"""Repository contracts owned by the ``skills_pool`` domain.
 
+Moved here by the ``core/repository`` consolidation. Every member is
+``@abstractmethod``: an implementation that omits one fails at construction
+naming the missing member, instead of raising ``AttributeError`` at the call
+site. Domain imports are ``TYPE_CHECKING``-only — see the module docstring in
+``core/repository/README.md`` for why that direction is load-bearing.
+"""
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from abc import abstractmethod
 from datetime import datetime
+from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.skills_pool.types import (
-    BotSkillLayoutScope,
-    BotSkillLayoutState,
-    RolloutEvidence,
-)
+if TYPE_CHECKING:
+    from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+    from agentclaw.community.core.skills_pool.quarantine import QuarantineRecord
+    from agentclaw.community.core.skills_pool.types import BotSkillLayoutScope, BotSkillLayoutState, RolloutEvidence
 
 
 @runtime_checkable
 class SkillsPoolLayoutRepositoryProtocol(Protocol):
     """持久化布局状态，并以 generation/lease 提供 fencing。"""
 
+    @abstractmethod
     def get(self, scope: BotSkillLayoutScope) -> BotSkillLayoutState:
         """读取状态；不存在记录时返回非持久化的 Legacy 缺省状态。"""
         ...
 
+    @abstractmethod
     def list_states(
         self,
         *,
@@ -30,6 +38,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """列出一个环境内已经认领过布局状态的 Bot。"""
         ...
 
+    @abstractmethod
     def claim_pool_migration(
         self,
         *,
@@ -43,6 +52,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """仅为尚未认领的 Legacy Bot 原子创建一个迁移代际。"""
         ...
 
+    @abstractmethod
     def renew_lease(
         self,
         *,
@@ -54,6 +64,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """仅允许当前 generation 的未过期持有者续租。"""
         ...
 
+    @abstractmethod
     def try_acquire_lease(
         self,
         *,
@@ -65,6 +76,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在 lease 缺失或过期时，以 CAS 竞争成为新持有者。"""
         ...
 
+    @abstractmethod
     def holds_lease(
         self,
         *,
@@ -75,6 +87,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """用数据库时钟确认当前 worker 仍持有未过期 lease。"""
         ...
 
+    @abstractmethod
     def record_ready_probe(
         self,
         *,
@@ -87,6 +100,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """以 generation/lease CAS 记录当前运行时已具备 Pool 能力。"""
         ...
 
+    @abstractmethod
     def release_not_capable_claim(
         self,
         *,
@@ -98,6 +112,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录旧运行时证据，并原子释放尚处于准备阶段的迁移认领。"""
         ...
 
+    @abstractmethod
     def release_changed_engine_claim(
         self,
         *,
@@ -109,6 +124,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录引擎身份漂移，并原子释放尚未开始切换的迁移认领。"""
         ...
 
+    @abstractmethod
     def record_cutover_committed(
         self,
         *,
@@ -121,6 +137,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录不可逆的数据面切换已经完成。"""
         ...
 
+    @abstractmethod
     def record_post_cutover_evidence(
         self,
         *,
@@ -133,6 +150,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在边界已提交时补齐运行时证据，不重复提交数据面边界。"""
         ...
 
+    @abstractmethod
     def has_quarantine_identity(
         self,
         *,
@@ -142,6 +160,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """确认该 generation 已持久化 quarantine 身份。"""
         ...
 
+    @abstractmethod
     def quarantine_identity_conflicts(
         self,
         *,
@@ -153,6 +172,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """判断运行时身份是否与该 generation 已持久化身份冲突。"""
         ...
 
+    @abstractmethod
     def record_cutover_finalizing(
         self,
         *,
@@ -165,6 +185,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录 bridge 已提交但切换后 local 合并仍需幂等前滚。"""
         ...
 
+    @abstractmethod
     def begin_cutover(
         self,
         *,
@@ -176,6 +197,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在运行时原子切换前持久化 pre-cutover 阶段。"""
         ...
 
+    @abstractmethod
     def record_pre_cutover_failure(
         self,
         *,
@@ -190,6 +212,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """持久化尚未跨越数据面边界的结构化失败及审计证据。"""
         ...
 
+    @abstractmethod
     def record_post_cutover_failure(
         self,
         *,
@@ -204,6 +227,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """持久化不可逆边界后的失败；状态保持为只能前滚。"""
         ...
 
+    @abstractmethod
     def mark_repair_required(
         self,
         *,
@@ -217,6 +241,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """切换结果无法证明时停止自动收敛并保留证据。"""
         ...
 
+    @abstractmethod
     def resolve_repair(
         self,
         *,
@@ -229,6 +254,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录人工核验事实并恢复到安全的前滚阶段。"""
         ...
 
+    @abstractmethod
     def commit_pool_active(
         self,
         *,
@@ -241,6 +267,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """在一个事务中更新该 Bot 全部 local locator 并提交 Pool Active。"""
         ...
 
+    @abstractmethod
     def record_runtime_reconciliation(
         self,
         *,
@@ -257,6 +284,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """
         ...
 
+    @abstractmethod
     def record_runtime_reconciliation_failure(
         self,
         *,
@@ -268,6 +296,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """Account for a runtime failure, invalidating older READY evidence."""
         ...
 
+    @abstractmethod
     def begin_legacy_rollback(
         self,
         *,
@@ -281,6 +310,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """从 POOL_ACTIVE 原子认领一次显式业务回滚。"""
         ...
 
+    @abstractmethod
     def try_acquire_rollback_lease(
         self,
         *,
@@ -292,6 +322,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """续租或在旧 lease 过期后接管同一回滚 generation。"""
         ...
 
+    @abstractmethod
     def record_legacy_rollback_committed(
         self,
         *,
@@ -303,6 +334,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """记录 Legacy 已成为数据面权威源。"""
         ...
 
+    @abstractmethod
     def record_rollback_failure(
         self,
         *,
@@ -317,6 +349,7 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
         """持久化显式回滚阶段失败。"""
         ...
 
+    @abstractmethod
     def commit_legacy_active(
         self,
         *,
@@ -327,3 +360,94 @@ class SkillsPoolLayoutRepositoryProtocol(Protocol):
     ) -> bool:
         """原子恢复 Legacy locator 与布局状态。"""
         ...
+
+
+class QuarantineRepositoryProtocol(Protocol):
+    @abstractmethod
+    def get_quarantine(
+        self,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+    ) -> QuarantineRecord | None: ...
+
+    @abstractmethod
+    def mark_cleaned(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool: ...
+
+    @abstractmethod
+    def claim_cleanup(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        lease_seconds: int,
+        eligible_before: datetime,
+    ) -> bool: ...
+
+    @abstractmethod
+    def mark_cleanup_failed(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool: ...
+
+    @abstractmethod
+    def record_cleanup_uncertain(
+        self,
+        *,
+        scope: BotSkillLayoutScope,
+        migration_generation: str,
+        cleanup_owner: str,
+        evidence: dict[str, object],
+    ) -> bool: ...
+
+
+@runtime_checkable
+class SkillsPoolSkillRepositoryProtocol(Protocol):
+    """激活所需的 Bot 级 Skill 资产视图。"""
+
+    @abstractmethod
+    def list_bot_local_assets(
+        self, *, env: str, bot_id: str
+    ) -> list[RegisteredSkillAsset]: ...
+
+    @abstractmethod
+    def list_bot_active_assets(
+        self,
+        *,
+        env: str,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+    ) -> list[RegisteredSkillAsset]: ...
+
+
+@runtime_checkable
+class SkillsPoolRolloutRepositoryProtocol(Protocol):
+    @abstractmethod
+    def commit_change(
+        self,
+        *,
+        env: str,
+        config_id: int | None,
+        expected_revision: str | None,
+        expected_enable: bool,
+        expected_value: dict[str, object],
+        next_revision: str,
+        enabled: bool,
+        value: dict[str, object],
+        audit: dict[str, object],
+    ) -> bool: ...
+
+    @abstractmethod
+    def list_audit_events(self, *, env: str) -> list[dict[str, object]]: ...

@@ -34,7 +34,7 @@ from typing import Optional
 
 from injector import inject
 
-from agentclaw.community.core.task_queue.repository.protocol import TaskQueueRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import (
     Complete,

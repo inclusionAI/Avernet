@@ -25,7 +25,7 @@ from typing import Optional, Dict, Any, List
 from injector import inject
 
 from agentclaw.community.core.bot_management.token_vault import CIPHER_PREFIX, TokenVault
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.log import get_logger
 

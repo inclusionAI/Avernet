@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.conn_info_builders.arca_builder import (
     ArcaConnInfoBuilder,
 )

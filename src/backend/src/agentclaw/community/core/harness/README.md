@@ -16,6 +16,7 @@ consumes:
   - "WorkspacePathFactory"
   - "MCPCenterPlugin"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.harness    # repository contracts consumed by this module
   - agentclaw.community.core.services
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.workspace

@@ -17,13 +17,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import EntityDeviceBinding
+from agentclaw.community.core.devices.repository.models import EntityDeviceBinding
 from agentclaw.community.utils.env_utils import get_current_env
 
 pytestmark = pytest.mark.integration

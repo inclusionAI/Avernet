@@ -75,7 +75,7 @@ from agentclaw.community.api.local_skill_delete_service import (
     LocalSkillDeleteServiceProtocol,
 )
 from agentclaw.community.di import config as cfg
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -85,22 +85,18 @@ from agentclaw.community.core.skill_center.services.git_sync import (
     GitSyncConfig,
     GitSyncService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillCategoryRepository,
-    SkillMemberRepository,
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillMemberRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 from agentclaw.community.core.skill_center.services.skill_auth_service import (
     SkillAuthService,
 )
 from agentclaw.community.core.skill_center.services.skill_batch_sync_service import (
     SkillBatchSyncService,
 )
-from agentclaw.community.core.skill_center.services.skill_center_sync_service import (
-    SkillCenterSyncService,
-    SkillCenterSyncLogRepository,
-)
+from agentclaw.community.core.skill_center.services.skill_center_sync_service import SkillCenterSyncService
+from agentclaw.community.core.repository.protocols.skill_center import SkillCenterSyncLogRepository
 from agentclaw.community.core.skill_center.services.skill_member_service import (
     SkillMemberService,
 )
@@ -110,10 +106,8 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 from agentclaw.community.core.skill_center.services.market_sync import MarketSyncService
 from agentclaw.community.core.skill_center.services.skill_cache import MarketCache
 from agentclaw.community.core.skill_center.services.skill_scan import SkillScanService
-from agentclaw.community.core.skill_center.services.skill_propagation_service import (
-    SkillPropagationLogRepository,
-    SkillPropagationService,
-)
+from agentclaw.community.core.skill_center.services.skill_propagation_service import SkillPropagationService
+from agentclaw.community.core.repository.protocols.skill_center import SkillPropagationLogRepository
 from agentclaw.community.core.skill_center.services.skill_publish_service import (
     SkillPublishService,
 )
@@ -128,9 +122,7 @@ from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetSwitcherFactory,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_task import (
     SkillsPoolReconcileWakeupListener,
 )
@@ -159,15 +151,11 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
 )
-from agentclaw.community.plugin_api.local_skill_cleanup import (
-    LocalSkillCleanupRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    BotCollabLogRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.cache import CachePlugin
 from agentclaw.community.plugin_api.database import DatabasePlugin

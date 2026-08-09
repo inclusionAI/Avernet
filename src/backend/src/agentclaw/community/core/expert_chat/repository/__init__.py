@@ -1,9 +1,5 @@
 """Expert Chat repository module."""
-from agentclaw.community.core.expert_chat.repository.expert_chat_repository import (
-    ExpertChatRepository,
-)
-from agentclaw.community.core.expert_chat.repository.expert_chat_instance_repository import (
-    ExpertChatInstanceRepository,
-)
+from agentclaw.community.core.repository.protocols.chat import ExpertChatRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
 
 __all__ = ["ExpertChatRepository", "ExpertChatInstanceRepository"]

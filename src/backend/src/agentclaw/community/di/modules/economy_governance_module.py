@@ -26,12 +26,10 @@ from agentclaw.community.api.governance_service import (
     GovernanceWorkflowServiceProtocol,
     NotifyLifecycleServiceProtocol,
 )
-from agentclaw.community.core.economy.governance.domain.protocols import (
-    AuditRepositoryProtocol,
-    NotifyLogRepositoryProtocol,
-    TaskRecordRepositoryProtocol,
-    WhitelistRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.governance import WhitelistRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import TaskRecordRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import NotifyLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.governance import AuditRepositoryProtocol
 from agentclaw.community.core.economy.governance.lifecycle import GovernanceBotLifecycle
 from agentclaw.community.core.economy.governance.repositories.audit_repo import (
     GovernanceAuditRepository,

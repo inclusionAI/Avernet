@@ -11,7 +11,7 @@ import inspect
 import pytest
 from unittest.mock import MagicMock
 
-from agentclaw.community.core.devices.repository.protocol import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
 from agentclaw.community.plugins.oss_to_nas_record_repository import (
     OssToNasRecordRepository as UnifiedOssToNasRecordRepository,
 )

@@ -33,7 +33,7 @@ routing bug tracked separately.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from tests.community.framework.device_seams import route_device_accessor_to_local
 from tests.community.factories.access import make_staff_user

@@ -8,9 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.plugins.local.sqlite_models import (
-    DefaultSkillsetSkillExclusion,
-)
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
 from agentclaw.community.plugins.skill_repository import SkillRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 

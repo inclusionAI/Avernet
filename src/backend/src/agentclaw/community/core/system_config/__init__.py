@@ -8,9 +8,7 @@ from agentclaw.community.core.system_config.models import (
     ConfigCategoryRecord,
     ConfigItemRecord,
 )
-from agentclaw.community.core.system_config.repository import (
-    ConfigRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.config import ConfigRepositoryProtocol
 from agentclaw.community.core.system_config.service import SystemConfigService
 from agentclaw.community.core.system_config.cluster_config import ClusterConfigService
 from agentclaw.community.core.system_config.device_config import DeviceConfigService

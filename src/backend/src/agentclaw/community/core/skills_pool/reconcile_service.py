@@ -6,9 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     CUTOVER_EVIDENCE_CONTRACT_VERSION,
     RuntimeLayoutProbeResult,
@@ -36,9 +34,7 @@ from agentclaw.community.core.skills_pool.mapping_convergence import (
     MappingConvergenceStatus,
     converge_post_cutover_mappings,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_support import (
     cutover_failure_profile,
     persisted_cutover_evidence,
@@ -51,10 +47,8 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayout,
     SkillLayoutPhase,
 )
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 

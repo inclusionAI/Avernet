@@ -35,9 +35,7 @@ from agentclaw.community.core.skills_pool.recovery_service import (
     SkillsPoolRecoveryService,
     SkillsPoolRollbackService,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.rollout_gate import (
     SkillsPoolRolloutGate,
 )
@@ -56,15 +54,13 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
 )
-from agentclaw.community.core.skills_pool.ports import (
-    SkillsPoolRuntimeProtocol,
-    SkillsPoolSkillRepositoryProtocol,
-)
+from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.plugins.skills_pool_layout_repository import (

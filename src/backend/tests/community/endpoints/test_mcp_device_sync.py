@@ -21,7 +21,7 @@ Coverage of the call chain:
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from tests.community.factories.access import make_staff_user
 from tests.community.framework import CaseInput, ExpectError, ExpectSuccess, endpoint_test
