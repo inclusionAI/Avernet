@@ -3446,6 +3446,8 @@ class BotService:
 
             # Withdraw every application authorization standing against this
             # bot — whoever delegated it — before anything destructive happens.
+            # This is the first of two sweeps; the second runs after the soft
+            # delete, and the pair is what actually closes the gap. See there.
             #
             # Ordering is the whole point. Placed after the device release and
             # the passport destruction, a failure here would leave a bot that is
@@ -3511,6 +3513,8 @@ class BotService:
             if not result:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
 
+            self._sweep_grants_that_raced_the_deletion(bot_id, user_id)
+
             self._sync_provider_bot_delete_to_bcn(bot_id, user_id)
 
             # 清理关联的脏数据（仅限非 default bot）
@@ -3536,6 +3540,57 @@ class BotService:
         except Exception as e:
             logger.error(f"[bot_service.delete_bot] Failed to delete bot {bot_id}: {e}")
             raise BotServiceError(f"Failed to delete bot: {e}")
+
+    def _sweep_grants_that_raced_the_deletion(
+        self, bot_id: str, user_id: str
+    ) -> None:
+        """Withdraw grants that landed while the deletion was in flight.
+
+        The first sweep commits, and then the deletion spends time in the device
+        release and the Passport destruction — both remote calls. A collaborator
+        granting in that window inserts a row *after* the sweep read, and it
+        would outlive the bot.
+
+        **No lock is needed to close it**, because the window has a hard end
+        rather than a fuzzy one: once ``soft_delete_by_owner`` commits, no
+        further grant can be created at all. Every way the delegation gate
+        resolves a bot — ``get_by_id_and_owner``, ``get_unique_by_id``, and the
+        reachability query behind the ambiguous-id resolve — filters
+        ``is_delete == 0``, so a caller can no longer name this bot to grant on.
+        Sweeping once more after that commit therefore catches everything the
+        window could have admitted, and nothing can arrive behind it.
+
+        **Best-effort, unlike the first sweep.** The bot is already deleted by
+        the time this runs, so raising would report a failure for an operation
+        that succeeded, and a retry would fail on the now-missing bot. What a
+        failure leaves behind is a row for a bot that no longer exists — which
+        grants nothing: every read filters bots by liveness, and every request
+        re-adjudicates against a bot that cannot be resolved. Hygiene, not the
+        boundary. The boundary is that nothing is trusted from the row.
+
+        A non-zero count here means the race actually happened, which is worth
+        seeing in the log rather than inferring later from an orphan row.
+        """
+        try:
+            raced = self._bot_app_grant_provider().revoke_all_for_bot(
+                bot_id=bot_id, owner_id=user_id
+            )
+        except Exception as exc:  # noqa: BLE001 — see the docstring
+            logger.warning(
+                "[bot_service.delete_bot] post-deletion grant sweep failed for "
+                "bot %s; any authorization created during the deletion is now "
+                "orphaned, and grants nothing: %s",
+                bot_id,
+                exc,
+            )
+            return
+        if raced:
+            logger.warning(
+                "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                "created on bot %s while it was being deleted",
+                raced,
+                bot_id,
+            )
 
     def _sync_provider_bot_delete_to_bcn(self, bot_id: str, user_id: str) -> None:
         """Best-effort sync of local bot deletion to BCN provider bot deletion."""

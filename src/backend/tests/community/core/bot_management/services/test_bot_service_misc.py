@@ -6,7 +6,7 @@ check_bot_name_exists, generate_bot_id.
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call as mock_call, patch
 
 import pytest
 
@@ -436,9 +436,59 @@ class TestDeleteBot:
 
         assert svc.delete_bot("bot001", "user001") is True
 
-        grants.revoke_all_for_bot.assert_called_once_with(
-            bot_id="bot001", owner_id="user001"
-        )
+        # Twice, and both for the same bot: once before anything destructive,
+        # once after the soft delete to catch the window between them.
+        assert grants.revoke_all_for_bot.call_count == 2
+        for call in grants.revoke_all_for_bot.call_args_list:
+            assert call == mock_call(bot_id="bot001", owner_id="user001")
+
+    def test_a_grant_that_races_the_deletion_is_swept_afterwards(self):
+        """The window between the first sweep and the soft delete.
+
+        The first sweep commits, then the deletion spends time in the device
+        release and the Passport destruction. A collaborator granting in there
+        inserts a row after the sweep read, and it would outlive the bot.
+
+        No lock closes this — the second sweep does, because the window has a
+        hard end: once the soft delete commits, every path the delegation gate
+        uses to resolve a bot filters ``is_delete == 0``, so no further grant
+        can be created. Sweeping again after that commit catches everything the
+        window admitted, and nothing can arrive behind it.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        swept: list[int] = []
+
+        def _sweep(*, bot_id, owner_id):
+            # First call: nothing yet. Second: the row that raced in.
+            swept.append(len(swept))
+            return 0 if len(swept) == 1 else 1
+
+        grants.revoke_all_for_bot.side_effect = _sweep
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
+
+        assert grants.revoke_all_for_bot.call_count == 2, "the second sweep ran"
+
+    def test_a_failed_post_deletion_sweep_does_not_fail_the_deletion(self):
+        """Best-effort, unlike the first sweep — and deliberately so.
+
+        The bot is already gone by then, so raising would report failure for an
+        operation that succeeded, and a retry would fail on the missing bot.
+        What a failure leaves is a row for a bot that cannot be resolved, which
+        grants nothing.
+        """
+        svc = _make_service()
+        grants = MagicMock()
+        grants.revoke_all_for_bot.side_effect = [0, RuntimeError("grant store down")]
+        svc._bot_app_grant_provider = lambda: grants
+        svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
+        svc._repository.soft_delete_by_owner.return_value = True
+
+        assert svc.delete_bot("bot001", "user001") is True
 
     def test_a_failed_withdrawal_aborts_the_deletion(self):
         """Never a deleted bot with live authorizations against it.

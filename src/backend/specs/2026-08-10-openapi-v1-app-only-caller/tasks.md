@@ -542,6 +542,22 @@ regression tests.
    why. Refused now with a distinct 409, whose remedy — withdraw, then grant —
    is tested.
 
+3. **A grant could outlive the bot it was made on.** The deletion sweep commits
+   and the deletion then spends time in the device release and the Passport
+   destruction, so a grant made in that window landed after the sweep read and
+   survived. Closed by a second sweep after the soft delete rather than by
+   locking: the window has a hard end, because once `is_delete = 1` every path
+   the delegation gate resolves a bot through filters it out, so no further
+   grant can be created. The second sweep is best-effort — the bot is already
+   gone, and an orphan row grants nothing, since every read filters by
+   liveness and every request re-adjudicates.
+
+Two further defects were introduced *by* these fixes and caught in the same
+review rounds — a candidate bound that decided the answer it was meant only to
+bound, and a grant provider typed against a concrete class. Both are fixed;
+both are worth remembering as evidence that a fix in this area needs its own
+scrutiny, not just the one it replaces.
+
 ## Groups
 
 - **Group A — The record:** Tasks 1, 2
