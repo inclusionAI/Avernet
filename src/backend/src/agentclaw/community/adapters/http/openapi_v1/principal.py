@@ -104,6 +104,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     MissingPrincipalError,
     UserIdMismatchError,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.log import get_logger
 
@@ -186,19 +187,6 @@ def caller_app_id(principal: Principal) -> int | None:
     return app_id if isinstance(app_id, int) else None
 
 
-#: How much of a rejected id reaches the log. Long enough to identify a
-#: misconfigured partner integration, short enough that a caller cannot choose
-#: how many bytes each refusal costs.
-_LOGGED_ID_LIMIT = 128
-
-
-def _for_log(user_id: str) -> str:
-    """The rejected id as one escaped, bounded token."""
-    if len(user_id) <= _LOGGED_ID_LIMIT:
-        return repr(user_id)
-    return f"{user_id[:_LOGGED_ID_LIMIT]!r}…(+{len(user_id) - _LOGGED_ID_LIMIT})"
-
-
 async def require_user_id(
     principal: Annotated[Principal, Depends(require_principal)],
     user_id: Annotated[
@@ -212,7 +200,7 @@ async def require_user_id(
             # id is longer than it *even when the value matches the signed
             # principal*, locking them out of all 56 operations. That is a change
             # to who may call, which this change promises not to make. The log
-            # line below is bounded instead — see ``_for_log``.
+            # line below is bounded instead — see ``log_safe.for_log``.
             alias=USER_ID_QUERY,
             min_length=1,
             description=USER_ID_DESCRIPTION,
@@ -263,7 +251,7 @@ async def require_user_id(
         # fixed "Forbidden", so this line is an operator's only record of which
         # user a partner integration asked for.
         #
-        # The rejected value goes through ``_for_log``, and that is not
+        # The rejected value goes through ``log_safe.for_log``, and that is not
         # decoration. This branch runs *only* when the parameter is not the
         # caller's, so by construction the value is one the caller chose and the
         # server refused — arbitrary text, unbounded now that the request-level
@@ -276,7 +264,7 @@ async def require_user_id(
         logger.warning(
             "%s=%s does not match the verified caller %s",
             USER_ID_QUERY,
-            _for_log(user_id),
+            for_log(user_id),
             caller,
         )
         raise UserIdMismatchError("request user id is not the verified caller")

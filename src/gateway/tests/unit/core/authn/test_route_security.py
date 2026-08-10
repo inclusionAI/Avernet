@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from gateway.community.core.authn import RouteSecurity
@@ -12,12 +13,80 @@ from gateway.community.spi.authn import Presence, PrincipalType
 _CONFIG = Path(__file__).resolve().parents[4] / "configs" / "application.yaml"
 
 
-def test_shipped_config_loads_and_requires_user() -> None:
+def test_shipped_config_admits_a_machine_caller_on_the_public_api() -> None:
+    """Both identities optional on the wide rule, and both *declared*.
+
+    The table cannot express what is actually meant — "at least one of user or
+    app" — so this is the closest expressible rule, with the backend's
+    ``require_principal`` refusing "neither". The refusal moved one hop; it was
+    not removed.
+
+    ``app: optional`` is not cosmetic: the runner resolves only the identities a
+    route declares, so an undeclared App never reaches the signed principal and
+    the backend could not tell an application from an anonymous caller.
+    """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     req = rs.resolve("GET", "/openapi/v1/bots/abc")
     assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
+    assert req[PrincipalType.APP] is Presence.OPTIONAL
+
+
+#: The operations that still require a human on the wire. Mirrors Mode REFUSED
+#: in the backend's ``adapters/http/openapi_v1/admission.py`` — that table is
+#: the authority, and this list is the edge's expression of it. They are two
+#: packages, so the agreement is kept by these tests plus the backend's own
+#: enumeration rather than by a shared import.
+_HUMAN_ONLY = [
+    ("POST", "/openapi/v1/bots"),
+    ("GET", "/openapi/v1/bots/bot-123/authorized-apps"),
+    ("DELETE", "/openapi/v1/bots/bot-123/authorized-apps/42"),
+    ("GET", "/openapi/v1/bots/logs/traces"),
+    ("GET", "/openapi/v1/bots/logs/traces/t-1"),
+    ("GET", "/openapi/v1/bots/logs/sessions/s-1/traces"),
+    ("GET", "/openapi/v1/bots/mcp/servers/svc/config"),
+    ("PUT", "/openapi/v1/bots/mcp/servers/svc/config"),
+    ("GET", "/openapi/v1/bots/mcp/servers/svc/permissions"),
+    ("GET", "/openapi/v1/bots/loadtest/hello"),
+]
+
+
+@pytest.mark.parametrize(("method", "path"), _HUMAN_ONLY)
+def test_shipped_config_still_requires_a_user_where_a_human_is_required(
+    method: str, path: str
+) -> None:
+    """The refusals the wide rule no longer provides, restated explicitly.
+
+    Each of these used to inherit ``user: required`` from
+    ``/openapi/v1/bots/**``. That rule now admits a machine caller, so an
+    operation left to inherit would have been quietly opened — which is exactly
+    the kind of change nobody notices until an application uses it.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve(method, path)
+
+    assert req is not None, (method, path)
+    assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
+
+
+def test_shipped_config_lets_an_application_discover_its_own_scope() -> None:
+    """The one operation an integration calls before it can call anything else.
+
+    Requiring a human here would make an application's own scope discoverable
+    only by the person it acts for. The App stays required — it is what the
+    answer is scoped by.
+    """
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+
+    req = rs.resolve("GET", _AUTHORIZED_BOTS_PATH)
+
+    assert req is not None
+    assert req[PrincipalType.USER] is Presence.OPTIONAL
+    assert req[PrincipalType.APP] is Presence.REQUIRED
 
 
 _SOCKET_PATH = "/openapi/v1/bots/messages/ws/ARCA_x@0:20003/api/openclaw/ws"
@@ -45,9 +114,12 @@ def test_the_socket_exemption_beats_the_bots_user_requirement() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     assert rs.resolve("WEBSOCKET", _SOCKET_PATH) == {}
+    # A sibling path under the same prefix resolves to the wide rule instead —
+    # asserted as "not the exemption" rather than by naming a presence, because
+    # what this test is about is which *rule* wins, and the wide rule's
+    # requirements are free to change without weakening the exemption's ranking.
     bots = rs.resolve("WEBSOCKET", "/openapi/v1/bots/abc")
-    assert bots is not None
-    assert bots[PrincipalType.USER] is Presence.REQUIRED
+    assert bots is not None and bots != {}
 
 
 def test_the_socket_exemption_stops_at_the_ws_segment() -> None:
@@ -61,8 +133,9 @@ def test_the_socket_exemption_stops_at_the_ws_segment() -> None:
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
     sibling = rs.resolve("WEBSOCKET", "/openapi/v1/bots/messages/history")
-    assert sibling is not None
-    assert sibling[PrincipalType.USER] is Presence.REQUIRED
+    assert sibling is not None and sibling != {}, (
+        "a sibling of the socket subtree must not inherit its exemption"
+    )
 
 
 def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
@@ -79,7 +152,7 @@ def test_the_socket_exemption_does_not_reach_the_http_plane() -> None:
     for path in (_SOCKET_PATH, "/openapi/v1/bots/messages/../../admin/keys"):
         req = rs.resolve("GET", path)
         assert req is not None, path
-        assert req[PrincipalType.USER] is Presence.REQUIRED, path
+        assert req != {}, f"the HTTP plane must not inherit the socket exemption: {path}"
 
 
 def test_shipped_config_exempts_the_collaboration_socket_handshake() -> None:
@@ -122,9 +195,9 @@ def test_shipped_config_lets_the_owner_list_and_withdraw_without_an_app() -> Non
 
     An owner must be able to withdraw after the application's credential is
     lost or rotated, and must be able to ask "which apps can reach my bot?"
-    without holding any application's key. Both inherit ``user: required`` from
-    ``/openapi/v1/bots/**`` — this pins that the POST rule above did not drag
-    them along with it.
+    without holding any application's key. This pins that the POST rule did not
+    drag them along with it — and, since the wide rule stopped requiring a
+    human, that they still require one of their own accord.
     """
     raw = yaml.safe_load(_CONFIG.read_text())
     rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
@@ -136,22 +209,6 @@ def test_shipped_config_lets_the_owner_list_and_withdraw_without_an_app() -> Non
         assert req is not None, (method, path)
         assert req[PrincipalType.USER] is Presence.REQUIRED, (method, path)
         assert PrincipalType.APP not in req, (method, path)
-
-
-def test_shipped_config_requires_user_and_app_for_the_application_view() -> None:
-    """The App here is not just required, it is what the answer is scoped by.
-
-    The runner resolves only the identities a route declares, so were this rule
-    to lose ``app``, the upstream would never see the App principal and its
-    query would have nothing to filter on. That failure would widen a listing
-    rather than break it, which is why it is pinned.
-    """
-    raw = yaml.safe_load(_CONFIG.read_text())
-    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
-    req = rs.resolve("GET", _AUTHORIZED_BOTS_PATH)
-    assert req is not None
-    assert req[PrincipalType.USER] is Presence.REQUIRED
-    assert req[PrincipalType.APP] is Presence.REQUIRED
 
 
 def test_more_specific_rule_wins() -> None:

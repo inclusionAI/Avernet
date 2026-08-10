@@ -416,21 +416,37 @@
 
 ---
 
-## Task 14: The gateway route-security rules  `[ ]`
+## Task 14: The gateway route-security rules  `[x]`
 
 - **Files:** `src/gateway/configs/application.yaml`,
   `src/gateway/tests/unit/core/authn/`
 - **Done when:**
-  - [ ] `/openapi/v1/bots/**` becomes `{user: optional, app: optional}`, with the
-        Mode D overrides restoring `user: required` (and `app: required` where it
-        is required today).
-  - [ ] A comment explains, in this file's voice: why the **refusals** are
-        enumerated rather than the admissions; why both identities are optional;
-        and that "neither present" now dies at the backend's `require_principal`
-        — a **relocation** of the refusal, not a removal.
-  - [ ] `RouteSecurity.resolve` tests assert `user: required` for exactly the Mode
-        D paths, derived from `ADMISSION` so the two expressions cannot drift.
-  - [ ] Gateway tests run explicitly; the module has no standalone lint step.
+  - [x] `/openapi/v1/bots/**` becomes `{user: optional, app: optional}`, with
+        explicit `user: required` restored on every Mode D path. Three of those
+        (`GET`/`DELETE` authorized-apps, the MCP configuration pair) previously
+        *inherited* the requirement and would have been quietly opened.
+  - [x] `GET /bots/authorized` relaxed to `{user: optional, app: required}` —
+        it is the operation an integration calls to discover its own scope, and
+        requiring a human would make that discoverable only by the person it
+        acts for.
+  - [x] The comment explains why the refusals are enumerated rather than the
+        admissions, why both identities are optional, and that "neither" now
+        dies at the backend — a **relocation** of the refusal, not a removal.
+  - [x] Two stale comments corrected: they described the inheritance that no
+        longer holds.
+  - [x] Gateway tests: the wide rule admits a machine caller, every Mode D path
+        still requires a human (parametrised), and the app view is
+        user-optional/app-required. 527 gateway unit tests pass.
+  - [x] Three socket tests asserted the wide rule's `user: required` as a proxy
+        for "not exempt"; rewritten to assert what they are actually about, so
+        they no longer break when the wide rule's requirements change.
+  - [x] **Not derived from `ADMISSION` programmatically**, and deliberately so:
+        the two live in separate packages, and reimplementing the path matcher
+        on the backend side would be the second implementation of
+        "most specific" that `gateway/core/paths/_pattern.py` exists to
+        prevent. The list is mirrored on the gateway side with a comment naming
+        the backend table as the authority, and `admission.py` points back.
+
 - **Depends on:** Tasks 9, 10, 11
 
 ---

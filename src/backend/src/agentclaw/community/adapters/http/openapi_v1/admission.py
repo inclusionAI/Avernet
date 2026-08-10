@@ -45,7 +45,11 @@ from enum import StrEnum
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 class AdmissionMode(StrEnum):
@@ -71,6 +75,19 @@ class AdmissionMode(StrEnum):
 
 #: Every public operation, keyed by ``(method, path)`` exactly as FastAPI
 #: reports it. Grouped by mode, with the reason each group has the mode it has.
+#:
+#: **This table has a counterpart at the edge.** The gateway's
+#: ``route_security`` (``src/gateway/configs/application.yaml``) decides which
+#: identities are *resolvable* for a path; this decides which operations admit a
+#: machine caller once they arrive. Both must agree that a ``REFUSED`` operation
+#: still requires a human — an operation left open at both hops because someone
+#: edited only one is the hole the pair exists to prevent.
+#:
+#: The agreement is pinned on the gateway side
+#: (``tests/unit/core/authn/test_route_security.py``), because that is where the
+#: path matcher lives and a second implementation of "most specific" is exactly
+#: what ``gateway/core/paths/_pattern.py`` exists to prevent. Change ``REFUSED``
+#: here and that test is the one that will fail.
 ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # ── A1: names a bot, resolved owner-scoped ───────────────────────────────
     # The caller can only ever reach their own bots here, so an application
@@ -283,8 +300,24 @@ class ActingCaller:
             raise GrantNotResolvableError("no grant reader for an application caller")
         record = self.grants.find(bot_id=bot_id, user_id=self.user_id, app_id=self.app_id)
         if record is None:
+            # Which user and which bot were asked for goes to the **log**, not
+            # into the exception message. The message is carried into a log line
+            # verbatim by the handlers in ``app.py`` and ``error_logging.py``,
+            # and both of these values are caller-chosen and unbounded — so
+            # interpolating them there would let the party being refused inject
+            # extra log lines and choose how many bytes each refusal costs.
+            #
+            # ``app_id`` is safe to name: it is an int off the verified
+            # principal, not something the request supplied.
+            logger.warning(
+                "[bot_app_grant] app_id=%s holds no live grant from user=%s "
+                "on bot=%s",
+                self.app_id,
+                for_log(self.user_id),
+                for_log(bot_id),
+            )
             raise GrantNotResolvableError(
-                f"app {self.app_id} holds no grant from {self.user_id} on {bot_id}"
+                f"app {self.app_id} holds no live grant for the requested bot"
             )
         return record.owner_id
 

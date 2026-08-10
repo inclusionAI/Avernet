@@ -34,10 +34,14 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     GrantNotResolvableError,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     GrantCheckedDep,
 )
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 #: The query parameter naming the bot owner a request addresses.
 OWNER_ID_QUERY = "owner_id"
@@ -110,9 +114,18 @@ async def resolve_owner_id(
     """
     if caller.is_application:
         if owner_id is not None and owner_id != granted_owner_id:
+            # The addressed owner goes to the log bounded, and stays out of the
+            # exception message: that message reaches a log line verbatim, and
+            # ``owner_id`` is declared ``min_length=1`` with no upper bound, so
+            # raw it would let a refused caller pad every refusal to any size.
+            logger.warning(
+                "[engine_runtime] app_id=%s addressed owner=%s, which its "
+                "grant does not cover",
+                caller.app_id,
+                for_log(owner_id),
+            )
             raise GrantNotResolvableError(
-                f"app {caller.app_id} addressed owner {owner_id!r}, but its "
-                "grant covers a bot owned by someone else"
+                f"app {caller.app_id} addressed an owner its grant does not cover"
             )
         return granted_owner_id
     return owner_id if owner_id is not None else caller.user_id
