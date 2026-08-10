@@ -7,11 +7,13 @@ import time
 import zipfile
 
 import jwt
-from fastapi.testclient import TestClient
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -48,9 +50,18 @@ def _principal(tenant: str) -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": tenant,
                     "subject": {"id": _OWNER, "username": "skills@example.test"},
-                }
+                },
+                {
+                    "type": "app",
+                    "tenant": tenant,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "Skills tenant isolation test",
+                        "owners": _OWNER,
+                        "tenant": tenant,
+                    },
+                },
             ],
         },
         _KEY,
@@ -143,7 +154,7 @@ def test_every_skills_operation_is_guarded_from_another_tenant(
         )
 
     headers = {PRINCIPAL_HEADER: _principal(_TENANT_B)}
-    client = TestClient(app_with_testing_modules)
+    client = user_scoped_client(app_with_testing_modules, _OWNER)
     own_list = client.get(f"/openapi/v1/bots/skills?bot_id={_BOT_ID}", headers=headers)
     assert own_list.status_code == 200
     assert own_list.json()["data"]["total"] == 1

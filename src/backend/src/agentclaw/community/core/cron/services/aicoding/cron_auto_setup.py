@@ -6,7 +6,7 @@ import re
 from typing import Any, Dict, Optional
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.cron.services.cron_relay import CronRelayService
 from agentclaw.community.log import get_logger
 

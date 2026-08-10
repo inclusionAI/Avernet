@@ -32,6 +32,26 @@ class MissingPrincipalError(Exception):
     """
 
 
+class UserIdMismatchError(Exception):
+    """Raised when a request's ``user_id`` is not the verified caller's (→ 403).
+
+    Every user-scoped public operation now names the end user it acts for in a
+    required ``user_id`` query parameter rather than inferring it from the
+    principal. Until delegation lands (auth design §15) the only user a caller
+    may name is itself, so the parameter must repeat the ``user`` principal's
+    subject id and a disagreement is refused here.
+
+    401 would be wrong — the caller *is* authenticated — and so would silently
+    preferring one of the two values: trusting the parameter would let any
+    verified user read another's data, and trusting the principal would answer a
+    request the caller did not make. The refusal is the only answer that keeps
+    the parameter honest while it is still redundant.
+
+    Raised in a dependency, so ``@envelope_errors`` never sees it; ``app.py``
+    registers a handler for this type for the reason documented there.
+    """
+
+
 class UnsupportedEngineError(Exception):
     """Raised when a request names an engine the platform does not support (→ 400).
 

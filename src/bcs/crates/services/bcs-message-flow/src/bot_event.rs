@@ -969,9 +969,13 @@ async fn record_task_response_event_in_store(
         ChatEventState::ToolCallStart | ChatEventState::ToolCallEnd => {
             task_store.record_response_tool_call(task_id).await;
         }
-        ChatEventState::Delta | ChatEventState::Final => {
+        ChatEventState::Delta => {
             let text = extract_message_text(&cmd.event_payload);
             task_store.record_response_text(task_id, &text).await;
+        }
+        ChatEventState::Final => {
+            let text = extract_message_text(&cmd.event_payload);
+            task_store.record_final_response_text(task_id, &text).await;
         }
         ChatEventState::Error | ChatEventState::Aborted => {}
     }

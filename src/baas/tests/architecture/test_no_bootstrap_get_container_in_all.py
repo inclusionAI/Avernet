@@ -24,15 +24,9 @@ _ALLOWED_LAYERS = {"bootstrap"}
 
 # Known pre-existing violations (lazy/function-body imports inside core/plugins)
 # These are tracked debt — the test warns about them but doesn't fail.
-_KNOWN_DEBT: dict[str, list[tuple[str, int]]] = {
-    "core": [
-        ("core/utils/callback_utils.py", 31),
-    ],
-    "plugins": [
-        ("plugins/sandbox/utils/arca_utils.py", 92),
-        ("plugins/sandbox/utils/arca_utils.py", 121),
-    ],
-}
+# NOTE: issue #852 eliminated the final debt sites (callback_handler, arca_utils);
+# this map is now empty. Update it if new get_container imports are introduced.
+_KNOWN_DEBT: dict[str, list[tuple[str, int]]] = {}
 
 
 def _collect_get_container_imports() -> dict[str, list[tuple[str, int, str]]]:

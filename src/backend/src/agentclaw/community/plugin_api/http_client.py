@@ -36,7 +36,7 @@ Impls (Rule 20/21):
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Iterator, Mapping, Protocol, runtime_checkable
 
 import httpx
 
@@ -104,6 +104,24 @@ class HttpClient(Plugin, Protocol):
         timeout: float = 30.0,
     ) -> httpx.Response:
         """Issue a DELETE to ``base_url + path`` and return the response."""
+        ...
+
+    def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, Any] | None = None,
+        json: Any | None = None,
+        headers: Mapping[str, str] | None = None,
+        timeout: float = 30.0,
+    ) -> Iterator[httpx.Response]:
+        """Issue a streaming request to ``base_url + path`` and yield a streaming
+        :class:`httpx.Response` for use inside a ``with`` block
+        (``resp.iter_lines()`` / ``raise_for_status()``). The wire shape matches a
+        direct ``httpx.Client.stream()`` call; transport errors and
+        ``raise_for_status`` propagate unchanged.
+        """
         ...
 
 

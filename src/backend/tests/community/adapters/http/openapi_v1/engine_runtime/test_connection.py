@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.connection import (
     router,
@@ -36,11 +38,19 @@ class FakeConnections:
     def __set_relay(self, relay):  # wired by the fixture
         self._relay = relay
 
-    def build(self, *, bot_id, owner_id) -> ConnectionResult:
-        # The real service resolves the caller's bot before touching the device
-        # service; model that, or a foreign bot appears to succeed here.
-        self._relay.resolve_bot(bot_id, owner_id)
-        self.calls.append({"bot_id": bot_id, "owner_id": owner_id})
+    def build(self, *, bot_id, owner_id, caller_id, stage) -> ConnectionResult:
+        # The real service resolves the addressed bot and adjudicates the
+        # caller before touching the device service; model that, or a foreign
+        # bot / non-operator appears to succeed here.
+        self._relay.resolve_bot(bot_id, owner_id, caller_id)
+        self.calls.append(
+            {
+                "bot_id": bot_id,
+                "owner_id": owner_id,
+                "caller_id": caller_id,
+                "stage": stage,
+            }
+        )
         if self.raises is not None:
             raise self.raises
         sockets = [
@@ -75,7 +85,7 @@ def client(relay, connections):
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": OWNER}
     attach_injector(app, Injector([_M()]))
-    return TestClient(app)
+    return user_scoped_client(app, OWNER)
 
 
 def _caps(*supported: str) -> EngineResult:
@@ -130,8 +140,16 @@ def test_foreign_bot_is_masked_404_without_building_a_connection(
     assert connections.calls == []
 
 
-def test_the_service_is_called_with_the_principals_owner_id(client, connections):
-    """Never a caller-supplied identity: the wider permission model inside
-    ``get_device_connection`` must not be reachable with someone else's id."""
+def test_the_service_is_called_with_the_verified_caller_and_named_owner(
+    client, connections
+):
+    """The caller comes from the principal, never the request body; the owner
+    defaults to the caller; the stage defaults to the draft — so a request
+    naming nothing behaves exactly as before the expansion."""
     ok(client.get(URL))
-    assert connections.calls[0] == {"bot_id": BOT, "owner_id": OWNER}
+    assert connections.calls[0] == {
+        "bot_id": BOT,
+        "owner_id": OWNER,
+        "caller_id": OWNER,
+        "stage": "draft",
+    }

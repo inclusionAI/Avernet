@@ -74,28 +74,3 @@ class BotMCPProvider(Protocol):
         ...
 
 
-@runtime_checkable
-class UserMCPConfigRepository(Protocol):
-    """Repository interface for user-level MCP configuration."""
-
-    def get_by_user_and_server_code(
-        self, user_id: str, server_code: str
-    ) -> Optional[dict[str, Any]]:
-        ...
-
-    def get_by_id(self, config_id: str) -> Optional[dict[str, Any]]:
-        ...
-
-    def list_by_user(self, user_id: str) -> List[dict[str, Any]]:
-        ...
-
-    def create(self, config_data: dict[str, Any]) -> dict[str, Any]:
-        ...
-
-    def update(
-        self, config_id: str, config_data: dict[str, Any]
-    ) -> Optional[dict[str, Any]]:
-        ...
-
-    def delete(self, config_id: str) -> bool:
-        ...

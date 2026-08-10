@@ -15,6 +15,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.adapters.http.middleware import AvernetTenantMiddleware
+from tests.community.adapters.http.openapi_v1.conftest import (
+    user_scoped_client,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
@@ -46,14 +49,9 @@ from agentclaw.community.core.skill_center.services.local_skill_state_service im
 )
 from agentclaw.community.plugin_api.models import BotModel
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
-from agentclaw.community.plugins.bot_repository import BotRepository
-from agentclaw.community.plugins.local.sqlite_models import (
-    DefaultSkillsetSkillExclusion,
-)
-from agentclaw.community.plugins.skill_repository import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository
+from agentclaw.community.core.skill_center.orm import DefaultSkillsetSkillExclusion
+from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository, SkillSetRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -152,7 +150,7 @@ def _client(
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
-    return TestClient(app)
+    return user_scoped_client(app, "actor")
 
 
 def test_upload_accepts_only_raw_zip_and_returns_created_inactive_skill():
@@ -194,7 +192,7 @@ def test_upload_replacement_returns_200_and_updated_operation():
     app.include_router(router)
     app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
     attach_injector(app, Injector([Bindings()]))
-    client = TestClient(app)
+    client = user_scoped_client(app, "actor")
     response = client.post(
         "/openapi/v1/bots/skills/upload?bot_id=bot-1",
         content=b"PK\x03\x04",
@@ -468,6 +466,10 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
     now = int(time.time())
 
     def token(tenant: str) -> str:
+        # The tenant rides on the ``app`` principal: a ``user`` principal carries
+        # none, because nothing in a user credential proves which tenant the
+        # person acts for. A user-only token would scope to the internal
+        # default and this pair of requests would stop testing isolation at all.
         return jwt.encode(
             {
                 "iss": "gateway",
@@ -477,9 +479,18 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
                 "principals": [
                     {
                         "type": "user",
-                        "tenant": tenant,
                         "subject": {"id": "owner", "username": "owner@example.com"},
-                    }
+                    },
+                    {
+                        "type": "app",
+                        "tenant": tenant,
+                        "app": {
+                            "app_id": 1,
+                            "app_name": "Partner App",
+                            "owners": "partner-org",
+                            "tenant": tenant,
+                        },
+                    },
                 ],
             },
             key,
@@ -490,7 +501,7 @@ def test_router_uses_verified_principal_and_real_tenant_guard(tmp_path):
     app.add_middleware(AvernetTenantMiddleware)
     app.include_router(router)
     attach_injector(app, Injector([Bindings()]))
-    client = TestClient(app)
+    client = user_scoped_client(app, "owner")
     try:
         visible = client.get(
             "/openapi/v1/bots/skills?bot_id=bot",

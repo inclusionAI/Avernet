@@ -14,7 +14,7 @@ from typing import Any
 
 from injector import inject
 
-from agentclaw.community.core.system_config.repository import ConfigRepositoryProtocol
+from agentclaw.community.core.repository.protocols.config import ConfigRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

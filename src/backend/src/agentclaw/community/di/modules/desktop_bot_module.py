@@ -5,9 +5,9 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.api.desktop_bot_service import DesktopBotServiceProtocol
 from agentclaw.community.core.desktop_bot.lifecycle import DesktopBotLifecycle
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import DesktopBotService
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
 from agentclaw.community.di.config import BaasConfig

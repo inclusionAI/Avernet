@@ -19,9 +19,7 @@ from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.devices.repository.protocol import (
-        DeviceBindingRepository,
-    )
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
     from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
     from agentclaw.community.core.service_bot.services.baas_service import BaasService
     from agentclaw.community.plugin_api.passport import PassportPlugin

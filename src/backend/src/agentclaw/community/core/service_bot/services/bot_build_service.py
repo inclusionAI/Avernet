@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from injector import inject
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.engine_resolver import resolve_engine_for_bot
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.service_bot.services.baas_service import (
     ENGINE_DIR_MOUNT_WHITELIST_BUSINESS_CODE,
@@ -206,7 +206,6 @@ class BotBuildService:
         Args:
             bot: Bot 信息字典，包含: bot_id, entity_id, entity_type, device_id, bot_name, bot_desc
             version: 迁移版本号（整数），默认 1
-
         Returns:
             dict: 构建结果信息
                 - success: 构建是否成功
@@ -260,6 +259,13 @@ class BotBuildService:
                 bot_id=bot_id,
                 entity_type=entity_type,
             ) / version_str / build_plan.migration_subpath
+            migration_path_base = self._get_migration_path_base(
+                owner_id=entity_id,
+                bot_id=bot_id,
+            )
+            runtime_artifact_root = (
+                f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}"
+            )
 
             logger.info(
                 f"[BotBuildService.build] Step 1: "
@@ -280,6 +286,13 @@ class BotBuildService:
                 build_plan=build_plan,
                 provider=provider,
             )
+
+            # The host-side engine-root rsync is the sole writer of the
+            # versioned artifact. It preserves active symlinks and local Skill
+            # payloads while each engine build plan excludes mounted repo
+            # corpora. Do not make the Draft runtime write this target again:
+            # published NFS paths are not writable from every sandbox, and the
+            # Claude Code active root is already covered by extra_sync.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
             mcp_success = True
@@ -308,17 +321,13 @@ class BotBuildService:
 
             # 构建结果
             success = migration_success and mcp_success and openclaw_configs_success
-            migration_path_base = self._get_migration_path_base(
-                owner_id=entity_id,
-                bot_id=bot_id,
-            )
             result = {
                 "success": success,
                 "bot_id": bot_id,
                 "entity_id": entity_id,
                 "entity_type": entity_type,
                 "version": version_str,
-                "migration_path": f"{migration_path_base}/{version_str}/{build_plan.migration_subpath}",
+                "migration_path": runtime_artifact_root,
                 "build_target_path": str(target_dir),
                 "mcp_success": mcp_success,
                 "openclaw_configs_success": openclaw_configs_success,
@@ -456,6 +465,7 @@ class BotBuildService:
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """发布 Bot 到 BaaS 层。
 
@@ -507,13 +517,15 @@ class BotBuildService:
             logger.warning(
                 f"[BotBuildService.release] queryToken failed: bot_id={bot_id}, "
                 f"owner_id={owner_id}, error={e}"
-            )
+        )
 
         try:
-            is_teclaw_release = (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
             )
+            is_teclaw_release = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
             if is_teclaw_release:
                 # teclaw: non-mount delivery — hand the frozen artifact to BaaS,
                 # which forwards it to the external container. No migration_path.
@@ -581,6 +593,7 @@ class BotBuildService:
         ext_info: Optional[Dict[str, Any]] = None,
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步发布 Bot 到 BaaS 层。
 
@@ -620,57 +633,8 @@ class BotBuildService:
             ext_info=ext_info,
             extra_envs=extra_envs,
             docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )
-
-    def _sync_skill_links(
-        self,
-        device_id: str,
-        version: str,
-        build_plan: EngineBuildPlan,
-        provider: EngineSandboxProvider,
-    ) -> None:
-        """同步 skill 软链到目标目录。
-
-        Args:
-            device_id: 设备 ID，用于执行远程命令
-            version: 版本号，用于拼接目标路径
-            build_plan: 引擎构建计划
-            provider: 当前引擎 provider
-
-        Raises:
-            BotBuildMigrationError: 同步失败
-        """
-        try:
-            source_base_path = provider.get_base_path().rstrip('/')
-            source_skill_path = f"{source_base_path}/{build_plan.skill_source_relpath.strip('/')}"
-            target_skill_path = (
-                f"/home/admin/nfs/bot-data/{version}/"
-                f"{build_plan.migration_subpath}/{build_plan.skill_target_relpath.strip('/')}"
-            )
-            skill_cmd = (
-                "rsync -av --exclude='skills-repo' --exclude='.skills-repo*' "
-                f"{source_skill_path}/ {target_skill_path}/"
-            )
-
-            logger.info(
-                f"[BotBuildService._sync_skill_links] "
-                f"Running rsync skill command:{skill_cmd}"
-            )
-
-            self._device_service.exec_shell_new(
-                device_id=device_id,
-                shell_cmd=skill_cmd,
-            )
-
-            logger.info(
-                "[BotBuildService._sync_skill_links] "
-                "Skill links synced successfully"
-            )
-        except Exception as e:
-            logger.warning(
-                f"[BotBuildService._sync_skill_links] "
-                f"Failed to synced links: {device_id}, {e}"
-            )
 
     def _run_local_command(
         self,
@@ -812,6 +776,11 @@ class BotBuildService:
                 "rsync",
                 "-av",           # 归档模式 + 详细输出
                 "--delete",       # 删除目标目录中不存在于源目录的文件
+                # The versioned target is reused when the same publish version
+                # retries. Excluded mount/corpus paths must not survive from an
+                # earlier partial artifact, otherwise Pool active roots can
+                # expose the full repository through a stale bridge.
+                "--delete-excluded",
                 *excludes,
                 f"{source_dir}/",
                 f"{target_dir}/",
@@ -842,6 +811,7 @@ class BotBuildService:
                     "rsync",
                     "-av",
                     "--delete",
+                    "--delete-excluded",
                     *excludes,
                     f"{extra_source}/",
                     f"{extra_target}/",
@@ -851,10 +821,6 @@ class BotBuildService:
                     command_name="rsync (extra)",
                     error_message="rsync extra sync failed",
                 )
-
-            # 同步 skill 软链到目标目录
-            if build_plan and provider:
-                self._sync_skill_links(device_id, version_str, build_plan, provider)
 
             logger.info(
                 f"[BotBuildService._migrate_bot_instance] "
@@ -1078,6 +1044,7 @@ class BotBuildService:
             delivery: DeliveryArtifact = DeliveryArtifact(None),
             extra_envs: Optional[Dict[str, Any]] = None,
             docker_image: str | None = None,
+            runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """升级 Bot 到 BaaS 层（复用现有 Bot）。
 
@@ -1111,10 +1078,13 @@ class BotBuildService:
         )
 
         try:
-            if (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
-            ):
+            resolved_runtime_kind = (
+                runtime_kind
+                if runtime_kind is not None
+                else self._baas_service.resolve_container_provider(bot)
+            )
+            is_teclaw_upgrade = resolved_runtime_kind == TECLAW_DEVICE_PROVIDER
+            if is_teclaw_upgrade:
                 # teclaw re-publish: re-deliver the frozen artifact to the
                 # existing container (non-mount). No migration_path. The artifact
                 # IS the delivery payload, so fail loudly if it is missing rather
@@ -1571,6 +1541,7 @@ class BotBuildService:
         delivery: DeliveryArtifact = DeliveryArtifact(None),
         extra_envs: Optional[Dict[str, Any]] = None,
         docker_image: str | None = None,
+        runtime_kind: str | None = None,
     ) -> Dict[str, Any]:
         """异步升级 Bot 到 BaaS 层。
 
@@ -1594,4 +1565,5 @@ class BotBuildService:
             delivery=delivery,
             extra_envs=extra_envs,
             docker_image=docker_image,
+            runtime_kind=runtime_kind,
         )

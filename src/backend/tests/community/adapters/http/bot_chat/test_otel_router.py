@@ -212,7 +212,7 @@ async def test_ingest_otlp_traces_rejects_payload_without_spans(monkeypatch):
     monkeypatch.setattr(otel_router, "_write_otlp_request_log", lambda **kwargs: logged.append(kwargs))
 
     with pytest.raises(HTTPException) as exc_info:
-        await ingest_otlp_traces(payload={"resourceSpans": []}, db=object())
+        await ingest_otlp_traces(payload={"resourceSpans": []}, repo=object())
 
     assert exc_info.value.status_code == 400
     assert logged == [
@@ -233,16 +233,12 @@ async def test_ingest_otlp_traces_persists_observations_and_chat_trace(monkeypat
     }
 
     class FakeRepo:
-        def __init__(self, db):
-            self.db = db
-
         def upsert_ocb_observation(self, observation):
             calls["observations"].append(observation)
 
         def upsert_ocb_trace(self, trace, source):
             calls["traces"].append((trace, source))
 
-    monkeypatch.setattr(otel_router, "BotChatDbRepository", FakeRepo)
     monkeypatch.setattr(otel_router, "_write_otlp_request_log", lambda **kwargs: calls["logs"].append(kwargs))
 
     payload = {
@@ -285,7 +281,7 @@ async def test_ingest_otlp_traces_persists_observations_and_chat_trace(monkeypat
         ]
     }
 
-    result = await ingest_otlp_traces(payload=payload, db=object())
+    result = await ingest_otlp_traces(payload=payload, repo=FakeRepo())
 
     assert result.success is True
     assert result.data.trace_count == 1
@@ -312,16 +308,12 @@ async def test_ingest_otlp_traces_does_not_promote_child_span_to_trace(monkeypat
     }
 
     class FakeRepo:
-        def __init__(self, db):
-            self.db = db
-
         def upsert_ocb_observation(self, observation):
             calls["observations"].append(observation)
 
         def upsert_ocb_trace(self, trace, source):
             calls["traces"].append((trace, source))
 
-    monkeypatch.setattr(otel_router, "BotChatDbRepository", FakeRepo)
     monkeypatch.setattr(otel_router, "_write_otlp_request_log", lambda **kwargs: calls["logs"].append(kwargs))
 
     payload = {
@@ -354,7 +346,7 @@ async def test_ingest_otlp_traces_does_not_promote_child_span_to_trace(monkeypat
         ]
     }
 
-    result = await ingest_otlp_traces(payload=payload, db=object())
+    result = await ingest_otlp_traces(payload=payload, repo=FakeRepo())
 
     assert result.success is True
     assert result.data.trace_count == 0

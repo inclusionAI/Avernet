@@ -306,7 +306,6 @@ def test_a_resolved_identity_is_signed_onto_the_upstream_handshake() -> None:
     # not of the declared type would not exercise what a handshake does.
     auth.identities = {
         PrincipalType.USER: UserPrincipal(
-            tenant="acme",
             subject=AuthenticatedUser(id="u-42", username="alice@example.com"),
         )
     }
@@ -338,7 +337,6 @@ def test_the_handshake_log_line_names_the_caller_and_no_credential(
     app, auth, forwarder = _build()
     auth.identities = {
         PrincipalType.USER: UserPrincipal(
-            tenant="acme",
             subject=AuthenticatedUser(id="u-42", username="alice@example.com"),
         )
     }
@@ -359,7 +357,7 @@ def test_the_handshake_log_line_names_the_caller_and_no_credential(
         for message in (record.getMessage() for record in caplog.records)
         if message.startswith("ws forwarding request")
     )
-    assert "tenant=acme" in line
+    assert "tenant=-" in line
     assert "caller=user:u-42" in line
     assert "x-proxypass-token=<redacted>" in line
     assert "t.o.k" not in line

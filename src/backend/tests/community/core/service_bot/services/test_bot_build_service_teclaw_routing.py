@@ -102,11 +102,11 @@ def test_release_routes_arca_pinned_image_to_template_config():
         user_id="u1",
         migration_path="/m/1",
         publish_stage=PublishStage.VERIFY,
-        docker_image="registry/arka:v2",
+        docker_image="registry/arca:v2",
     )
 
     assert baas.create_bot.call_args.kwargs["template_config"] == {
-        "image": "registry/arka:v2"
+        "image": "registry/arca:v2"
     }
 
 
@@ -186,16 +186,16 @@ def test_upgrade_routes_arca_pinned_image_to_template_config():
         user_id="u1",
         migration_path="/m/1",
         publish_stage=PublishStage.ONLINE,
-        docker_image="registry/arka:v2",
+        docker_image="registry/arca:v2",
     )
 
     assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
-        "image": "registry/arka:v2"
+        "image": "registry/arca:v2"
     }
 
 
 @pytest.mark.unit
-def test_teclaw_ignores_arka_docker_image():
+def test_teclaw_ignores_arca_docker_image():
     svc, baas = _svc("teclaw")
 
     svc.release(
@@ -204,7 +204,7 @@ def test_teclaw_ignores_arka_docker_image():
         migration_path="",
         publish_stage=PublishStage.VERIFY,
         delivery=DeliveryArtifact(_ARTIFACT),
-        docker_image="registry/arka:v2",
+        docker_image="registry/arca:v2",
     )
 
     baas.create_teclaw_bot.assert_called_once()

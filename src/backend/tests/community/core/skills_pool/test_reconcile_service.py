@@ -41,7 +41,7 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.core.task_queue.types import Complete, Retry
-from agentclaw.community.plugins.skills_pool_runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 
 
 def _aicoding_engine_api():

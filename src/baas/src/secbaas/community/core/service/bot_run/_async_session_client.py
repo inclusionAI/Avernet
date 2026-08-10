@@ -94,6 +94,11 @@ class AsyncSessionClient:
             "offset": offset,
             "engine": engine or self.engine,
         }
+
+        # IMPORTANT: no need to pass 'agent_id' for openclaw engine
+        if (engine or self.engine) == "openclaw":
+            params["agent_id"] = None
+
         resp = await self._request("GET", "/api/sessions", params=params)
         data = resp.get("data", [])
         return [self._parse_session_info(item) for item in data]

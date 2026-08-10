@@ -13,14 +13,12 @@ from agentclaw.community.api.local_skill_state_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -85,8 +83,17 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": _TENANT,
                     "subject": {"id": _OWNER, "username": "state@example.test"},
+                },
+                {
+                    "type": "app",
+                    "tenant": _TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "State Test App",
+                        "owners": "state-org",
+                        "tenant": _TENANT,
+                    },
                 }
             ],
         },
@@ -179,7 +186,11 @@ def _assert_skill_remains_inactive(_response, world) -> None:
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/activate",
     scenario="activates_exact_tenant_local_skill",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_activate,
     expect=ExpectSuccess(
         status=200,
@@ -197,7 +208,11 @@ def activate_local_skill_reconciles_runtime():
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/activate",
     scenario="runtime_failure_returns_fixed_error",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_runtime_failure,
     expect=ExpectError(
         status=502,
@@ -216,7 +231,11 @@ def activate_local_skill_runtime_failure_is_publicly_safe():
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/deactivate",
     scenario="idempotent_inactive_skill_still_reconciles",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_activate,
     expect=ExpectSuccess(
         status=200,
@@ -234,7 +253,11 @@ def deactivate_inactive_local_skill_is_an_idempotent_happy_path():
     method="POST",
     path="/openapi/v1/bots/skills/{skill_id}/deactivate",
     scenario="runtime_failure_compensates_with_fixed_error",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_runtime_failure,
     extra_assertions=(_assert_skill_remains_inactive,),
     expect=ExpectError(

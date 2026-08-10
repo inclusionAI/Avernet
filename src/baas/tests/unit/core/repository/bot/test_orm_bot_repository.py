@@ -619,6 +619,30 @@ class TestInsertBotRecord:
         assert result is not None
         mock_session.add.assert_called_once()
         mock_session.flush.assert_called_once()
+        added_model = mock_session.add.call_args[0][0]
+        assert added_model.template_uuid == "tpl-001"
+
+    def test_clone_with_template_override(self, repo, mock_session):
+        source_model, _ = _make_mock_bot_model(
+            id_val=5,
+            bot_uuid="bot-src",
+            template_uuid="TEMPLATE-old",
+        )
+        mock_session.query.return_value.filter.return_value.first.return_value = (
+            source_model
+        )
+
+        result = repo.insert_bot_record(
+            source_bot_id=5,
+            tenant="t1",
+            env="dev",
+            status="FAILED",
+            template_uuid="TEMPLATE-new",
+        )
+
+        assert result is not None
+        added_model = mock_session.add.call_args[0][0]
+        assert added_model.template_uuid == "TEMPLATE-new"
 
     def test_clone_with_existing_pending_cleans_up(self, repo, mock_session):
         source_model, source_record = _make_mock_bot_model(

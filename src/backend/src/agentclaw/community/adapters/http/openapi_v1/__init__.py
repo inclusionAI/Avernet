@@ -29,6 +29,60 @@ whose id equals a component name is unreachable at that address. The reserved
 names are fixed and documented in ``docs/openapi-v1/README.md``; a test asserts
 the doc's list still equals the routes'.
 
+Naming the end user
+-------------------
+
+Every operation that scopes to a user takes a required **``user_id`` query
+parameter** — whatever the method, whatever the body. It is never a body field
+and never a path segment: it is not an attribute of any resource here, it is who
+the call is for, so a body (which describes the resource) and a path (which
+names it) are both the wrong place. ``bot_id`` is unaffected — it stays in the
+path where it addresses a bot and in the query string where it is a parameter.
+The full reasoning is in ``principal.py``; handlers declare ``UserIdDep``.
+
+Four operations are exempt because they have no user dimension to scope by:
+``check_bot_name`` answers a tenant-wide uniqueness question, and
+``list_mcp_servers`` / ``list_mcp_tenants`` / ``get_mcp_server`` read a
+marketplace catalogue that is identical for every caller in the tenant. They
+still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just have
+no user-shaped answer to give. The load-test group is exempt on the same
+grounds and for the plainest reason of all: it reads and writes nothing.
+
+Planes
+------
+
+Every group here served HTTP only until the load-test group added a WebSocket.
+That changes nothing about the rule above — ``_PUBLIC_AUTH`` reaches a socket
+route as it reaches any other, and ``require_principal`` verifies the same
+signed header the gateway puts in a handshake — but two mechanical facts follow
+from it. A WebSocket route has no OpenAPI representation, so it appears in none
+of the generated-document assertions and its address is governed by
+``test_loadtest_endpoints.py`` instead; and the response tables below are an
+HTTP notion, so attaching one to a group with socket routes describes only its
+HTTP half.
+
+One thing the socket plane does **not** currently get: ``AvernetTenantMiddleware``
+and the public access log both return early on a non-HTTP scope, so a WebSocket
+runs under the *default* tenant and leaves no access line. That is harmless for
+a route that reads and writes nothing — the only socket route here — and it is
+the first thing to fix before adding one that does, because a tenant-scoped
+read under the default tenant is a data-isolation failure, not a missing log.
+
+The Bot Logs group is a different exclusion, and the sharpest thing to know
+about this rule. ``GET …/bots/logs/traces`` already takes a required
+``user_id`` — but there it means *whose traces to read*, a filter, and any
+caller presenting both a user and an App identity may name someone else's. Here
+it means *whose call this is*, and naming someone else is a 403. Same spelling,
+opposite contract, and the published document will carry both. Do not "unify"
+them without deciding which meaning the address should have.
+
+Because of those exemptions the dependency is declared **per handler**, not per
+group: two of the four sit inside groups whose other routes do take it (1 of 13
+in ``bots``, 3 of 6 in ``mcp``), so a group-level dependency would put the
+parameter on them. ``test_explicit_user_id.py`` is what makes a new route
+impossible to forget — the same trade ``test_path_convention.py`` makes for the
+addressing rule above.
+
 Mount order
 -----------
 
@@ -46,7 +100,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from .bots import router as bots_router
-from .contracts import ENGINE_RUNTIME_ERROR_RESPONSES, ERROR_RESPONSES
+from .contracts import (
+    ENGINE_RUNTIME_ERROR_RESPONSES,
+    ERROR_RESPONSES,
+    USER_SCOPED_ERROR_RESPONSES,
+)
 from .dependencies import require_principal
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
@@ -54,6 +112,7 @@ from .engine_runtime.engine import router as engine_engine_router
 from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .identity import router as identity_router
+from .loadtest import router as loadtest_router
 from .mcp import router as mcp_router
 from .bot_logs import router as logs_router
 from .resources import router as resources_router
@@ -65,12 +124,40 @@ from .skills import router as skills_router
 # only on this surface).
 PUBLIC_API_PREFIX = "/openapi/v1"
 
-# Order matters: literal sub-groups first, the `{bot_id}` wildcard group last.
-# See "Mount order" above for which literals actually depend on it.
-_SUBGROUPS = [
+# The groups that answer no 403, because no route in them is scoped by the
+# *caller's* user: Bot Logs never derived a user from the credential at all, and
+# the load-test group has nothing to scope — its two endpoints answer a constant
+# and echo their input, so they touch no user's data on the way.
+#
+# It is not that Bot Logs has no `user_id` — `GET …/bots/logs/traces` has taken
+# a required one since #692. It means something else there, and the difference
+# is why that group stays out of this rule rather than being folded into it: on
+# the rest of the surface `user_id` is *whose call this is*, and must be the
+# caller (403 otherwise); on that one operation it is *whose traces to read*, a
+# filter over a tenant-level observability surface that already requires both a
+# user and an App identity (`route_security`, `require_user_and_app_principal`).
+# Bringing it under this rule would remove a capability that route exists to
+# provide. See the note in the spec's Out of Scope.
+_GROUPS_WITHOUT_CALLER_SCOPE = [
     logs_router,
-    identity_router,
+    loadtest_router,
+]
+
+# The groups where SOME routes take a `user_id` and some do not — `bots`
+# (12 of 13) and `mcp` (3 of 6). They keep the surface-wide response table here
+# and declare the 403 per route, so the four exempt operations do not advertise
+# a failure they cannot produce. See "Naming the end user" above.
+_MIXED_GROUPS = [
     mcp_router,
+]
+
+# Order matters: every literal sub-group — these three lists — is registered
+# before the `{bot_id}` wildcard group, which `build_public_router` mounts last.
+# See "Mount order" above for which literals actually depend on it. Splitting the
+# literals across three lists is about which *response table* each gets; it does
+# not change that they all precede `bots`.
+_SUBGROUPS = [
+    identity_router,
     resources_router,
     routines_router,
     skills_router,
@@ -109,15 +196,24 @@ _PUBLIC_AUTH = [Depends(require_principal)]
 def build_public_router() -> APIRouter:
     """Assemble the ``/openapi/v1/bots`` public router.
 
-    ``ERROR_RESPONSES`` and ``_PUBLIC_AUTH`` are attached here rather than on
+    The response tables and ``_PUBLIC_AUTH`` are attached here rather than on
     each handler so the published schema documents the envelope this surface
     actually returns on failure, and so every route requires an authenticated
     caller — every group, every route, one declaration.
+
+    Which response table a group gets depends on whether all of its routes are
+    user-scoped. The two mixed groups declare their 403 per route instead; the
+    ``user_id`` parameter itself is always per handler (see "Naming the end
+    user" above).
     """
     public = APIRouter()
-    for router in _SUBGROUPS:
+    for router in _GROUPS_WITHOUT_CALLER_SCOPE + _MIXED_GROUPS:
         public.include_router(
             router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+    for router in _SUBGROUPS:
+        public.include_router(
+            router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
         )
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(
@@ -125,6 +221,7 @@ def build_public_router() -> APIRouter:
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH,
         )
+    # `bots` is mixed too, but stays last for the wildcard-ordering rule above.
     public.include_router(
         bots_router, responses=ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
     )

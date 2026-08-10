@@ -16,8 +16,8 @@ from typing import Any
 import httpx
 from injector import inject
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.health_probe import HealthProbePlugin

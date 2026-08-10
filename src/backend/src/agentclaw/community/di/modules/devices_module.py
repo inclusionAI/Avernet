@@ -41,18 +41,20 @@ from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.oss_to_nas_migration_service import OssToNasMigrationServiceProtocol
 from agentclaw.community.api.oss_to_nas_switch_service import OssToNasSwitchServiceProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
+from agentclaw.community.core.common_config.service import CommonConfigService
+from agentclaw.community.core.bot_management.services.default_image_policy_listener import (
+    DefaultImagePolicyActivationListener,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.devices.protocols import (
     BotQueryProtocol,
     BotSyncProtocol,
     McpSyncProtocol,
 )
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.arca_bot_create_baas_rollout_config import (
     ArcaBotCreateBaasRolloutConfigProvider,
 )
@@ -91,9 +93,8 @@ from agentclaw.community.core.devices.services.oss_to_nas_switch_service import 
 from agentclaw.community.core.mcp.services.sync_service import MCPSyncService
 from agentclaw.community.core.notify.bot_lister import RepositoryNotifyBotLister
 from agentclaw.community.core.notify.protocol import NotifyBotLister
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.system_config import (
     SystemConfigService,
@@ -104,9 +105,7 @@ from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.drm import DRMReaderPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
-from agentclaw.community.plugins.device_repository import (
-    DeviceRepository as UnifiedDeviceRepository,
-)
+from agentclaw.community.core.repository.implementations.devices.device import DeviceRepository as UnifiedDeviceRepository
 from agentclaw.community.plugins.local.process_manager import LocalProcessManager
 
 
@@ -117,9 +116,7 @@ class DevicesModule(Module):
     """Neutral, profile-independent bindings for the devices module."""
 
     def configure(self, binder) -> None:
-        from agentclaw.community.plugins.oss_to_nas_record_repository import (
-            OssToNasRecordRepository as UnifiedOssToNasRecordRepository,
-        )
+        from agentclaw.community.core.repository.implementations.devices.oss_to_nas_record import OssToNasRecordRepository as UnifiedOssToNasRecordRepository
 
         # Unified ORM repo (one body, ZDAS + SQLite). @inject ctor takes
         # the bound DatabasePlugin; prod vs test differ only by which
@@ -153,6 +150,11 @@ class DevicesModule(Module):
         binder.bind(
             DeviceFileSystemResolver,
             to=DefaultDeviceFileSystemResolver,
+            scope=singleton,
+        )
+        binder.bind(
+            DefaultImagePolicyActivationListener,
+            to=DefaultImagePolicyActivationListener,
             scope=singleton,
         )
         # NOTE: the ``DeviceSyncDispatcher`` seam is a Protocol bound per-profile
@@ -260,6 +262,8 @@ class DevicesModule(Module):
         task_queue_service: TaskQueueService,
         baas_device_service: BaasDeviceService,
         bot_repository: BotRepository,
+        publish_repository: BotPublishRepositoryProtocol,
+        common_config_service: CommonConfigService,
         template_service: TemplateService,
     ) -> BaasPublishTaskLifecycle:
         return BaasPublishTaskLifecycle(
@@ -269,6 +273,8 @@ class DevicesModule(Module):
             task_queue_service=task_queue_service,
             baas_device_service=baas_device_service,
             bot_repository=bot_repository,
+            publish_repository=publish_repository,
+            common_config_service=common_config_service,
             template_service=template_service,
         )
 

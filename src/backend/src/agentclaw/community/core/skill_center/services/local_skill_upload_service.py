@@ -20,10 +20,8 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    BotCollabLogRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.errors import (
     LocalSkillDuplicateError,
     LocalSkillEditPausedError,
@@ -33,19 +31,15 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.bot_management.readiness import is_bot_ready
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
     SkillSetServiceFactory,
 )
-from agentclaw.community.plugin_api.local_skill_cleanup import (
-    LocalSkillCleanupRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.core.skills_pool.edit_guard import (
     SkillsPoolEditGuard,
     SkillsPoolEditPausedError,
@@ -113,6 +107,7 @@ class LocalSkillUploadService:
                 raise LocalSkillNotFoundError()
             if not is_bot_ready(bot):
                 raise LocalSkillNotReadyError()
+            name, description, files = self._unpack(package)
             is_teclaw = self._is_teclaw(bot_id=bot_id, owner_id=owner_id)
             await self._retry_pending_cleanup(
                 bot=bot,
@@ -120,7 +115,6 @@ class LocalSkillUploadService:
                 bot_id=bot_id,
                 is_teclaw=is_teclaw,
             )
-            name, description, files = self._unpack(package)
             # Re-read same-name candidates, owner, readiness and default state
             # under the edit lock.  Uploader identity is intentionally absent.
             default_set = self._ensure_default_set(
@@ -134,6 +128,17 @@ class LocalSkillUploadService:
             if len(matches) > 1:
                 raise LocalSkillDuplicateError()
             if matches:
+                if self._cleanup_repo.list_repair_required(
+                    env=str(bot["env"]),
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    skill_id=str(matches[0]["id"]),
+                ):
+                    # A failed delete may still restore the authoritative old
+                    # package into its recorded locator.  Do not let a
+                    # replacement reuse that skill identity until recovery has
+                    # converged, or the recovery could overwrite new content.
+                    raise LocalSkillStorageError()
                 return await self._replace(
                     skill=matches[0],
                     bot=bot,
@@ -294,6 +299,26 @@ class LocalSkillUploadService:
             }
         )
 
+    def _ensure_default_set_membership(
+        self,
+        *,
+        owner_id: str,
+        bot_id: str,
+        engine_type: str | None,
+        skill_id: str,
+    ) -> None:
+        """Repair legacy Local Skill membership before publishing a replacement."""
+        default_set = self._ensure_default_set(
+            owner_id=owner_id, bot_id=bot_id, engine_type=engine_type
+        )
+        members = self._skill_set_repo.get_skills_in_set(str(default_set["id"]))
+        if any(str(member.get("id")) == skill_id for member in members):
+            return
+        if not self._skill_set_repo.add_skill_to_set(
+            str(default_set["id"]), skill_id, user_id=owner_id
+        ):
+            raise LocalSkillStorageError()
+
     async def _replace(
         self,
         *,
@@ -343,26 +368,56 @@ class LocalSkillUploadService:
         runtime_sync_attempted = False
         try:
             await staged.write(files)
-            updated = self._skill_repo.update(
-                skill["id"],
-                {
-                    "description": description,
-                    "git_path": f"local://{new_locator}",
-                    "user_id": owner_id,
-                },
-            )
-            if updated is None:
-                raise RuntimeError("Local Skill metadata switch failed")
-            switched = True
-            # Register deletion before runtime sync makes the committed switch
-            # recoverable even if a later obsolete-byte purge cannot start.
-            old_cleanup_work_id = self._record_cleanup(
-                bot, owner_id, bot_id, str(skill["id"]), old_locator
+            old_cleanup_work_id = self._cleanup_repo.record_preparing(
+                env=str(bot["env"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                skill_id=str(skill["id"]),
+                package_locator=old_locator,
             )
             if old_cleanup_work_id is None:
                 raise LocalSkillStorageError()
-            runtime_sync_attempted = bool(skill["active"])
-            if bool(skill["active"]) and not self._sync_runtime(bot, owner_id, bot_id):
+            committed_cleanup_id = self._skill_repo.replace_bot_local_skill(
+                skill_id=str(skill["id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                old_locator=old_locator,
+                new_locator=new_locator,
+                description=description,
+                # Replacements always reconcile the runtime before the old
+                # package can be cleaned up, including an inactive skill
+                # whose desired state is represented by an exclusion.
+                requires_runtime_restore=True,
+                cleanup_work_id=old_cleanup_work_id,
+            )
+            if committed_cleanup_id != old_cleanup_work_id:
+                raise RuntimeError("Local Skill metadata switch failed")
+            switched = True
+            runtime_sync_attempted = True
+            if bool(skill["active"]):
+                self._ensure_default_set_membership(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                    skill_id=str(skill["id"]),
+                )
+            else:
+                # A prior default-set exclusion can be stale after defaults
+                # are recreated.  Mirror the desired inactive state into the
+                # current default set before publishing the replacement.
+                default_set = self._ensure_default_set(
+                    owner_id=owner_id,
+                    bot_id=bot_id,
+                    engine_type=bot.get("active_engine"),
+                )
+                if not self._skill_set_repo.add_default_skill_exclusion(
+                    owner_id,
+                    bot_id,
+                    int(default_set["id"]),
+                    int(skill["id"]),
+                ):
+                    raise LocalSkillStorageError()
+            if not self._sync_runtime(bot, owner_id, bot_id):
                 raise LocalSkillRuntimeSyncError()
             self._audit_log_repo.insert(
                 {
@@ -403,6 +458,9 @@ class LocalSkillUploadService:
                     runtime_sync_attempted=runtime_sync_attempted,
                 )
             else:
+                self._cancel_cleanup_if_registered(
+                    old_cleanup_work_id, bot, owner_id, bot_id
+                )
                 await self._discard_or_record(
                     bot=bot,
                     owner_id=owner_id,
@@ -457,7 +515,6 @@ class LocalSkillUploadService:
                 raise LocalSkillStorageError()
             if (
                 runtime_sync_attempted
-                and bool(skill["active"])
                 and not self._sync_runtime(bot, owner_id, bot_id)
             ):
                 # Runtime may have switched partway before reporting failure.
@@ -555,7 +612,9 @@ class LocalSkillUploadService:
         for work in self._cleanup_repo.list_pending(
             env=str(bot["env"]), owner_id=owner_id, bot_id=bot_id
         ):
-            if self._cleanup_target_is_authoritative(work):
+            if self._cleanup_target_is_authoritative(
+                work, owner_id=owner_id, bot_id=bot_id
+            ):
                 self._cancel_cleanup_if_registered(
                     int(work["id"]), bot, owner_id, bot_id
                 )
@@ -571,7 +630,7 @@ class LocalSkillUploadService:
                     error="runtime restore before cleanup failed",
                 ):
                     raise LocalSkillStorageError()
-                continue
+                raise LocalSkillStorageError()
             storage = (
                 self._skill_service_factory.local_skill_package_storage_for_locator(
                     entity_id=str(bot["entity_id"]),
@@ -615,14 +674,18 @@ class LocalSkillUploadService:
             raise LocalSkillStorageError() from exc
         return context.provider == "teclaw"
 
-    def _cleanup_target_is_authoritative(self, work: dict[str, Any]) -> bool:
+    def _cleanup_target_is_authoritative(
+        self, work: dict[str, Any], *, owner_id: str, bot_id: str
+    ) -> bool:
+        locator = str(work["package_locator"])
         skill_id = work.get("skill_id")
-        if skill_id is None:
-            return False
-        skill = self._skill_repo.get_by_id(str(skill_id))
-        return bool(
-            skill and skill.get("git_path") == f"local://{work['package_locator']}"
-        )
+        if skill_id is not None:
+            skill = self._skill_repo.get_by_id(str(skill_id))
+            if skill and skill.get("git_path") == f"local://{locator}":
+                return True
+        return self._skill_repo.get_bot_local_by_locator(
+            bot_id=bot_id, user_id=owner_id, locator=locator
+        ) is not None
 
     def _same_name_matches(
         self, *, bot_id: str, owner_id: str, name: str

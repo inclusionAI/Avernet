@@ -20,7 +20,6 @@ import time
 import zipfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Protocol, runtime_checkable
 
 import requests
 
@@ -33,17 +32,6 @@ logger = get_logger()
 
 NAS_ROOT_ENV = "SKILL_CENTER_NAS_ROOT"
 DEFAULT_NAS_ROOT = os.path.expanduser("~/aiworkbench/skills-center")
-
-
-@runtime_checkable
-class SkillCenterSyncLogRepository(Protocol):
-    """SC 同步日志 repository 协议（local SQLite / prod 关系存储实现）。"""
-
-    def create(self, data: dict) -> dict:
-        ...
-
-    def mark_success(self, skill_uuid: str, version: str, env: str, checksum: str = None) -> None:
-        ...
 
 
 def _parse_version(version_str: str) -> tuple:

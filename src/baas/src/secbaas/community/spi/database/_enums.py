@@ -12,3 +12,4 @@ class PluginDatabaseType(StrEnum):
 
     ZDAS_ORM = "ZDAS_ORM"
     SQLITE_ORM = "SQLITE_ORM"
+    MARIADB_ORM = "MARIADB_ORM"

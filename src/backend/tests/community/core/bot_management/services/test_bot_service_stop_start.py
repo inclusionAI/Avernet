@@ -57,6 +57,9 @@ def _make_service() -> BotService:
     # the resolved DeviceService.
     svc._bot_publish_provider = lambda: MagicMock()
     svc._device_service_provider = lambda: MagicMock()
+    teclaw_provision = MagicMock()
+    teclaw_provision.is_teclaw.side_effect = lambda engine: engine == "teclaw"
+    svc._teclaw_provision_provider = lambda: teclaw_provision
     # Restart idempotency lock repo. Default: acquire() returns a truthy mock
     # so restart_bot treats the lock as acquired and proceeds to stop+start.
     svc._restart_lock_repo = MagicMock()

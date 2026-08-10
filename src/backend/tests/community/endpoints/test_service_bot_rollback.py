@@ -8,12 +8,10 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.channel.services.repositories import ChannelRepository
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BAAS, HttpClient
 from tests.community.factories.access import make_staff_user
@@ -95,11 +93,9 @@ def _install_baas_for_rollback(
 def _seed_base(world) -> dict:
     """Seed base entities: user, bot, skills, binding. Returns the bot dict."""
     make_staff_user(world, user_id=_OWNER)
-    from agentclaw.community.core.skill_center.services.repositories import (
-        SkillRepository,
-        SkillSetRepository,
-    )
-    from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+    from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
     from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
     world.get(SkillRepoSyncPlugin).set_override("get_local_skills_root", lambda: None)
@@ -549,7 +545,7 @@ def _seed_rollback_stored_online_channel(world) -> None:
     bot = _seed_base(world)
     _install_baas_for_rollback(world)
 
-    from agentclaw.community.core.channel.services.repositories import ChannelRepository
+    from agentclaw.community.core.repository.protocols.chat import ChannelRepository
     # Live table now holds card-B — rollback must NOT consult it (compose_stored).
     world.get(ChannelRepository).insert_channel(
         type="dingding", description=None, identity_id=_OWNER, bind_bot_id=_BOT_ID,

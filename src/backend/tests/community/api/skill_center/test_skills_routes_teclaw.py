@@ -93,7 +93,7 @@ def _app(skill_service):
             from agentclaw.community.api.skill_parameter_service_factory import (
                 SkillParameterServiceFactoryProtocol,
             )
-            from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+            from agentclaw.community.core.repository.protocols.bot import BotRepository
             from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
                 CollaboratorLockService,
             )
@@ -106,9 +106,7 @@ def _app(skill_service):
             from agentclaw.community.core.skill_center.factories import (
                 SkillServiceFactory,
             )
-            from agentclaw.community.core.skill_center.services.repositories import (
-                SkillRepository,
-            )
+            from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
             from agentclaw.community.core.workspace.path_factory import (
                 WorkspacePathFactory,
             )
@@ -161,7 +159,7 @@ def test_readme_route_uses_skill_bot_context_not_request_context_for_teclaw():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -221,7 +219,7 @@ def test_readme_route_link_name_falls_back_to_global_lookup():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -269,7 +267,7 @@ def test_readme_route_handles_duplicate_link_name_scopes_and_desktop_bot():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -306,7 +304,7 @@ def test_readme_route_falls_back_when_skill_not_found_and_bot_type_lookup_fails(
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -362,7 +360,7 @@ def test_readme_route_rejects_local_skill_when_owning_bot_is_missing():
     client, factory, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -390,7 +388,7 @@ def test_readme_route_resolves_default_bot_by_env_owner_and_bot_id():
     factory.create.side_effect = [lookup_svc, read_svc]
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -432,7 +430,7 @@ def test_readme_route_rejects_ambiguous_default_bot_owner_scope():
     client, _, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -460,7 +458,7 @@ def test_readme_route_handles_target_bot_repository_failure(caplog):
     client, _, _ = _app(lookup_svc)
     bot_repo = client.app.state.injector.get(
         __import__(
-            "agentclaw.community.core.bot_management.repository.protocol",
+            "agentclaw.community.core.repository.protocols.bot",
             fromlist=["BotRepository"],
         ).BotRepository
     )
@@ -493,8 +491,8 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     bot_repo = injector.get(BotRepository)
     bot_repo.get_by_id.return_value = {
@@ -531,15 +529,21 @@ def test_parameter_routes_use_trusted_bot_owner_for_device_resolution(method):
         )
 
 
-def test_parameter_route_rejects_request_bot_mismatch_before_device_access():
-    """skill 与请求 Bot 不一致时 fail closed，不能拨号到请求指定的 Bot。"""
+@pytest.mark.parametrize(
+    "git_path",
+    ["local://skills-local/x", "", "unknown://x"],
+)
+def test_parameter_route_rejects_request_bot_mismatch_before_device_access(
+    git_path,
+):
+    """Bot 私有或未知来源必须 fail closed，不能拨号到请求指定的 Bot。"""
 
     lookup_svc = MagicMock()
     lookup_svc.get_skill.return_value = {
         "id": "1",
         "name": "x",
         "link_name": "x",
-        "git_path": "local://skills-local/x",
+        "git_path": git_path,
         "bolt_id": "b1",
         "user_id": "owner-u",
     }
@@ -549,7 +553,7 @@ def test_parameter_route_rejects_request_bot_mismatch_before_device_access():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     injector.get(SkillRepository).get_by_id.return_value = lookup_svc.get_skill.return_value
     parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
@@ -560,6 +564,7 @@ def test_parameter_route_rejects_request_bot_mismatch_before_device_access():
     )
 
     assert response.status_code == 409
+    assert response.json()["detail"] == "Skill does not belong to the requested Bot"
     parameter_factory.create.assert_not_awaited()
 
 
@@ -569,7 +574,7 @@ def test_parameter_route_rejects_private_skill_without_bot_binding():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -612,11 +617,11 @@ def test_parameter_routes_reject_non_admin_collaborator(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     injector.get(SkillRepository).get_by_id.return_value = skill
     injector.get(BotRepository).get_by_id.return_value = {
@@ -653,11 +658,11 @@ def test_parameter_route_returns_structured_error_without_active_binding():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context import (
         DeviceNotBoundError,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -689,22 +694,34 @@ def test_parameter_route_returns_structured_error_without_active_binding():
     assert response.json()["detail"] == "Bot has no active device"
 
 
-def test_shared_git_skill_parameters_use_requested_bot_owner():
-    """共享 Git Skill 的 author 不影响目标 Bot owner 解析。"""
+@pytest.mark.parametrize(
+    ("method", "git_path", "bolt_id"),
+    [
+        ("get", "git://shared", None),
+        ("get", "git://shared", "default"),
+        ("get", "center://skill-uuid", "publisher-bot"),
+        ("post", "center://skill-uuid", "publisher-bot"),
+    ],
+)
+def test_shared_market_skill_parameters_use_requested_bot_owner(
+    method, git_path, bolt_id
+):
+    """共享市场 Skill 的历史归属不影响目标 Bot owner 解析。"""
 
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
+    lookup_svc.parse_local_skill_config = AsyncMock(return_value=None)
     skill = {
         "id": "1",
         "name": "shared",
         "link_name": "shared",
-        "git_path": "git://shared",
-        "bolt_id": None,
+        "git_path": git_path,
+        "bolt_id": bolt_id,
         "user_id": "market-author",
         "is_public": True,
     }
@@ -721,9 +738,16 @@ def test_shared_git_skill_parameters_use_requested_bot_owner():
     }
     parameter_factory = injector.get(SkillParameterServiceFactoryProtocol)
 
-    response = client.get("/api/skills/1/parameters", params=_Q)
+    if method == "get":
+        response = client.get("/api/skills/1/parameters", params=_Q)
+    else:
+        response = client.post(
+            "/api/skills/1/parameters",
+            params=_Q,
+            json={"parameters": {}},
+        )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     parameter_factory.create.assert_awaited_once_with(
         bot_id="b1",
         user_id="owner-u",
@@ -736,8 +760,8 @@ def test_parameter_route_scopes_duplicate_default_bot_by_entity():
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -783,11 +807,11 @@ def test_parameter_route_scopes_duplicate_default_bot_by_entity():
 def test_parameter_post_keeps_edit_lock_enforcement():
     """敏感请求体不入审计，但写操作仍必须持有 Bot 编辑锁。"""
 
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
         CollaboratorLockService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {
@@ -830,11 +854,11 @@ def test_parameter_routes_fail_closed_when_permission_service_errors(method):
     from agentclaw.community.api.skill_parameter_service_factory import (
         SkillParameterServiceFactoryProtocol,
     )
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
         CollaboratorService,
     )
-    from agentclaw.community.core.skill_center.services.repositories import SkillRepository
+    from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
     lookup_svc = MagicMock()
     skill = {

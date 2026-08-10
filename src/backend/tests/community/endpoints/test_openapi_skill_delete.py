@@ -14,16 +14,14 @@ from agentclaw.community.api.local_skill_delete_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
-from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
@@ -113,8 +111,17 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": _TENANT,
                     "subject": {"id": _OWNER, "username": "delete@example.test"},
+                },
+                {
+                    "type": "app",
+                    "tenant": _TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "Delete Test App",
+                        "owners": "delete-org",
+                        "tenant": _TENANT,
+                    },
                 }
             ],
         },
@@ -224,7 +231,11 @@ def _seed_inactive_skill_in_active_custom_set(world) -> None:
     method="DELETE",
     path="/openapi/v1/bots/skills/{skill_id}",
     scenario="deletes_exact_inactive_local_skill",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_inactive_delete,
     expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"deleted": True}}),
 )
@@ -236,7 +247,11 @@ def delete_inactive_local_skill():
     method="DELETE",
     path="/openapi/v1/bots/skills/{skill_id}",
     scenario="rejects_active_local_skill",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_active_delete,
     expect=ExpectError(
         status=409,
@@ -251,7 +266,11 @@ def delete_active_local_skill_is_rejected():
     method="DELETE",
     path="/openapi/v1/bots/skills/{skill_id}",
     scenario="rejects_inactive_default_skill_referenced_by_active_custom_set",
-    input=CaseInput(path_params={"skill_id": "1"}, headers=_HEADERS),
+    input=CaseInput(
+        path_params={"skill_id": "1"},
+        query_params={"user_id": _OWNER},
+        headers=_HEADERS,
+    ),
     seed=_seed_inactive_skill_in_active_custom_set,
     expect=ExpectError(
         status=409,

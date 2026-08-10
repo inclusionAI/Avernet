@@ -1,5 +1,7 @@
 """Coverage tests for PaasServiceFacade — targets uncovered branches."""
 
+import asyncio
+import threading
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1566,3 +1568,77 @@ class TestFetchStartProgress:
 
         with pytest.raises(DeviceFacadeException):
             await f.fetch_start_progress("dev@42")
+
+
+# ---------------------------------------------------------------------------
+# resolve_invoke_http_info — event loop blocking regression
+# ---------------------------------------------------------------------------
+
+
+class TestResolveInvokeHttpInfoDoesNotBlockLoop:
+    """Template lookup and factory creation both issue synchronous DB queries.
+
+    Running them inline on the uvicorn event loop parks the whole worker for
+    the duration of the query. These tests block the calling thread until a
+    loop-side coroutine releases it: if the sync call ran on the loop, the
+    releasing coroutine could never be scheduled.
+    """
+
+    @staticmethod
+    def _blocking(return_value, reached, release):
+        def _call(*_args, **_kwargs):
+            reached.set()
+            if not release.wait(timeout=5):
+                raise AssertionError(
+                    "event loop was blocked: the loop-side coroutine never ran "
+                    "while the synchronous call was in flight"
+                )
+            return return_value
+
+        return _call
+
+    @staticmethod
+    async def _release_when_reached(reached, release):
+        await asyncio.to_thread(reached.wait, 5)
+        release.set()
+
+    @pytest.mark.asyncio
+    async def test_template_lookup_yields_loop(self):
+        f, tpl_svc, factory = _make_facade()
+        mock_svc = _make_mock_service()
+        factory.create.return_value = mock_svc
+
+        reached = threading.Event()
+        release = threading.Event()
+        tpl_svc.get_by_template_id.side_effect = self._blocking(
+            _make_template(), reached, release
+        )
+
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(
+                f.resolve_invoke_http_info("dev@42", 8080, "/api"),
+                self._release_when_reached(reached, release),
+            ),
+            timeout=10,
+        )
+
+        assert isinstance(result, HttpConnectionInfo)
+
+    @pytest.mark.asyncio
+    async def test_factory_create_yields_loop(self):
+        f, tpl_svc, factory = _make_facade()
+        mock_svc = _make_mock_service()
+
+        reached = threading.Event()
+        release = threading.Event()
+        factory.create.side_effect = self._blocking(mock_svc, reached, release)
+
+        result, _ = await asyncio.wait_for(
+            asyncio.gather(
+                f.resolve_invoke_http_info("dev@42", 8080, "/api"),
+                self._release_when_reached(reached, release),
+            ),
+            timeout=10,
+        )
+
+        assert isinstance(result, HttpConnectionInfo)

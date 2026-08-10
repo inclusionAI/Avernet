@@ -58,10 +58,10 @@ from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemD
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.core.resources.models import ResourceType
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.resources.yuque_resolve import YuqueResolveError, resolve_yuque_url
 from agentclaw.community.core.resources.dependencies.service_dep import sync_yuque_permissions
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,

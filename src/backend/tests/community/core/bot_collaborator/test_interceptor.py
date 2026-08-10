@@ -145,7 +145,7 @@ class TestCollaboratorPermissionInterceptor:
     @pytest.mark.asyncio
     async def test_before_no_owner_id_resolves_via_repo(self):
         """测试无 owner_id 时通过 BotRepository 解析归属，而非跳过权限检查。"""
-        from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
 
         interceptor = CollaboratorPermissionInterceptor(
             bot_id="$request.bot_id",
@@ -176,7 +176,7 @@ class TestCollaboratorPermissionInterceptor:
     @pytest.mark.asyncio
     async def test_before_no_owner_id_rejects_non_owner(self):
         """测试无 owner_id 时解析到非当前用户归属 → 403 拒绝。"""
-        from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
 
         interceptor = CollaboratorPermissionInterceptor(
             bot_id="$request.bot_id",
@@ -526,7 +526,7 @@ class TestExtractOwnerFromRequestBody:
     async def test_extract_owner_id_none_resolves_via_repo(self):
         """测试 request body 未提供 owner_id 时通过 BotRepository 解析归属。"""
         from agentclaw.community.adapters.http.bot_public.schemas import BotPublicRequest
-        from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+        from agentclaw.community.core.repository.protocols.bot import BotRepository
 
         interceptor = CollaboratorPermissionInterceptor(
             bot_id="$bot_id",

@@ -3,10 +3,8 @@
 Tests the following endpoint from ``adapters/http/service_bot/router_build.py``:
 - POST /api/service-bot/build
 
-This endpoint exercises the post-R14 sandbox provider through
-``BotBuildService._sync_skill_links`` → ``provider.get_base_path()``.
-The provider's ``base_path`` now comes from ``WorkspaceConfig`` (typed,
-YAML-driven) instead of an ``is_local_mode`` flag.
+This endpoint exercises the engine-aware build plan selected by the sandbox
+provider. The provider's workspace configuration is typed and YAML-driven.
 
 The NAS shell-outs (``sudo chmod`` / ``sudo rsync`` against
 ``/home/admin/.merge_nas``) are the one thing no test host can serve, so the
@@ -24,7 +22,7 @@ from __future__ import annotations
 import subprocess
 
 from agentclaw.community.api.bot_build_service import BotBuildServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.service_bot.services.bot_build_service import (
     BotBuildService,
 )

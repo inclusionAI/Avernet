@@ -13,6 +13,10 @@ consumes:
   - "Every plugin Protocol (agentclaw.community.plugin_api.*)"
   - "Some core domain repository protocols (injected for sandbox-resolution etc.)"
 internal_dependencies:
+  - agentclaw.community.core.economy.governance.orm    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.access
   - agentclaw.community.core.auth
   - agentclaw.community.core.base
@@ -22,6 +26,9 @@ internal_dependencies:
   - agentclaw.community.core.user_list.models  # SQLite ORM side-effect import for user-list tables
   - agentclaw.community.core.economy.governance.contracts.models  # SQLite ORM side-effect import for local table creation
   - agentclaw.community.core.economy.governance.repositories.orm  # SQLite ORM side-effect import for local table creation
+  - agentclaw.community.core.system_config.orm  # SQLite ORM side-effect import for ac_config_* table creation
+  - agentclaw.community.core.skill_center.orm   # SQLite ORM side-effect import for ac_default_skillset_* table creation
+  - agentclaw.community.core.devices.repository.models  # SQLite ORM side-effect import for ac_entity_device_binding
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_chat

@@ -143,7 +143,7 @@ _所有组只依赖 **bots 隔离（Stage 1 ✅）** —— 没有 Track A 阶�
 
 | 组 | 端点数 | 负责人 | 优先级 | 路由 | 状态 |
 |---|---|---|---|---|---|
-| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**（仅 personal bot；`service` 返回 501） |
+| sessions | 7 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/sessions/` | ✅ **已实现 —— PR #630**；运维者 + 阶段 2026-08-09 |
 | engine（只读） | 3 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/engine/` | ✅ **已实现 —— PR #630** |
 | connection | 1 | ⬜ 未分配 | P1 | `openapi_v1/engine_runtime/connection/` | ✅ **已实现 —— PR #630** |
 | approvals | 3 | ⬜ 未分配 | P2 | `openapi_v1/engine_runtime/approvals/` | ✅ **已实现 —— PR #630** |
@@ -472,6 +472,126 @@ AvernetTenantMiddleware → resolve_avernet_tenant(request)  ─┐
 **PR #363**（`docs/api-endpoints.zh-CN.md`，totalfrank 写的中文端点参考 —— 截至
 2026-07-29 仍是 open/draft；此处作为参考保留）中的 v1 契约总览做了交叉核对。
 
+## 显式指定终端用户（`?user_id=`）
+
+**每一个按用户作用域的操作，都带一个必填的 `user_id` query 参数。** 不是 body 字段，
+也不是路径段 —— 就放 query string，无论什么方法、无论有没有 body。
+
+```text
+GET    /openapi/v1/bots/b-1?user_id=u-42
+PUT    /openapi/v1/bots/b-1?user_id=u-42        {"bot_name": "Ada"}
+DELETE /openapi/v1/bots/b-1?user_id=u-42
+POST   /openapi/v1/bots/skills/upload?bot_id=b-1&user_id=u-42    <raw zip>
+```
+
+**为什么只有一种位置。** `user_id` 不是这个面上任何资源的属性，它表示*这次调用是为谁
+发起的*：在每个操作上都是同一个值，在读和写上含义完全一致。请求 body 描述的是被操作
+的资源，把它放进去就会读成资源的一个属性（在 `PUT …/bots/{bot_id}` 的 body 里挨着
+`bot_name`，看起来就像在给 Agent 设置这个字段）。路径段*命名*资源，所以
+`/bots/{bot_id}/users/{user_id}` 会声称在寻址「Agent 名下的某个用户」—— 归属关系反了，
+而且描述的不是该操作实际返回的东西。
+
+三种替代方案已评估并否决，记录在此以免同一个问题被从头再讨论一遍
+（`specs/2026-08-08-openapi-v1-explicit-user-id/plan.md`）：
+
+| 已否决 | 原因 |
+| --- | --- |
+| 放进 11 个 JSON body 写操作的 body | 对于 body 不由本 API 定义的写操作需要一张三行例外表 —— 两个裸字节上传，以及自由格式的 `PUT …/engine-config` —— 并且会让同一个资源上的同一个概念分裂成两种位置 |
+| 放进路径 | 如上，归属关系反了；用户在前的 `/openapi/v1/users/{user_id}/…` 形式本身自洽，但此处走不通：`/openapi/v1` 之后的第一段是网关的**域选择器** |
+| `X-Avernet-User-Id` header | 统一，且与网关的委托草案一致（auth design §15），但会让用户变成传输层元数据，而不是操作的一个参数 |
+
+**`bot_id` 不动。** 它在寻址 Agent 的地方留在路径里，作为参数的地方留在 query 里。
+本次改动没有挪动任何一个。
+
+**没有改变的是什么。** 被指定的用户仍然必须是已验证的调用方本人。指定其他人一律
+`403` + 固定的 `"Forbidden"` —— 响应体不透露被指定的用户是谁，两个不同的被拒 id 得到
+逐字节相同的响应。没有已验证 principal 的请求依旧是 `401`，与之前完全一致。这件事的
+全部意义在于：在「App 代表用户调用」这个调用方出现*之前*，先把契约准备好；真正放行它
+是委托工作流（auth design §15），而它要放宽的那一行，就是
+`openapi_v1/principal.py::require_user_id` 里的相等性判断。
+
+**有四个操作不带 `user_id`**，因为它们根本没有可按用户切分的维度。它们仍然要求已认证
+的调用方 —— 那是 `require_principal` 的职责 —— 只是给不出按用户区分的答案：
+
+| 操作 | 为什么不带 |
+| --- | --- |
+| `GET /openapi/v1/bots/check-name` | 重名是在整个租户范围内判断的；`check_bot_name_exists` 只接受名字 |
+| `GET /openapi/v1/bots/mcp/servers` | 市场目录 —— 对租户内每个调用方都相同 |
+| `GET /openapi/v1/bots/mcp/servers/{server_code}` | 同上 |
+| `GET /openapi/v1/bots/mcp/tenants` | 同上 |
+
+注意*不在*这张表里的：`list_resources`、`create_resource`、`get_resource`、
+`update_resource` 同样没有用到这个值，但它们仍然带。它们在原则上是按用户作用域的，只是
+今天还没有真正校验 —— 它们按调用方传入的 `bot_id` 作用域，却不检查调用方是否拥有该
+Agent，也就是 `specs/2026-08-02-public-api-user-only-principal/` 记录的那个缺口。以后
+补上它应该是改这几个 handler，而不是给四个公共操作新增一个必填参数。
+
+**Bot Logs 属于另一种排除，也是这里最需要留意的一点。**
+`GET /openapi/v1/bots/logs/traces` 从 #692 起就带一个必填的 `user_id` —— 但在那里它的
+含义是*要读谁的 trace*，是一个过滤条件，同时持有 User 与 App 身份的调用方可以把它指向
+别人。在这里它的含义是*这次调用是为谁发起的*，指向别人就是 403。**同一个拼写，相反的
+契约**，而且发布出去的文档里两者都在。不要在没有先决定「这个地址上它该是哪个含义」之前
+就去「统一」它们。
+
+`tests/…/openapi_v1/test_explicit_user_id.py` 针对生成的文档断言了以上全部 —— 带它的
+56 个、不带它的 4 个、`user_id` 从不作为 body 字段或路径段出现、以及 `bot_id` 的位置
+没有变化 —— 所以破坏该规则的路由会在那里失败，而不是等到 review。
+
+---
+
+## 操作共享 Bot 与已发布阶段（`?owner_id=`、`?stage=`）
+
+**engine-runtime 各组是一个运维台（operator console），谁可以持有它只有一条规则：**
+Bot 的**拥有者**，或 **member 级及以上的协作者** —— 与内部设备连接采用同一门槛
+（`core/engine_runtime/gate.py` 的 `OPERATOR_LEVEL`）。公开（public）可见性不授予任何
+人操作权：公开 Bot 的受众通过 messages 通道与它对话，操作权仍属于它的团队。其他任何
+调用者得到的应答**与 Bot 不存在时逐字节一致**（掩蔽 404）—— 不是 403，403 保持其
+`user_id` 不匹配的唯一含义。协作者查询失败时拒绝（fail closed）。拒绝点会把两个 id
+写入日志；响应不携带任何一个。
+
+两个可选的 query 参数指定目标，遵循与 `user_id` 相同的放置规则（query string，从不
+放在 body 或路径段）：
+
+```text
+GET /openapi/v1/bots/sessions/b-1?user_id=u-collab&owner_id=u-owner            协作者，团队 Bot
+GET /openapi/v1/bots/engine/b-1/status?user_id=u-owner&stage=online            拥有者，线上运行态
+GET /openapi/v1/bots/connection/b-1?user_id=u-collab&owner_id=u-owner&stage=verify
+```
+
+- **`owner_id`** —— 请求所指向 Bot 的拥有者。默认是调用者本人，因此操作自己的 Bot
+  无需额外指定，**此前有效的每个请求行为逐字节不变**。
+- **`stage`** —— 请求指向哪个运行态：`draft`（默认 —— Bot 自己的工作区，也是 personal
+  bot 唯一的运行态）、`verify` 或 `online`。已发布阶段是否存活由
+  `core/engine_runtime/stage.py` 的规则决定，与 cron 的运行态选取一致：`online` 在最新
+  发布单为 `SUCCESS` 时存活；`verify` 在有发布单验证中时存活，或在晋级后保留的 verify
+  binding 仍为 ACTIVE 时存活。没有存活运行态的阶段 —— 包括对 personal bot 指定已发布
+  阶段 —— 返回 `409` `"No live runtime at the requested stage"`，从不回退到另一阶段的
+  binding。（`eval` 没有长期运行态，不可寻址。）
+
+**运维者看到的是整个设备的状态，这是明文契约。** 引擎的会话集合不按调用者划分 ——
+引擎端口会丢弃 `user_id` 过滤 —— 因此被准入的运维者会看到所指运行态上的所有会话，
+包括终端用户对话创建的会话，与内部工作台向拥有者展示的完全一致。经由本面创建的会话
+会记录实际操作者，保持可归因。一个注意点：多实例 provider 可能把一个已发布阶段扇出
+到多个设备实例；按阶段寻址的应答描述的是所指 binding 的当前实例，不是整个集群
+（cron 的扇出仍在内部）。
+
+被否决的替代方案（记录在 `specs/2026-08-09-openapi-v1-access-expansion/plan.md`，
+避免重新展开讨论）：按调用者划分会话（引擎会忽略按用户过滤，而后端自建
+调用者→会话索引等于在运维台里重造聊天产品）；把公开 Bot 的任意调用者当作运维者
+（内部可达不等于公开授权）；`stage` 作为路径段；必填的 `owner_id`。
+
+延后但未丢失 —— 已建 issue：数据类目的协作者访问（#906、#907）、routines 的阶段
+钉死（#908）、发布生命周期（#909）、可见性/协作者管理（#910）、delegation（#911）。
+skills 组的 `owner_entity_id` 定位参数早于 `owner_id`，应在 skills 发布前统一到
+`owner_id`（spec 未决问题 1）。
+
+`tests/…/openapi_v1/engine_runtime/test_operator_access.py` 对全部十六个操作扫掠
+运维者矩阵；`…/test_stage_addressing.py` 钉住阶段行为并断言两个参数恰好出现在这
+十六个操作上、可选、位于 query；`tests/community/core/engine_runtime/test_stage.py`
+钉住存活规则。
+
+---
+
 ## 寻址规则
 
 **每个操作的地址都是 `/openapi/v1/bots/<component>/…`。** 组件的**字面**名称在前；
@@ -506,8 +626,8 @@ id 恰好等于某个组件名，它在该地址上就不可达。这个集合�
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity  logs
-mcp  models  resources  routines  sessions  skills
+approvals  ceiling  check-name  connection  engine  identity  loadtest
+logs  mcp  models  resources  routines  sessions  skills
 ```
 
 **先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。
@@ -661,6 +781,52 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
+### ✅ loadtest（2 个端点）· `openapi_v1/loadtest/router.py` —— **已实现**
+
+两个刻意什么都不做的端点，用于让压测量出**链路本身**的开销 —— 网关的鉴权与转发、
+本服务的中间件栈、框架的请求处理 —— 而不让这个数字里混进数据库往返、engine 调用或
+Agent 状态。它们不是产品面，而是其它端点的数字所参照的基线。
+
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/loadtest/hello` | 返回常量 `hello world` | `Envelope[HelloWorld]`（`data.message == "hello world"`） |
+| WEBSOCKET | `/openapi/v1/bots/loadtest/ws/echo` | 把收到的每一帧原样回送 | ——（见下） |
+
+**鉴权 —— 与本面上其它操作完全一致。** 两者都声明了 `require_principal`，因此没有通过
+校验的 `X-Avernet-Principal` 的调用方在 handler 运行前就会被拒绝：HTTP 端点返回标准
+`ErrorEnvelope` 的 `401`；socket 则以关闭码 `1008` 拒绝 —— 在 accept 之前拒绝握手，
+客户端看到的是 HTTP `403`。经网关时两者都从 `/openapi/v1/bots/**` 继承
+`user: required`，`route_security` 中没有为它们开豁免。**不豁免是刻意的**：绕开鉴权测出
+的数字描述的是一条没有调用方能走的链路。
+
+**不按用户维度收敛。** 两者都不带 `?user_id=` —— 它们不读也不写任何数据，没有可供该参数
+指称的范围。参见上文"为终端用户命名"；HTTP 那个已与另外四个同理豁免的目录类读操作一起
+记录在 `test_explicit_user_id.py` 中，并且不声明 `403`。
+
+**socket 的契约**（在此写全，因为 WebSocket 没有 OpenAPI 表示，**不会**出现在任何生成
+产物里 —— 下面这份就是契约全文，而不是某份机器可读文件的摘要）：
+
+- **帧类型。** 文本帧与二进制帧都接受，并按收到时的类型原样回送。载荷逐字节返回：不做
+  裁剪、不重新编码、不解析、不作任何解释，因此驱动端可以自行选择载荷形态。
+- **顺序。** 进一帧、出一帧，保持顺序。不做批处理与合并，也没有服务端主动发起的帧 ——
+  客户端没先说的话，socket 不会说。
+- **断开。** 由客户端关闭结束连接；服务端不主动先关，也不自行发送关闭帧。传输层掉线是
+  同样的结果。两者都不是错误，也不会按错误记录日志。
+- **生命周期。** 无空闲超时、无 ping/pong，除 ASGI server 及前置 L7 跳所施加的限制外，
+  不设消息条数或大小上限。
+
+**路由。** HTTP 端点通过 `bots` domain 直达后端，网关无需改动。socket 需要自己的
+domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 即
+`src/gateway/configs/application.yaml` 中的 `bots-loadtest-ws`：仅 socket 平面、
+原样转发到后端、无 rewrite。`ws` 这一段正是该占用所锚定的位置，与
+`/openapi/v1/bots/messages/ws/**` 同形，因此日后在 `loadtest` 下新增的 HTTP 端点
+天然落在其外。
+
+> **已知缺口。** `AvernetTenantMiddleware` 与公共访问日志在非 HTTP scope 上都会提前
+> 返回，因此该 socket 运行在**默认**租户下，且不写访问日志行。在这里无害 —— 它不读也
+> 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
+> 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
+
 ### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
@@ -669,7 +835,7 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 
 | 组 | 端点数 | 公共路径 |
 |---|---|---|
-| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 仅 personal bot |
+| sessions | 7 | `/openapi/v1/bots/sessions/{bot_id}…` —— 拥有者/协作者运维 |
 | engine | 3 | `/openapi/v1/bots/engine/{bot_id}/{status,capabilities,available}` |
 | models | 2 | `/openapi/v1/bots/models/{bot_id}`、`…/{bot_id}/{model_id}` |
 | approvals | 3 | `/openapi/v1/bots/approvals/{bot_id}/mode`（GET/PUT）、`…/modes` |
@@ -768,6 +934,46 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 ---
 
 ## Changelog（变更记录）（每次挪动看板时追加一条带日期的记录）
+
+- **2026-08-09** —— **engine-runtime 各组开始服务共享 Bot 与已发布阶段。** 运维者规则
+  取代了共享 Bot 一律拒绝：Bot 的拥有者与 member 级及以上协作者可以操作它 —— 包括公开
+  的 personal bot、带协作者的 Bot、以及 service bot 的 verify/online 运行态 —— 通过两个
+  可选 query 参数（`owner_id` 默认为调用者；`stage` 默认为 `draft`），默认值保证此前的
+  每个请求逐字节不变。非运维者得到与 Bot 不存在时一致的应答；死阶段返回 `409`
+  `"No live runtime at the requested stage"`；501 现在只表示「不服务该 Bot 类型」。
+  relay 的 `draft_device` 改为必填无默认的 `stage`，阶段→binding 规则唯一存放于
+  `core/engine_runtime/stage.py`（与 connection 服务共用，并与 cron 的保留 verify 规则
+  一致），`sharing.py` / `BotFacts.is_shared` 退役。详见上文 **操作共享 Bot 与已发布
+  阶段** 与 `specs/2026-08-09-openapi-v1-access-expansion/`。看板已挪动：sessions 行
+  备注。后续工作已建 issue #906–#911。
+
+- **2026-08-09（追记，记录 2026-08-07 合入的 PR #880）** —— **草稿 service bot 曾在整个
+  公共面被服务、且始终指向 draft 设备。** 该变更落地时没有 spec 目录也没有变更记录；
+  在此补记以保全文档历史。它把 Track C 门禁从「仅私有 personal bot」放宽到「未共享
+  personal bot + service bot 未共享的发布前草稿」，所有被门禁的转发固定
+  `draft_device=True` —— 也就是上一条 2026-08-09 访问扩展所取代的状态。其 docstring 中
+  `publish_bot_id + "pub" + version` 的命名方案说法与事实不符（代码写入的是
+  `publish_bot_id = bot_id`；draft 与已发布运行态的真正分界是 binding 的存放位置 ——
+  `ac_bots.binding_id` 与 `ac_bot_publish.ext.binding.{verify,online}`），已由访问扩展
+  修正。
+
+- **2026-08-09** —— **新增 `loadtest` 组件，也是本面上第一个 WebSocket。** 两个刻意
+  什么都不做的端点 —— `GET …/loadtest/hello` 返回常量，`WEBSOCKET …/loadtest/ws/echo`
+  原样回送 —— 让压测能够测出公共链路本身的开销，而不把服务调用混进这个数字。两者都和其它
+  端点一样要求 `require_principal`；都不按用户维度收敛，因此 HTTP 那个与另外四个没有用户
+  维度的操作归为一类。为了让同一个依赖服务于两个平面，`require_principal` 与
+  `resolve_caller` 的入参从 `Request` 放宽为 `HTTPConnection`，没有已验证调用方的握手以
+  关闭码 `1008` 拒绝，而不是用它根本无法承载的 `401` envelope —— **HTTP 行为没有变化**。
+  由于 WebSocket 不会出现在任何生成产物中，socket 的完整契约写在上文 **各组件端点** 一节
+  里而非通过文档发布；网关经仅 socket 平面的 `bots-loadtest-ws` domain 提供该地址，
+  socket 平面上的租户与访问日志缺口也一并记录在那里。
+
+- **2026-08-09** —— **公共面现在显式指定终端用户。** 65 个操作中的 56 个改为接受必填的
+  `user_id` query 参数，不再从已验证 principal 推导 owner；指定其他用户返回 `403`。四个
+  没有用户维度的操作（`check-name`、三个 MCP 目录读）不带该参数，Bot Logs 保持不变 ——
+  它自己的 `user_id` 是相反的含义。`bot_id` 没有挪动。谁可以调用什么完全没有改变：这是
+  为「App 代表用户调用」准备契约，而不是放行它。详见上文 **显式指定终端用户** 与
+  `specs/2026-08-08-openapi-v1-explicit-user-id/`。
 
 - **2026-08-04** —— **Skills Track B integration/release gate 的实现与 CI 已完成，但不等于
   release complete。** Served OpenAPI 现锁定为恰好六个 Bot-owned Local Skill 操作；旧的

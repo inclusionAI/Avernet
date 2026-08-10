@@ -70,6 +70,21 @@ The public package requires an explicit `bcsUrl` or `BCS_URL`.
 If `channels.bcs` is missing, or neither `channels.bcs.bcsUrl` nor `BCS_URL` is set,
 the plugin can still load and register, but the BCS WebSocket runtime will not start.
 
+## OpenClaw compatibility tests
+
+The repository compatibility harness installs exact, published OpenClaw
+versions from this package's declared `openclaw.compat.pluginApi` floor through
+the current non-beta `latest` release. It probes real SDK exports and types,
+then runs `chat.send` through a local deterministic model and a real OpenClaw
+gateway:
+
+```bash
+scripts/openclaw_compat.sh --version 2026.3.28
+scripts/openclaw_compat.sh --max-workers 2
+```
+
+Reports are written to `scripts/.dependencies/compat/openclaw/reports/`.
+
 ## Full Example
 
 ```json

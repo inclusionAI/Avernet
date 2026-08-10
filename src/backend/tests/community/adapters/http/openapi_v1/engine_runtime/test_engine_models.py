@@ -16,7 +16,7 @@ from agentclaw.community.core.engine_runtime.errors import (
 )
 from agentclaw.community.core.engine_runtime.models import EngineResult
 
-from .conftest import BOT, fails, ok
+from .conftest import BOT, OWNER, fails, ok
 
 
 @pytest.fixture
@@ -200,7 +200,7 @@ def test_unknown_model_is_404(models_client, relay):
 
 
 def test_both_groups_serve_service_bots(engine_client, models_client, relay):
-    """Only sessions is personal-only; engine state and models are device facts."""
+    """Engine state and models are device facts, served for both bot types."""
     relay.set_bot_type("service")
     relay.results = [EngineResult(data=RAW_STATUS)]
     ok(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"))
@@ -225,7 +225,7 @@ def test_relay_errors_are_enveloped(models_client, relay, exc, status):
     fails(models_client.get(f"/openapi/v1/bots/models/{BOT}"), status)
 
 
-# ── the private-bots-only gate ───────────────────────────────────────────────
+# ── the operator gate ────────────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -241,11 +241,11 @@ def test_relay_errors_are_enveloped(models_client, relay, exc, status):
 def test_a_service_bot_is_served_at_its_draft_device(
     request, relay, client_name, path
 ):
-    """Every route serves an unshared service bot — at its DRAFT binding.
+    """Every route serves a service bot at its DRAFT binding by default.
 
-    The relay's default for a service bot is the *published* runtime; these
-    groups operate a bot's pre-publication workspace, so every forward must
-    carry ``draft_device=True``.
+    A request that names no stage behaves exactly as before stages were
+    addressable: every forward carries ``stage == "draft"``, never the
+    published runtime the relay's internal default would resolve.
     """
     client = request.getfixturevalue(client_name)
     relay.set_bot_type("service")
@@ -253,14 +253,31 @@ def test_a_service_bot_is_served_at_its_draft_device(
     resp = client.get(path)
     assert resp.status_code == 200, resp.json()
     assert relay.calls, "the route never forwarded"
-    assert all(c["draft_device"] is True for c in relay.calls)
+    assert all(c["stage"] == "draft" for c in relay.calls)
 
 
-def test_a_shared_bot_gets_501_without_touching_the_device(engine_client, relay):
-    relay.set_shared()
-    body = fails(engine_client.get(f"/openapi/v1/bots/engine/{BOT}/status"), 501)
-    assert body["message"] == "Not supported for this bot type"
-    assert relay.calls == []
+def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
+    make_client, relay
+):
+    """The flip of the old shared-bot 501: operators are adjudicated per
+    caller — a collaborator reads engine state, a stranger's answer is
+    byte-identical to a bot that does not exist."""
+    relay.add_operator("u2")
+    relay.results = [EngineResult(data=RAW_STATUS)]
+    collaborator = make_client(engine_router, caller="u2")
+    ok(
+        collaborator.get(
+            f"/openapi/v1/bots/engine/{BOT}/status", params={"owner_id": OWNER}
+        )
+    )
+    stranger = make_client(engine_router, caller="u9")
+    refused = fails(
+        stranger.get(
+            f"/openapi/v1/bots/engine/{BOT}/status", params={"owner_id": OWNER}
+        ),
+        404,
+    )
+    assert refused["message"] == "Not found"
 
 
 def test_an_unknown_bot_type_gets_501_without_touching_the_device(

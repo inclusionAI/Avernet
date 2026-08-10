@@ -36,9 +36,7 @@ from agentclaw.community.core.economy.governance.domain.notification import (
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-        NotifyLogRepository,
-    )
+    from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
 
 log = get_logger(__name__)
 

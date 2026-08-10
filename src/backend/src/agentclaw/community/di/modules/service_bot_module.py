@@ -37,7 +37,7 @@ from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.api.publish_flow_service import PublishFlowServiceProtocol
 from agentclaw.community.api.publish_approval import PublishApprovalServiceProtocol
 from agentclaw.community.api.quality_service import QualityTaskServiceProtocol
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
@@ -50,7 +50,7 @@ from agentclaw.community.core.config_compose.services.collector import (
 )
 from agentclaw.community.core.config_compose.services.config_composer import ConfigComposer
 from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
@@ -63,12 +63,8 @@ from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion 
 )
 from agentclaw.community.di.modules.skill_center_module import DeviceFilesystemDispatcher
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
-from agentclaw.community.core.service_bot.repository.publish_operation_repository import (
-    PublishOperationRepository,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import PublishOperationRepository
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.service_bot.services.bot_process import (
@@ -83,9 +79,7 @@ from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     ServiceSkillsManifestBuilder,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
@@ -122,12 +116,8 @@ from agentclaw.community.plugin_api.approval_workflow import ApprovalWorkflowPlu
 from agentclaw.community.core.service_bot.repository.config_artifact_offload import (
     ConfigArtifactOffloader,
 )
-from agentclaw.community.plugins.bot_publish_repository import (
-    BotPublishRepository as UnifiedBotPublishRepository,
-)
-from agentclaw.community.plugins.publish_operation_repository import (
-    OrmPublishOperationRepository,
-)
+from agentclaw.community.core.repository.implementations.publishing.bot_publish import BotPublishRepository as UnifiedBotPublishRepository
+from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository
 from agentclaw.community.utils import env_utils
 
 logger = get_logger()
@@ -188,6 +178,7 @@ class ServiceBotModule(Module):
         baas_http: Annotated[HttpClient, QUALIFIER_BAAS],
         general_http: Annotated[HttpClient, QUALIFIER_GENERAL],
         secret_resolver: SecretResolver,
+        secret_names: cfg.SecretNamesConfig,
         common_whitelist_service: CommonWhiteListService,
         outbound_rule_provider: OutboundRuleProvider,
     ) -> BaasService:
@@ -223,6 +214,7 @@ class ServiceBotModule(Module):
             personal_bot_template_uuid=baas.personal_bot_template_uuid,
             common_whitelist_service=common_whitelist_service,
             outbound_rule_provider=outbound_rule_provider,
+            theta_master_key_secret=secret_names.aicoding_theta_master_key,
         )
         logger.info(
             "[NEW-ARCH] BaasService initialized: api_base=%s, tenant=%s, template_uuid=%s, "
@@ -293,6 +285,7 @@ class ServiceBotModule(Module):
         publish_operation_repo: PublishOperationRepository,
         task_queue_service: TaskQueueService,
         bot_process_registry: BotProcessRegistry,
+        common_config_service: CommonConfigService,
     ) -> BotPublishService:
         """Construct ``BotPublishService``.
 
@@ -312,6 +305,7 @@ class ServiceBotModule(Module):
             publish_operation_repo=publish_operation_repo,
             task_queue_service=task_queue_service,
             bot_process_registry=bot_process_registry,
+            common_config_service=common_config_service,
             publish_flow_service_provider=lambda: injector.get(PublishFlowService),
         )
 
@@ -345,9 +339,7 @@ class ServiceBotModule(Module):
         from agentclaw.community.core.services.identity import IdentityService
         from agentclaw.community.core.skill_center.factories import SkillSetServiceFactory
         from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-        from agentclaw.community.core.resources.repository.protocol import (
-            ResourceRepositoryProtocol,
-        )
+        from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 
         return ConfigComposerInputCollector(
             skill_set_service_factory=injector.get(SkillSetServiceFactory),

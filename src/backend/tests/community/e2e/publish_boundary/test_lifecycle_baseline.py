@@ -7,9 +7,7 @@ Every later scenario builds on this shape.
 """
 import pytest
 
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,

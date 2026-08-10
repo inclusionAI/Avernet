@@ -16,6 +16,7 @@ a builder on success and let the decorator handle the mapped failures.
 
 from __future__ import annotations
 
+import inspect
 from functools import wraps
 from http import HTTPStatus
 from json import JSONDecodeError
@@ -24,6 +25,11 @@ from typing import Awaitable, Callable, Mapping, TypeVar
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from agentclaw.community.adapters.http.error_logging import (
+    capture_call_params,
+    log_public_error,
+    remember_call_params,
+)
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     CODE_ACCEPTED,
     CODE_CREATED,
@@ -37,6 +43,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     ClusterMismatchError,
     MissingPrincipalError,
     UnsupportedEngineError,
+    UserIdMismatchError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -68,6 +75,7 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
     EngineRuntimeError,
+    EngineStageNotLiveError,
     EngineUpstreamError,
 )
 from agentclaw.community.core.gateway_principal import PrincipalVerificationError
@@ -162,6 +170,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # entry covers a handler that calls ``verify_principal_token`` directly, so
     # the error cannot escape the envelope as a 500.
     PrincipalVerificationError: (401, "Unauthorized"),
+    # 403, not 401: the caller authenticated fine, it just asked to act for
+    # someone it may not act for. Not folded into the 401s above for that
+    # reason — a partner debugging an integration needs to tell "my credential
+    # is wrong" from "my credential is fine but this user is not mine", and the
+    # two have different fixes. The message says nothing about which user was
+    # asked for; both ids are on the warning line in ``principal.py``.
+    UserIdMismatchError: (403, "Forbidden"),
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
@@ -245,6 +260,13 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Retryable: cold, dormant or restarting. Distinct from 404 (the bot IS the
     # caller's) and from 500 (nothing is broken).
     EngineDeviceNotReadyError: (409, "Bot device is not ready"),
+    # NOT retryable as-is: the named stage has no live runtime (nothing
+    # validating for verify, nothing released for online, or a published stage
+    # named on a personal bot). Distinct from the masked 404 deliberately — the
+    # operator adjudication has already run, and an operator may fix a stage by
+    # publishing — and from "device not ready", which promises a retry will
+    # eventually succeed.
+    EngineStageNotLiveError: (409, "No live runtime at the requested stage"),
     # An out-of-range page argument, so it joins the 422 FastAPI already returns
     # for page_size > 100 rather than inventing a status. Needs a mapped entry
     # rather than a bare HTTPException: app-level handlers replace an unmapped
@@ -258,7 +280,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # cannot be distinguished from a bot that is not the caller's.
     EngineResourceNotFoundError: (404, "Not found"),
     EngineUpstreamError: (502, "Engine service error"),
-    # Base of the four above — LAST of its group.
+    # Base of the Engine* errors above — LAST of its group.
     EngineRuntimeError: (502, "Engine service error"),
     # Transport errors that reach a handler without the relay translating them
     # (e.g. a future caller using the transport directly). The relay already
@@ -427,7 +449,17 @@ def envelope_errors(
     The wrapped handler must take a ``request: Request`` parameter (used for the
     error envelope's ``request_id``). Unmapped exceptions are re-raised so the
     app's 500 handler still owns them.
+
+    Every failure is also logged here, with its traceback and the arguments the
+    handler was called with. This is the only frame that has both: the public
+    response carries a fixed message by design, so without this the sole record
+    of a mapped failure was the status code on the access log. Capture is lazy —
+    a successful request pays nothing — and the parameters are stashed on the
+    request for the unmapped case, where ``app.py`` logs further out.
     """
+    # Resolved once, at import: ``fn`` is the undecorated handler, so the bind
+    # in the except-branch recovers real parameter names for positional args.
+    signature = inspect.signature(fn)
 
     @wraps(fn)
     async def wrapper(*args: object, **kwargs: object) -> object:
@@ -437,9 +469,17 @@ def envelope_errors(
             request = _find_request(args, kwargs)
             if request is None:
                 raise
+            params = capture_call_params(signature, args, kwargs)
+            # Stashed before the mapping decision: an unmapped error is
+            # re-raised out of this frame, and the handler that catches it can
+            # no longer see the arguments.
+            remember_call_params(request, params)
             response = mapped_error_response(exc, request)
             if response is None:
                 raise
+            log_public_error(
+                request, exc, status=response.status_code, params=params
+            )
             return response
 
     return wrapper

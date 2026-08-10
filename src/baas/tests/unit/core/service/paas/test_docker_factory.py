@@ -8,7 +8,7 @@ self._paas_sandbox_plugins.docker_sandbox_plugin instead of
 docker.from_env(). Tests mock the plugin directly, no @patch needed.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -140,6 +140,7 @@ def factory():
             docker_sandbox_plugin=mock_docker_plugin,
         ),
         secret_plugin=MagicMock(),
+        callback_handler=MagicMock(handle=AsyncMock(return_value={"status": "ok"})),
     )
 
 

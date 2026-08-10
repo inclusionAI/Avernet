@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.user_list.repository import UserListRepositoryProtocol
+from agentclaw.community.core.repository.protocols.identity import UserListRepositoryProtocol
 from agentclaw.community.log import get_logger
 
 

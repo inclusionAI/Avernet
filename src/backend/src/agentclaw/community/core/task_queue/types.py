@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Union
+from typing import NamedTuple, Optional, Union
 
 
 class TaskStatus(str, Enum):
@@ -69,8 +69,29 @@ class TaskRecord:
     attempts: int
     last_error: Optional[str]
     env: str
+    #: The caller-supplied enqueue dedup key, or ``None`` when the caller opted
+    #: out. Retained after the task goes terminal (it is the audit value), so
+    #: "which task handled key X?" stays answerable. The separate enforcement
+    #: column that actually backs the unique index is deliberately not projected
+    #: here — it is a storage detail, not part of a task's meaning.
+    idempotency_key: Optional[str] = None
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
+
+
+class EnqueueResult(NamedTuple):
+    """Outcome of an enqueue — destructures as ``(record, created)``.
+
+    ``created`` is ``False`` only when a *keyed* enqueue joined a task that was
+    already live under the same key; the returned ``record`` is that existing
+    task. An un-keyed enqueue always creates a row, so it is always ``True``.
+
+    A ``False`` never hands back a terminal task: terminal transitions release
+    the key, so a key that is still held necessarily belongs to a live task.
+    """
+
+    record: TaskRecord
+    created: bool
 
 
 # ── Handler outcomes ────────────────────────────────────────────────────────

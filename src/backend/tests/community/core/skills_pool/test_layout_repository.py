@@ -17,10 +17,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CreateTable
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.skills_pool.quarantine import (
-    QuarantineStatus,
-    RuntimeReconciliationStatus,
-)
+from agentclaw.community.core.skills_pool.quarantine import QuarantineStatus, RuntimeReconciliationStatus
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     RolloutEvidence,
@@ -32,16 +29,10 @@ from agentclaw.community.core.skills_pool.repository.models import (
     SkillMigrationQuarantineModel,
     SkillsPoolRolloutAuditModel,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.models.skill import Skill
-from agentclaw.community.plugins.skills_pool_layout_repository import (
-    SkillsPoolLayoutRepository,
-)
-from agentclaw.community.plugins.skills_pool_quarantine_repository import (
-    _database_timestamp,
-)
+from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
+from agentclaw.community.core.repository.implementations.skills_pool.layout_quarantine import _database_timestamp
 
 
 class InMemorySqliteDB:

@@ -176,6 +176,89 @@ def test_claude_code_coding_template_maps_to_aicoding_engine():
     )
 
 
+def test_claude_code_architect_template_selector_maps_to_aicoding_engine():
+    resolver, _ = _resolver(
+        {
+            "selectors": [
+                {
+                    "bot_type": "service",
+                    "engine": "aicoding",
+                    "template_type": "architect",
+                    "template_uid": "aicoding_architect_template",
+                }
+            ],
+            "templates": {
+                "aicoding_architect_template": {
+                    "template_uuid": "TEMPLATE-aicoding-architect"
+                }
+            },
+        }
+    )
+
+    assert (
+        resolver.resolve_template_uid(
+            env="pre",
+            bot_type="service",
+            engine_type="claude_code",
+            template_type="architect",
+            template_config=None,
+        )
+        == "aicoding_architect_template"
+    )
+
+
+def test_claude_code_architect_template_maps_to_aicoding_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="architect",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_generalcc_template_maps_to_aicoding():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="generalCC",
+        )
+        == "aicoding"
+    )
+
+
+def test_claude_code_normalcc_template_keeps_claude_code_engine():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type="normalCC",
+        )
+        == "claude_code"
+    )
+
+
+@pytest.mark.parametrize("template_type", [None, ""])
+def test_claude_code_missing_template_type_keeps_claude_code_engine(
+    template_type: str | None,
+):
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude_code",
+            template_type=template_type,
+        )
+        == "claude_code"
+    )
+
+
+def test_claude_code_non_normalcc_template_type_maps_to_aicoding_case_insensitive():
+    assert (
+        SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+            engine_type="claude-code",
+            template_type=" Architect ",
+        )
+        == "aicoding"
+    )
+
 def test_resolves_personal_hermes_template_uid():
     resolver, _ = _resolver(
         {
@@ -1013,3 +1096,118 @@ def test_whitelist_staff_ids_type_coercion():
 
     assert result.template_uuid == "TEMPLATE-override-test"
     assert result.source == "whitelist"
+
+
+@pytest.mark.parametrize(
+    ("user_id", "expected_template_uuid"),
+    [
+        ("405935", "TEMPLATE-group-a"),
+        ("168944", "TEMPLATE-group-b"),
+        ("999999", "TEMPLATE-default"),
+    ],
+)
+def test_multi_group_whitelist_selects_template_for_each_group(
+    user_id,
+    expected_template_uuid,
+):
+    """Each staff group can select an independent BaaS template."""
+    mapping = {
+        "selectors": [{"engine": "openclaw", "template_uid": "default_template"}],
+        "templates": {"default_template": {"template_uuid": "TEMPLATE-default"}},
+    }
+    whitelist_config = {
+        "mappings": [
+            {"staff_ids": [405935], "template_uuid": "TEMPLATE-group-a"},
+            {"staff_ids": ["168944"], "template_uuid": "TEMPLATE-group-b"},
+        ]
+    }
+    system_config = MagicMock()
+    system_config.get_config.side_effect = lambda *, category, config_key, env: (
+        mapping
+        if config_key == BAAS_TEMPLATE_UID_ROUTING_CONFIG_KEY
+        else whitelist_config
+    )
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template(
+        bot_id="bot001",
+        user_id=user_id,
+        env="pre",
+        bot_type="personal",
+        engine_type="openclaw",
+        template_type=None,
+        template_config=None,
+    )
+
+    assert result.template_uuid == expected_template_uuid
+    assert result.source == (
+        "system_config" if expected_template_uuid == "TEMPLATE-default" else "whitelist"
+    )
+
+
+def test_multi_group_whitelist_allows_duplicate_user_with_same_template():
+    """Repeated membership is harmless when every group selects the same template."""
+    system_config = MagicMock()
+    system_config.get_config.return_value = {
+        "mappings": [
+            {"staff_ids": ["405935"], "template_uuid": "TEMPLATE-shared"},
+            {"staff_ids": [405935], "template_uuid": " TEMPLATE-shared "},
+        ]
+    }
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template_override(
+        env="pre",
+        user_id="405935",
+        bot_type="service",
+    )
+
+    assert result == "TEMPLATE-shared"
+
+
+def test_multi_group_whitelist_rejects_ambiguous_user_mapping():
+    """A user mapped to different templates falls back instead of depending on order."""
+    system_config = MagicMock()
+    system_config.get_config.return_value = {
+        "mappings": [
+            {"staff_ids": ["405935"], "template_uuid": "TEMPLATE-group-a"},
+            {"staff_ids": ["405935"], "template_uuid": "TEMPLATE-group-b"},
+        ]
+    }
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template_override(
+        env="pre",
+        user_id="405935",
+        bot_type="personal",
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "whitelist_config",
+    [
+        {"mappings": "not-a-list"},
+        {
+            "mappings": [
+                "not-an-object",
+                {"staff_ids": ["405935"], "template_uuid": "invalid-template"},
+            ]
+        },
+        {"mappings": [{"staff_ids": ["405935"]}]},
+    ],
+)
+def test_multi_group_whitelist_invalid_config_falls_through(whitelist_config):
+    """Malformed multi-group config preserves the existing routing fallback."""
+    system_config = MagicMock()
+    system_config.get_config.return_value = whitelist_config
+    resolver = SystemConfigBaasTemplateResolver(system_config)
+
+    result = resolver.resolve_template_override(
+        env="pre",
+        user_id="405935",
+        bot_type="personal",
+    )
+
+    assert result is None

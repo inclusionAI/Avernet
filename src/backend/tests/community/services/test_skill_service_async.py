@@ -228,6 +228,25 @@ class TestSkillServiceAsyncRouting:
         device_fs.exists.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_pool_activate_keeps_existing_link_until_bindpath_publish(
+        self, tmp_path
+    ):
+        service, device_fs, _ = self._service(tmp_path)
+        service.runtime_uses_pool_paths = True
+        existing = service.active_dir / "direct-skill"
+        existing.symlink_to("skills-repo/business/direct-skill")
+
+        activated = await service.activate_skill(
+            "git://business/direct-skill",
+            user_id="user1",
+            bolt_id="bot1",
+        )
+
+        assert activated is True
+        device_fs.delete_tree.assert_not_awaited()
+        assert existing.is_symlink()
+
+    @pytest.mark.asyncio
     async def test_upload_does_not_overwrite_global_local_skill(
         self, tmp_path
     ):

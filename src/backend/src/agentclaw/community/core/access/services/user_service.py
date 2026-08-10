@@ -2,7 +2,7 @@
 from injector import inject
 
 from agentclaw.community.core.access.errors import UserNotFoundError
-from agentclaw.community.core.access.repository import PolicyRepository
+from agentclaw.community.core.repository.protocols.identity import PolicyRepository
 from agentclaw.community.core.access.models import UserInfoRecord
 from agentclaw.community.log import get_logger
 

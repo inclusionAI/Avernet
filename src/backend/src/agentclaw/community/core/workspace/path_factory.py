@@ -12,6 +12,7 @@ from typing import Optional
 
 from injector import inject
 
+from agentclaw.community.core.workspace.skill_layout import pool_paths_for_engine
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
 
@@ -25,25 +26,6 @@ SQLITE_PERSONAL_ROOT = Path.home() / ".moltis"
 
 # NAS挂载根目录
 DEFAULT_ARCA_ROOT = Path("/home/admin/.merge_nas")
-
-# Desktop bot 桌面版的 engine-view skills 根目录（VM 内 virtiofs mount path）。
-# 跟 BAAS 同事 / Phase 2a/2b ocwn 编排约定：engine 在 VM 内看到的 skills 根永远是
-# `/home/admin/.openclaw/workspace/skills`。Backend 通过 BaasDeviceFileSystem 调
-# engine HTTP API 直接用这个路径，不再经过 OSS view 与 `_convert_path` 转写。
-# 仅 desktop bot 走这条路径（ac_bots.bot_type == "desktop"）；service bot 即使
-# device_provider 也是 baas，仍然走云端 OSS-view 分支。
-# 改路径前请同步 BAAS 同事 + ocwn (Phase 2a) + engine `_convert_path` 处。
-BAAS_ENGINE_SKILLS_ROOT = Path("/home/admin/.openclaw/workspace/skills")
-
-# Desktop bot 桌面版的 engine-view skills 根目录（VM 内 virtiofs mount path）。
-# 跟 BAAS 同事 / Phase 2a/2b ocwn 编排约定：engine 在 VM 内看到的 skills 根永远是
-# `/home/admin/.openclaw/workspace/skills`。Backend 通过 BaasDeviceFileSystem 调
-# engine HTTP API 直接用这个路径，不再经过 OSS view 与 `_convert_path` 转写。
-# 仅 desktop bot 走这条路径（ac_bots.bot_type == "desktop"）；service bot 即使
-# device_provider 也是 baas，仍然走云端 OSS-view 分支。
-# 改路径前请同步 BAAS 同事 + ocwn (Phase 2a) + engine `_convert_path` 处。
-BAAS_ENGINE_SKILLS_ROOT = Path("/home/admin/.openclaw/workspace/skills")
-
 
 def _get_aidesktop_root() -> Path:
     """Read aidesktop_root from env, then the process-cached config provider."""
@@ -480,10 +462,11 @@ class WorkspacePathFactory:
            ``git_path`` stays ``local://skills-local/<name>``. No host/OSS-view
            layout applies. This takes precedence over the host-path branches below.
         1. Desktop bot (``is_desktop=True``, ie. ``ac_bots.bot_type == "desktop"``):
-           engine-view path inside the VM
-           (``/home/admin/.openclaw/workspace/skills/skills-local``). Backend writes
-           via BaaS invoke-http; engine sees this path directly. No OSS-view layer
-           in this link — engine ``_convert_path`` falls through passthrough.
+           the selected engine's Legacy local path inside the VM. Backend writes
+           via BaaS invoke-http; the engine sees this path directly. The
+           compatibility paths come from the same fail-closed contract used by
+           Skills Pool; Pool-active requests are still overridden by
+           ``SkillServiceFactory`` from the authoritative layout state.
         2. Shared host root (``skill_repo_sync.get_local_skills_root()`` returns
            non-``None``, ie. local-dev impl): root + ``skills-local``.
         3. Per-bot cloud OSS-view path (``get_local_skills_root()`` returns
@@ -503,10 +486,11 @@ class WorkspacePathFactory:
             )
             return result
         if is_desktop:
-            result = BAAS_ENGINE_SKILLS_ROOT / "skills-local"
+            result = Path(pool_paths_for_engine(engine_type).legacy_local)
             logger.info(
-                "[path_factory.get_bot_skills_local_dir] entity=%s bot=%s → DESKTOP_BOT %s",
-                entity_id, bot_id, result,
+                "[path_factory.get_bot_skills_local_dir] entity=%s bot=%s "
+                "engine=%s → DESKTOP_BOT %s",
+                entity_id, bot_id, engine_type, result,
             )
             return result
         # singlebox 多 bot 改造: LOCAL+non-desktop 不再走 SHARED_ROOT (用户上传的 skill
@@ -553,10 +537,11 @@ class WorkspacePathFactory:
         is also baas but they use the cloud OSS-view path).
         """
         if is_desktop:
-            result = BAAS_ENGINE_SKILLS_ROOT / "skills-repo"
+            result = Path(pool_paths_for_engine(engine_type).legacy_repo)
             logger.info(
-                "[path_factory.get_bot_skills_repo_dir] entity=%s bot=%s → DESKTOP_BOT %s",
-                entity_id, bot_id, result,
+                "[path_factory.get_bot_skills_repo_dir] entity=%s bot=%s "
+                "engine=%s → DESKTOP_BOT %s",
+                entity_id, bot_id, engine_type, result,
             )
             return result
         local_root = self._skill_repo_sync.get_local_skills_root()

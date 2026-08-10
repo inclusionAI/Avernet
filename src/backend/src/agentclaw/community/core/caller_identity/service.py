@@ -5,14 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    BotCollabLockRepositoryProtocol,
-    CollaboratorRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-    BotRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotCollabLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.caller_identity.contracts import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
@@ -38,11 +34,8 @@ from agentclaw.community.core.caller_identity.protocols import (
     CallerRuntimeUpdaterProtocol,
     CallerTokenProviderProtocol,
 )
-from agentclaw.community.core.caller_identity.repository import (
-    CallerIdentityEngineChangedError,
-    CallerIdentityLockMismatchError,
-    CallerIdentityRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
+from agentclaw.community.core.caller_identity.contracts import CallerIdentityEngineChangedError, CallerIdentityLockMismatchError
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.env_utils import get_current_env

@@ -6,12 +6,8 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-)
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.events.types import (
     BaasPublishCompletedEvent,
@@ -25,21 +21,14 @@ from agentclaw.community.core.skills_pool.claim_service import (
     MigrationClaimOutcome,
     SkillsPoolMigrationClaimService,
 )
-from agentclaw.community.core.skills_pool.quarantine import (
-    QUARANTINE_RETENTION,
-    SKILLS_POOL_QUARANTINE_CLEANUP_TASK,
-    QuarantineStatus,
-    QuarantineRepositoryProtocol,
-    SkillsPoolQuarantineCleanupTaskHandler,
-)
+from agentclaw.community.core.skills_pool.quarantine import QUARANTINE_RETENTION, SKILLS_POOL_QUARANTINE_CLEANUP_TASK, QuarantineStatus, SkillsPoolQuarantineCleanupTaskHandler
+from agentclaw.community.core.repository.protocols.skills_pool import QuarantineRepositoryProtocol
 from agentclaw.community.core.skills_pool.reconcile_service import (
     SkillsPoolReconcileOutcome,
     SkillsPoolReconcileResult,
     SkillsPoolReconcileService,
 )
-from agentclaw.community.core.skills_pool.repository.protocol import (
-    SkillsPoolLayoutRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolLayoutRepositoryProtocol
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,

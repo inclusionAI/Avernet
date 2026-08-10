@@ -27,6 +27,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     RESTART_LOCK_TTL_SECONDS,
     BotInvalidLifecycleStateError,
     BotNotFoundError,
+    BotOperationNotAllowedError,
     BotService,
     BotServiceError,
 )
@@ -159,7 +160,7 @@ def _make_service(
     svc._device_binding_repo = device_binding_repo if device_binding_repo is not None else MagicMock()
     svc._bot_publish_repo = bot_publish_repo if bot_publish_repo is not None else MagicMock()
     svc._baas_template_resolver = baas_template_resolver
-    svc._task_queue_service = task_queue_service
+    svc._task_queue_service = task_queue_service or MagicMock()
     svc._common_config_service = common_config_service
     svc._teclaw_provision_provider = lambda: SimpleNamespace(
         is_teclaw=lambda active_engine: active_engine == "teclaw"
@@ -182,6 +183,15 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
         return dict(state)
 
     repository.update_by_owner.side_effect = update_bot
+
+    def compare_and_set_ext(*, bot_id, owner_id, expected_ext, ext):
+        del bot_id, owner_id
+        if state.get("ext") != expected_ext:
+            return None
+        state["ext"] = ext
+        return dict(state)
+
+    repository.compare_and_set_ext.side_effect = compare_and_set_ext
     return repository, state
 
 
@@ -191,6 +201,22 @@ def _stateful_bot_repository(bot: dict) -> tuple[MagicMock, dict]:
 
 
 class TestRestartGuardOrchestration:
+
+    def test_teclaw_bot_restart_is_rejected_before_lock_or_device_work(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(active_engine="teclaw")
+        svc._repository.get_by_id_and_owner.return_value = bot
+
+        with patch.object(svc, "stop_bot") as stop, \
+             patch.object(svc, "start_bot") as start:
+            with pytest.raises(BotOperationNotAllowedError, match="teclaw 类型的 Bot 不支持重启"):
+                svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert repo.acquire_calls == 0
+        stop.assert_not_called()
+        start.assert_not_called()
+
     def test_restart_during_reactivation_is_idempotent(self):
         """Dormant reactivation owns the lifecycle while it is running."""
         repo = FakeRestartLockRepo()
@@ -291,7 +317,10 @@ class TestRestartGuardOrchestration:
 
         assert result["status"] == "PENDING"
         assert result["binding_id"] == 42
-        assert result["ext"]["restart_publish_id"] == "9377"
+        assert result["ext"] == {}
+        assert svc._device_binding_repo.update_device_props.call_args_list[-1].kwargs[
+            "props"
+        ]["restart_publish_id"] == "9377"
         assert "restart_in_progress" not in result
 
     def test_recycled_bot_restart_is_rejected_without_side_effects(self):
@@ -921,11 +950,11 @@ class TestRestartGuardOrchestration:
         start.assert_not_called()
         assert result == bot
 
-    def test_restart_baas_service_refreshes_pin_before_upgrade(self):
-        """草稿态重启读取当前开关，并仅刷新 Pin 字段后透传镜像。"""
+    def test_restart_baas_service_uses_default_image_and_defers_marker(self):
+        """草稿重启提交时只透传 DEFAULT intent，成功前不持久化标记。"""
         repo = FakeRestartLockRepo()
         common_config = MagicMock()
-        common_config.get_value.return_value = {"image": "registry/arka:v2"}
+        common_config.get_value.return_value = {"image": "registry/arca:v2"}
         bot = {
             **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
             "ext": {"service_bot_config": {"device_count": 3}},
@@ -935,9 +964,10 @@ class TestRestartGuardOrchestration:
             repo,
             bot_repository=bot_repository,
             common_config_service=common_config,
+            task_queue_service=MagicMock(),
         )
         svc._template_service.get_template_config.return_value = {
-            "image": "registry/arka:v1",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
         device_service = MagicMock()
@@ -954,13 +984,101 @@ class TestRestartGuardOrchestration:
 
         common_config.get_value.assert_called_once()
         assert state["ext"]["service_bot_config"] == {"device_count": 3}
-        assert state["ext"]["sbot_pin_image"] is True
-        assert state["ext"]["sbot_docker_image"] == "registry/arka:v2"
+        assert "sbot_use_default_image" not in state["ext"]
+        payload = svc._task_queue_service.enqueue.call_args.args[1]
+        assert payload["image_policy_on_success"] == "default"
         upgrade_kwargs = baas.upgrade_bot.call_args.kwargs
         assert upgrade_kwargs["template_config"] == {
-            "image": "registry/arka:v2",
+            "image": "registry/arca:v1",
             "envs": {"A": "1"},
         }
+
+    @pytest.mark.parametrize(
+        "config_value",
+        [None, {}, {"image": ""}],
+        ids=["missing-or-disabled", "missing-image", "empty-image"],
+    )
+    def test_restart_baas_without_active_image_policy_has_no_marker_intent(
+        self, config_value
+    ):
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = config_value
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        }
+        bot_repository, state = _stateful_bot_repository(bot)
+        svc = _make_service(
+            repo,
+            bot_repository=bot_repository,
+            common_config_service=common_config,
+            task_queue_service=MagicMock(),
+        )
+        svc._template_service.get_template_config.return_value = {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="baas", device_id="BOT-uuid-9",
+        )
+        svc._device_service_provider = lambda: device_service
+        baas = MagicMock()
+        baas.upgrade_bot.return_value = {"publish_id": 101}
+        svc._baas_service_provider = lambda: baas
+
+        with patch.object(svc, "stop_bot"), patch.object(svc, "start_bot"):
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert state["ext"] == {
+            "service_bot_config": {"device_count": 3},
+            "sbot_use_default_image": True,
+            "sbot_pin_image": True,
+            "sbot_docker_image": "stale:v1",
+        }
+        payload = svc._task_queue_service.enqueue.call_args.args[1]
+        assert "image_policy_on_success" not in payload
+        assert baas.upgrade_bot.call_args.kwargs["template_config"] == {
+            "image": "registry/arca:v1",
+            "envs": {"A": "1"},
+        }
+        common_config.get_value.assert_called_once()
+
+    def test_restart_arca_without_active_image_policy_has_no_marker_override(self):
+        repo = FakeRestartLockRepo()
+        common_config = MagicMock()
+        common_config.get_value.return_value = None
+        svc = _make_service(repo, common_config_service=common_config)
+        bot = {
+            **_make_bot(status="ACTIVE", binding_id=42, bot_type="service"),
+            "ext": {
+                "service_bot_config": {"device_count": 3},
+                "sbot_use_default_image": True,
+                "sbot_pin_image": True,
+                "sbot_docker_image": "stale:v1",
+            },
+        }
+        svc._repository.get_by_id_and_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.get_device.return_value = SimpleNamespace(
+            id=42, device_provider="arca"
+        )
+        svc._device_service_provider = lambda: device_service
+
+        with patch.object(svc, "stop_bot", return_value=True), patch.object(
+            svc, "start_bot", return_value=bot
+        ) as start:
+            svc.restart_bot(bot_id="bot001", user_id="user001")
+
+        assert start.call_args.kwargs["bot_ext_override"] is None
+        svc._repository.compare_and_set_ext.assert_not_called()
+        common_config.get_value.assert_called_once()
 
     def test_restart_baas_service_ignores_existing_publish_migration_path(self):
         """普通 restart 只重启当前 bot；历史发布记录里的 migration_path 不参与。"""
@@ -1579,6 +1697,97 @@ class TestAsyncReleasesLock:
         device_service.apply_device.assert_called_once()
         assert device_service.apply_device.call_args.kwargs["device_provider"] == "baas"
 
+    def test_allocator_defers_default_image_while_recreate_is_pending(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status="PENDING", bot_type="service")
+        bot["ext"] = {"service_bot_config": {"device_count": 2}}
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = bot
+
+        device_service = MagicMock()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status="PENDING",
+        )
+        svc._device_service_provider = lambda: device_service
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._template_service.get_template_config.return_value = None
+        svc._query_admin_worknos = MagicMock(return_value=[])
+        default_ext = {
+            "service_bot_config": {"device_count": 2},
+            "sbot_use_default_image": True,
+        }
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch.object(
+            svc, "_persist_service_bot_default_image"
+        ) as persist_default:
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="u1",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=["openclaw"],
+                active_engine="openclaw",
+                device_provider="arca",
+                bot_ext_override=default_ext,
+            )
+
+        persist_default.assert_not_called()
+        assert device_service.apply_device.call_args.kwargs["device_props_extra"] == {
+            "image_policy_on_active": "default"
+        }
+        update = svc._repository.update_by_owner.call_args.args[2]
+        assert "ext" not in update
+
+    def test_allocator_persists_default_image_when_recreate_is_already_active(self):
+        repo = FakeRestartLockRepo()
+        svc = _make_service(repo)
+        bot = _make_bot(status="PENDING", bot_type="service")
+        svc._repository.get_by_id_and_owner.return_value = bot
+        svc._repository.update_by_owner.return_value = bot
+        device_service = MagicMock()
+        device_service.apply_device.return_value = SimpleNamespace(
+            id=7,
+            device_id="device-7",
+            device_provider="arca",
+            status="ACTIVE",
+        )
+        svc._device_service_provider = lambda: device_service
+        svc._skill_set_factory.create.return_value.get_symlink_mappings.return_value = []
+        svc._template_service.get_template_config.return_value = None
+        svc._query_admin_worknos = MagicMock(return_value=[])
+        default_ext = {"sbot_use_default_image": True}
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.threading.Thread",
+            _SyncThread,
+        ), patch.object(
+            svc, "_persist_service_bot_default_image"
+        ) as persist_default:
+            svc._allocate_device_async(
+                bot_id="bot001",
+                user_id="user001",
+                nick_name="u1",
+                entity_id="staff_user001",
+                entity_type="staff",
+                engine_types=["openclaw"],
+                active_engine="openclaw",
+                device_provider="arca",
+                bot_ext_override=default_ext,
+            )
+
+        persist_default.assert_called_once_with(
+            {**bot, "bot_id": "bot001", "ext": default_ext},
+            user_id="user001",
+        )
+
     def test_allocator_logs_explicit_provider_before_apply_device(self):
         repo = FakeRestartLockRepo()
         svc = _make_service(repo)
@@ -1700,6 +1909,109 @@ class TestAsyncReleasesLock:
 
 
 class TestRestartBaasPendingAndQueue:
+    @pytest.mark.parametrize("bot_type", ["personal", "service"])
+    def test_baas_restart_ignores_legacy_request_id_without_baseline(
+        self,
+        bot_type,
+    ):
+        """旧协议只留下 request_id 时，不得把历史记录当作进行中重启。"""
+        baas = MagicMock()
+        baas.list_bot_publishes.return_value = [
+            {"id": 32272, "publish_type": "UPDATE"}
+        ]
+        baas.upgrade_bot.return_value = {
+            "publish_id": 32273,
+            "bot_uuid": "BOT-x",
+        }
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = {
+            "device_id": "BOT-x",
+            "status": DeviceBindingStatus.ACTIVE.value,
+            "device_props": {
+                "restart_request_id": "legacy-request-id",
+                "restart_publish_id": "32272",
+            },
+        }
+        bot = {
+            "bot_id": "bot-1",
+            "owner_id": "u1",
+            "binding_id": 42,
+            "bot_type": bot_type,
+            "entity_id": "u1",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bind_repo = MagicMock()
+        task_queue_service = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            device_binding_repo=bind_repo,
+            device_provider=device_provider,
+            baas_service_provider=lambda: baas,
+            task_queue_service=task_queue_service,
+        )
+        svc._template_service.get_template_config.return_value = None
+
+        svc._restart_bot_baas(
+            bot_id="bot-1",
+            user_id="u1",
+            binding_id=42,
+            bot=bot,
+        )
+
+        baas.upgrade_bot.assert_called_once()
+        new_request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
+        assert new_request_id != "legacy-request-id"
+        assert bind_repo.update_device_props.call_args_list[0].kwargs["props"] == {
+            "restart_request_id": new_request_id,
+            "restart_workflow_baseline": 32272,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+
+    @pytest.mark.parametrize("baseline", [0, 32272])
+    def test_baas_restart_suppresses_complete_durable_intent(self, baseline):
+        """只有 request_id 与合法 baseline 同时存在时才抑制重复重启。"""
+        baas = MagicMock()
+        device_provider = MagicMock()
+        device_provider.get_device.return_value = {
+            "device_id": "BOT-x",
+            "status": DeviceBindingStatus.PENDING.value,
+            "device_props": {
+                "restart_request_id": "current-request-id",
+                "restart_workflow_baseline": baseline,
+                "restart_publish_id": None,
+            },
+        }
+        bot = {
+            "bot_id": "bot-1",
+            "owner_id": "u1",
+            "binding_id": 42,
+            "bot_type": "personal",
+            "entity_id": "u1",
+        }
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = bot
+        task_queue_service = MagicMock()
+        svc = _make_service(
+            bot_repository=bot_repo,
+            device_provider=device_provider,
+            baas_service_provider=lambda: baas,
+            task_queue_service=task_queue_service,
+        )
+
+        result = svc._restart_bot_baas(
+            bot_id="bot-1",
+            user_id="u1",
+            binding_id=42,
+            bot=bot,
+        )
+
+        assert result == bot
+        baas.list_bot_publishes.assert_not_called()
+        baas.upgrade_bot.assert_not_called()
+        task_queue_service.enqueue.assert_not_called()
+
     def test_personal_baas_restart_marks_pending_and_enqueues_task(self):
         """personal baas 重启 → upgrade_bot 取 publish_id；bot/binding 双置 PENDING；
         持久化 restart poll task。"""
@@ -1732,36 +2044,41 @@ class TestRestartBaasPendingAndQueue:
         # upgrade_bot 调用
         baas.upgrade_bot.assert_called_once()
         assert baas.upgrade_bot.call_args.kwargs["mount_home_dir_storage"] is True
-        # bot 行置 PENDING，并记录当前 restart publish 轮次。
+        # bot 行先置 PENDING；publish_id 在 Binding 上单独补记。
         bot_repo.update_by_owner.assert_called_with(
             "bot-1",
             "u1",
-            {"status": "PENDING", "ext": {"restart_publish_id": "9377"}},
+            {"status": "PENDING"},
         )
         # binding 置 PENDING
         bind_repo.update_status.assert_called_with(
             binding_id=42, status=DeviceBindingStatus.PENDING
         )
-        bind_repo.update_device_props.assert_called_once_with(
-            binding_id=42,
-            props={
-                "publish_id": "9377",
-                "restart_publish_id": "9377",
-                "restart_request_id": baas.upgrade_bot.call_args.kwargs["request_id"],
-            },
-        )
+        request_id = baas.upgrade_bot.call_args.kwargs["request_id"]
+        assert bind_repo.update_device_props.call_args_list[0].kwargs["props"] == {
+            "restart_request_id": request_id,
+            "restart_workflow_baseline": 0,
+            "restart_publish_id": None,
+            "restart_image_policy_on_success": None,
+        }
+        assert bind_repo.update_device_props.call_args_list[1].kwargs["props"] == {
+            "publish_id": "9377",
+            "restart_publish_id": "9377",
+        }
         task_queue_service.enqueue.assert_called_once()
         enqueue_args = task_queue_service.enqueue.call_args
         assert enqueue_args.args[0] == BAAS_RESTART_PUBLISH_POLL_TASK
         assert enqueue_args.args[1]["binding_id"] == 42
         assert enqueue_args.args[1]["bot_id"] == "bot-1"
         assert enqueue_args.args[1]["owner_id"] == "u1"
-        assert enqueue_args.args[1]["publish_id"] == 9377
+        assert "publish_id" not in enqueue_args.args[1]
         assert enqueue_args.args[1]["bot_uuid"] == "BOT-x"
-        assert enqueue_args.kwargs == {"deadline_seconds": 86400}
+        assert enqueue_args.args[1]["request_id"] == request_id
+        assert enqueue_args.args[1]["workflow_baseline"] == 0
+        assert enqueue_args.kwargs == {"deadline_seconds": 86400, "delay_seconds": 2}
 
-    def test_baas_restart_missing_publish_id_skips_poll_task(self):
-        """publish_id 缺失：仅 log，不抛，不入队；status 仍置 PENDING。"""
+    def test_baas_restart_missing_publish_id_keeps_adoption_task(self):
+        """publish_id 缺失时，durable task 仍按 baseline 查询并认领 workflow。"""
         baas = MagicMock()
         baas.upgrade_bot.return_value = {"bot_uuid": "BOT-x"}  # 无 publish_id
         device_provider = MagicMock()
@@ -1790,4 +2107,5 @@ class TestRestartBaasPendingAndQueue:
         bot_repo.update_by_owner.assert_called_with(
             "bot-1", "u1", {"status": "PENDING"}
         )
-        task_queue_service.enqueue.assert_not_called()
+        task_queue_service.enqueue.assert_called_once()
+        assert "publish_id" not in task_queue_service.enqueue.call_args.args[1]

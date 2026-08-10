@@ -114,8 +114,6 @@ pub struct DeleteSessionQuery {
 #[derive(Debug, Deserialize)]
 pub struct AddMemberRequest {
     pub bot_uuid: String,
-    #[serde(default = "default_member_role")]
-    pub role: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -757,8 +755,7 @@ pub async fn add_group_member(
     Json(req): Json<AddMemberRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
     let requester_bot_id = resolve_group_member_caller(&state, &headers, &uri, &id).await?;
-    let AddMemberRequest { bot_uuid, role } = req;
-    let response_role = role.clone();
+    let AddMemberRequest { bot_uuid } = req;
     let result = state
         .services
         .group_management
@@ -767,7 +764,6 @@ pub async fn add_group_member(
             human_actor_id: extract_human_actor_id(&state, &headers, &uri).await,
             group_id: id.clone(),
             bot_id: bot_uuid,
-            role: Some(role),
         })
         .await
         .map_err(group_use_case_error_to_http)?;
@@ -777,7 +773,7 @@ pub async fn add_group_member(
         "session_id": result.group_id,
         "member": {
             "bot_uuid": result.member.bot_uuid,
-            "role": response_role,
+            "role": result.member.role,
         }
     })))
 }
@@ -1930,10 +1926,6 @@ async fn resolve_driver_bot_owner(
         .ok()
         .and_then(|h| h.capabilities.name);
     (Some(human_id), owner_name)
-}
-
-fn default_member_role() -> String {
-    "consultant".to_string()
 }
 
 fn group_status_to_wire(status: GroupStatus) -> &'static str {

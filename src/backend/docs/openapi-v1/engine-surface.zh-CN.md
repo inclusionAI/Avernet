@@ -74,14 +74,18 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 
 ### sessions（7）—— engine `/api/sessions`
 
-> **仅限 personal bot。** 在 `service` bot 上，七条路由全部返回
-> `501 "Not supported for this bot type"`，且在任何设备调用**之前**就判定。
+> **一个运维台，整设备可见是明文契约。** _2026-08-09 修订
+> （`specs/2026-08-09-openapi-v1-access-expansion/`）；2026-07-30 的原始裁定仅服务
+> personal bot，PR #880 增加了 service 草稿。_ 七条路由服务所指 Bot 的**运维者** ——
+> 拥有者与 member 级及以上协作者，在任何设备调用之前裁定；其他调用者得到掩蔽
+> 404 —— 指向请求指定的阶段（`?stage=`，默认 draft；verify/online 存活时可用）。
 > engine 接受 `user_id`、记了日志、然后**丢弃**它 —— `sessions_list()` 根本没有
-> `user_id` 参数（`plugins/openclaw/_session.py:125-132`），因此设备会返回它持有的
-> 全部会话。在 personal bot 上这一集合就是 owner 自己的；而 service bot 的设备服务
-> 多个 caller，那就是所有人的。按 session key 里已带的 `user:<id>` 后缀过滤才是正解，
-> 但它属于 **engine** —— 在未过滤的设备响应之上再由后端过滤是可以被绕过的。
-> 以后放开到两种 bot 类型不会破坏任何契约。_2026-07-30 决定。_
+> `user_id` 参数（`plugins/openclaw/_session.py:125-132`）—— 因此设备返回它持有的
+> 全部会话，被准入的运维者会看到所有会话，包括终端用户对话；公开文档明说了这一点。
+> 按 session key 里 `user:<id>` 后缀做按调用者过滤属于 **engine**（在未过滤的设备
+> 响应之上由后端过滤可被绕过），且已作为扩展目标被否决，而非延后。注意：多实例
+> provider 可能把一个已发布阶段扇出到多个设备实例；按阶段寻址的应答描述所指
+> binding 的当前实例，不是整个集群。_
 
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
@@ -285,10 +289,12 @@ engine 的每个 handler 都会调用 `check_capability()`
 ### 3. `user_id` 必须来自 principal，绝不来自调用方
 
 若干 engine 路由把 `user_id` 作为 **query 参数**（`GET /api/sessions`、
-`POST /api/approvals/mode/get`、`/api/session-favorites`）。在公共面上，它们必须
-由 `caller_owner_id(principal)` 填充，并在请求中出现时**予以拒绝**（body 上
-`extra="forbid"`，query 模型里显式不收）。原样转发调用方给的 `user_id`，就是同一
-租户内的跨调用方读取 —— 隔离守卫抓不到它，因为 engine 根本没有租户维度。
+`POST /api/approvals/mode/get`、`/api/session-favorites`）。在公共面上，它们由请求
+的**已验证调用者**填充（显式 user-id 变更要求的 `?user_id=`，必须等于 principal），
+并在请求 body 中出现时**予以拒绝**（body 上 `extra="forbid"`，query 模型里显式
+不收）。原样转发未经验证的值就是同一租户内的跨调用方冒充 —— 隔离守卫抓不到它，
+因为 engine 根本没有租户维度。_2026-08-09 修订：共享 Bot 上实际操作者可能是协作者，
+因此写入的是操作者本人的 id，不必然是拥有者的。_
 
 `/api/sessions` 与 `/api/models` 上的 `engine=` 覆盖参数同理：**bot 的当前引擎
 才是权威**，不要暴露它。
@@ -413,7 +419,10 @@ _已被取代的旧说明（2026-08-03 之前）：这些组原本比 `{bot_id}`
 - **2026-07-30 —— sessions 组与 connection 端点仅服务 `personal` bot**；
   `service` 返回 `501`。`BotType` 是 `Literal["personal", "service"]`，而 PR #494
   已经允许外部租户创建两者之一，所以这是真实存在的情况，不是假设。其余三个组两种
-  类型都服务。
+  类型都服务。_已两次被取代：PR #880（2026-08-07）让全部五个组服务 service bot 的
+  未共享草稿；2026-08-09 的访问扩展
+  （`specs/2026-08-09-openapi-v1-access-expansion/`）用运维者裁定取代共享 Bot 拒绝，
+  并使 verify/online 阶段可寻址（`?owner_id=`、`?stage=`）。_
 
   connection 是在评审过程中被纳入这条裁定的，理由来自 sessions 组，而非它自身。
   它发布的 socket 不论标成什么，作用域都不止于对话：引擎的 WebSocket 服务端在

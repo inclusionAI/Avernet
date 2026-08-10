@@ -39,9 +39,11 @@ from secbaas.community.core.repository.device import (
     DeviceRepository,
 )
 from secbaas.community.core.service.paas import (
+    DeviceCallbackHandler,
     DeviceFacadeException,
     ErrorCode,
     PaasServiceFacade,
+    dispatch_start_hook,
 )
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.core.utils.secret_utils import (
@@ -50,8 +52,6 @@ from secbaas.community.core.utils.secret_utils import (
 )
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
-
-from ._start_hook_dispatcher import dispatch_start_hook
 
 logger = get_logger("core-service")
 
@@ -544,15 +544,17 @@ class DefaultDeviceService(DeviceService):
         repository: DeviceRepository,
         device_template_service: DeviceTemplateManageService,
         secret_plugin: SecretStorePlugin,
+        callback_handler: DeviceCallbackHandler,
     ) -> None:
         """Initialize DefaultDeviceService with injected dependencies.
 
-        All three arguments are required per R-14 wiring principle.
+        All arguments are required per R-14 wiring principle.
         """
         self._paas_facade = paas_facade
         self._secret_plugin = secret_plugin
         self._repository = repository
         self._device_template_service = device_template_service
+        self._callback_handler = callback_handler
 
     def create_device(
         self,
@@ -1122,6 +1124,7 @@ class DefaultDeviceService(DeviceService):
                     hook_timeout=hook_timeout,
                     publish_id=publish_id,
                     facade=self._paas_facade,
+                    callback_handler=self._callback_handler,
                 )
 
                 # Return with PENDING status — callback will update to ACTIVE/FAILED
@@ -1910,6 +1913,7 @@ class DefaultDeviceService(DeviceService):
                     hook_timeout=hook_timeout,
                     publish_id=publish_id,
                     facade=self._paas_facade,
+                    callback_handler=self._callback_handler,
                 )
 
                 # Return with PENDING status - callback will update to ACTIVE/FAILED

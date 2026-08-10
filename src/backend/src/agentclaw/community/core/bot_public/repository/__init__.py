@@ -1,6 +1,4 @@
 """Bot public repository - Protocol definitions."""
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 
 __all__ = ["BotFriendRepositoryProtocol"]

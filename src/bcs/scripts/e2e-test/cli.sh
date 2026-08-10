@@ -247,9 +247,10 @@ test_cli_chat() {
             TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return
         fi
     fi
-    # chat --detach prints "Run: <uuid>" / "Session: ..." / "State: running"
-    # (capital). Assert a run/session handle is present (no unasserted pass).
-    if _cli_contains "$BCS_CLI_STDOUT" "Run:" || _cli_contains "$BCS_CLI_STDOUT" "Session:"; then
+    # chat --detach prints a run/session handle. The default (no --json) now
+    # returns a single JSON object with lowercase "run_id"/"session_id" keys;
+    # --no-json still prints the human "Run:"/"Session:" lines. Accept either.
+    if _cli_contains "$BCS_CLI_STDOUT" "Run:" || _cli_contains "$BCS_CLI_STDOUT" "Session:" || _cli_contains "$BCS_CLI_STDOUT" '"run_id"' || _cli_contains "$BCS_CLI_STDOUT" '"session_id"'; then
         pass "bcs-cli chat returned a run/session handle"
         TESTS_PASSED=$((TESTS_PASSED+1))
     else

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
 from agentclaw.community.core.resources.service import ResourceService
 
 

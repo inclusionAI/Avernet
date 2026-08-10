@@ -12,10 +12,8 @@ from agentclaw.community.adapters.http.skill_center.skill_category import (
     _build_tree,
     _to_tree_node,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillCategoryRepository,
-    SkillRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillCategoryRepository
 
 
 def _bind_repos(category_repo, skill_repo=None):

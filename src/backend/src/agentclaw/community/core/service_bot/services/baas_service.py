@@ -34,7 +34,7 @@ from agentclaw.community.core.caller_identity.credential import (
     CallerCredentialError,
     CallerToken,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotLookupAmbiguousError
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 
 from agentclaw.community.plugin_api.http_client import HttpClient
 from agentclaw.community.plugin_api.secret_resolver import SecretResolver
@@ -61,9 +61,9 @@ from agentclaw.community.kernel.device_dto import (
 
 if TYPE_CHECKING:
     from agentclaw.community.plugin_api.outbound_rules import OutboundRuleProvider
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-    from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
-    from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
+    from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+    from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
     from agentclaw.community.core.system_config.service import SystemConfigService
     from agentclaw.community.core.common_config import CommonWhiteListService
 
@@ -365,6 +365,7 @@ class BaasService:  # pragma: no cover
         common_whitelist_service: "CommonWhiteListService",
         outbound_rule_provider: "OutboundRuleProvider",
         personal_bot_template_uuid: Optional[str] = None,
+        theta_master_key_secret: str = "",
     ):
         """初始化 BaasService。
 
@@ -412,6 +413,7 @@ class BaasService:  # pragma: no cover
         self._secret_resolver = secret_resolver
         self._common_whitelist_service = common_whitelist_service
         self._outbound_rule_provider = outbound_rule_provider
+        self._theta_master_key_secret = theta_master_key_secret
 
     def post_bots_api(
         self,
@@ -670,8 +672,30 @@ class BaasService:  # pragma: no cover
             stage=stage,
         )
 
+        # 引擎专属模板字段在 strategy 内集中消费；下游只接收通用 dict。
+        from agentclaw.community.core.bot_management.engines import resolve_provisioning
+
+        provisioning_ctx, provisioning_strategy = resolve_provisioning(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_type=bot_type,
+            active_engine=engine,
+            template_type=bot.get("template_type"),
+            template_config=template_config,
+        )
+        extra_properties = provisioning_strategy.build_extra_properties(
+            provisioning_ctx,
+            secret_resolver=self._secret_resolver,
+            theta_master_key_secret=self._theta_master_key_secret,
+        )
+
         # 构建出站操作规则
-        outbound_operation_rule = self._build_outbound_operation_rule(bot_id, owner_id, agent_pass_token)
+        outbound_operation_rule = self._build_outbound_operation_rule(
+            bot_id,
+            owner_id,
+            agent_pass_token,
+            extra_properties=extra_properties,
+        )
 
         # 从 ac_bots.ext.service_bot_config 解析沙箱规格（cpu/memory 缺一则整组不传）
         resource_spec = self._resolve_service_bot_resource_spec(bot.get("ext"))
@@ -1742,7 +1766,7 @@ class BaasService:  # pragma: no cover
         self,
         bind_id: int,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1755,7 +1779,10 @@ class BaasService:  # pragma: no cover
         Args:
             bind_id: 设备绑定 ID
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws。
+                BaaS 侧 ``build_proxypass_url`` 是
+                ``f"{scheme}://{host}/proxypass/{target}{path}"`` 直接拼接，
+                不补分隔符；缺斜杠会拼出 ``…@0:20003api/openclaw/ws``。
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
@@ -1786,7 +1813,7 @@ class BaasService:  # pragma: no cover
         self,
         bot_uuid: str,
         port: int = 20003,
-        path: str = "api/openclaw/ws",
+        path: str = "/api/openclaw/ws",
         tenant: str = "",
         device_affinity: Optional[str] = None,
         device_uuid: Optional[str] = None,
@@ -1799,7 +1826,8 @@ class BaasService:  # pragma: no cover
         Args:
             bot_uuid: Bot UUID（= device_id）
             port: 目标端口，默认 20003
-            path: WebSocket 路径，默认 api/openclaw/ws
+            path: WebSocket 路径，必须自带前导斜杠，默认 /api/openclaw/ws
+                （拼接契约见 :meth:`get_ws_info`）
             tenant: 租户名称；空则回落到 self._tenant（BaasConfig.tenant，各部署配置）
             device_affinity: 设备亲和性标识，用于指定目标设备（可选）
             device_uuid: 多实例场景锁定特定实例（可选）；不传则 BaaS 自动选活跃实例
@@ -2718,6 +2746,8 @@ class BaasService:  # pragma: no cover
         owner_id: str,
         agent_pass_token: str = "",
         agent_code: str = "",
+        *,
+        extra_properties: dict[str, Any] | None = None,
     ) -> OutBoundOperationRule:
         """构建出站操作规则 — 委托给注入的 ``OutboundRuleProvider`` (Rule 20)。
 
@@ -2733,6 +2763,7 @@ class BaasService:  # pragma: no cover
             agent_pass_token=agent_pass_token,
             agent_code=agent_code,
             bot_type_resolver=self._resolve_bot_type,
+            extra_properties=extra_properties,
         )
 
     def _build_teclaw_outbound_operation_rule(

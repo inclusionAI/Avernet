@@ -27,7 +27,7 @@ from secbaas.community.core.service.bot_run._worker import (
     BotRequestWorker,
     BotRequestWorkerConfig,
 )
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 # ----------------------------- fixtures -----------------------------
 

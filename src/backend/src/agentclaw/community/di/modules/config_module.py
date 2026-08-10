@@ -191,6 +191,10 @@ class ConfigModule(Module):
                 "gateway_principal_signing_key",
                 defaults.gateway_principal_signing_key,
             ),
+            aicoding_theta_master_key=block.get(
+                "aicoding_theta_master_key",
+                defaults.aicoding_theta_master_key,
+            ),
         )
 
     @singleton

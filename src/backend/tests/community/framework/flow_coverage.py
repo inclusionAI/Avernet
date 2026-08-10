@@ -25,6 +25,15 @@ def covered_modules(flows: list[FlowCase]) -> set[str]:
     return out
 
 
+# Structural packages under ``core/`` that are not business modules and so are
+# not part of the E3 denominator. ``repository`` holds the Protocol contracts and
+# the ORM bodies shared by every business module; it carries no flow of its own,
+# and its bodies are exercised by the flows of the modules that consume it. It is
+# excluded here rather than added to SINGLEBOX_E2E_EXEMPT because exempt means
+# "not covered yet" — these ARE covered, just not nameable as a `covers` entry.
+_STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset({"repository"})
+
+
 def all_core_modules() -> set[str]:
     """Top-level business module package names under agentclaw/core/."""
     regular_packages = {
@@ -40,7 +49,7 @@ def all_core_modules() -> set[str]:
         and not child.name.startswith("_")
         and child.name not in regular_packages
     }
-    return regular_packages | namespace_packages
+    return (regular_packages | namespace_packages) - _STRUCTURAL_NON_BUSINESS
 
 
 # First pass: all core modules exempt (no real e2e flows exist yet, those

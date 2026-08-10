@@ -8,6 +8,7 @@ Workspace path factory + workspace constants — single source of truth for per-
 purpose: "Workspace path factory + workspace constants — single source of truth for per-bot / per-user paths."
 provides:
   - "WorkspacePathFactory"
+  - "Filesystem-engine Skill layout compatibility path contract"
   - "DEFAULT_ENGINE_TYPE, SUPPORTED_ENGINE_TYPES constants"
   - "EngineSandboxProvider Protocol + OpenClaw / ClaudeCode impls (mode-blind, take WorkspaceConfig)"
 consumes:

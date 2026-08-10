@@ -21,7 +21,7 @@ _CREDS = CredentialBundle(headers={}, cookies={}, query={})
 
 
 def _user_p() -> UserPrincipal:
-    return UserPrincipal(tenant="t", subject=AuthenticatedUser(id="u", username="a"))
+    return UserPrincipal(subject=AuthenticatedUser(id="u", username="a"))
 
 
 def _app_p() -> AppPrincipal:

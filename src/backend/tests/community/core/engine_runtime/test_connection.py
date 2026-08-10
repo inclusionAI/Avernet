@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -53,6 +54,7 @@ class _Bots:
             "bot_type": self.bot_type,
             "active_engine": self.engine,
             "public": self.public,
+            "id": 100,
         }
 
 
@@ -109,6 +111,42 @@ class _Devices:
         return self.info
 
 
+#: A routing target as the ARCA provider spells one: ``ARCA_`` + the
+#: ``@alt``-suffixed sandbox id + the engine adapter's port.
+ARCA_TARGET = "ARCA_ARCA-SANDBOX-abc123@0:20003"
+ARCA_TOKEN = "eyJhbGciOiJIUzI1NiIs"
+
+#: What the endpoint must publish for :data:`ARCA_TARGET` on an openclaw bot.
+#: Spelled out in full rather than assembled from parts, so a change to any of
+#: the four pieces — gateway origin, published prefix, target, credential
+#: parameter — has to be restated here deliberately.
+ARCA_URL = (
+    "wss://gw.example/openapi/v1/bots/messages/ws/"
+    "ARCA_ARCA-SANDBOX-abc123@0:20003/api/openclaw/ws"
+    f"?x-proxypass-token={ARCA_TOKEN}"
+)
+
+
+def _arca(**overrides):
+    """The ARCA provider's shape: a bare routing target, a signed credential,
+    and **no url** — it composes none in any mode and is never handed the
+    in-device path that would have to go into one.
+
+    ``url=""`` is the load-bearing part: ``_Devices`` otherwise synthesises a
+    BaaS-style relay URL, which would send these cases down the re-addressing
+    branch and quietly stop testing the composed one.
+    """
+    return _Devices(
+        **{
+            "type": "proxy",
+            "target": ARCA_TARGET,
+            "token": ARCA_TOKEN,
+            "url": "",
+            **overrides,
+        }
+    )
+
+
 def _gateway(base="https://gw.example"):
     """The endpoint the composition root resolved for this environment.
 
@@ -117,40 +155,71 @@ def _gateway(base="https://gw.example"):
     return GatewayEndpoint(base_url=base)
 
 
-class _CollaboratorRepo:
-    """Stands in for the collaborator table the shared-bot gate reads."""
+class _Collaborators:
+    """Stands in for ``CollaboratorService.get_permission_level``."""
 
-    def __init__(self, collaborators=None):
-        self._collaborators = collaborators or {}
+    def __init__(self, levels=None):
+        self._levels = levels or {}
         self.calls = []
 
-    def list_by_bot(self, bot_id, owner_id, env, role=None):
-        self.calls.append((bot_id, owner_id))
-        return self._collaborators.get((bot_id, owner_id), [])
+    def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+        # Recorded unconditionally — the owner short-circuit is the real
+        # service's; skipping the record here made the owner assertions
+        # tautological.
+        self.calls.append((bot_pk, user_id, owner_id))
+        if user_id == owner_id:
+            return PermissionLevel.OWNER
+        return self._levels.get((bot_pk, user_id), PermissionLevel.NONE)
 
 
-def _svc(bots=None, bindings=None, devices=None, gateway=None, collaborators=None):
+class _PublishRepo:
+    """Stands in for the publish repository (published-stage sockets)."""
+
+    def __init__(self, by_pk=None):
+        self._by_pk = by_pk or {}
+        self.calls = []
+
+    def list_by_source_bot(self, source_bot_pk, env):
+        self.calls.append((source_bot_pk, env))
+        return list(self._by_pk.get(source_bot_pk, []))
+
+
+def _svc(
+    bots=None,
+    bindings=None,
+    devices=None,
+    gateway=None,
+    collaborators=None,
+    publish_repo=None,
+):
     return EngineConnectionService(
         bots or _Bots(), bindings or _Bindings(), devices or _Devices(),
         gateway if gateway is not None else _gateway(),
-        collaborators or _CollaboratorRepo(),
+        collaborators or _Collaborators(),
+        publish_repo or _PublishRepo(),
     )
 
 
-def _build(svc):
-    return svc.build(bot_id=BOT, owner_id=OWNER)
+def _build(svc, caller_id=OWNER, stage="draft"):
+    return svc.build(
+        bot_id=BOT, owner_id=OWNER, caller_id=caller_id, stage=stage
+    )
 
 
 def test_foreign_bot_raises_before_resolving_a_device():
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     with pytest.raises(BotNotFoundError):
-        _svc(bindings=bindings).build(bot_id=BOT, owner_id="someone-else")
+        _svc(bindings=bindings).build(
+            bot_id=BOT, owner_id="someone-else", caller_id=OWNER, stage="draft"
+        )
 
 
 def test_the_resolved_owner_is_passed_as_the_operator():
-    """``get_device_connection`` has a wider permission model of its own —
-    public bots and collaborators. Passing the resolved owner means it can
-    never widen this owner-only surface."""
+    """The operator id is routing and bookkeeping downstream, and it must be
+    the resolved owner even when a collaborator holds the channel: some
+    device-service implementations apply collaborator-blind permission models
+    to it, and the BaaS path keys instance affinity on it — per-caller values
+    would pin two operators of one (bot, stage) to different instances."""
     devices = _Devices()
     _build(_svc(devices=devices))
     assert devices.kwargs["operator"].staff_id == OWNER
@@ -546,19 +615,16 @@ def test_result_exposes_no_field_beside_the_url_to_compose_with():
     assert {f.name for f in dataclasses.fields(result.sockets[0])} == {"kind", "url"}
 
 
-# ── bot-type gate ─────────────────────────────────────────────────────────
+# ── the operator gate ─────────────────────────────────────────────────────
 
 
-def test_an_unshared_service_bot_is_served_its_draft_socket():
-    """The socket a service bot gets addresses its DRAFT device, and only that.
+def test_a_service_bots_default_socket_addresses_its_draft_device():
+    """A request naming no stage gets the DRAFT socket, exactly as before.
 
-    The published socket is an operator channel — ``sessions.*``,
-    ``exec.approvals.*``, ``operator.admin`` — so it may only reach a device
-    the owner alone uses. For an unshared service bot that is the draft
-    binding: this endpoint reads it owner-scoped by ``bot_id``, and the
-    verify/online runtimes publishing produces are bound under
-    ``publish_bot_id`` on the publish records, so they cannot be addressed
-    here at all.
+    The draft binding is read owner-scoped by ``bot_id``; the verify/online
+    runtimes publishing produces live only in the publish records'
+    ``ext.binding.{verify,online}``, addressed via ``stage=`` and resolved
+    through the same rule the relay uses.
     """
     bindings, devices = _Bindings(), _Devices()
     result = _build(
@@ -570,88 +636,117 @@ def test_an_unshared_service_bot_is_served_its_draft_socket():
     assert bindings.calls == [(BOT, OWNER)]
 
 
-def test_a_shared_service_bot_is_refused_before_a_device_is_touched():
-    """Sharing closes the draft window too: ``ExpertChatService`` creates
-    collaborator and public callers' sessions on the bot's own draft binding,
-    so a shared service bot's draft device is multi-caller — the exposure this
-    gate exists to prevent."""
+def test_a_public_service_bots_owner_keeps_their_socket():
+    """The flip of the old shared-bot refusal: visibility no longer costs the
+    owner their operator channel."""
+    bindings, devices = _Bindings(), _Devices()
+    result = _build(
+        _svc(
+            bots=_Bots(bot_type="service", public="1"),
+            bindings=bindings,
+            devices=devices,
+        )
+    )
+    assert [s.kind for s in result.sockets] == ["chat"]
+
+
+def test_a_non_operator_is_refused_before_a_device_is_touched():
+    """A caller who is neither owner nor collaborator gets the same masked
+    not-found an absent bot raises — refused at composition time, before the
+    device service (whose own model would admit anyone to a *public* bot)
+    could be consulted at all."""
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     devices = _Devices()
-    svc = _svc(
-        bots=_Bots(bot_type="service", public="1"), bindings=bindings, devices=devices
-    )
+    svc = _svc(bots=_Bots(public="1"), bindings=bindings, devices=devices)
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="stranger")
 
     # Refused at composition time — no device call was made on the way out.
     assert devices.kwargs is None
 
 
-def test_a_collaborated_service_bot_is_refused():
-    """Service bots are exactly the type that takes collaborators."""
-    bindings = _Bindings(raises=AssertionError("must not be reached"))
-    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
-    svc = _svc(
-        bots=_Bots(bot_type="service"), bindings=bindings, collaborators=collaborators
+def test_a_member_collaborator_is_served_the_socket():
+    """The flip of the old collaborated-bot refusal: the team operates the
+    bot, adjudicated per caller at member level or above."""
+    collaborators = _Collaborators({(100, "u2"): PermissionLevel.MEMBER})
+    result = _build(
+        _svc(bots=_Bots(bot_type="service"), collaborators=collaborators),
+        caller_id="u2",
     )
+    assert [s.kind for s in result.sockets] == ["chat"]
+    assert collaborators.calls == [(100, "u2", OWNER)]
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+
+def test_a_public_personal_bots_owner_keeps_their_socket():
+    """Visibility is a property of the bot, not a penalty on its owner."""
+    result = _build(_svc(bots=_Bots(public="1")))
+    assert [s.kind for s in result.sockets] == ["chat"]
 
 
-def test_a_public_personal_bot_is_refused_before_a_device_is_touched():
-    """``personal`` does not imply single-caller — ``ac_bots.public`` is free.
-
-    ``bot_public_service`` sets the column with no ``bot_type`` gate, and
-    ``ExpertChatService`` admits any caller to a public bot and creates their
-    sessions on its binding. This socket's ``sessions.*`` methods would then
-    reach those conversations, which is exactly what the service-bot refusal
-    above exists to prevent.
-    """
+def test_public_visibility_grants_operation_to_no_one():
+    """The audience of a public bot converses over the chat path; the
+    operator channel stays with the owner and collaborators."""
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     svc = _svc(bots=_Bots(public="1"), bindings=bindings)
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="stranger")
 
 
-def test_a_collaborated_personal_bot_is_refused():
-    """A coding app takes collaborators while staying ``bot_type='personal'``."""
-    bindings = _Bindings(raises=AssertionError("must not be reached"))
-    collaborators = _CollaboratorRepo({(BOT, OWNER): [{"user_id": "someone"}]})
-    svc = _svc(bindings=bindings, collaborators=collaborators)
-
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+def test_a_coding_apps_collaborator_is_served_the_socket():
+    """A coding app takes collaborators while staying ``bot_type='personal'``
+    — its team holds the operator channel from their own accounts."""
+    collaborators = _Collaborators({(100, "u2"): PermissionLevel.ADMIN})
+    result = _build(_svc(collaborators=collaborators), caller_id="u2")
+    assert [s.kind for s in result.sockets] == ["chat"]
 
 
-def test_an_unreadable_collaborator_table_refuses_rather_than_publishes():
-    """The gate fails closed: a database blip must not open a shared bot."""
+def test_an_unreadable_collaborator_lookup_refuses_rather_than_publishes():
+    """The gate fails closed: a database blip must not admit a stranger."""
 
     class _Broken:
-        def list_by_bot(self, bot_id, owner_id, env, role=None):
-            raise RuntimeError("collaborator table unavailable")
+        def get_permission_level(self, bot_pk, user_id, owner_id, env=None):
+            raise RuntimeError("collaborator service unavailable")
 
     bindings = _Bindings(raises=AssertionError("must not be reached"))
     svc = _svc(bindings=bindings, collaborators=_Broken())
 
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
+    with pytest.raises(BotNotFoundError):
+        _build(svc, caller_id="u2")
 
 
-def test_the_collaborator_lookup_is_skipped_for_an_already_public_bot():
-    """Public is decisive; there is nothing a second query could change."""
-    collaborators = _CollaboratorRepo()
-    svc = _svc(
-        bots=_Bots(public="1"),
-        bindings=_Bindings(raises=AssertionError("must not be reached")),
-        collaborators=collaborators,
+def test_the_owner_holds_their_socket_with_no_collaborator_row():
+    """The owner needs no configured row; the level policy — including its
+    DB-free owner short-circuit — is the real ``CollaboratorService``'s."""
+    collaborators = _Collaborators()
+    result = _build(_svc(collaborators=collaborators))
+    assert [s.kind for s in result.sockets] == ["chat"]
+
+
+def test_a_published_stage_socket_addresses_the_stage_binding():
+    """``stage=online`` composes against the publish record's binding — never
+    ``ac_bots.binding_id`` — through the same rule the relay uses. A draft
+    fallback here would be the cross-stage leak the spec forbids."""
+    from tests.community.core.engine_runtime.test_stage import _Record
+
+    bindings = _Bindings(raises=AssertionError("the draft binding was read"))
+    devices = _Devices()
+    publish_repo = _PublishRepo(
+        {100: [_Record({"binding": {"online": 77, "verify": 76}}, "success")]}
     )
-
-    with pytest.raises(EngineBotTypeNotSupportedError):
-        _build(svc)
-    assert collaborators.calls == []
+    _build(
+        _svc(
+            bots=_Bots(bot_type="service"),
+            bindings=bindings,
+            devices=devices,
+            publish_repo=publish_repo,
+        ),
+        stage="online",
+    )
+    assert devices.kwargs["binding_id"] == 77
+    # Keyed on the primary key of the row the adjudication was proven against.
+    assert [pk for pk, _ in publish_repo.calls] == [100]
 
 
 def test_an_unknown_bot_type_is_refused_rather_than_assumed_personal():
@@ -685,3 +780,181 @@ def test_the_provider_is_asked_exactly_once():
     # ...leaving the relay-mode lookup as the only provider round trip.
     assert devices.kwargs is not None
     assert devices.kwargs["binding_id"] == 42
+
+
+# ── providers that hand back a bare routing target (ARCA) ─────────────────────
+
+
+@pytest.mark.parametrize("kind", ["proxy", "arca"])
+def test_a_bare_target_provider_gets_a_composed_gateway_url(kind):
+    """The ARCA provider returns a target and a credential and no url. Composing
+    one here is what makes the endpoint answer for those bots at all — before
+    this branch existed every one of them was a 502.
+
+    Both members of ``_PROXY_TARGET_TYPES`` are exercised, and against the same
+    expected URL: the kind selects the branch and must not reach the output. The
+    provider answers ``"proxy"`` today and ``"arca"`` is the ``device_provider``
+    key the same device carries elsewhere, so a transposition in either literal
+    is a silent 502 for a whole provider — this is what fails first if one is
+    mistyped."""
+    assert _build(_svc(devices=_arca(type=kind))).sockets[0].url == ARCA_URL
+
+
+def test_a_composed_url_never_names_the_hop_behind_the_gateway():
+    """The reason this endpoint exists. Composing must not become the way the
+    engine proxy's address leaks out after re-addressing stopped leaking it."""
+    url = _build(_svc(devices=_arca())).sockets[0].url
+    # The *routing prefix*, with its slash — bare ``proxypass`` also matches the
+    # credential parameter, which is named ``x-proxypass-token`` and belongs here.
+    assert "proxypass/" not in url
+    assert "agentclawproxy" not in url
+
+
+def test_a_composed_target_segment_survives_verbatim():
+    """The credential is a signature over the target string, and the proxy
+    rejects a handshake whose url target disagrees with the claim — so
+    percent-encoding ``@`` or ``:`` here would break every ARCA connection."""
+    url = _build(_svc(devices=_arca())).sockets[0].url
+    assert f"/openapi/v1/bots/messages/ws/{ARCA_TARGET}/api/openclaw/ws" in url
+    assert "%40" not in url and "%3A" not in url
+
+
+def test_a_composed_bracketed_target_keeps_its_brackets():
+    """Same ``safe`` set as the local branch, so a target that is authority-like
+    rather than a plain segment survives either way in."""
+    devices = _arca(target="[::1]:20003")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.startswith(
+        "wss://gw.example/openapi/v1/bots/messages/ws/[::1]:20003/api/openclaw/ws"
+    )
+
+
+def test_a_composed_url_addresses_the_bots_own_engine():
+    """The provider never sees ``path`` — the base ``get_device_connection`` does
+    not forward it — so the engine path is this branch's to apply. Getting it
+    wrong is not a 404 but a socket the engine closes with 4001."""
+    devices = _arca()
+    url = _build(_svc(bots=_Bots(engine="claude_code"), devices=devices)).sockets[0].url
+    assert url.endswith(
+        f"/{ARCA_TARGET}/api/claude_code/ws?x-proxypass-token={ARCA_TOKEN}"
+    )
+
+
+def test_a_composed_url_with_no_credential_publishes_no_query_string():
+    devices = _arca(token="")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == (
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+        f"{ARCA_TARGET}/api/openclaw/ws"
+    )
+    assert "?" not in url
+
+
+def test_a_composed_credential_is_percent_encoded():
+    devices = _arca(token="a b&c=d")
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url.endswith("?x-proxypass-token=a%20b%26c%3Dd")
+
+
+def test_composing_and_readdressing_agree_byte_for_byte():
+    """The two branches reach the same published URL by different routes: one
+    cuts the tail out of a provider's url, the other builds it from the target
+    and path. They share a builder precisely so they cannot drift — this pins
+    that they have not."""
+    composed = _build(_svc(devices=_arca())).sockets[0].url
+    readdressed = _build(
+        _svc(
+            devices=_Devices(
+                type="baas",
+                target=ARCA_TARGET,
+                token=ARCA_TOKEN,
+                url=(
+                    "wss://agentclawproxy-prod.example.com/proxypass/"
+                    f"{ARCA_TARGET}/api/openclaw/ws"
+                ),
+            )
+        )
+    ).sockets[0].url
+    assert composed == readdressed == ARCA_URL
+
+
+def test_a_provider_url_wins_over_composing_one():
+    """Ordering, and the reason this fix is not a one-way door: a url the
+    provider issued records a routing decision it made and we did not. Should a
+    bare-target provider ever grow a relay mode, it is preferred here with no
+    change — the composed branch simply stops being reached.
+
+    The url deliberately points somewhere the composed branch never would, so
+    the assertion can tell which branch answered.
+    """
+    devices = _arca(
+        url="wss://agentclawproxy-prod.example.com/proxypass/ARCA_OTHER@1:20099/api/openclaw/ws"
+    )
+    url = _build(_svc(devices=devices)).sockets[0].url
+    assert url == (
+        "wss://gw.example/openapi/v1/bots/messages/ws/"
+        f"ARCA_OTHER@1:20099/api/openclaw/ws?x-proxypass-token={ARCA_TOKEN}"
+    )
+
+
+def test_a_bare_target_provider_url_of_an_unknown_shape_is_still_refused():
+    """The composed branch is not a fallback for a url that failed to parse.
+    A provider that issued a shape we cannot re-address is a fault to name, not
+    something to quietly route around by building our own."""
+    devices = _arca(url="wss://relay.example/wsrelay/6f2a")
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=devices))
+
+
+def test_an_unrecognised_connection_kind_is_named():
+    """Not folded into the composed branch as a catch-all: a provider that was
+    supposed to supply a url and did not has a bug, and composing something
+    plausible for it would bury that bug in a handshake failure."""
+    devices = _Devices(type="teclaw", target="TECLAW_x@4:20003", token="tok", url="")
+    with pytest.raises(EngineUpstreamError) as excinfo:
+        _build(_svc(devices=devices))
+    assert "teclaw" in str(excinfo.value)
+
+
+def test_the_unrecognised_kind_message_does_not_carry_the_credential():
+    devices = _Devices(type="teclaw", target="t", token="secret-tok", url="")
+    with pytest.raises(EngineUpstreamError) as excinfo:
+        _build(_svc(devices=devices))
+    assert "secret-tok" not in str(excinfo.value)
+
+
+def test_a_composed_url_still_needs_a_routing_target():
+    """The target guard runs before any branching, so it covers this branch too
+    — and here it is the only thing standing between an empty target and
+    ``…/bots/messages/ws//api/openclaw/ws``."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=_arca(target="")))
+
+
+def test_an_unencodable_composed_target_is_named_rather_than_a_500():
+    """A lone surrogate survives ``json.loads``, so a provider's response can
+    carry one into this branch as easily as into the local one."""
+    with pytest.raises(EngineUpstreamError):
+        _build(_svc(devices=_arca(target="ARCA_x\ud800@0:20003")))
+
+
+def test_a_composed_expiry_falls_back_to_the_requested_ttl():
+    """ARCA reports no expiry, so the computed bound is what is published — and
+    unusually it is exact rather than a guess: this endpoint asks for
+    ``CONNECTION_TTL_SECONDS`` and the provider signs for precisely that."""
+    from datetime import datetime, timedelta, timezone
+
+    result = _build(_svc(devices=_arca(expires_at="")))
+    expires = datetime.fromisoformat(result.expires_at)
+    expected = datetime.now(timezone.utc) + timedelta(seconds=CONNECTION_TTL_SECONDS)
+    assert abs((expires - expected).total_seconds()) < 60
+
+
+def test_a_bare_target_provider_reporting_unavailable_is_not_ready():
+    """The availability gate sits in ``build``, before any URL is composed, so it
+    covers this branch by construction rather than by repetition. Pinned because
+    "refused exactly as today, on every provider" is a spec criterion, and a
+    future reordering could quietly compose a URL for a stopped sandbox."""
+    devices = _arca(available=False, message="sandbox stopped")
+    with pytest.raises(EngineDeviceNotReadyError):
+        _build(_svc(devices=devices))

@@ -12,9 +12,6 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
     PublishStatusInvalidError,
 )
-from agentclaw.community.core.service_bot.services.arka_image_pin import (
-    resolve_publish_image_pin,
-)
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -62,13 +59,13 @@ class ScaleMixin:
         if not bot:
             raise PublishFlowServiceError(f"Bot does not exist: {publish_record.source_bot_id}")
 
-        active_engine = (bot.get("active_engine") or "").strip().lower()
-        if not self._provider_behavior(bot).supports_scale:
+        publish_runtime_kind = self.resolve_publish_runtime_kind(publish_record)
+        if not self._publish_provider_behavior(publish_record).supports_scale:
             return {
                 "success": True,
                 "message": "Service bots on the teclaw engine do not support scaling",
                 "publish_id": publish_id,
-                "engine": active_engine,
+                "engine": publish_runtime_kind,
                 "supported": True,
             }
 
@@ -93,7 +90,7 @@ class ScaleMixin:
 
         bot_uuid = binding.device_id
         target_count = self._resolve_scale_target_count(publish_record)
-        image_pin = resolve_publish_image_pin(publish_record)
+        image_pin = self.resolve_publish_image_pin(publish_record)
         pinned_image = image_pin.docker_image
         scale_config = (
             {"deploy_config": {"docker_image": pinned_image}}

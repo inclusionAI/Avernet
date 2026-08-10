@@ -23,7 +23,7 @@ from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
 )
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.caller_identity.models import McpCallType
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
@@ -38,7 +38,7 @@ from agentclaw.community.core.expert_chat.errors import (
     SessionCreateError,
     ConnectionError,
 )
-from agentclaw.community.core.expert_chat.repository import ExpertChatRepository
+from agentclaw.community.core.repository.protocols.chat import ExpertChatRepository
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
     ExpertChatInstanceService,
 )

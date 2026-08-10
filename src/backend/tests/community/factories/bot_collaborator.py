@@ -4,12 +4,12 @@ Provides factory functions to create bots and collaborators for testing.
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.services.collaborator_service import (
     CollaboratorService,
     CollaboratorRole,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
 from tests.community.framework.world import World
 
 

@@ -128,7 +128,7 @@ async def test_list_bot_identity_files_returns_all_16_with_exists():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -160,7 +160,7 @@ async def test_list_bot_identity_files_marks_absent_files_false():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -178,7 +178,7 @@ async def test_list_bot_identity_files_reads_trace_id_from_request_state():
 
     env = await list_bot_identity_files(
         bot_id="bot-x",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=request,
     )
@@ -200,7 +200,7 @@ async def test_list_bot_identity_files_400_when_entity_type_invalid():
 
     resp = await list_bot_identity_files(
         bot_id="bot-x",
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -318,7 +318,7 @@ async def test_get_bot_identity_file_returns_content_and_path():
     env = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -353,7 +353,7 @@ async def test_get_bot_identity_file_400_on_value_error():
     resp = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -369,7 +369,7 @@ async def test_update_bot_identity_file_returns_ref():
         bot_id="bot-x",
         file_type=IdentityFileType.SOUL,
         body=IdentityFileWrite(content="# my soul"),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -400,7 +400,7 @@ async def test_update_bot_identity_file_400_on_value_error():
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
         body=IdentityFileWrite(content="x"),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=_request_without_trace(),
     )
@@ -416,7 +416,7 @@ async def test_get_and_update_thread_trace_id():
     get_env = await get_bot_identity_file(
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=request,
     )
@@ -426,7 +426,7 @@ async def test_get_and_update_thread_trace_id():
         bot_id="bot-x",
         file_type=IdentityFileType.RULES,
         body=IdentityFileWrite(content="x"),
-        principal={"user_id": "u1"},
+        owner_id="u1",
         identity_service=service,
         request=request,
     )

@@ -15,7 +15,7 @@ from injector import inject
 from websockets import ClientConnection
 
 from agentclaw.community.core.devices.repository import DeviceBindingRepository
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
 
 from agentclaw.community.log import get_logger

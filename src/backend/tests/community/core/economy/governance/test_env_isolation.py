@@ -12,20 +12,13 @@ from sqlalchemy.orm import sessionmaker
 
 from .conftest import FakeDB
 
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    WhitelistEntryOrm,
-    GovernanceNotificationOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.notify_log_repo import (
-    NotifyLogRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.whitelist_repo import (
-    GovernanceWhitelistRepository,
-)
+from agentclaw.community.core.economy.governance.orm import WhitelistEntryOrm, GovernanceNotificationOrm
+from agentclaw.community.core.repository.implementations.governance.notify_log import NotifyLogRepository
+from agentclaw.community.core.repository.implementations.governance.whitelist import GovernanceWhitelistRepository
 
 
-_NOTIFY_ENV = "agentclaw.community.core.economy.governance.repositories.notify_log_repo.get_current_env"
-_WHITELIST_ENV = "agentclaw.community.core.economy.governance.repositories.whitelist_repo.get_current_env"
+_NOTIFY_ENV = "agentclaw.community.core.repository.implementations.governance.notify_log.get_current_env"
+_WHITELIST_ENV = "agentclaw.community.core.repository.implementations.governance.whitelist.get_current_env"
 
 
 def _db(engine):

@@ -51,3 +51,7 @@ class LocalSkillRuntimeSyncError(Exception):
 
 class LocalSkillEditPausedError(Exception):
     """A Bot Skill layout operation currently owns the edit lock."""
+
+
+class ActiveSkillSetReferenceError(RuntimeError):
+    """A Skill became referenced by an active custom SkillSet."""

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.core.channel.services.repositories import ChannelRepository
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 
 
 class ChannelEngineOverridesReader:

@@ -7,7 +7,7 @@ import pytest
 
 from agentclaw.community.core.skill_center.local_skill_cleanup import LocalSkillCleanupWorkModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
-from agentclaw.community.plugin_api.local_skill_cleanup import LocalSkillCleanupRepository
+from agentclaw.community.core.repository.protocols.skill_center import LocalSkillCleanupRepository
 
 
 def test_cleanup_repository_persists_and_progresses_one_bot_scoped_work_item(world) -> None:
@@ -40,6 +40,27 @@ def test_cleanup_preparation_is_durable_but_not_purgeable_until_committed(world)
         row = db.query(LocalSkillCleanupWorkModel).one()
         assert row.status == "preparing"
     assert repo.cancel_pending(work_id=work_id, **scope)
+
+
+def test_cleanup_preparation_reuses_terminal_work_for_the_same_locator(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    locator = "pool/local/retryable-locator"
+    work_id = repo.record_preparing(**scope, skill_id="9", package_locator=locator)
+    assert work_id is not None
+    assert repo.cancel_pending(work_id=work_id, **scope)
+    assert repo.record_preparing(**scope, skill_id="10", package_locator=locator) == work_id
+    assert repo.record_pending(
+        **scope, skill_id="10", package_locator=locator,
+        requires_runtime_restore=False,
+    ) == work_id
+    assert repo.mark_cleaned(work_id=work_id, **scope)
+    assert repo.record_preparing(**scope, skill_id="11", package_locator=locator) == work_id
+    with world.get(DatabasePlugin).orm_session() as db:
+        row = db.query(LocalSkillCleanupWorkModel).one()
+        assert row.status == "preparing"
+        assert row.skill_id == 11
+        assert row.last_error is None
 
 
 def test_cleanup_repository_isolated_by_the_full_deployment_wide_bot_scope(world) -> None:
@@ -125,6 +146,22 @@ def test_cleanup_repair_required_retains_the_quarantine_outside_purge_retries(wo
         row = db.query(LocalSkillCleanupWorkModel).one()
         assert row.status == "repair_required"
         assert row.last_error == "authoritative package repair required"
+
+
+def test_cleanup_lists_repair_required_work_only_for_the_affected_skill(world) -> None:
+    repo = world.get(LocalSkillCleanupRepository)
+    scope = {"env": "dev", "owner_id": "owner", "bot_id": "bot"}
+    assert repo.record_repair_required(
+        **scope, skill_id="9", package_locator="pool/local/delete-quarantine"
+    )
+    assert repo.record_repair_required(
+        **scope, skill_id="10", package_locator="pool/local/other-quarantine"
+    )
+
+    repair_work = repo.list_repair_required(**scope, skill_id="9")
+
+    assert len(repair_work) == 1
+    assert repair_work[0]["package_locator"] == "pool/local/delete-quarantine"
 
 
 def test_cleanup_ddl_uses_a_bounded_full_locator_digest_as_its_unique_key() -> None:

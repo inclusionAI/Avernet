@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from agentclaw.community.core.channel.json_config_utils import _get_local_base_dir
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot

@@ -9,10 +9,8 @@ from typing import Dict, Any
 
 from injector import inject
 
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 
 logger = get_logger()
 

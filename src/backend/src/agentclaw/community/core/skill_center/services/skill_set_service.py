@@ -14,7 +14,7 @@ from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+    from agentclaw.community.core.repository.protocols.bot import BotRepository
     from agentclaw.community.core.devices.services.device_context_resolver import (
         DeviceContextResolver,
     )
@@ -29,10 +29,8 @@ from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_servers,
 )
 from agentclaw.community.core.mcp.services.config_service import MCPConfigService
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.path_resolution import (
     canonical_pool_local_path,
@@ -1214,7 +1212,8 @@ class SkillSetService:
     def get_symlink_mappings(
         self,
         user_id: str | None = None,
-        bolt_id: str | None = None
+        bolt_id: str | None = None,
+        additional_skill_paths: list[str] | None = None,
     ) -> list[SynlinkMappingInfo]:
         """生成技能激活软链配置（支持多能力集激活）
 
@@ -1224,11 +1223,39 @@ class SkillSetService:
         Args:
             user_id: 用户 ID
             bolt_id: Bot ID，默认使用 self.bot_id
+            additional_skill_paths: 当前请求直接激活、但尚未属于 active
+                SkillSet 的 Skill locator。它们与 SkillSet 快照使用同一套
+                Engine/Planner 路径规则生成一次完整 publish。
 
         Returns:
             List[SynlinkMappingInfo]: 软链配置列表（已去重）
         """
         unique_skills = self.get_active_skills(user_id=user_id, bolt_id=bolt_id)
+
+        # Direct Skill CRUD is intentionally orthogonal to SkillSet membership.
+        # The device boundary accepts a complete mapping publish, so the current
+        # request must be merged into the active-SkillSet snapshot explicitly;
+        # otherwise bindpath can report success while never seeing the requested
+        # Skill. Keep the locator as the identity and let the common mapping code
+        # below select Legacy/Pool roots for every filesystem engine.
+        seen_paths = {
+            str(skill.get("git_path", ""))
+            for skill in unique_skills
+            if skill.get("git_path")
+        }
+        requested_paths = additional_skill_paths or []
+        for skill_path in requested_paths:
+            if not isinstance(skill_path, str) or not skill_path.startswith(
+                ("git://", "local://")
+            ):
+                raise ValueError(
+                    f"Unsupported direct Skill locator: {skill_path!r}"
+                )
+            if skill_path in seen_paths:
+                continue
+            unique_skills.append({"name": "", "git_path": skill_path})
+            seen_paths.add(skill_path)
+
         if not unique_skills:
             return []
 
@@ -1256,9 +1283,10 @@ class SkillSetService:
             ENGINE_SKILLS_REPO_DIR_MAP.get(self.engine_type, str(base_skills_dir / "skills-repo"))
         )
         pool_layout_paths = None
-        if self.entity_id is not None:
+        pool_owner_id = self.user_id or self.entity_id
+        if pool_owner_id is not None:
             pool_layout_paths = self._pool_layout_paths(
-                str(self.entity_id),
+                str(pool_owner_id),
                 str(self.bot_id),
                 self.engine_type,
             )
@@ -1345,11 +1373,31 @@ class SkillSetService:
                 target = str(base_skills_dir / link_name)
                 symlinks.append(SynlinkMappingInfo(source=source, target=target))
 
-        logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(symlinks)}")
-        for sm in symlinks:
+        resolved_mappings = symlinks
+        if requested_paths:
+            # A single runtime link name cannot safely resolve to two corpora.
+            # Reject collisions before calling the device boundary; identical
+            # mappings are harmless duplicates and collapse in insertion order.
+            resolved_mappings = []
+            mappings_by_target: dict[str, SynlinkMappingInfo] = {}
+            for mapping in symlinks:
+                existing = mappings_by_target.get(mapping.target)
+                if existing is None:
+                    mappings_by_target[mapping.target] = mapping
+                    resolved_mappings.append(mapping)
+                    continue
+                if existing.source != mapping.source:
+                    raise ValueError(
+                        "Conflicting Skill mappings for runtime target "
+                        f"{mapping.target!r}: {existing.source!r} != "
+                        f"{mapping.source!r}"
+                    )
+
+        logger.info(f"[get_symlink_mappings] 生成软链配置完成: symlinks_count={len(resolved_mappings)}")
+        for sm in resolved_mappings:
             logger.info(f"[get_symlink_mappings] symlink: source={sm.source}, target={sm.target}")
 
-        return symlinks
+        return resolved_mappings
 
     # ====== MCP Server Management in SkillSet ======
 
@@ -1961,10 +2009,11 @@ class _DeviceSyncMixin:
     skill_set_service: SkillSetService
 
     def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
+        """Resolve a Bot lock by owner, while retaining its entity as scope."""
         owner_id = (
-            self.skill_set_service.entity_id
-            or user_id
+            user_id
             or self.skill_set_service.user_id
+            or self.skill_set_service.entity_id
         )
         bot_id = self.skill_set_service.bot_id
         if not owner_id or not bot_id:
@@ -2653,6 +2702,25 @@ class SkillSetActivator(_DeviceSyncMixin):
             self.repo_dir = self.skill_set_service.repo_dir
             self.local_dir = self.skill_set_service.local_dir
 
+    def _bot_layout_scope(self, user_id: str | None) -> BotSkillLayoutScope | None:
+        """Resolve a Bot lock by owner, while retaining its entity as scope."""
+        owner_id = (
+            user_id
+            or self.skill_set_service.user_id
+            or self.skill_set_service.entity_id
+        )
+        bot_id = self.skill_set_service.bot_id
+        if not owner_id or not bot_id:
+            return None
+        bot = self.skill_set_service._bot_repo.get_by_id_and_owner(bot_id, owner_id)
+        if bot is None or bot.get("entity_id") is None or bot.get("env") is None:
+            return None
+        return BotSkillLayoutScope(
+            env=str(bot["env"]),
+            entity_id=str(bot["entity_id"]),
+            bot_id=str(bot_id),
+        )
+
     async def activate_skill_set(
         self,
         skill_set_id: str,
@@ -2798,6 +2866,32 @@ class SkillSetActivator(_DeviceSyncMixin):
         skill_set_id: str,
         user_id: str | None = None,
         proxy_token: str | None = None
+    ) -> DeactivateResult:
+        """Serialize Bot-scoped deactivation with Local Skill mutations."""
+        scope = self._bot_layout_scope(user_id)
+        if scope is None:
+            return await self._deactivate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditPausedError:
+            return DeactivateResult(
+                success=False,
+                message="Skills are temporarily read-only while layout work is running",
+            )
+        try:
+            return await self._deactivate_skill_set_unlocked(
+                skill_set_id, user_id=user_id, proxy_token=proxy_token
+            )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def _deactivate_skill_set_unlocked(
+        self,
+        skill_set_id: str,
+        user_id: str | None = None,
+        proxy_token: str | None = None,
     ) -> DeactivateResult:
         """取消激活单个能力集
 

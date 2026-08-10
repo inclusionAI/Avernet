@@ -15,7 +15,7 @@ from agentclaw.community.core.bot_chat.models import (
     AwLangfuseTrace,
     BcsGroupSession,
 )
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.core.bot_chat.query_support import (
     QueryScope,
     enrich_group_labels,
@@ -898,6 +898,7 @@ async def test_contains_query_accepts_90_days_and_rejects_longer_ranges():
             langfuse_public_key="",
             langfuse_secret_key="",
         ),
+        MagicMock(),
     )
     service._db_repo = MagicMock()
     service._db_repo.list_ocb_traces.return_value = ([], 0)
@@ -931,6 +932,7 @@ async def test_unbounded_time_scope_requires_exact_identifier():
             langfuse_public_key="",
             langfuse_secret_key="",
         ),
+        MagicMock(),
     )
 
     with pytest.raises(ValueError, match="requires match_mode=exact"):
@@ -992,6 +994,7 @@ async def test_langfuse_filter_scans_later_pages_before_paginating():
             langfuse_public_key="fixture-public",
             langfuse_secret_key="fixture-secret",
         ),
+        MagicMock(),
     )
     service._fetch_traces_from_langfuse = AsyncMock(
         side_effect=[
@@ -1047,6 +1050,7 @@ async def test_time_scope_all_accepts_old_exact_trace_and_naive_dates():
             langfuse_public_key="",
             langfuse_secret_key="",
         ),
+        MagicMock(),
     )
     old_session = ConversationSession(
         id="trace_old_fixture",

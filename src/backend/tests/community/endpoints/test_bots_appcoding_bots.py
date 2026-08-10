@@ -10,10 +10,8 @@ tests. (The contrived service-raises-500 case was dropped with that mock.)
 """
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
-    TemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 
 from tests.community.framework import (
     CaseInput,

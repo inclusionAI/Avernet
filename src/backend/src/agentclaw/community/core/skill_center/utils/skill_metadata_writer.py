@@ -4,10 +4,8 @@ Skill set metadata writer for persisting skill set information to JSON.
 import json
 from pathlib import Path
 
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import jwt
 
 from agentclaw.community.core.bot_chat.models import BcsGroupSession
-from agentclaw.community.core.bot_chat.repository import BotChatDbRepository
+from agentclaw.community.core.repository.implementations.chat.db import BotChatDbRepository
 from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (

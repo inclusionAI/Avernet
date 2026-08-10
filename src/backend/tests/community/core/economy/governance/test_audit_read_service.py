@@ -11,12 +11,8 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from agentclaw.community.core.economy.governance.repositories.audit_repo import (
-    GovernanceAuditRepository,
-)
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    AuditLogOrm,
-)
+from agentclaw.community.core.repository.implementations.governance.audit import GovernanceAuditRepository
+from agentclaw.community.core.economy.governance.orm import AuditLogOrm
 from agentclaw.community.core.economy.governance.services.audit_read_service import (
     GovernanceAuditReadService,
 )
@@ -26,7 +22,7 @@ from tests.community.core.economy.governance.conftest import FakeDB
 
 
 _ENV_PATCH = (
-    "agentclaw.community.core.economy.governance.repositories.audit_repo.get_current_env"
+    "agentclaw.community.core.repository.implementations.governance.audit.get_current_env"
 )
 
 

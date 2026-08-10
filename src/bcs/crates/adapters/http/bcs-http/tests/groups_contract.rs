@@ -512,7 +512,7 @@ impl GroupManagementService for RecordingGroupManagement {
     ) -> Result<GroupAddMemberResult, bcs_service_api::GroupUseCaseError> {
         let result = GroupAddMemberResult {
             group_id: cmd.group_id.clone(),
-            member: participant_view(&cmd.bot_id, cmd.role.as_deref().unwrap_or("consultant")),
+            member: participant_view(&cmd.bot_id, "consultant"),
         };
         self.add_member_calls.lock().await.push(cmd);
         Ok(result)
@@ -2259,7 +2259,7 @@ async fn put_group_status_delegates_to_group_management_status_and_preserves_res
 }
 
 #[tokio::test]
-async fn post_group_member_delegates_to_group_management_add_member() {
+async fn post_group_member_delegates_without_exposing_role() {
     let temp_dir = TempDir::new().unwrap();
     let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
     register_bot(&registry, "driver-bot", "Driver").await;
@@ -2284,11 +2284,7 @@ async fn post_group_member_delegates_to_group_management_add_member() {
                 .header("authorization", "Bearer driver-token")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({
-                        "bot_uuid": "target-bot",
-                        "role": "observer"
-                    })
-                    .to_string(),
+                    serde_json::json!({ "bot_uuid": "target-bot" }).to_string(),
                 ))
                 .unwrap(),
         )
@@ -2301,7 +2297,7 @@ async fn post_group_member_delegates_to_group_management_add_member() {
     assert_eq!(json["added"], true);
     assert_eq!(json["session_id"], "group-1");
     assert_eq!(json["member"]["bot_uuid"], "target-bot");
-    assert_eq!(json["member"]["role"], "observer");
+    assert_eq!(json["member"]["role"], "consultant");
 
     let calls = recorder.add_member_calls.lock().await;
     assert_eq!(calls.len(), 1);
@@ -2310,7 +2306,6 @@ async fn post_group_member_delegates_to_group_management_add_member() {
     assert_eq!(cmd.human_actor_id.as_deref(), Some("human_alice"));
     assert_eq!(cmd.group_id, "group-1");
     assert_eq!(cmd.bot_id, "target-bot");
-    assert_eq!(cmd.role.as_deref(), Some("observer"));
 }
 
 #[tokio::test]

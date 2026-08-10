@@ -15,10 +15,8 @@ from agentclaw.community.api.local_skill_upload_service import (
 from agentclaw.community.core.bot_collaborator.protocols import (
     CollaboratorServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    BotCollabLogRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotCollabLogRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.skill_center.factories import (
     LocalSkillPackageStorage,
     SkillServiceFactory,
@@ -26,10 +24,8 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.services.local_skill_upload_service import (
     LocalSkillUploadService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skills_pool.edit_guard import SkillsPoolEditGuard
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 from agentclaw.community.utils.gateway_principal_config import (
@@ -117,6 +113,12 @@ def _package() -> bytes:
 
 
 def _principal() -> str:
+    """A caller in ``_TENANT`` — the tenant asserted by the ``app`` principal.
+
+    A ``user`` principal carries no tenant (nothing in a user credential proves
+    one), so a user-only token would scope to the internal default and this file
+    would seed one tenant while the request read another.
+    """
     now = int(time.time())
     return jwt.encode(
         {
@@ -127,9 +129,18 @@ def _principal() -> str:
             "principals": [
                 {
                     "type": "user",
-                    "tenant": _TENANT,
                     "subject": {"id": _OWNER, "username": "upload@example.test"},
-                }
+                },
+                {
+                    "type": "app",
+                    "tenant": _TENANT,
+                    "app": {
+                        "app_id": 1,
+                        "app_name": "Partner App",
+                        "owners": "partner-org",
+                        "tenant": _TENANT,
+                    },
+                },
             ],
         },
         _KEY,
@@ -225,7 +236,7 @@ def _assert_associated_to_owning_bot_default(response, world) -> None:
     path="/openapi/v1/bots/skills/upload",
     scenario="raw_zip_created_in_verified_tenant",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID},
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
         headers=_HEADERS,
         raw_body=_package(),
     ),
@@ -251,7 +262,7 @@ def raw_zip_upload_creates_an_inactive_skill():
     path="/openapi/v1/bots/skills/upload",
     scenario="multipart_rejected_after_verified_tenant_guard",
     input=CaseInput(
-        query_params={"bot_id": _BOT_ID},
+        query_params={"bot_id": _BOT_ID, "user_id": _OWNER},
         headers={**_HEADERS, "content-type": "multipart/form-data; boundary=x"},
         raw_body=b"--x--",
     ),

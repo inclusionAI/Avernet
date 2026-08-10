@@ -12,18 +12,14 @@ from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.skill_service_factory import SkillServiceFactoryProtocol
 from agentclaw.community.api.skill_set_service_factory import SkillSetServiceFactoryProtocol
 from agentclaw.community.core.access.services.policy_service import PolicyService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
-    TemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_public.repository.bot_friend_repository import (
-    BotFriendRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.bot import BotFriendRepositoryProtocol
 from agentclaw.community.core.bot_public.repository.models import BotFriendStatus
 from agentclaw.community.core.bot_public.services.bot_public_service import BotPublicService
 from agentclaw.community.core.devices.models import DeviceBindingStatus
-from agentclaw.community.core.devices.repository.protocol import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_service import (
     DeviceService,
     LOCAL_DEVICE_PROVIDER,
@@ -32,11 +28,9 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
     SkillSetServiceFactory,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillRepository,
-    SkillSetRepository,
-)
-from agentclaw.community.plugins.bot_friend_repository import BotFriendRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.implementations.bot.friend import BotFriendRepository
 from agentclaw.community.utils.env_utils import get_current_env
 
 from tests.community.contracts.gateway.conftest import (

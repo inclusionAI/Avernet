@@ -13,9 +13,7 @@ from agentclaw.community.core.service_bot.services.publish_flow.tasks import (
     PublishTaskLifecycle,
 )
 from agentclaw.community.core.service_bot.types import PublishStage
-from agentclaw.community.core.task_queue.repository.protocol import (
-    TaskQueueRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
@@ -39,7 +37,7 @@ async def _run_draft_restore_task(world, operation_id: int):
     registry = injector.get(HandlerRegistry)
     if registry.get(DRAFT_RESTORE_TASK) is None:
         await injector.get(PublishTaskLifecycle).bootstrap()
-    task = injector.get(TaskQueueService).enqueue(
+    task, _created = injector.get(TaskQueueService).enqueue(
         DRAFT_RESTORE_TASK,
         {
             "draft_publish_id": _DRAFT_ID,

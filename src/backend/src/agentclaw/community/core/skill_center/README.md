@@ -37,6 +37,8 @@ consumes:
   - "WorkspacePathFactory"
   - "LocalSkillCleanupRepository"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
+  - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.core.access
   - agentclaw.community.core.base
   - agentclaw.community.core.bot_collaborator
@@ -102,3 +104,7 @@ If a device reports source deletion failure after a partial delete and the
 authoritative package cannot be verified repaired, the complete quarantine is
 retained as `repair_required` cleanup work. It is deliberately excluded from
 ordinary obsolete-byte purge retries until package repair is resolved.
+Before a later deletion of that same Local Skill starts, it reacquires the
+serialized edit lease and restores any such quarantine to the authoritative
+locator; only after that succeeds can the deletion retry. If restoration leaves
+a redundant quarantine, ordinary pending cleanup may purge that duplicate.

@@ -106,13 +106,14 @@ class BuildStageRunner:
             # Build succeeded: merge the artifact pointers into ext (ARCA =
             # migration_path/build_target_path; external = config_artifact/
             # content_hash/engine_ext).
-            ext = self._ext_state.get_latest_ext(publish_id)
+            ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
             ext.update(artifact.ext)
             self._ext_state.update_status(
                 publish_id=publish_id,
                 target_status=PublishStatus.BUILT,
                 source_status=PublishStatus.BUILDING,
                 ext=ext,
+                expected_ext=expected_ext,
             )
 
             logger.info(
@@ -130,7 +131,7 @@ class BuildStageRunner:
         except Exception as e:
             logger.error("[BuildStageRunner] Build failed: %s", e)
 
-            ext = self._ext_state.get_latest_ext(publish_id)
+            ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
             PublishExtState.clear_retry_flag(ext)
             ext["error_message"] = str(e)
             ext["source_status"] = PublishStatus.BUILDING.value
@@ -139,6 +140,7 @@ class BuildStageRunner:
                 target_status=PublishStatus.FAILED,
                 source_status=PublishStatus.BUILDING,
                 ext=ext,
+                expected_ext=expected_ext,
             )
 
             return PublishFlowResult(

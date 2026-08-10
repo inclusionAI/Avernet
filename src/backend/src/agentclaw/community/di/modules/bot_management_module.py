@@ -42,16 +42,14 @@ from agentclaw.community.api.render_screen_service import RenderScreenServicePro
 from agentclaw.community.core.bot_collaborator.protocols import (
     BotServiceProtocol as CoreBotServiceProtocol,
 )
-from agentclaw.community.core.bot_collaborator.repository.protocol import CollaboratorRepositoryProtocol
-from agentclaw.community.core.bot_management.render_screen.repositories import RenderScreenRepository
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import RenderScreenRepository
 from agentclaw.community.core.bot_management.render_screen.services.render_screen_service import (
     RenderScreenService,
 )
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRepository,
-    BotRestartLockRepositoryProtocol,
-)
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import TemplateRepository
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.cleanup_service import BotCleanupService
@@ -73,10 +71,8 @@ from agentclaw.community.core.bot_management.services.template_service import Te
 from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -84,8 +80,8 @@ from agentclaw.community.core.devices.services.baas_template_resolver import (
     SystemConfigBaasTemplateResolver,
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
-from agentclaw.community.core.resources.repository.protocol import ResourceRepositoryProtocol
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import BotPublishRepositoryProtocol
+from agentclaw.community.core.repository.protocols.platform import ResourceRepositoryProtocol
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.service_bot.services.bot_publish_service import BotPublishService
 from agentclaw.community.core.service_bot.services.deploy.producer import (
@@ -108,16 +104,10 @@ from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipPlu
 from agentclaw.community.plugin_api.http_client import QUALIFIER_BCN, HttpClient
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.plugins.bot_repository import (
-    BotRepository as UnifiedBotRepository,
-)
-from agentclaw.community.plugins.bot_restart_lock_repository import BotRestartLockRepository
-from agentclaw.community.plugins.render_screen_repository import (
-    RenderScreenRepository as UnifiedRenderScreenRepository,
-)
-from agentclaw.community.plugins.template_repository import (
-    TemplateRepository as UnifiedTemplateRepository,
-)
+from agentclaw.community.core.repository.implementations.bot.bot import BotRepository as UnifiedBotRepository
+from agentclaw.community.core.repository.implementations.bot.restart_lock import BotRestartLockRepository
+from agentclaw.community.core.repository.implementations.bot.render_screen import RenderScreenRepository as UnifiedRenderScreenRepository
+from agentclaw.community.core.repository.implementations.bot.template import TemplateRepository as UnifiedTemplateRepository
 
 
 logger = get_logger()

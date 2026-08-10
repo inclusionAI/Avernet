@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from agentclaw.community.adapters.http.dependencies import RequestContext, get_request_context
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
     with_interceptors,
@@ -30,9 +30,7 @@ from agentclaw.community.core.resources.dependencies.resource import (
     get_file_service,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import select_stage_bind_id
 from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.devices.services import device_info as device_info_lookup

@@ -35,3 +35,7 @@ class CollaboratorServiceProtocol(Protocol):
     def check_collaborator_permission(self, *args: Any, **kwargs: Any) -> Any:
         """检查协作者权限."""
         ...
+
+    def get_permission_level(self, *args: Any, **kwargs: Any) -> Any:
+        """获取用户在 Bot 中的权限级别（bot_pk 定位，无额外 Bot 查询）."""
+        ...

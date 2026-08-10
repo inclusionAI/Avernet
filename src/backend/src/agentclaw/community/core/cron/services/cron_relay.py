@@ -19,9 +19,7 @@ from typing import Any, Optional
 from injector import inject
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.repository.template_repository_protocol import (
-    TemplateRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import TemplateRepository
 from agentclaw.community.core.cron.protocols import (
     BotInfoProvider,
     DeviceConnectionProvider,
@@ -32,9 +30,7 @@ from agentclaw.community.core.devices.services.device_context_resolver import (
 )
 from agentclaw.community.core.devices.services.device_service import DeviceService
 from agentclaw.community.core.cron.errors import CronRelayError
-from agentclaw.community.core.service_bot.repository.bot_publish_repository import (
-    BotPublishRepositoryProtocol,
-)
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
 from agentclaw.community.core.cron.services.cron_runtime_targets import (
     CronRuntimeTarget,

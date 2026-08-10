@@ -1,4 +1,4 @@
-"""The forward log line names the tenant and the caller it resolved.
+"""The forward log line names the tenant-bearing callers it resolved.
 
 The gateway is the only hop that sees the caller's credentials, so it is the
 only one that can say what a request turned out to *be*. Until this line carried
@@ -42,9 +42,8 @@ from gateway.community.spi.forwarder import ForwardRequest, ForwardResponse
 _TEST_KEY = "access-log-test-shared-secret-32b!!"
 
 
-def _user(user_id: str = "u-42", tenant: str = "acme") -> UserPrincipal:
+def _user(user_id: str = "u-42") -> UserPrincipal:
     return UserPrincipal(
-        tenant=tenant,
         subject=AuthenticatedUser(id=user_id, username="alice@example.com"),
     )
 
@@ -64,9 +63,9 @@ def test_no_identity_reads_as_absent() -> None:
     assert _identity_label({}) == ("-", "-")
 
 
-def test_user_identity_names_tenant_and_subject() -> None:
+def test_user_identity_has_no_tenant_and_names_subject() -> None:
     tenant, caller = _identity_label({PrincipalType.USER: _user()})
-    assert (tenant, caller) == ("acme", "user:u-42")
+    assert (tenant, caller) == ("-", "user:u-42")
 
 
 def test_every_identity_in_the_set_is_named() -> None:
@@ -116,7 +115,17 @@ def test_disagreeing_tenants_are_all_named() -> None:
     """
     tenant, _ = _identity_label(
         {
-            PrincipalType.USER: _user(tenant="tenant-a"),
+            PrincipalType.BOT: BotPrincipal(
+                tenant="tenant-a",
+                bot=Bot(
+                    bot_uuid="bot-1",
+                    owner_id="u-42",
+                    token="secret-bot-token",
+                    app_id=7,
+                    agent_code="ac",
+                    tenant="tenant-a",
+                ),
+            ),
             PrincipalType.APP: _app_principal(tenant="tenant-b"),
         }
     )

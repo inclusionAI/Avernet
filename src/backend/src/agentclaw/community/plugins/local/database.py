@@ -143,21 +143,22 @@ class SqliteDB(MockSeam, DatabasePlugin, LifecycleBase):
         import agentclaw.community.plugin_api.models  # noqa: F401  ac_bots / ac_resource / ac_channel_config
         import agentclaw.community.core.models  # noqa: F401  ac_skill* / ac_skill_set_mcp / ac_user_mcp_config / propagation_log / center_sync_log
         import agentclaw.community.core.skill_center.local_skill_cleanup  # noqa: F401  obsolete Local Skill package cleanup work
+        import agentclaw.community.core.skill_center.orm  # noqa: F401  ac_default_skillset_*
         import agentclaw.community.core.access.sqlite_models  # noqa: F401  ac_access_control_policy / ac_user_info
         import agentclaw.community.core.service_bot.repository.models  # noqa: F401  ac_bot_publish
         import agentclaw.community.core.bot_public.repository.models  # noqa: F401  ac_bot_friend
         import agentclaw.community.core.expert_chat.sqlite_models  # noqa: F401  ac_expert_chat_bot_sessions
-        import agentclaw.community.plugins.local.sqlite_models  # noqa: F401  ac_entity_device_binding
+        import agentclaw.community.core.devices.repository.models  # noqa: F401  ac_entity_device_binding
         import agentclaw.community.core.bot_management.repository.models  # noqa: F401  ac_templates / ac_bot_restart_lock
         import agentclaw.community.core.bot_management.render_screen.sqlite_models  # noqa: F401  ac_bot_render_screen
-        import agentclaw.community.plugins.local.system_config_models  # noqa: F401  ac_config_*
+        import agentclaw.community.core.system_config.orm  # noqa: F401  ac_config_*
         import agentclaw.community.core.harness.sqlite_models  # noqa: F401  ac_harness_*
         import agentclaw.community.core.bot_chat.models  # noqa: F401  bot_chat private-Base tables
         import agentclaw.community.core.bot_dormant.sqlite_models  # noqa: F401  ac_bot_dormant_*
         import agentclaw.community.core.task_queue.repository.models  # noqa: F401  ac_task_queue
         import agentclaw.community.core.skills_pool.repository.models  # noqa: F401  ac_bot_skill_layout_state
         import agentclaw.community.core.session_resources.repository.models  # noqa: F401  ac_session_resource
-        import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401  governance_*
+        import agentclaw.community.core.economy.governance.orm  # noqa: F401  governance_*
         import agentclaw.community.core.caller_identity.models  # noqa: F401  caller identity tables
         import agentclaw.community.core.user_list.models  # noqa: F401  ac_entity_user_list
 

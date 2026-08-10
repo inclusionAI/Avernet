@@ -4,17 +4,11 @@ import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentclaw.community.core.bot_management.services.bot_service import BotService
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotRestartLockRepositoryProtocol,
-)
-from agentclaw.community.core.bot_collaborator.repository.protocol import (
-    CollaboratorRepositoryProtocol,
-)
-from agentclaw.community.core.devices.repository.protocol import (
-    DeviceBindingRepository,
-    OssToNasRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
+from agentclaw.community.core.repository.protocols.bot import CollaboratorRepositoryProtocol
+from agentclaw.community.core.repository.protocols.devices import OssToNasRecordRepository
+from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
 

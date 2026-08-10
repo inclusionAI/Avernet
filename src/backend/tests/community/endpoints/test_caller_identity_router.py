@@ -7,13 +7,11 @@ transaction, lock, and Agent Principal synchronization branches.
 
 from __future__ import annotations
 
-from agentclaw.community.core.bot_management.repository.protocol import BotRepository
+from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.bot_collaborator.services.collaborator_lock_service import (
     CollaboratorLockService,
 )
-from agentclaw.community.core.skill_center.services.repositories import (
-    SkillSetRepository,
-)
+from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot

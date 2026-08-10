@@ -9,12 +9,14 @@ __all__ = [
 
 def __getattr__(name: str):
     """Lazy import to avoid circular dependencies at module load time."""
-    if name in ("ChannelRecord", "ChannelRepository"):
-        from agentclaw.community.core.channel.services.repositories import (  # noqa: F401 lazy
-            ChannelRecord,
-            ChannelRepository,
-        )
-        return locals()[name]
+    if name == "ChannelRecord":
+        from agentclaw.community.core.channel.models import ChannelRecord
+
+        return ChannelRecord
+    if name == "ChannelRepository":
+        from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+
+        return ChannelRepository
     if name == "ChannelService":
         from agentclaw.community.core.channel.services.channel_service import ChannelService
         return ChannelService

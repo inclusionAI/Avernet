@@ -78,10 +78,13 @@ this contract.
    in the owner Bot container, and audit/operation attribution identifies the
    collaborator only as actor. Public response payloads must not expose either
    identity.
-3. With a principal from another tenant that independently owns the same-shaped
-   owner/Bot values, verify list and raw ZIP upload-or-replace operate only on
-   that tenant's own Bot data. Confirm the target tenant's rows, desired state,
-   packages, associations, exclusions, and cleanup work do not change.
+3. With a principal from another tenant that owns a different globally scoped
+   Bot, reuse the same tenant-local Skill name and verify list and raw ZIP
+   upload-or-replace operate only on that tenant's own Bot data. The two Bots
+   must have distinct `(env, entity_id, bot_id)` identities: that identity is
+   deployment-wide unique and is also the scope of cleanup work. Confirm the
+   target tenant's rows, desired state, packages, associations, exclusions, and
+   cleanup work do not change.
 4. For masked target-tenant negatives, use a Bot ID that exists in the owner
    tenant but is missing from the other tenant. Attempt list, detail, raw ZIP
    upload-or-replace, activate, deactivate, and delete against the owner

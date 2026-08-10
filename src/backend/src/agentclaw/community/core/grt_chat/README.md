@@ -12,6 +12,7 @@ consumes:
   - "BotRepository"
   - "DeviceRepository"
 internal_dependencies:
+  - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.bot_management
   - agentclaw.community.core.devices
   - agentclaw.community.log

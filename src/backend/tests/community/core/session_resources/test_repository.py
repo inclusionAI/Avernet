@@ -9,9 +9,7 @@ from agentclaw.community.core.session_resources.types import (
     TransferApiVersion,
 )
 from agentclaw.community.plugins.local.database import SqliteDB, reset_for_tests
-from agentclaw.community.plugins.session_resource_repository import (
-    SessionResourceRepository,
-)
+from agentclaw.community.core.repository.implementations.platform.session_resource import SessionResourceRepository
 
 
 def _record() -> SessionResourceRecord:

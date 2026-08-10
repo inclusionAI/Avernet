@@ -112,7 +112,7 @@ def _identity_label(identities: dict[PrincipalType, Principal]) -> tuple[str, st
     labels = []
     tenants = set()
     for principal in identities.values():
-        if principal.tenant:
+        if not isinstance(principal, UserPrincipal) and principal.tenant:
             tenants.add(principal.tenant)
         if isinstance(principal, UserPrincipal):
             labels.append(f"user:{principal.subject.id}")

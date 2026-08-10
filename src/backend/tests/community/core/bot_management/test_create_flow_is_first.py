@@ -28,11 +28,30 @@ class TestIsFirstBot:
         assert _svc_with_count(5).is_first_bot("user001") is False
 
 
+class TestIsFirstPersonalBot:
+    def test_no_live_personal_bot_is_first_personal(self):
+        svc = BotService.__new__(BotService)
+        svc._repository = MagicMock()
+        svc._repository.exists_by_owner_and_bot_type.return_value = False
+
+        assert svc.is_first_personal_bot("user001") is True
+        svc._repository.exists_by_owner_and_bot_type.assert_called_once_with(
+            "user001", "personal"
+        )
+
+    def test_existing_live_personal_bot_is_not_first_personal(self):
+        svc = BotService.__new__(BotService)
+        svc._repository = MagicMock()
+        svc._repository.exists_by_owner_and_bot_type.return_value = True
+
+        assert svc.is_first_personal_bot("user001") is False
+
+
 class TestApplyRpcTenantBranch:
-    """发证 RPC 按租户分流:默认租户按 is_first 分,其他租户一律 applyFirst。"""
+    """发证 RPC 按租户分流:默认租户按首个个人 Bot 分,其他租户一律 applyFirst。"""
 
     @pytest.mark.parametrize(
-        "tenant,is_first,expect_first_rpc",
+        "tenant,use_first_passport,expect_first_rpc",
         [
             ("teamclaw", True, True),    # 默认租户首 bot → applyFirst
             ("teamclaw", False, False),  # 默认租户非首 → applyAgent
@@ -40,7 +59,9 @@ class TestApplyRpcTenantBranch:
             ("tenantB", False, True),    # 其他租户非首 → 仍 applyFirst
         ],
     )
-    def test_rpc_selection(self, tenant, is_first, expect_first_rpc, monkeypatch):
+    def test_rpc_selection(
+        self, tenant, use_first_passport, expect_first_rpc, monkeypatch
+    ):
         from agentclaw.community.core.bot_management import create_flow
         from agentclaw.community.utils.avernet_tenant import DEFAULT_AVERNET_TENANT
 
@@ -62,7 +83,7 @@ class TestApplyRpcTenantBranch:
             spec=MagicMock(),
             mcp_codes=[],
             cli_items=[],
-            is_first_bot=is_first,
+            use_first_passport=use_first_passport,
         )
 
         if expect_first_rpc:

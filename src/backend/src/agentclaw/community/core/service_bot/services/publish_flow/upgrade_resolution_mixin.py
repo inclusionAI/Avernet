@@ -18,8 +18,8 @@ from __future__ import annotations
 from agentclaw.community.core.service_bot.repository.models import (
     BotPublishRecord,
 )
-from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
-    TECLAW_DEVICE_PROVIDER,
+from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    RUNTIME_KIND_TECLAW,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
@@ -233,8 +233,8 @@ class UpgradeResolutionMixin:
 
         if status in _ONLINE_NOT_LIVE_BAAS_STATUSES:
             is_teclaw = (
-                self._baas_service.resolve_container_provider(bot)
-                == TECLAW_DEVICE_PROVIDER
+                self.resolve_publish_runtime_kind(publish_record)
+                == RUNTIME_KIND_TECLAW
             )
             decision = (
                 OnlineDeployDecision.RETIRE_THEN_FIRST_RELEASE

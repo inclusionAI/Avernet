@@ -74,9 +74,7 @@ def _db() -> DataSourcePlugin:
 
 def _strategy_pool(db: DataSourcePlugin):
     return {
-        "google": GoogleUserStrategy(
-            token_header="x-avernet-google-token", default_tenant="default"
-        ),
+        "google": GoogleUserStrategy(token_header="x-avernet-google-token"),
         "bot_token": BotTokenStrategy(registry=BotRepository(db)),
         "app_token": AppTokenStrategy(registry=AppRepository(db)),
         "access_key_token": AccessKeyTokenStrategy(registry=AccessKeyRepository(db)),
@@ -101,7 +99,6 @@ def _google_strategies() -> dict[PrincipalType, IdentityChain]:
         (
             GoogleUserStrategy(
                 token_header="x-avernet-google-token",
-                default_tenant="default",
                 transport=_userinfo_handler(_GOOGLE_BODY),
             ),
         ),

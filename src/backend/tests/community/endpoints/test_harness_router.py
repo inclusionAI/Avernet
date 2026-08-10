@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.core.harness.repository_protocol import (
-    HarnessScanRecordRepository,
-)
+from agentclaw.community.core.repository.protocols.harness import HarnessScanRecordRepository
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_bot
 from tests.community.framework import drain_background_tasks

@@ -112,6 +112,8 @@ if TYPE_CHECKING:
     )
     from secbaas.community.spi.secret import SecretStorePlugin
 
+    from ._callback_handler import DeviceCallbackHandler
+
 
 class LocalPaasService(PaasService, LocalPaasServiceProtocol):
     """Local platform PaaS service implementation.
@@ -149,6 +151,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         server_ip: str,
         desktop_sandbox_plugin: DesktopSandboxPlugin,
         secret_plugin: SecretStorePlugin,
+        callback_handler: DeviceCallbackHandler,
         env: str | None = None,
         device_template_repository: DeviceTemplateRepository | None = None,
         device_repository: DeviceRepository | None = None,
@@ -216,6 +219,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
             ws_conn_mode if ws_conn_mode is not None else self._DEFAULT_WS_CONN_MODE
         )
         self._secret_plugin = secret_plugin
+        self._callback_handler = callback_handler
 
     async def get_credentials(self) -> LocalCredentials:
         """Get the credentials used by this service instance.
@@ -2205,11 +2209,8 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 stderr="",
                 tenant=device.tenant,
             )
-            from secbaas.community.core.utils.callback_utils import (
-                handle_device_callback,
-            )
 
-            result = await handle_device_callback(callback)
+            result = await self._callback_handler.handle(callback)
             logger.info(
                 f"[PUBLISH_CALLBACK_SUCCESS] device={device.device_uuid}, "
                 f"publish_id={record.publish_id}, source={source}, result={result}"

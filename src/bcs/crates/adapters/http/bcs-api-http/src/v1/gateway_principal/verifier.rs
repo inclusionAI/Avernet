@@ -138,6 +138,24 @@ impl GatewayPrincipalTokenVerifier {
                     );
                     GatewayPrincipalVerificationError::InvalidSignature
                 }
+                jsonwebtoken::errors::ErrorKind::InvalidIssuer => {
+                    warn!(
+                        expected_iss = %self.trust.issuer,
+                        kid = ?header.kid,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token issuer mismatch"
+                    );
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
+                jsonwebtoken::errors::ErrorKind::InvalidAudience => {
+                    warn!(
+                        expected_aud = %self.trust.audience,
+                        kid = ?header.kid,
+                        token_fingerprint = %token_fingerprint,
+                        "Gateway Principal token audience mismatch"
+                    );
+                    GatewayPrincipalVerificationError::InvalidClaims
+                }
                 other => {
                     warn!(
                         kid = ?header.kid,
@@ -148,6 +166,24 @@ impl GatewayPrincipalTokenVerifier {
                     GatewayPrincipalVerificationError::InvalidClaims
                 }
             })?;
+
+        for claim in ["iss", "aud"] {
+            let observed = match token_data.claims.get(claim) {
+                Some(Value::String(_)) => continue,
+                Some(Value::Array(_)) => "array",
+                Some(_) => "non_string",
+                None => "missing",
+            };
+            warn!(
+                claim = %claim,
+                observed = %observed,
+                kid = ?header.kid,
+                token_fingerprint = %token_fingerprint,
+                "Gateway Principal claim must be a single string"
+            );
+            return Err(GatewayPrincipalVerificationError::InvalidClaims);
+        }
+
         let claims: GatewayClaims = serde_path_to_error::deserialize(
             token_data.claims.into_deserializer(),
         )
@@ -173,24 +209,6 @@ impl GatewayPrincipalTokenVerifier {
             GatewayPrincipalVerificationError::InvalidClaims
         })?;
 
-        if claims.iss != self.trust.issuer {
-            warn!(
-                expected_iss = %self.trust.issuer,
-                kid = ?header.kid,
-                token_fingerprint = %token_fingerprint,
-                "Gateway Principal token issuer mismatch"
-            );
-            return Err(GatewayPrincipalVerificationError::InvalidClaims);
-        }
-        if claims.aud != self.trust.audience {
-            warn!(
-                expected_aud = %self.trust.audience,
-                kid = ?header.kid,
-                token_fingerprint = %token_fingerprint,
-                "Gateway Principal token audience mismatch"
-            );
-            return Err(GatewayPrincipalVerificationError::InvalidClaims);
-        }
         if let Err(e) = validate_times(claims.iat, claims.exp, now) {
             warn!(
                 now,

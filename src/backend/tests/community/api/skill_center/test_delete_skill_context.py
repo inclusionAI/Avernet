@@ -8,9 +8,7 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.dependencies import RequestContext
 from agentclaw.community.adapters.http.skill_center.skills import delete_skill
-from agentclaw.community.core.bot_management.repository.protocol import (
-    BotLookupAmbiguousError,
-)
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 
 

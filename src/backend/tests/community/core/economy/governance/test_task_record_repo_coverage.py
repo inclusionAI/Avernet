@@ -33,13 +33,8 @@ from agentclaw.community.core.economy.governance.domain.ticket import (
     GovernanceTicket,
     MutableSnapshot,
 )
-from agentclaw.community.core.economy.governance.repositories.orm import (
-    GovernanceNotificationOrm,
-    GovernanceTicketOrm,
-)
-from agentclaw.community.core.economy.governance.repositories.task_record_repo import (
-    TaskRecordRepository,
-)
+from agentclaw.community.core.economy.governance.orm import GovernanceNotificationOrm, GovernanceTicketOrm
+from agentclaw.community.core.repository.implementations.governance.task_record import TaskRecordRepository
 
 from .conftest import FakeDB
 
@@ -61,7 +56,7 @@ def engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    import agentclaw.community.core.economy.governance.repositories.orm  # noqa: F401
+    import agentclaw.community.core.economy.governance.orm  # noqa: F401
     Base.metadata.create_all(eng)
     return eng
 
@@ -695,8 +690,8 @@ class TestInsertTicket:
 
 
 _TASK_ENV_PATCH = (
-    "agentclaw.community.core.economy.governance.repositories."
-    "task_record_repo.get_current_env"
+    "agentclaw.community.core.repository.implementations.governance."
+    "task_record.get_current_env"
 )
 
 
