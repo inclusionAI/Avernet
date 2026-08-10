@@ -69,6 +69,11 @@ _NON_ENDPOINT_NAME_PATTERNS: tuple[str, ...] = (
     "models",        # adapter-owned identity / response dataclasses
     "errors",        # adapter-owned error types (kept import-light on purpose)
     "gating",        # engine-runtime resolve-and-gate helper shared by groups
+    "admission",     # which operations admit a caller with no end user. A policy
+                     # table, and import-light for the same reason ``enums`` is:
+                     # it is read by the route inventory test and by the gateway
+                     # rule derivation, neither of which should have to stand up
+                     # the HTTP stack to ask what the policy is.
     "clusters",      # public-API domain rule (engine ↔ cluster bijection)
     "principal",     # caller-identity extraction from the principal seam
     "enums",         # adapter-owned public enums (import-light by design:

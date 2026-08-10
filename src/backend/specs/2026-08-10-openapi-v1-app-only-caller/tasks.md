@@ -15,7 +15,7 @@
 > test is the one that proves it; if anything in this list gets cut, not that.
 >
 > **The negative promise.** A caller naming an end user must come out of this
-> bit-for-bit unchanged on all 63 operations, and no *request* schema may change.
+> bit-for-bit unchanged on all 71 operations, and no *request* schema may change.
 > The single response change is additive. An existing test expectation edited to
 > accommodate this work is a scope escape, not a fix.
 
@@ -205,23 +205,29 @@
 
 ---
 
-## Task 7: The admission table and the acting caller  `[ ]`
+## Task 7: The admission table and the acting caller  `[x]`
 
 - **Files:** `adapters/http/openapi_v1/admission.py` (new)
 - **Done when:**
-  - [ ] `AdmissionMode` and `ADMISSION` cover **every** public operation — all 63,
-        none omitted — grouped and commented by mode.
-  - [ ] The module docstring states the rule each mode encodes, and that the mode
-        follows from the operation's *shape*: which ids it takes and how it
-        resolves its bot.
-  - [ ] The A1/A2 split is explained: A1 resolves by `get_by_id_and_owner`, so a
-        shared bot is unreachable there for a human too and the invariant needs
-        no special handling; A2 takes a second owner parameter and admits
-        collaborators, which is where delegation pays off.
-  - [ ] Mode D entries carry their individual reasons.
-  - [ ] `ActingCaller` with `user_id`, `app_id: int | None`, `require_bot()`
-        returning the bot's `owner_id`, and `granted_bot_ids()` returning `None`
-        for a human (no filtering) versus an empty set (granted nothing).
+  - [x] `AdmissionMode` and `ADMISSION` cover **every** public operation.
+        **The surface has 71 operations, not the 63 the artifacts claimed** —
+        verified by enumerating the built router; spec and plan corrected. Mode
+        counts land exactly where the plan predicted: 34 A1, 16 A2, 2 B, 1 C,
+        4 OPEN, 14 REFUSED.
+  - [x] The module docstring states the rule each mode encodes and that a mode
+        follows from the operation's shape.
+  - [x] The A1/A2 split is explained, including why A1 needs no special handling
+        for shared bots — they are unreachable there for a human too.
+  - [x] Mode D entries carry their individual reasons.
+  - [x] `ActingCaller` with `user_id`, `app_id: int | None`, `require_bot()`
+        returning the grant's owner, and `granted_bot_ids()` returning `None`
+        for a human versus an empty set for an ungranted application.
+  - [x] `BODY_BOT_ID_OPERATIONS` and `SKILL_SCOPED_OPERATIONS` name the five
+        operations Task 10 handles, so the exception list is data rather than
+        something a test hard-codes.
+  - [x] `GrantNotResolvableError` added, documented as byte-identical to
+        bot-not-found and explicitly not a 403.
+
 - **Depends on:** —
 
 ---
