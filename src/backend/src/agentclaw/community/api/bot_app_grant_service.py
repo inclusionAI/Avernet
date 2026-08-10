@@ -78,6 +78,19 @@ class BotAppGrantServiceProtocol(Protocol):
         not which caller — ``bot_id`` is not unique across owners.
         """
 
+    def find(
+        self, *, bot_id: str, user_id: str, app_id: int
+    ) -> BotAppGrantRecord | None:
+        """The live delegation for this scope, or ``None`` when there is none.
+
+        The authorization probe for an application caller. ``None`` is a real
+        state — "may not act as this user on this bot" — not a widened type.
+
+        A record means the delegation exists, **not** that the request may
+        proceed: whether the delegating user may still operate the bot is asked
+        separately and live.
+        """
+
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which bots may this app reach as ``user_id``.
 

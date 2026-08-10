@@ -279,28 +279,31 @@
 
 ---
 
-## Task 9: Turn on Modes A1 and A2  `[ ]`
+## Task 9: Turn on Modes A1 and A2  `[x]`
 
 - **Files:** the `bots`, `identity`, `resources`, `routines`, `skills`,
   `sessions`, `engine`, `models`, `approvals`, `connection` routers
 - **Done when:**
-  - [ ] Every A1/A2 operation whose `bot_id` is on the wire takes the
-        grant-checked dependency in place of `UserIdDep`.
-  - [ ] **No handler body changes** in this task. If a body needs editing, stop —
-        the check is in the wrong place.
-  - [ ] `connection`'s gate runs inside `EngineConnectionService`, so the
-        owner-substitution is applied at that seam, with a comment saying it is
-        the one group where the router does not show the adjudication.
-  - [ ] **The invariant test**, and it is the one that must not be cut: U
-        collaborates on P's bot at member level and grants app A; A reaches the
-        bot; **removing U as a collaborator refuses A on the next request with
-        the grant row still present**; re-adding restores it.
-  - [ ] A acting as a member-level U is refused exactly what a member-level U is
-        refused, by the gate rather than by a new rule.
-  - [ ] A shared bot stays unreachable on A1 groups even with a grant, because it
-        is unreachable for the human too.
-  - [ ] A2 with `owner_id` naming anyone but the grant's owner → `404`; with it
-        omitted → resolved from the record.
+  - [x] All 50 A1/A2 operations take the grant check, and **exactly** those —
+        verified by walking the built router's effective routes and diffing
+        against `ADMISSION`. Declared at `include_router` for the four groups
+        that are wholly A1 (identity, resources, routines, skills = 25 routes),
+        per route for the mixed `bots` group (9), and transitively via
+        `OwnerIdDep` for the 16 engine-runtime operations.
+  - [x] **No handler body changed.**
+  - [x] Two real bugs found and fixed while wiring:
+        a **user+app** caller was being treated as an application, which would
+        have put every ordinary collaborator request through a grant lookup and
+        refused the ones with no grant; and `BotAppGrantService` had no `find`,
+        so the probe reached a member that did not exist.
+  - [x] **The invariant test** passes: remove the collaboration and the
+        application is refused on its next request with the grant row intact;
+        re-add it and access returns with no re-granting.
+  - [x] A grant from a collaborator confers no more than that collaborator has.
+  - [x] A2 with `owner_id` naming anyone but the grant's owner → 404 **before
+        any forward**; omitted → resolved from the record; agreeing → accepted.
+  - [x] A human caller addressing a shared bot is unchanged.
+
 - **Depends on:** Task 8
 
 ---

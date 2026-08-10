@@ -307,7 +307,15 @@ async def require_acting_caller(
     which is what makes it structurally impossible for one to be resolved
     against a grant.
     """
-    app_id = caller_app_id(principal)
+    # **Only a caller with no human on the wire is governed by a grant.** A
+    # request carrying a user *and* an app is a human request — the gateway
+    # forwards the whole identity set it resolved, so an App rides along on
+    # every route that declares it (bot logs, the authorization group, anything
+    # under a ``user: required, app: optional`` rule). Keying off the presence
+    # of an app alone would put all of those through a grant lookup and refuse
+    # the ones with no grant: a large, silent regression for callers who did
+    # nothing but present the credential the gateway asked them for.
+    app_id = None if caller_names_a_user(principal) else caller_app_id(principal)
     return ActingCaller(
         user_id=user_id,
         app_id=app_id,

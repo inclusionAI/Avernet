@@ -108,6 +108,7 @@ from .contracts import (
     USER_SCOPED_ERROR_RESPONSES,
 )
 from .dependencies import require_principal
+from .principal import require_granted_bot
 from .engine_runtime.approvals import router as engine_approvals_router
 from .engine_runtime.connection import router as engine_connection_router
 from .engine_runtime.engine import router as engine_engine_router
@@ -166,6 +167,23 @@ _SUBGROUPS = [
     # claiming it.
     authorized_apps_router,
     authorized_bots_router,
+]
+
+# The groups where **every** route is Mode A1 — it names a bot and resolves it
+# owner-scoped — so the grant check can be declared once for the group instead
+# of on each of its 25 routes.
+#
+# Declared per group rather than surface-wide because the check is not a no-op
+# everywhere: on an operation that names no bot it would refuse an application
+# outright, which is exactly wrong for the listings (Mode B) and the
+# account-level reads (C/OPEN). `bots` is mixed and declares it per route;
+# `admission.py` is the authority on which is which, and
+# `test_principal_seam.py` fails if a route's declaration and its mode disagree.
+#
+# The engine-runtime groups need no entry here: their `OwnerIdDep` already
+# depends on the same check, because it is where the addressed owner comes from
+# for an application caller.
+_GRANT_CHECKED_SUBGROUPS = [
     identity_router,
     resources_router,
     routines_router,
@@ -201,6 +219,12 @@ _ENGINE_RUNTIME_GROUPS = [
 # to this same invocation.
 _PUBLIC_AUTH = [Depends(require_principal)]
 
+# The bot authorization for an application caller, for the groups that are
+# wholly Mode A1. A no-op for a caller that names an end user — their own
+# operation's owner-scoped resolve already refuses a bot that is not theirs, and
+# re-deciding it here would risk a second, different answer.
+_GRANT_CHECKED = [Depends(require_granted_bot)]
+
 
 def build_public_router() -> APIRouter:
     """Assemble the ``/openapi/v1/bots`` public router.
@@ -223,6 +247,12 @@ def build_public_router() -> APIRouter:
     for router in _SUBGROUPS:
         public.include_router(
             router, responses=USER_SCOPED_ERROR_RESPONSES, dependencies=_PUBLIC_AUTH
+        )
+    for router in _GRANT_CHECKED_SUBGROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED,
         )
     for router in _ENGINE_RUNTIME_GROUPS:
         public.include_router(

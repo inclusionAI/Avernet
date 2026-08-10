@@ -35,7 +35,10 @@ from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngin
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    UserIdDep,
+    require_granted_bot,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     accepted,
     created,
@@ -86,6 +89,18 @@ from .schemas import (
 )
 
 logger = get_logger()
+
+#: The bot authorization for an application caller, on the Mode A1 operations
+#: of this group.
+#:
+#: Declared per route here, unlike the four groups that are wholly A1 and get it
+#: at ``include_router``. This group is mixed: it also holds the bots listing
+#: (Mode B), the ceiling (C), the name check (OPEN) and bot creation (refused),
+#: none of which names a bot — and on those the check would refuse an
+#: application outright rather than authorize it. ``admission.py`` is the
+#: authority on which route is which; ``test_principal_seam.py`` fails if a
+#: declaration and a mode disagree.
+_GRANT_CHECKED = [Depends(require_granted_bot)]
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"])
 
@@ -360,7 +375,12 @@ async def get_bots_ceiling(
     return envelope(Ceiling(ceiling=ceiling), request)
 
 
-@router.get("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
+@router.get(
+    "/{bot_id}",
+    response_model=Envelope[Bot],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def get_bot(
     bot_id: str,
@@ -373,7 +393,12 @@ async def get_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.put("/{bot_id}", response_model=Envelope[Bot], responses=USER_SCOPED_403)
+@router.put(
+    "/{bot_id}",
+    response_model=Envelope[Bot],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def update_bot(
     bot_id: str,
@@ -424,7 +449,12 @@ async def update_bot(
     return envelope(_to_bot(bot), request)
 
 
-@router.delete("/{bot_id}", response_model=Envelope[Deleted], responses=USER_SCOPED_403)
+@router.delete(
+    "/{bot_id}",
+    response_model=Envelope[Deleted],
+    responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
+)
 @envelope_errors
 async def delete_bot(
     bot_id: str,
@@ -442,6 +472,7 @@ async def delete_bot(
     "/{bot_id}/restart",
     response_model=Envelope[Bot],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def restart_bot(
@@ -472,6 +503,7 @@ async def restart_bot(
             "carries the terminal state (e.g. REJECTED, EXPIRED)",
         },
     },
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_auth_status(
@@ -553,6 +585,7 @@ async def get_bot_auth_status(
     "/{bot_id}/status",
     response_model=Envelope[BotStatus],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_status(
@@ -580,6 +613,7 @@ async def get_bot_status(
     "/{bot_id}/passport",
     response_model=Envelope[Passport],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_passport(
@@ -618,6 +652,7 @@ def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def get_bot_engine_config(
@@ -643,6 +678,7 @@ async def get_bot_engine_config(
     "/{bot_id}/engine-config",
     response_model=Envelope[dict[str, Any]],
     responses=USER_SCOPED_403,
+    dependencies=_GRANT_CHECKED,
 )
 @envelope_errors
 async def update_bot_engine_config(

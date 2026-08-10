@@ -177,6 +177,25 @@ class BotAppGrantService:
         """
         return self._repository.list_for_bot(bot_id, owner_id)
 
+    def find(
+        self, *, bot_id: str, user_id: str, app_id: int
+    ) -> BotAppGrantRecord | None:
+        """The live delegation for this scope, or ``None``.
+
+        The authorization probe the machine-caller path runs on every
+        bot-scoped request. A unique-key point lookup, because the delegating
+        user travels on the request rather than having to be discovered.
+
+        ``None`` is a real state of the contract — "this application may not act
+        as this user on this bot" is the answer it exists to give.
+
+        **A record is not permission to proceed.** It says the delegation
+        exists; whether that user may still operate that bot is a separate, live
+        question for the collaborator gate, and the caller must ask it. That
+        separation is what stops a delegation outliving the access it lends.
+        """
+        return self._repository.find(bot_id, user_id, app_id)
+
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which bots may this app reach as ``user_id``.
 
