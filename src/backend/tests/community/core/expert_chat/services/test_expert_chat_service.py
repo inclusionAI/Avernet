@@ -984,6 +984,81 @@ class TestDeleteAdapterSession:
 
 
 # ---------------------------------------------------------------------------
+# _create_aicoding_session / _create_claude_code_session
+# ---------------------------------------------------------------------------
+
+class TestCreateLocalSession:
+
+    @pytest.mark.asyncio
+    async def test_aicoding_session_key_uses_caller_and_agent(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+        bot = {
+            "bot_id": "20260714_ysjxmqfy",
+            "owner_id": "382716",
+            "bot_name": "GeneralCC Bot",
+        }
+
+        result = await svc._create_aicoding_session(
+            {"engine_type": "aicoding"},
+            bot,
+            "136677",
+        )
+
+        assert result.startswith("user:136677:session:")
+        assert result.endswith(":agent:20260714_ysjxmqfy")
+
+    @pytest.mark.asyncio
+    async def test_claude_code_session_key_uses_legacy_user_suffix(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        svc = _make_service(mock_repository, mock_bot_repo, mock_device_provider)
+
+        result = await svc._create_claude_code_session(
+            {"engine_type": "claude_code"},
+            {"bot_id": "20260714_ysjxmqfy"},
+            "136677",
+        )
+
+        assert result.startswith("session:")
+        assert result.endswith(":user:136677")
+        assert ":agent:" not in result
+
+    @pytest.mark.asyncio
+    async def test_create_session_routes_claude_code_to_legacy_user_suffix(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="claude_code")
+        resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.conn_info = conn
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_resolver=resolver,
+            mock_transport=transport,
+        )
+        bot = {
+            "bot_id": "20260714_ysjxmqfy",
+            "owner_id": "382716",
+            "public": "1",
+            "binding_id": "binding-1",
+        }
+
+        result = await svc._create_session(bot, "136677")
+
+        assert result.startswith("session:")
+        assert result.endswith(":user:136677")
+        assert ":agent:" not in result
+        transport.invoke.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
 # _create_openclaw_session
 # ---------------------------------------------------------------------------
 

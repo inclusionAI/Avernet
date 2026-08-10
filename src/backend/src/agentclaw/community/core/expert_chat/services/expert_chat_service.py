@@ -594,21 +594,34 @@ class ExpertChatService:
         if engine_type == "aicoding":
             return await self._create_aicoding_session(conn, bot, user_id)
         elif engine_type == "claude_code":
-            logger.info(
-                "[ExpertChatService] claude_code session: delegating to aicoding session for bot=%s, user=%s",
-                bot.get("bot_id"), user_id,
-            )
-            return await self._create_aicoding_session(conn, bot, user_id)
+            return await self._create_claude_code_session(conn, bot, user_id)
 
         return await self._create_openclaw_session(conn, bot, user_id)
 
+    async def _create_claude_code_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
+        """Claude Code/GeneralCC 引擎：本地生成旧格式 session key，不调 Adapter。"""
+        import uuid
+
+        session_key = f"session:{uuid.uuid4()}:user:{user_id}"
+        logger.info(f"[claude_code] local session key generated: {session_key}")
+        return session_key
+
     async def _create_aicoding_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
         """
-        AI Coding 引擎：teamclaw-aicoding-relay 按需建 session，本地生成 key，不调 Adapter。
+        AI Coding/Claude Code 引擎：relay 按需建 session，本地生成 key，不调 Adapter。
+
+        session key 需要同时携带 caller user 与 agent 维度。
         """
         import uuid
-        session_key = f"session:{uuid.uuid4()}:user:{user_id}"
-        logger.info(f"[aicoding] local session key generated: {session_key}")
+
+        bot_id = str(bot["bot_id"])
+        session_key = f"user:{user_id}:session:{uuid.uuid4()}:agent:{bot_id}"
+        logger.info(
+            "[aicoding] local session key generated: bot=%s caller=%s session=%s",
+            bot_id,
+            user_id,
+            session_key,
+        )
         return session_key
 
     async def _create_openclaw_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
