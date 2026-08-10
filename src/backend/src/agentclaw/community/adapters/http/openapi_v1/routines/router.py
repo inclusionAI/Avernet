@@ -285,9 +285,9 @@ async def run_routine(
 ) -> Envelope[RoutineRun]:
     """Run a routine now, without waiting for its trigger.
 
-    `bot_id` is a required query parameter, as on the read. The response
-    reports the outcome of the trigger, but carries no timestamps — read the
-    routine's run history for those.
+    `bot_id` is a required query parameter, as on the read. The `status` here is
+    one of completed, failed, or unknown — narrower than the values run history
+    reports. No timestamps are carried; read the run history for those.
     """
     user_id = owner_id
     nick_name = owner_id

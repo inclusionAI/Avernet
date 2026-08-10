@@ -43,7 +43,10 @@ class Resource(BaseModel):
         description="Identifier of this resource. Use it in the path of the "
         "per-resource endpoints."
     )
-    name: str = Field(description="Resource name, unique within the bot.")
+    name: str = Field(
+        description="Resource name. Names are unique among resources of the "
+        "same kind within the bot, not across the bot as a whole."
+    )
     type: ResourceType = Field(description=_TYPE_DESC)
     source: str | None = Field(
         default=None, description="Where a link resource came from; null for "
@@ -81,8 +84,8 @@ class ResourceCreate(BaseModel):
     )
 
     name: str = Field(
-        description="Name for the new resource. Must be unique within the bot — "
-        "check it first with the name-availability endpoint."
+        description="Name for the new resource. A name already in use within "
+        "the bot is refused with 409."
     )
     type: ResourceType = Field(description=_TYPE_DESC)
     url: str | None = Field(

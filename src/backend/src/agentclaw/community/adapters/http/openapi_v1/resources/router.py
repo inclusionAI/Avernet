@@ -170,11 +170,25 @@ async def check_resource_name(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[NameCheck]:
-    """Check whether a resource name is available within the bot.
+    """Check whether a resource name is in use within the bot.
 
-    Names are unique per bot and per type, so pass the `type` you intend to
-    create; omitting it checks a file name.
+    Pass the `type` you are asking about; omitting it asks about a file name.
+
+    **Not a reliable preflight for creating a link.** A `link` here is checked
+    against a different set of records than the one link creation writes to, so
+    a name this endpoint reports as free can still be refused by create with
+    409. Treat create's answer as the authoritative one and handle the 409;
+    this endpoint is dependable for files.
     """
+    # The mismatch is real, not a caveat invented for the docstring: this maps
+    # openapi LINK to legacy ResourceType.LINK, while `create_url_resource`
+    # checks and writes legacy ResourceType.URL — which is what every link
+    # created through this surface is. So the check scans a set that holds none
+    # of them. Fixing it means deciding whether LINK fans out to both legacy
+    # types here (the "URL fan-out" follow-up noted on _OPENAPI_TO_LEGACY_TYPE),
+    # which is a behaviour change to the resources contract and not this
+    # change's to make. Until then the endpoint says what it actually does.
+    #
     # parent_path / exclude_id from the service signature stay off this contract
     # and are passed as None: resources are bot-scoped, so there is no parent
     # path to qualify the name with.

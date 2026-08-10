@@ -132,9 +132,17 @@ class RoutineRun(BaseModel):
 
     run_id: str = Field(description="Identifier of this execution.")
     routine_id: str = Field(description="Routine that was executed.")
+    # Deliberately not a closed set, and not the run-now vocabulary. This model
+    # serves two endpoints: run-now synthesizes its status here, while run
+    # history forwards whatever the bot's engine recorded — `succeeded` and
+    # `success` both occur in practice. Publishing the synthesized three as if
+    # they were the whole set told history readers that the value they actually
+    # receive cannot happen.
     status: str = Field(
-        description="Outcome of the execution: completed, failed, or unknown "
-        "when the bot reported none."
+        description="Outcome of the execution, as reported by the bot. Not a "
+        "closed set — engines record their own values, so match leniently. The "
+        "run-now endpoint reports one of completed, failed, or unknown; run "
+        "history reports whatever the bot recorded."
     )
     started_at: str | None = Field(
         default=None, description="When the run started (ISO 8601); null when the "
