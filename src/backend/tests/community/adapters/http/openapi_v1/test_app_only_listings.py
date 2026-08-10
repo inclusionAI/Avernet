@@ -30,6 +30,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_management.services.bot_service import (
+    BotNotFoundError,
+)
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
     GatewayApp,
@@ -50,6 +53,9 @@ UNGRANTED = "b-ungranted"
 #: It can never appear in the bots listing — that is owner-scoped — which is why
 #: the application's own view has to exist.
 SHARED = "b-shared"
+#: A legacy ``default``-style id: the delegating user owns one, and so does
+#: someone else. ``bot_id`` alone cannot tell the two apart.
+LEGACY_ID = "default"
 
 
 def _caller(*, with_user: bool) -> VerifiedCaller:
@@ -113,11 +119,19 @@ class _Bots:
         owned = [
             {"bot_id": GRANTED, "bot_name": "granted", "owner_id": USER},
             {"bot_id": UNGRANTED, "bot_name": "ungranted", "owner_id": USER},
+            # The user's own legacy bot, never granted to anyone.
+            {"bot_id": LEGACY_ID, "bot_name": "the user's own", "owner_id": USER},
         ]
         allowed = kwargs.get("bot_ids")
         if allowed is not None:
             owned = [b for b in owned if b["bot_id"] in allowed]
         return {"total": len(owned), "items": owned}
+
+    def get_bot(self, bot_id: str, user_id: str):
+        """Owner-scoped, as production is — and it resolves the *user's* bot."""
+        if user_id != USER:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        return {"id": 1, "bot_id": bot_id, "owner_id": USER, "bot_name": "the user's own"}
 
     def get_bots_ceiling_for_owner(self, owner_id: str) -> int:
         return 5
@@ -213,7 +227,11 @@ def test_a_human_caller_sees_everything_they_own(make_client, bots):
 
     listed = _data(client.get("/openapi/v1/bots"))
 
-    assert [item["bot_id"] for item in listed["items"]] == [GRANTED, UNGRANTED]
+    assert [item["bot_id"] for item in listed["items"]] == [
+        GRANTED,
+        UNGRANTED,
+        LEGACY_ID,
+    ], "every bot they own, including the legacy one no application was granted"
     assert bots.calls[0]["bot_ids"] is None, "unrestricted, not restricted-to-all"
 
 
@@ -229,6 +247,80 @@ def test_the_application_view_shows_a_bot_the_user_does_not_own(make_client):
     listed = _data(client.get("/openapi/v1/bots/authorized"))
 
     assert {item["bot_id"] for item in listed["items"]} == {GRANTED, SHARED}
+
+
+# ── bot_id is not unique across owners ───────────────────────────────────────
+
+
+class _CrossOwnerGrants:
+    """One grant, on **another owner's** bot that happens to share an id.
+
+    The delegating user also owns a bot called ``default``. Every column the
+    grant's unique key holds — app, bot_id, delegating user — is identical for
+    the two bots, so the lookup alone cannot tell them apart.
+    """
+
+    def find(self, *, bot_id: str, user_id: str, app_id: int):
+        if (bot_id, user_id, app_id) != (LEGACY_ID, USER, APP_ID):
+            return None
+        return _record(LEGACY_ID, owner_id="someone-else")
+
+    def list_for_app(self, *, app_id: int, user_id: str):
+        record = self.find(bot_id=LEGACY_ID, user_id=user_id, app_id=app_id)
+        return [record] if record else []
+
+
+@pytest.fixture
+def cross_owner_client(bots):
+    def _build():
+        class _M(Module):
+            def configure(self, binder):
+                binder.bind(BotServiceProtocol, to=bots)
+                binder.bind(BotAppGrantServiceProtocol, to=_CrossOwnerGrants())
+
+        app = FastAPI()
+        app.include_router(app_view_router)
+        app.include_router(bots_router)
+        app.dependency_overrides[require_principal] = lambda: _caller(with_user=False)
+        attach_injector(app, Injector([_M()]))
+        mount_public_error_handlers(app)
+        return user_scoped_client(app, USER)
+
+    return _build()
+
+
+def test_a_grant_on_another_owners_samenamed_bot_does_not_admit_the_users_own(
+    cross_owner_client,
+):
+    """The failure a bare ``bot_id`` invites, and it is silent without this.
+
+    ``ac_bots`` has no unique key on ``bot_id`` — the legacy ``default``
+    convention gave many owners one — so a grant naming *someone else's*
+    ``default`` matches a request naming the delegating user's own on every
+    column the grant is keyed by. An owner-scoped operation then resolves the
+    user's own bot and serves it: a ``200`` carrying a bot nobody granted.
+
+    Refused rather than reconciled. The caller is entitled to neither bot here:
+    the granted one is unreachable on an owner-scoped operation — it is
+    unreachable there for the delegating user too — and the user's own was never
+    granted.
+    """
+    response = cross_owner_client.get(f"/openapi/v1/bots/{LEGACY_ID}")
+
+    assert response.status_code == 404, response.json()
+
+
+def test_an_owner_scoped_listing_does_not_widen_through_a_shared_bot_id(
+    cross_owner_client,
+):
+    """The same collision, reached through the listing's id filter.
+
+    The narrowing set holds bare ids, so passing another owner's ``default``
+    into an owner-scoped query matches the delegating user's own.
+    """
+    listed = _data(cross_owner_client.get("/openapi/v1/bots"))
+
+    assert listed["items"] == [] and listed["total"] == 0
 
 
 # ── Mode C: an answer about the user's account ───────────────────────────────

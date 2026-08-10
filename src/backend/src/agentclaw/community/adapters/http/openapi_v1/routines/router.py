@@ -164,7 +164,7 @@ async def create_routine(
     """
     bot_id = body.bot_id
     # Before anything else touches the bot.
-    caller.require_bot(bot_id)
+    caller.require_bot(bot_id, must_be_own_bot=True)
     user_id = owner_id
     nick_name = owner_id
     adapter_body = {

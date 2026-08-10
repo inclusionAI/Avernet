@@ -91,9 +91,11 @@ from typing import Annotated
 from fastapi import Depends, Query, Request
 
 from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
     BODY_BOT_ID_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     ActingCaller,
+    AdmissionMode,
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
@@ -380,6 +382,7 @@ async def require_granted_bot(
     """
     if _defers_to_its_handler(request):
         return caller.user_id
+    own_bot = _resolves_owner_scoped(request)
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
     )
@@ -392,7 +395,28 @@ async def require_granted_bot(
             "no bot id on a grant-checked request; the operation must resolve "
             "its own bot before acting"
         )
-    return caller.require_bot(str(bot_id))
+    return caller.require_bot(str(bot_id), must_be_own_bot=own_bot)
+
+
+def _resolves_owner_scoped(request: Request) -> bool:
+    """Whether this operation resolves its bot as ``(bot_id, delegating user)``.
+
+    True for Mode A1, whose groups read through ``get_by_id_and_owner``; false
+    for A2, which takes the addressed owner from the grant instead. The
+    difference decides whether a grant naming *another* owner can legitimately
+    authorize the request — on A1 it cannot, because ``bot_id`` is not unique
+    across owners and the operation would act on the delegating user's own
+    same-named bot.
+
+    Unknown routes answer ``True``, the stricter side: an operation this cannot
+    classify has not been placed in a mode, and it is refused a moment later
+    anyway.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return True
+    return ADMISSION.get((request.method, path)) is not AdmissionMode.A2
 
 
 def _defers_to_its_handler(request: Request) -> bool:

@@ -268,8 +268,19 @@ class ActingCaller:
         """Whether a grant governs this request."""
         return self.app_id is not None
 
-    def require_bot(self, bot_id: str) -> str:
+    def require_bot(self, bot_id: str, *, must_be_own_bot: bool) -> str:
         """The addressed bot's owner, refusing an application without a grant.
+
+        ``must_be_own_bot`` says which bot the *operation* is about to act on,
+        and it has no default because getting it wrong is an authorization bug
+        rather than a preference:
+
+        - ``True`` — the operation resolves owner-scoped, as the user-scoped
+          groups do (``get_by_id_and_owner(bot_id, user_id)``). The grant is
+          only about that bot if it names the delegating user as owner.
+        - ``False`` — the operation takes the addressed owner from what this
+          returns, as the engine-runtime groups do. The grant names the bot
+          directly, so no further comparison is possible or needed.
 
         For a **human** caller this returns their own id and asks nothing: on
         the user-scoped groups the owner *is* the caller, and on the
@@ -285,6 +296,16 @@ class ActingCaller:
         What comes back is the **grant's** owner, not the request's. That is
         what lets an application address a bot its delegating user collaborates
         on without ever being able to name an owner of its own choosing.
+
+        **``bot_id`` alone does not identify a bot**, which is why the owner
+        has to be compared rather than merely returned. ``ac_bots`` carries no
+        unique key on it — the legacy ``default`` convention gave many owners a
+        bot of that id — so a grant naming *someone else's* ``default`` and a
+        request naming the delegating user's own ``default`` agree on every
+        column the grant's unique key holds. Returning the owner and letting an
+        owner-scoped caller discard it made the check and the resolution
+        disagree about which bot they meant, and the application got a bot
+        nobody granted.
 
         A grant is not the whole answer. It says the delegation exists; whether
         the delegating user may still operate the bot is asked separately, live,
@@ -319,9 +340,29 @@ class ActingCaller:
             raise GrantNotResolvableError(
                 f"app {self.app_id} holds no live grant for the requested bot"
             )
+        if must_be_own_bot and record.owner_id != self.user_id:
+            # The grant names a bot belonging to someone else, but this
+            # operation resolves owner-scoped and would act on the delegating
+            # user's *own* same-named bot. Two different bots, one ``bot_id``.
+            #
+            # Refused rather than reconciled: the caller is entitled to neither
+            # of them here. The granted bot is unreachable on an owner-scoped
+            # operation — it is unreachable there for the delegating user too,
+            # which is the point of the A1/A2 split — and the user's own bot was
+            # never granted.
+            logger.warning(
+                "[bot_app_grant] app_id=%s holds a grant on bot=%s owned by "
+                "another user; refusing an owner-scoped request from user=%s",
+                self.app_id,
+                for_log(bot_id),
+                for_log(self.user_id),
+            )
+            raise GrantNotResolvableError(
+                f"app {self.app_id} holds no live grant for the requested bot"
+            )
         return record.owner_id
 
-    def granted_bot_ids(self) -> frozenset[str] | None:
+    def granted_bot_ids(self, *, owned_by_delegator: bool = False) -> frozenset[str] | None:
         """The bots to narrow a listing to, or ``None`` to not narrow at all.
 
         ``None`` and the empty set are different answers and must stay so:
@@ -329,13 +370,28 @@ class ActingCaller:
         is an application that has been granted nothing, whose listing is empty.
         Collapsing them would hand an ungranted application the delegating
         user's entire bot list.
+
+        ``owned_by_delegator`` narrows further, to grants naming the delegating
+        user as the bot's owner, and an **owner-scoped listing must set it**.
+        The ids are bare ``bot_id`` strings, and ``bot_id`` is not unique across
+        owners: filtering an owner-scoped query by a set that includes someone
+        else's ``default`` matches the delegating user's own ``default`` and
+        returns a bot nobody granted. Nothing is lost by narrowing — an
+        owner-scoped listing cannot show a bot the user does not own anyway.
+
+        Callers that only ask *whether any delegation exists* leave it off:
+        there the question is about the relationship, not about which bots.
         """
         if self.app_id is None:
             return None
         if self.grants is None:
             return frozenset()
         records = self.grants.list_for_app(app_id=self.app_id, user_id=self.user_id)
-        return frozenset(record.bot_id for record in records)
+        return frozenset(
+            record.bot_id
+            for record in records
+            if not owned_by_delegator or record.owner_id == self.user_id
+        )
 
 
 __all__ = [

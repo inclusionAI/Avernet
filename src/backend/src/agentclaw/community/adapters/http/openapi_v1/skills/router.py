@@ -88,7 +88,7 @@ def _authorize_skills_bot(
     if not caller.is_application:
         return
     record = query_service.get_local_skill(skill_id=skill_id, actor_id=actor_id)
-    caller.require_bot(str(record["bolt_id"]))
+    caller.require_bot(str(record["bolt_id"]), must_be_own_bot=True)
 
 
 def _to_skill(record: dict[str, Any]) -> Skill:
@@ -150,7 +150,7 @@ async def get_skill(
     )
     # The record is already in hand, so this one checks the grant directly
     # rather than through the helper — one read, not two.
-    caller.require_bot(str(record["bolt_id"]))
+    caller.require_bot(str(record["bolt_id"]), must_be_own_bot=True)
     return envelope(_to_skill(record), request)
 
 

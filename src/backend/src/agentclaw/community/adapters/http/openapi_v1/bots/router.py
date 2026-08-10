@@ -325,7 +325,11 @@ async def list_bots(
     complete view of what an application may reach, including bots delegated by
     a collaborator, is ``GET /openapi/v1/bots/authorized``.
     """
-    granted = caller.granted_bot_ids()
+    # ``owned_by_delegator``: this query is owner-scoped, and ``bot_id`` is not
+    # unique across owners — filtering it by a set holding someone else's
+    # ``default`` would match the delegating user's own ``default`` and return
+    # a bot nobody granted.
+    granted = caller.granted_bot_ids(owned_by_delegator=True)
     if granted is not None and not granted:
         # Granted nothing: answer without asking the service for a page it
         # would have to discard entirely.
