@@ -7,6 +7,7 @@ services.
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any, Dict
 
 from agentclaw.community.core.bot_management.capabilities import (
@@ -284,6 +285,14 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         # AICoding / claude_code chat sessions are created lazily by the relay,
         # so ExpertChat must not call Adapter /api/sessions create/check/delete.
         return False
+
+    def build_local_chat_session_key(
+        self, ctx: BotProvisioningContext, *, user_id: str
+    ) -> str:
+        """Build the relay-owned local chat session key for coding engines."""
+        if self._engine_type == CLAUDE_CODE_ENGINE_TYPE:
+            return f"session:{uuid.uuid4()}:user:{user_id}"
+        return f"user:{user_id}:session:{uuid.uuid4()}:agent:{ctx.bot_id}"
 
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         # Application-only hooks (DIMA workspace/memory/cron) intentionally stay

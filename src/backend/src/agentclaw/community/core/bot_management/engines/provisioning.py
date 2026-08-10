@@ -91,6 +91,17 @@ class EngineProvisioningStrategy(ABC):
         """
 
     @abstractmethod
+    def build_local_chat_session_key(
+        self, ctx: BotProvisioningContext, *, user_id: str
+    ) -> str:
+        """Build the local session key for relay-managed chat sessions.
+
+        Only strategies with ``uses_adapter_chat_session_lifecycle(ctx) == False``
+        should be asked to construct this key. The concrete engine strategy owns
+        the wire format instead of ExpertChat branching on engine literals.
+        """
+
+    @abstractmethod
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         """Post-create hook. Default strategies should no-op."""
 

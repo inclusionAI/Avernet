@@ -1424,6 +1424,79 @@ class TestGetChatSessionCallerAuthorization:
         )
 
 
+# ---------------------------------------------------------------------------
+# relay-managed local session creation
+# ---------------------------------------------------------------------------
+
+class TestCreateLocalSession:
+
+    @pytest.mark.asyncio
+    async def test_create_session_uses_strategy_aicoding_caller_and_agent_key(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="aicoding")
+        resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.conn_info = conn
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_resolver=resolver,
+            mock_transport=transport,
+        )
+        bot = {
+            "bot_id": "20260714_ysjxmqfy",
+            "owner_id": "382716",
+            "public": "1",
+            "binding_id": "binding-1",
+            "active_engine": "aicoding",
+        }
+
+        result = await svc._create_session(bot, "136677")
+
+        assert result.startswith("user:136677:session:")
+        assert result.endswith(":agent:20260714_ysjxmqfy")
+        transport.invoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_create_session_uses_strategy_claude_code_legacy_user_suffix(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="claude_code")
+        resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.conn_info = conn
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_resolver=resolver,
+            mock_transport=transport,
+        )
+        bot = {
+            "bot_id": "20260714_ysjxmqfy",
+            "owner_id": "382716",
+            "public": "1",
+            "binding_id": "binding-1",
+            "active_engine": "claude_code",
+            "template_type": "normalCC",
+        }
+
+        result = await svc._create_session(bot, "136677")
+
+        assert result.startswith("session:")
+        assert result.endswith(":user:136677")
+        assert ":agent:" not in result
+        transport.invoke.assert_not_awaited()
+
+
 class TestChatEngineResolution:
 
     @pytest.mark.asyncio
@@ -1454,7 +1527,8 @@ class TestChatEngineResolution:
 
         session_key = await svc._create_session(bot, "owner1")
 
-        assert session_key.startswith("session:")
+        assert session_key.startswith("user:owner1:session:")
+        assert session_key.endswith(f":agent:{ACTIVE_BOT['bot_id']}")
         assert conn["engine_type"] == "aicoding"
         transport.invoke.assert_not_awaited()
 

@@ -649,22 +649,14 @@ class ExpertChatService:
         conn["engine_type"] = ctx.active_engine
 
         if not strategy.uses_adapter_chat_session_lifecycle(ctx):
+            session_key = strategy.build_local_chat_session_key(ctx, user_id=user_id)
             logger.info(
-                "[ExpertChatService] Relay-managed chat session: bot=%s, user=%s, engine=%s",
-                bot.get("bot_id"), user_id, ctx.active_engine,
+                "[ExpertChatService] Relay-managed chat session: bot=%s, user=%s, engine=%s, session=%s",
+                bot.get("bot_id"), user_id, ctx.active_engine, session_key,
             )
-            return await self._create_aicoding_session(conn, bot, user_id)
+            return session_key
 
         return await self._create_openclaw_session(conn, bot, user_id)
-
-    async def _create_aicoding_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
-        """
-        AI Coding 引擎：teamclaw-aicoding-relay 按需建 session，本地生成 key，不调 Adapter。
-        """
-        import uuid
-        session_key = f"session:{uuid.uuid4()}:user:{user_id}"
-        logger.info(f"[aicoding] local session key generated: {session_key}")
-        return session_key
 
     async def _create_openclaw_session(self, conn: Dict[str, Any], bot: Dict[str, Any], user_id: str) -> str:
         """调用 Adapter 创建 OpenClaw session，返回带前缀的完整 session ID"""
