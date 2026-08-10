@@ -30,7 +30,7 @@
         sees what was weighed.
 - **Depends on:** — (resolved at the review gate, not during implementation)
 
-## Task 2: The grant record  `[ ]`
+## Task 2: The grant record  `[x]`
 
 > **Unblocked — two tables, decided by the user.** Soft-delete in one table
 > cannot express more than one grant period: with `status` in the unique key
@@ -45,35 +45,55 @@
   `src/backend/src/agentclaw/community/core/bot_app_grant/__init__.py` (new),
   `…/core/bot_app_grant/models.py` (new)
 - **Done when:**
-  - [ ] `BotAppGrantModel` maps `ac_bot_app_grant` — live grants **only**, one
+  - [x] `BotAppGrantModel` maps `ac_bot_app_grant` — live grants **only**, one
         row iff the app may reach the bot right now: `app_id`, `app_name`,
-        `bot_id`, `owner_id`, `tenant`, `env`, `gmt_create`, `gmt_modified`.
-        No `status`, no `revoked_at` — a grant is live iff its row exists, so
-        there is no second state to model.
-  - [ ] `BotAppGrantLogModel` maps `ac_bot_app_grant_log` — append-only, one
+        `bot_id`, `owner_id`, `avernet_tenant`, `env`, `gmt_create`,
+        `gmt_modified`. No `status`, no `revoked_at` — a grant is live iff its
+        row exists, so there is no second state to model.
+  - [x] `BotAppGrantLogModel` maps `ac_bot_app_grant_log` — append-only, one
         row per grant and per withdrawal, with `action` in `granted`/`revoked`.
-        It duplicates `app_name` and `tenant` rather than joining, because it
-        must still read correctly once the live row is gone — which is exactly
-        when it is consulted.
-  - [ ] The log has **no unique constraint**, and the module docstring says why:
+        It duplicates `app_name` and `avernet_tenant` rather than joining,
+        because it must still read correctly once the live row is gone — which
+        is exactly when it is consulted.
+  - [x] **Tenant follows the platform convention, not a hand-rolled column.**
+        The column is `avernet_tenant` (`String(64)`, `server_default
+        "teamclaw"`) and both models call `register_avernet_tenant_guard`
+        (`utils/avernet_tenant_guard.py`). That guard confines every
+        SELECT/UPDATE/DELETE to the request's tenant and stamps it on every
+        INSERT, **refusing a row that names a different tenant** — so this
+        feature's cross-tenant refusal is the platform's, not code of ours that
+        could be forgotten. The log is guarded too, and that is not ceremonial:
+        it is read after the live row is deleted, so it has no guarded parent
+        left to inherit isolation from at the moment it matters most.
+  - [x] The log has **no unique constraint**, and the module docstring says why:
         its job is to accept every event including the fourth `revoked` for one
         pair, and a constraint there would reintroduce the bug the split fixes.
-  - [ ] `env` defaults from `agentclaw.community.utils.env_utils.get_current_env`
+  - [x] `env` defaults from `agentclaw.community.utils.env_utils.get_current_env`
         (`env_utils.py:68`) on both, matching `ac_bot_collaborator`
         (`core/bot_collaborator/models.py:130`).
-  - [ ] `UniqueConstraint("app_id", "bot_id", "owner_id", "env")` on the live
-        table, with the docstring noting `env` is in the key so one row cannot
-        collide across environments sharing a database.
-  - [ ] `Index("idx_app_owner_env", "app_id", "owner_id", "env")` — the app's
-        view. Not redundant with the unique key: that key's second column is
-        `bot_id`, so it cannot serve an `(app_id, owner_id)` lookup naming no
-        bot.
-  - [ ] `Index("idx_log_bot_owner_env", "bot_id", "owner_id", "env",
-        "gmt_create")` — reconstructing a bot's history in order.
-  - [ ] `GrantAction` is an enum with `GRANTED` / `REVOKED`, not bare strings.
-  - [ ] `to_record()` on both, mirroring `BotCollaboratorModel.to_record`
+  - [x] `uk_bot_app_grant_scope` on `("avernet_tenant", "app_id", "bot_id",
+        "owner_id", "env")`. **`avernet_tenant` leads the key**, following the
+        `ac_user_mcp_config` precedent (`core/models/mcp.py:100`): `owner_id` is
+        a user identifier, meaningful only within a tenant, so two tenants may
+        each hold a "12345" owning a same-named bot — without the tenant here
+        the second tenant's grant fails against a row it cannot see. `env` is in
+        the key so one authorization cannot collide across environments sharing
+        a database.
+  - [x] `idx_bot_app_grant_app_owner` on `("avernet_tenant", "app_id",
+        "owner_id", "env")` — the app's view. Not redundant with the unique key:
+        that key reaches `bot_id` before `owner_id`, so it cannot serve a lookup
+        naming no bot.
+  - [x] `idx_bot_app_grant_log_bot` on `("avernet_tenant", "bot_id", "owner_id",
+        "env", "gmt_create")` — reconstructing a bot's history in order.
+  - [x] **Verified against a live SQLite database, not by inspection:**
+        grant → withdraw → grant → withdraw completes with 0 live rows and 4 log
+        events in order, and a second live grant for the same scope is still
+        refused with `IntegrityError`. That cycle is exactly what broke the
+        first schema, so it is checked before anything is built on top.
+  - [x] `GrantAction` is an enum with `GRANTED` / `REVOKED`, not bare strings.
+  - [x] `to_record()` on both, mirroring `BotCollaboratorModel.to_record`
         (`core/bot_collaborator/models.py:146`).
-  - [ ] Bigint columns use `AutoIncrementBigInteger`
+  - [x] Bigint columns use `AutoIncrementBigInteger`
         (`plugin_api/models.py:41`) so they are `BIGINT` on OceanBase and
         `INTEGER` on SQLite, as `ac_bots` does.
 - **Depends on:** Task 1
