@@ -30,7 +30,11 @@
 | Singlebox coverage | PENDING | [GitHub job](https://github.com/inclusionAI/Avernet/actions/runs/31374816592/job/93411576272) | 新建 PR 的首轮执行中。 | 无 | 等待远端结论。 |
 | BCS / Backend / Engine / BaaS / Gateway unit tests | PENDING | [GitHub workflow](https://github.com/inclusionAI/Avernet/actions/runs/31374816560) | 新建 PR 的首轮执行中。 | 无 | 等待远端结论。 |
 
-本地已执行：Backend provisioning 定向测试 `26 passed`；BCS system-message `45` 单测与 `7` conformance 通过；BCS provider-http `41` 通过；Claude gateway `323` 通过；Git diff 和预推送 lint/SAST 通过。预推送只执行 lint，不替代远端 coverage/E2E。
+本地已执行：Backend provisioning 定向测试 `26 passed`；BCS system-message
+`43` 单测与 `7` conformance 通过；BCS provider-http `22` 单测与 `18`
+transport-contract 通过；BCS→BaaS bridge Node 合约通过；Claude gateway `323`
+通过；Git diff 和预推送 lint/SAST 通过。预推送只执行 lint，不替代远端
+coverage/E2E。
 
 ## 人工意见
 
@@ -45,3 +49,13 @@
 - ACI/CI: PENDING
 - 人工意见: CLEAR
 - 下一步: 等待并核验当前 head 的远端检查；若有合理自动或人工意见，按最小修复流程处理。
+
+## 2026-08-10 范围校正
+
+- 不扩展 BCS Provider webhook 协议：移除 `abort_run_id` 传递和对应
+  序列化测试；bridge 不会将新建 abort request 的 `id` 猜作活动 send run。
+  在协议携带可信目标 run ID 前，本地 `chat.abort` 显式返回 unsupported，
+  而浏览器/SSE 连接关闭仍只清理它自身的上游 fetch。
+- 不为 Provider-downlink Bot 改写普通 Chat 的初始化语义：Driver 保持
+  `chat.send`，其他参与者保持 `chat.inject`。这保留用户期待的可见 send
+  结果以及现有 BCS 默认行为。

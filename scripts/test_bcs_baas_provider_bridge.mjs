@@ -117,10 +117,6 @@ function providerBody(method, runId = 'run-1') {
 }
 
 const seen = [];
-let slowStarted;
-let markSlowStarted;
-let slowClosed;
-let markSlowClosed;
 const fakeBaas = createHttpServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -128,12 +124,6 @@ const fakeBaas = createHttpServer(async (request, response) => {
   seen.push({ body, transport: request.headers['x-bcn-transport'], authorization: request.headers.authorization });
   if (request.headers['x-bcn-transport'] === 'sse') {
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    if (body.id === 'slow-run') {
-      response.flushHeaders();
-      markSlowStarted();
-      response.on('close', markSlowClosed);
-      return;
-    }
     const state = body.id === 'run-error' ? 'error' : 'final';
     response.end(
       `id: 1\nevent: chat\ndata: {"runId":"${body.id}","seq":1,"state":"delta","deltaText":"ok"}\n\n`
@@ -197,18 +187,13 @@ try {
   response = await h1Request(bridgePort, providerBody('chat.inject'), 'provider-runtime-test');
   assert.equal(response.status, 401);
 
-  slowStarted = new Promise((resolve) => { markSlowStarted = resolve; });
-  slowClosed = new Promise((resolve) => { markSlowClosed = resolve; });
-  const pending = h2Request(bridgePort, { body: providerBody('chat.send', 'slow-run') });
-  await slowStarted;
-  response = await h1Request(bridgePort, { ...providerBody('chat.abort', 'abort-event'), abort_run_id: 'slow-run' });
-  assert.equal(response.status, 200);
-  assert.deepEqual(JSON.parse(response.body), { ok: true, cancelled: true });
-  await Promise.race([slowClosed, sleep(2_000).then(() => { throw new Error('abort did not close BaaS stream'); })]);
-  await Promise.race([pending.catch(() => undefined), sleep(2_000).then(() => { throw new Error('cancelled BCS stream did not finish'); })]);
+  response = await h1Request(bridgePort, providerBody('chat.abort', 'abort-event'));
+  assert.equal(response.status, 400);
+  assert.deepEqual(JSON.parse(response.body), { error: 'unsupported method' });
 
   assert.match(bridgeOutput, /bridge\.reject reason=provider_bot_mismatch method=chat\.inject run_id=run-1 provider_bot_ref=other-bot:mock-user/);
   assert.match(bridgeOutput, /bridge\.reject reason=unauthorized method=chat\.inject run_id=run-1 provider_bot_ref=bot-1:mock-user/);
+  assert.match(bridgeOutput, /bridge\.reject reason=abort_unsupported provider_bot_ref=bot-1:mock-user/);
   assert.doesNotMatch(bridgeOutput, /not logged/);
   process.stdout.write('BCS h2c Provider bridge contract tests passed\n');
 } finally {

@@ -3,12 +3,10 @@
 //! When a session is created this producer generates the initial
 //! `[GROUP CONTEXT]` or `[SERVICE GROUP CONTEXT]` message delivered
 //! to all bot participants, with `chat.send` for the driver/manager
-//! and `chat.inject` for other participants. A normal Chat group that
-//! contains a Provider-downlink bot instead initializes every participant via
-//! `chat.inject`, so its first visible user message does not race a hidden
-//! Driver inference. The driver's delivery can still be explicitly overridden
-//! via the event's `driver_delivery` field (except in ManagerWorker groups,
-//! which always deliver to the manager via `chat.send`).
+//! and `chat.inject` for other participants. The driver's delivery
+//! can be overridden to `chat.inject` via the event's
+//! `driver_delivery` field (except in ManagerWorker groups, which
+//! always deliver to the manager via `chat.send`).
 
 use std::collections::HashMap;
 
@@ -79,18 +77,8 @@ impl SystemMessageProducerService for SessionContextMessageProducer {
                 // task, so its context is always delivered via `chat.send`.
                 if is_manager_worker {
                     DeliveryType::Send
-                } else if let Some(delivery_type) = driver_delivery {
-                    *delivery_type
-                } else if has_provider_downlink_bot {
-                    // Provider engines serialize one active inference per
-                    // session. Starting an invisible Driver turn while the
-                    // group is created races the user's first message and can
-                    // surface a concurrent-session timeout. Initialize the
-                    // Driver silently and let an explicit chat.send start the
-                    // first inference.
-                    DeliveryType::Inject
                 } else {
-                    DeliveryType::Send
+                    driver_delivery.unwrap_or(DeliveryType::Send)
                 }
             } else {
                 DeliveryType::Inject

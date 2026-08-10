@@ -37,6 +37,7 @@ created: 2026-08-08T18:30:00+08:00
 | 前端范围 | target ESLint、受管浏览器 UI smoke | PASS |
 | 真实本机拓扑 | Terminal 启动后的 `status all` | 5 OpenClaw + 3 Claude、三个 relay、Provider bridge 与 Frontend 均 Running |
 
-新建当前 Planner + Developer 群的初始化只投递 `chat.inject`。随后两个 Bot 都产生
-final，BCS 会话历史及浏览器 DOM 中均未出现并发 session timeout。验收过程只使用
+历史验收曾覆盖新建当前 Planner + Developer 群的静默 `chat.inject` 初始化。当前
+产品语义已恢复为普通 Chat 的 Driver `chat.send`；后续验收以该可见初始化结果为准。
+当时两个 Bot 都产生 final，BCS 会话历史及浏览器 DOM 中均未出现并发 session timeout。验收过程只使用
 固定无副作用短语；报告不保存其正文、run ID 或任何凭据。

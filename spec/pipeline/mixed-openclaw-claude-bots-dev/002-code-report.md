@@ -23,14 +23,15 @@ created: 2026-08-08T18:30:00+08:00
 
 完整命令和结果见 `003b-regression-report.md`，浏览器验收见 `005-qa-report.md`。
 
-## 迭代 3：首条群消息并发超时
+## 迭代 3：首条群消息并发超时（已撤回）
 
 - 根因：普通 Chat 群创建时，BCS 会把 `SessionContext` 以 `chat.send`
   投递给 Driver。对于 Provider-downlink Claude，这会启动一个用户不可见的
   推理；用户紧接着的第一条消息会争用同一 relay session lock，最终在 30 秒后
   返回并发超时。
-- 修复：只有普通 Chat、未显式设置 `driver_delivery`、且群内存在
-  Provider-downlink Bot 时，Driver 的初始化也使用 `chat.inject`。显式策略
+- 该方案曾仅在普通 Chat、未显式设置 `driver_delivery`、且群内存在
+  Provider-downlink Bot 时，将 Driver 初始化改为 `chat.inject`。按当前
+  产品语义，该改动已撤回：普通 Chat 始终保留 Driver `chat.send`，显式策略
   与 ManagerWorker 的 Manager `chat.send` 语义保持不变。
 - 前端：本地页面的 Bot tab 与新群候选列表只隐藏精确匹配的旧 Claude 三角色名，
   保留带 `（当前）` 的受管卡片；既有群成员不被自动改写。

@@ -164,13 +164,8 @@ function bridgeHandler(options, activeRuns) {
       return;
     }
     if (meta.method === 'chat.abort') {
-      const targetRunId = typeof body.abort_run_id === 'string'
-        ? body.abort_run_id
-        : typeof body.run_id === 'string' ? body.run_id : meta.runId;
-      const controller = activeRuns.get(targetRunId);
-      if (controller) controller.abort();
-      safeLog(`bridge.cancel run_id=${targetRunId} provider_bot_ref=${meta.providerBotRef}`);
-      responseJson(response, 200, { ok: true, cancelled: Boolean(controller) });
+      safeLog(`bridge.reject reason=abort_unsupported provider_bot_ref=${meta.providerBotRef}`);
+      responseJson(response, 400, { error: 'unsupported method' });
       return;
     }
     if (!['chat.send', 'chat.inject', 'chat.history'].includes(meta.method)) {
@@ -263,7 +258,7 @@ const server = createTcpServer((socket) => {
     const prefixLength = Math.min(bufferedBytes, h2Preface.length);
     const prefix = Buffer.concat(bufferedChunks, bufferedBytes).subarray(0, prefixLength);
     // BCS SSE uses cleartext HTTP/2 prior knowledge; BCS callback requests
-    // (abort/inject/history) use HTTP/1. A local proxy keeps one Provider URL
+    // (inject/history) use HTTP/1. A local proxy keeps one Provider URL
     // while handing each accepted socket to a protocol-native server. TCP can
     // split the 24-byte h2c preface, so wait for a full match before choosing
     // HTTP/2 and retain every received byte for the selected listener.

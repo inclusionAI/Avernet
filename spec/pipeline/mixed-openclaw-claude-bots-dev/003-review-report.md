@@ -21,11 +21,11 @@ iteration: 2
 
 | 维度 | 结论 | 说明 |
 |------|------|------|
-| 正确性 | PASS | Provider 停止顺序先于 BCS；清理严格以保存的 provider ID 和三个 provider ref 为界。bridge 同时覆盖 h2c 流和 HTTP/1 回调，取消按 `abort_run_id` 定位活动流。前端将人类身份作为发送者元数据传到 Workbench `bot_id`，正常用户发送不复用 `bot_uuid`。 |
+| 正确性 | PASS | Provider 停止顺序先于 BCS；清理严格以保存的 provider ID 和三个 provider ref 为界。bridge 同时覆盖 h2c 流和 HTTP/1 回调；本地 `chat.abort` 在 Provider 协议没有安全目标 run ID 时显式拒绝，避免误取消活动流。前端将人类身份作为发送者元数据传到 Workbench `bot_id`，正常用户发送不复用 `bot_uuid`。 |
 | 安全性 | PASS | Runtime token 文件以 `umask 077`/`0600` 创建；bridge 每次请求校验 Provider 级 bearer token 和允许的 provider ref；bridge 与前端发送诊断均只输出 method/run ID/ref/status 或长度/布尔值/计数，契约测试断言不会出现请求正文。CLI preflight 仅执行 `--version`，显式路径不可用时 fail-closed。 |
 | 性能 | PASS | Provider ref 是常数规模集合；流响应通过背压逐块转发；CLI 探测有 5 秒同步超时，未新增轮询或非必要全量操作。 |
 | 代码风格 | PASS | 新增 Shell/Node/TS 与既有项目格式一致；相关 Shell 通过 `bash -n`，Node 通过 `node --check`，四个前端文件 ESLint 零告警。 |
-| 测试覆盖 | PASS | Shell 测试断言严格三角色、owned cleanup、生命周期回滚、CLI fallback 静态契约和 frontend 进程/发送字段；Node 合约测试实际拉起临时 bridge，验证 h2c stream、HTTP/1 inject/history、401/403 和 abort。测试输出均为 PASS。 |
+| 测试覆盖 | PASS | Shell 测试断言严格三角色、owned cleanup、生命周期回滚、CLI fallback 静态契约和 frontend 进程/发送字段；Node 合约测试实际拉起临时 bridge，验证 h2c stream、HTTP/1 inject/history、401/403 和 `chat.abort` 的显式拒绝。测试输出均为 PASS。 |
 | ACI 覆盖率门禁 | PENDING | 本地未提供 PR base/head、JUnit、coverage XML 或远端 ACI job；不能用 shell/Node 通过替代 casePassRate、lineCoverage、changeLineCoverage 门禁。 |
 | 静态检查 | PASS | `bash -n`、`node --check`、目标 TS ESLint 与 `git diff --check` 均成功。未发现本轮引入的未使用 import、未使用变量或空白字符问题。 |
 

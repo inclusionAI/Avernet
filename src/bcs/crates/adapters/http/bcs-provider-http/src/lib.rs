@@ -593,9 +593,6 @@ fn provider_request_from_frame(
         before: params.get("before").and_then(Value::as_u64),
         after: params.get("after").and_then(Value::as_u64),
         limit: params.get("limit").and_then(Value::as_u64),
-        abort_run_id: (request.method == "chat.abort")
-            .then(|| params.get("run_id").and_then(Value::as_str).map(str::to_string))
-            .flatten(),
         timeout_ms: callback_timeout_ms,
         extensions: provider_extensions_from_params(&params),
     })
@@ -1738,7 +1735,6 @@ Connection: keep-alive\r\n\
             before: None,
             after: None,
             limit: None,
-            abort_run_id: None,
             timeout_ms: 1_000,
             extensions: None,
         };
@@ -1758,29 +1754,6 @@ Connection: keep-alive\r\n\
         assert!(error.to_string().contains(
             "provider response header timeout after 10ms"
         ));
-    }
-
-    #[test]
-    fn provider_abort_forwards_target_run_id_without_reusing_abort_request_id() {
-        let target = BotDeliveryTarget::HttpProvider {
-            bot_id: "bot-1".to_string(),
-            provider_id: "provider-1".to_string(),
-            provider_bot_ref: "bot-1:owner-1".to_string(),
-            webhook_url: "http://127.0.0.1:28083/webhook".to_string(),
-            bcs_to_provider_token: RedactedToken::new("secret"),
-            protocol_version: "2.0".to_string(),
-        };
-        let frame = BcsFrame::Request(RequestFrame::new(
-            "abort-request-id",
-            "chat.abort",
-            Some(serde_json::json!({"bcs_group_id": "group-1", "run_id": "active-run-id"})),
-        ));
-
-        let body = provider_request_from_frame(&target, &frame, 1_000).unwrap();
-
-        assert_eq!(body.id, "abort-request-id");
-        assert_eq!(body.abort_run_id.as_deref(), Some("active-run-id"));
-        assert_eq!(serde_json::to_value(body).unwrap()["abort_run_id"], "active-run-id");
     }
 
     #[tokio::test]
@@ -1830,7 +1803,6 @@ Connection: keep-alive\r\n\
             before: None,
             after: None,
             limit: None,
-            abort_run_id: None,
             timeout_ms: 1_000,
             extensions: None,
         };

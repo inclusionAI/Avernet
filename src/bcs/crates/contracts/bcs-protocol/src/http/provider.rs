@@ -223,10 +223,6 @@ pub struct ProviderWebhookRequest {
     pub after: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
-    /// For `chat.abort`, the active chat run that the newly-created abort
-    /// request targets. `id` remains the abort request's own correlation ID.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub abort_run_id: Option<String>,
     pub timeout_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extensions: Option<Value>,

@@ -68,12 +68,11 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
 10. `status all` must initialize BCSFuse's standalone runtime paths before it
     reads its PID file, so a healthy BCSFuse listener is reported with a health
     result instead of a false `pid_file: stale` fallback.
-11. When a newly created normal Chat group contains a Provider-downlink bot,
-    its initial `SessionContext` is delivered to every bot with `chat.inject`
-    by default. This leaves the Driver idle until the human sends the first
-    message, avoiding a hidden initialization inference occupying the same
-    Claude session. An explicit `driver_delivery` override and the existing
-    ManagerWorker semantics remain authoritative.
+11. A newly created normal Chat group retains the BCS default `SessionContext`
+    delivery: the Driver receives `chat.send` and other participants receive
+    `chat.inject`. This applies equally when the group contains a
+    Provider-downlink bot; only an explicit `driver_delivery` override and the
+    existing ManagerWorker semantics alter the Driver delivery.
 12. In the local mixed singlebox UI, the exact legacy local role names
     `Claude Planner`, `Claude Developer`, and `Claude Reviewer` are hidden
     from tabs and the collaboration picker whenever their `（当前）` counterparts
@@ -83,13 +82,15 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
 ## Implemented safety and protocol decisions
 
 - The Provider bridge retains a single loopback webhook URL while accepting h2c
-  prior-knowledge SSE for `chat.send` and HTTP/1 callbacks for `chat.inject`,
-  `chat.history`, and `chat.abort`. The two protocol-native listeners are only
-  reachable through that one loopback bridge port. The TCP classifier buffers
-  a split h2c preface before selecting a listener.
-- `chat.abort` carries its target as `abort_run_id`; the bridge uses an
-  `AbortController` for the matching BaaS request, so cancellation closes an
-  idle upstream stream immediately rather than waiting for another SSE frame.
+  prior-knowledge SSE for `chat.send` and HTTP/1 callbacks for `chat.inject`
+  and `chat.history`. The two protocol-native listeners are only reachable
+  through that one loopback bridge port. The TCP classifier buffers a split
+  h2c preface before selecting a listener.
+- The local bridge explicitly rejects `chat.abort`: the BCS Provider webhook
+  payload preserves the newly-created abort request ID, but does not carry a
+  safe target stream ID. It must not guess and cancel an unrelated BaaS run.
+  An HTTP/SSE client disconnect still aborts that request's local upstream
+  fetch through its own `AbortController`.
 - Provider runtime credentials are exact token-to-`provider_bot_ref` bindings;
   legacy unbound token records are rejected. Claude config directories,
   workspaces, and bot names are unique after path normalization.
@@ -139,10 +140,10 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
   counts only. They must never pass the assembled send params (which include
   the user message) to the browser console. BCSFuse status loads its runtime
   environment before inspecting the PID file, including in standalone mode.
-- A Provider-downlink group context is intentionally a silent initialization:
-  BCS uses `chat.inject` for the Driver unless a caller explicitly overrides
-  that delivery mode. This prevents an invisible startup turn from colliding
-  with the user's first `chat.send` on the Claude adapter's session lock.
+- A Provider-downlink group context does not override BCS's normal Driver
+  semantics: the Driver receives the ordinary `chat.send` result and
+  non-Drivers receive `chat.inject`. This preserves the existing visible
+  initialization contract for every normal Chat group.
 
 ## Automated evidence
 
@@ -155,7 +156,7 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
   health and do not create a workspace `CLAUDE.md`.
 - `scripts/test_bcs_baas_provider_bridge.mjs`: real h2c streaming and HTTP/1
   callback contract tests for delta/final/error, inject/history, reference
-  authorization, and active-stream cancellation.
+  authorization, and explicit abort rejection.
 - BCS, Backend, BaaS, and vendored gateway focused unit suites cover abort
   serialization, per-bot adapter environment forwarding, downlink credential
   handling, and role prompt/data-directory isolation.
