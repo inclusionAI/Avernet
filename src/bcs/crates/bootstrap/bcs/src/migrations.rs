@@ -253,6 +253,19 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_user_id ON bcs_user_identities(user_id)",
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_external ON bcs_user_identities(auth_source, external_user_id, env)",
     "CREATE INDEX IF NOT EXISTS idx_external ON bcs_user_identities(external_user_id, env)",
+    // ── user_credentials ─────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_user_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        env TEXT NOT NULL
+    )",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_user_creds_user ON bcs_user_credentials(user_id, env)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS uk_user_creds_username ON bcs_user_credentials(username, env)",
+    "CREATE INDEX IF NOT EXISTS idx_user_creds_env ON bcs_user_credentials(env)",
     // ── groups ────────────────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -723,6 +736,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 8,
         name: "human_input_im_requests",
     },
+    SqliteMigration {
+        version: 9,
+        name: "add_user_credentials",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -989,6 +1006,9 @@ async fn apply_sqlite_migration_body(
         // Startup DDL creates the HumanInput request table and indexes before
         // versioned migrations are recorded.
         8 => Ok(()),
+        // bcs_user_credentials table is created by run_sqlite_bootstrap_tables
+        // via SQLITE_DDL_STATEMENTS; version 9 only records progress.
+        9 => Ok(()),
         _ => Ok(()),
     }
 }
@@ -1226,6 +1246,9 @@ mod tests {
                 .any(|column| column == "provider_message_ref")
         );
         assert!(request_columns.iter().any(|column| column == "created_at"));
+        let cred_columns = column_names(&db, "bcs_user_credentials").await?;
+        assert!(cred_columns.iter().any(|column| column == "password_hash"));
+        assert!(cred_columns.iter().any(|column| column == "username"));
         assert_eq!(
             migration_rows(&db).await?,
             vec![
@@ -1252,6 +1275,11 @@ mod tests {
                     8,
                     "human_input_im_requests".to_string(),
                     "sqlite".to_string()
+                ),
+                (
+                    9,
+                    "add_user_credentials".to_string(),
+                    "sqlite".to_string()
                 )
             ]
         );
@@ -1264,7 +1292,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 8);
+        assert_eq!(report.pending_versions.len(), 9);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -1295,6 +1323,8 @@ mod tests {
             report.pending_versions[7].name,
             "human_input_im_requests"
         );
+        assert_eq!(report.pending_versions[8].version, 9);
+        assert_eq!(report.pending_versions[8].name, "add_user_credentials");
         Ok(())
     }
 
@@ -1330,6 +1360,11 @@ mod tests {
                 (
                     8,
                     "human_input_im_requests".to_string(),
+                    "sqlite".to_string()
+                ),
+                (
+                    9,
+                    "add_user_credentials".to_string(),
                     "sqlite".to_string()
                 )
             ]
