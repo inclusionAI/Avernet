@@ -192,8 +192,12 @@
         reframes the property as "the end user the credential names", not
         "the user this request acts for".
   - [x] `require_principal` carries the end-user requirement;
-        `require_operating_caller` is the opt-in. Both refuse through one
+        `require_operating_caller` added as the opt-in. Both refuse through one
         `_refuse` helper so the two failures are indistinguishable from outside.
+        **Superseded in Task 8** — see the correction there and in `plan.md`:
+        a route-level dependency cannot relax a router-level one, so
+        `require_operating_caller` is dropped and `require_principal` consults
+        the admission table instead. `_refuse` and everything else here stands.
   - [x] `resolve_avernet_tenant`'s docstring extended for the app-only case.
   - [x] Verifier tests updated to the new contract; six seam tests added for the
         admission split, including that an app-only refusal is byte-identical to
@@ -232,11 +236,23 @@
 
 ---
 
-## Task 8: The seam — authorize `user_id`, resolve the owner  `[ ]`
+## Task 8: The seam — authorize `user_id`, resolve the owner  `[~]`
 
 - **Files:** `adapters/http/openapi_v1/principal.py`,
   `engine_runtime/params.py`, `errors.py`, `responses.py`, `adapters/http/app.py`
 - **Done when:**
+  > **Plan correction.** `require_operating_caller` (Task 6) cannot serve as a
+  > per-route opt-in: `build_public_router` applies `require_principal` to every
+  > route via `_PUBLIC_AUTH`, and FastAPI merges router-level dependencies into
+  > each route — a route can add a check, never relax one. Verified directly.
+  > `require_principal` therefore consults `ADMISSION` itself, which keeps the
+  > single declaration and makes the fail-closed default *stronger*: an
+  > operation absent from the table is refused, so a new route is refused by
+  > omission rather than by remembering not to opt in.
+
+  - [ ] `require_operating_caller` removed; `require_principal` admits an
+        app-only caller only when the request's route has an admitting mode in
+        `ADMISSION`, and refuses when the route is absent from the table.
   - [ ] `require_user_id` keeps its signature and required `user_id`, and gains
         the app-only branch. Its docstring's promise — "stops comparing the two
         ids and asks whether the delegation was granted" — is rewritten as

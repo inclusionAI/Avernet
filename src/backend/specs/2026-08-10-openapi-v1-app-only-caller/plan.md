@@ -19,6 +19,31 @@ owner gains visibility of, and override on, every grant against their bot.
 **3. Clear the deletion blocker.** `delete_bot` revokes every grant standing
 against the bot, whoever delegated it, inside the deletion.
 
+> **Correction, found in implementation (Task 8).** This plan originally had
+> admitted operations *declare* `require_operating_caller` instead of
+> `require_principal`. That cannot work: `build_public_router` applies
+> `require_principal` to every route through `_PUBLIC_AUTH`, and FastAPI merges
+> router-level dependencies into every route — a route-level dependency can add
+> a check, never relax one. Verified directly rather than assumed.
+>
+> The mechanism is therefore **one dependency that consults the table**:
+> `require_principal` stays the single declaration on all 71 routes and looks
+> the request's route up in `ADMISSION`. Every property the two-dependency shape
+> was chosen for survives, and one improves:
+>
+> - *Fail closed by default* — an operation **absent** from the table is
+>   refused, so a new route is refused by omission rather than by remembering
+>   not to opt in. Stronger than before: previously a route could have been
+>   admitted by declaring the wrong dependency; now admission requires a table
+>   entry that the inventory test forces someone to write deliberately.
+> - *One declaration* — unchanged, and now genuinely one.
+> - *Route-blindness where it matters* — the lookup is in the adapter, which
+>   knows about routes. The verifier stays route-blind, which was the actual
+>   constraint.
+>
+> `require_operating_caller` is dropped; the modes in `ADMISSION` express what
+> it was going to.
+
 **4. Make the user-less caller verifiable, and refused by default.**
 `verify_principal_token` stops requiring an end user and starts requiring an end
 user *or* an application; `require_principal` — which every public route already
