@@ -118,6 +118,24 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
+        """Which of these ``bot_id``s are live, in one query.
+
+        The owner-blind sibling of :meth:`list_live_bot_ids_by_owner`, and it
+        exists because a caller may hold ids for bots belonging to *several*
+        owners — an application's grants, for instance, which now cover bots the
+        delegating user collaborates on rather than owns. Filtering those
+        against one owner's live ids would silently drop every shared bot.
+
+        Returns a set for direct membership testing, and never more ids than it
+        was given. An empty input returns an empty set without querying.
+
+        Scoped by current env AND tenant, like its siblings, and excludes
+        soft-deleted rows.
+        """
+        ...
+
+    @abstractmethod
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:

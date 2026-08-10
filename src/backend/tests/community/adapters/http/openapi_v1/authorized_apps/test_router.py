@@ -128,8 +128,8 @@ def grants(sessions):
     class _LiveBots:
         """Every bot is live; deletion is covered in the service tests."""
 
-        def list_live_bot_ids_by_owner(self, owner_id: str) -> list[str]:
-            return [BOT, "b-2"]
+        def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
+            return set(bot_ids)
 
     return BotAppGrantService(BotAppGrantRepository(_Db()), _LiveBots())
 

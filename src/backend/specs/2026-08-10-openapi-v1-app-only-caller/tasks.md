@@ -60,33 +60,37 @@
 
 ---
 
-## Task 2: Rekey the repository and service  `[ ]`
+## Task 2: Rekey the repository and service  `[x]`
 
 - **Goal:** Every read and write keys on the delegating user, and the app's view
   stops assuming granted bots belong to them.
 - **Files:** `core/repository/protocols/bot/app_grant.py` and its implementation,
   `core/bot_app_grant/services/grant_service.py`, `api/bot_app_grant_service.py`
 - **Done when:**
-  - [ ] `grant()` takes `user_id` and `owner_id` as separate values.
-  - [ ] `find(bot_id, user_id, app_id)` rekeyed from `owner_id`. **No new read
-        member is needed for authorization** — the delegating user is on the
-        wire, so this stays a unique-key probe.
-  - [ ] `revoke(bot_id, user_id, app_id)` rekeyed, plus
-        `revoke_all_for_app_on_bot(bot_id, app_id) -> int` for the owner's
-        override.
-  - [ ] `list_for_app(app_id, user_id)` rekeyed, and **its liveness filter
-        fixed**: it runs `list_live_bot_ids_by_owner(owner_id)` today, which
-        under the new model drops every shared granted bot. It becomes a
-        liveness check by `bot_id`. A comment records that this was a real bug
-        introduced by the model change, not a refactor.
-  - [ ] `list_for_bot(bot_id)` no longer scopes by `owner_id`; the caller decides
-        whether to narrow to one delegating user.
-  - [ ] `revoke_all_for_bot(bot_id) -> int` — the deletion sweep, whoever
-        delegated: deletes every live row and appends one `revoked` event per row
-        in **one** `transactional_orm_session()`, log rows built from the live
-        rows so the recorded `app_name` is the one at consent time.
-  - [ ] Service tests for each, including two delegations of one app on one bot
-        being independently withdrawable.
+  - [x] `grant()` takes `user_id` and `owner_id` as separate values.
+  - [x] `find(bot_id, user_id, app_id)` rekeyed. Still a unique-key point probe;
+        its docstring now says explicitly that a record coming back means the
+        delegation exists, **not** that the request may proceed — the live
+        collaborator check is the caller's separate job.
+  - [x] `revoke(bot_id, user_id, app_id)` rekeyed, plus
+        `revoke_all_for_app_on_bot(bot_id, app_id)`.
+  - [x] `list_for_app(app_id, user_id)` rekeyed, **and its liveness filter
+        fixed**. Needed a new repository member: no owner-blind liveness read
+        existed, so `BotRepository.filter_live_bot_ids(bot_ids) -> set[str]`
+        was added beside `list_live_bot_ids_by_owner`. One query, as before.
+  - [x] `list_for_bot(bot_id)` no longer scopes by `owner_id`.
+  - [x] `revoke_all_for_bot(bot_id) -> int`. Both sweeps share one `_sweep`
+        helper so they cannot drift in locking or logging, and both build log
+        rows from the live rows — the only way they can record a delegator they
+        were never told about.
+  - [x] Service tests: 28 pass, including two collaborators delegating the same
+        app on the same bot, independent withdrawal, the owner override, both
+        sweeps, and a granted bot the delegator does not own surviving the
+        liveness filter.
+  - [x] The test double `_LiveBots` was modelling one bot id under two owners,
+        which is incoherent once the filter is owner-blind; rebuilt around a flat
+        live set, matching production.
+
 - **Depends on:** Task 1
 
 ---

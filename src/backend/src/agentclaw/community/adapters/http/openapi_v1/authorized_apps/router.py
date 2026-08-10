@@ -158,7 +158,11 @@ async def grant_authorized_app(
     bot_service.get_bot(bot_id, owner_id)
     app_id, app_name = _calling_app(principal)
     record = grants.grant(
-        bot_id=bot_id, owner_id=owner_id, app_id=app_id, app_name=app_name
+        bot_id=bot_id,
+        user_id=owner_id,
+        owner_id=owner_id,
+        app_id=app_id,
+        app_name=app_name,
     )
     return created(_to_authorized_app(record), request)
 
@@ -178,7 +182,7 @@ async def list_authorized_apps(
     """The owner's view — which applications can reach this bot."""
     del principal  # authority comes from the owner-scoped bot read below
     bot_service.get_bot(bot_id, owner_id)
-    records = grants.list_for_bot(bot_id=bot_id, owner_id=owner_id)
+    records = grants.list_for_bot(bot_id=bot_id)
     items = [_to_authorized_app(record) for record in records]
     return page(len(items), items, request)
 
@@ -205,7 +209,7 @@ async def revoke_authorized_app(
     """
     del principal
     bot_service.get_bot(bot_id, owner_id)
-    grants.revoke(bot_id=bot_id, owner_id=owner_id, app_id=app_id)
+    grants.revoke(bot_id=bot_id, user_id=owner_id, app_id=app_id)
     return deleted_envelope(request)
 
 
@@ -227,6 +231,6 @@ async def list_authorized_bots(
     none answers ``200`` with no items rather than ``404``.
     """
     app_id, _ = _calling_app(principal)
-    records = grants.list_for_app(app_id=app_id, owner_id=owner_id)
+    records = grants.list_for_app(app_id=app_id, user_id=owner_id)
     items = [_to_authorized_bot(record) for record in records]
     return page(len(items), items, request)

@@ -1,4 +1,4 @@
-"""Repository and service tests for owner-granted bot authorizations.
+"""Repository and service tests for user-granted bot authorizations.
 
 Run against a real SQLite database rather than a mock repository, because the
 behaviours worth pinning here are database behaviours: a unique key that has to
@@ -78,35 +78,41 @@ def repo(db):
 
 
 class _LiveBots:
-    """A bot repository double tracking which bots this owner still has.
+    """A bot repository double tracking which bots still exist.
 
-    Mirrors ``list_live_bot_ids_by_owner``, which excludes soft-deleted rows —
-    so ``delete`` here means what it means in production: the id stops coming
-    back. ``queries`` counts calls, which is how the batching test proves the
-    filter costs one query rather than one per grant.
+    Mirrors ``filter_live_bot_ids``, which is **owner-blind** — a bot id is live
+    or it is not. That is the whole point rather than a simplification: a
+    delegating user may hold grants on bots several other people own, so a
+    liveness filter that asked "which of *this user's* bots are live" would drop
+    every shared one, silently and precisely in the case delegation exists for.
+
+    ``queries`` counts calls, which is how the batching test proves the filter
+    costs one query rather than one per grant.
     """
 
     def __init__(self):
-        self.live: dict[str, set[str]] = {}
+        self.live: set[str] = set()
         self.queries = 0
 
-    def add(self, owner_id: str, *bot_ids: str) -> None:
-        self.live.setdefault(owner_id, set()).update(bot_ids)
+    def add(self, *bot_ids: str) -> None:
+        self.live.update(bot_ids)
 
-    def delete(self, owner_id: str, bot_id: str) -> None:
-        self.live.get(owner_id, set()).discard(bot_id)
+    def delete(self, bot_id: str) -> None:
+        """Soft-deletion, as the caller sees it: the id stops coming back."""
+        self.live.discard(bot_id)
 
-    def list_live_bot_ids_by_owner(self, owner_id: str) -> list[str]:
+    def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
+        if not bot_ids:
+            return set()
         self.queries += 1
-        return sorted(self.live.get(owner_id, set()))
+        return {bot for bot in bot_ids if bot in self.live}
 
 
 @pytest.fixture
 def bots():
     """Seeded with every bot the tests grant, so the default is "all live"."""
     doubles = _LiveBots()
-    for owner in ("u-1", "u-2"):
-        doubles.add(owner, "b-1", "b-2")
+    doubles.add("b-1", "b-2")
     return doubles
 
 
@@ -115,7 +121,13 @@ def service(repo, bots):
     return BotAppGrantService(repo, bots)
 
 
-GRANT = {"bot_id": "b-1", "owner_id": "u-1", "app_id": 42, "app_name": "partner"}
+GRANT = {
+    "bot_id": "b-1",
+    "user_id": "u-1",
+    "owner_id": "u-1",
+    "app_id": 42,
+    "app_name": "partner",
+}
 
 
 def _log(sessions):
@@ -128,23 +140,48 @@ def _log(sessions):
         ]
 
 
-def test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request(
-    service, sessions
-):
-    """The row must answer "whose bot, in which tenant" on its own.
+def _rows(sessions, model):
+    with sessions() as session:
+        return session.query(model).order_by(model.id).all()
 
-    The later machine-caller path resolves ownership from these columns rather
-    than from anything the caller sends, so they have to be on the row and they
-    have to be the resolved values.
+
+def test_both_users_and_the_tenant_are_resolved_at_write_time(service, sessions):
+    """The row must answer "as whom, on whose bot, in which tenant" on its own.
+
+    The machine-caller path reads all three off the record rather than off the
+    request, so they have to be on the row and they have to be resolved values.
     """
     record = service.grant(**GRANT)
 
+    assert record.user_id == "u-1"
     assert record.owner_id == "u-1"
     assert record.avernet_tenant  # stamped by the guard, not passed in
     with sessions() as session:
         row = session.query(BotAppGrantModel).one()
+        assert row.user_id == "u-1"
         assert row.owner_id == "u-1"
         assert row.avernet_tenant == record.avernet_tenant
+
+
+def test_delegator_and_owner_are_recorded_separately_for_a_shared_bot(
+    service, sessions
+):
+    """The two columns are two different people, and both must survive.
+
+    ``user_id`` is who lent their access; ``owner_id`` is whose bot it is. A
+    collaborator delegating on someone else's bot is the case the single-column
+    record could not express at all.
+    """
+    record = service.grant(
+        bot_id="b-9", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
+    )
+
+    assert (record.user_id, record.owner_id) == ("u-2", "u-1")
+    with sessions() as session:
+        row = session.query(BotAppGrantModel).one()
+        assert (row.user_id, row.owner_id) == ("u-2", "u-1")
+    logged = _rows(sessions, BotAppGrantLogModel)[0]
+    assert (logged.user_id, logged.owner_id) == ("u-2", "u-1")
 
 
 def test_grant_is_idempotent_and_does_not_move_granted_at(service, sessions):
@@ -179,9 +216,9 @@ def test_grant_withdraw_grant_withdraw_survives(service, sessions):
     revoked rows share the remaining key columns. Two tables make it ordinary.
     """
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
     with sessions() as session:
         assert session.query(BotAppGrantModel).count() == 0
@@ -204,7 +241,7 @@ def test_regrant_after_revoke_creates_a_new_period(service, sessions):
     the log is where that lives.
     """
     first = service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
     second = service.grant(**GRANT)
 
     assert _log(sessions) == [
@@ -224,7 +261,7 @@ def test_log_outlives_the_live_row(service, sessions):
     joining to a row that no longer exists.
     """
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
     with sessions() as session:
         assert session.query(BotAppGrantModel).count() == 0
@@ -241,23 +278,23 @@ def test_log_outlives_the_live_row(service, sessions):
 def test_revoke_absent_grant_raises_distinctly(service):
     """"Nothing to remove" must not read as "removed"."""
     with pytest.raises(GrantNotFoundError):
-        service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+        service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
 
 def test_revoke_is_not_silently_repeatable(service):
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
     with pytest.raises(GrantNotFoundError):
-        service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+        service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
 
 def test_list_excludes_revoked_grants(service):
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", owner_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
-    assert service.list_for_bot(bot_id="b-1", owner_id="u-1") == []
-    assert service.list_for_app(app_id=42, owner_id="u-1") == []
+    assert service.list_for_bot(bot_id="b-1") == []
+    assert service.list_for_app(app_id=42, user_id="u-1") == []
 
 
 def test_list_for_app_is_scoped_to_the_calling_app(service):
@@ -266,11 +303,15 @@ def test_list_for_app_is_scoped_to_the_calling_app(service):
     A listing that silently widens is worse than one that fails, so each
     scoping dimension is pinned on its own.
     """
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
-    service.grant(bot_id="b-2", owner_id="u-1", app_id=99, app_name="other")
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=99, app_name="other"
+    )
 
-    assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-1"]
-    assert [r.bot_id for r in service.list_for_app(app_id=99, owner_id="u-1")] == ["b-2"]
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-1")] == ["b-1"]
+    assert [r.bot_id for r in service.list_for_app(app_id=99, user_id="u-1")] == ["b-2"]
 
 
 def test_grant_truncates_an_over_long_app_name_instead_of_failing(service, sessions):
@@ -285,7 +326,7 @@ def test_grant_truncates_an_over_long_app_name_instead_of_failing(service, sessi
     long_name = "n" * (APP_NAME_MAX_LENGTH + 500)
 
     record = service.grant(
-        bot_id="b-1", owner_id="u-1", app_id=42, app_name=long_name
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name=long_name
     )
 
     assert len(record.app_name) == APP_NAME_MAX_LENGTH
@@ -303,12 +344,16 @@ def test_list_for_app_excludes_a_deleted_bot(service, bots):
     indefinitely. The owner's view needs no equivalent test: its route resolves
     the bot first and 404s.
     """
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
-    service.grant(bot_id="b-2", owner_id="u-1", app_id=42, app_name="partner")
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
 
-    bots.delete("u-1", "b-1")
+    bots.delete("b-1")
 
-    assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-2"]
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-1")] == ["b-2"]
 
 
 def test_list_for_app_filters_in_one_query_not_one_per_grant(service, bots):
@@ -319,11 +364,15 @@ def test_list_for_app_filters_in_one_query_not_one_per_grant(service, bots):
     synchronous. Counting queries is the only way to keep the fix from
     regressing into the shape it replaced.
     """
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
-    service.grant(bot_id="b-2", owner_id="u-1", app_id=42, app_name="partner")
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
     bots.queries = 0
 
-    service.list_for_app(app_id=42, owner_id="u-1")
+    service.list_for_app(app_id=42, user_id="u-1")
 
     assert bots.queries == 1
 
@@ -332,29 +381,187 @@ def test_list_for_app_makes_no_bot_query_when_there_are_no_grants(service, bots)
     """Nothing to filter, so nothing to ask the bot repository."""
     bots.queries = 0
 
-    assert service.list_for_app(app_id=42, owner_id="u-1") == []
+    assert service.list_for_app(app_id=42, user_id="u-1") == []
     assert bots.queries == 0
 
 
-def test_list_for_app_is_scoped_to_the_calling_owner(service):
-    """One app, granted by two owners, sees only the calling owner's bots."""
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
-    service.grant(bot_id="b-2", owner_id="u-2", app_id=42, app_name="partner")
+def test_list_for_app_is_scoped_to_the_delegating_user(service):
+    """One app, two delegators, sees only the named delegator's bots.
 
-    assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-1"]
-    assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-2")] == ["b-2"]
+    The scope is the *delegation*, not the ownership: an application holding a
+    grant from one user must not inherit another user's.
+    """
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-2", user_id="u-2", owner_id="u-2", app_id=42, app_name="partner"
+    )
+
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-1")] == ["b-1"]
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-2")] == ["b-2"]
 
 
-def test_list_for_bot_is_scoped_to_the_owning_user(service):
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
+def test_list_for_app_includes_a_bot_the_delegator_does_not_own(service, bots):
+    """The case the owner-based filter silently dropped.
 
-    assert service.list_for_bot(bot_id="b-1", owner_id="u-2") == []
+    ``b-3`` belongs to ``u-9`` and ``u-2`` collaborates on it. Filtering the
+    result against ``u-2``'s *own* live bots — which is what this did while only
+    owners could grant — removes exactly the bot the delegation exists to reach,
+    and does it without an error.
+    """
+    bots.add("b-3")
+    service.grant(
+        bot_id="b-3", user_id="u-2", owner_id="u-9", app_id=42, app_name="partner"
+    )
+
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-2")] == ["b-3"]
+
+
+def test_list_for_bot_shows_every_delegation_whoever_made_it(service):
+    """The bot's owner has to see a grant a collaborator made.
+
+    Narrowing this to one delegating user would hide from an owner precisely the
+    machine access they most need to know about — access to their own bot,
+    arranged by someone else.
+    """
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=99, app_name="other"
+    )
+
+    delegations = service.list_for_bot(bot_id="b-1")
+
+    assert {(r.user_id, r.app_id) for r in delegations} == {("u-1", 42), ("u-2", 99)}
+
+
+def test_two_users_may_delegate_the_same_app_on_the_same_bot(service, sessions):
+    """Two delegations, not one — and the second must not be swallowed.
+
+    Keyed on the bot's owner these would collide, and the idempotent grant path
+    would return the first user's row for the second user's request: an
+    application bounded by the wrong person's access, with no error to notice.
+    """
+    first = service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    second = service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
+    )
+
+    assert first.id != second.id
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 2
+    assert _log(sessions) == [GrantAction.GRANTED, GrantAction.GRANTED]
+
+
+def test_one_users_withdrawal_leaves_the_others_delegation_working(service):
+    """A collaborator withdraws their own loan, not a colleague's."""
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
+    )
+
+    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+
+    assert service.list_for_app(app_id=42, user_id="u-1") == []
+    assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-2")] == ["b-1"]
+
+
+def test_owner_override_withdraws_every_delegation_of_one_app(service, sessions):
+    """"Revoke this app's access to my bot" means all of it.
+
+    A withdrawal that left the application still reaching the bot through a
+    colleague's grant would not be a withdrawal.
+    """
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=99, app_name="other"
+    )
+
+    service.revoke_app(bot_id="b-1", app_id=42)
+
+    assert service.list_for_app(app_id=42, user_id="u-1") == []
+    assert service.list_for_app(app_id=42, user_id="u-2") == []
+    assert [r.app_id for r in service.list_for_bot(bot_id="b-1")] == [99], (
+        "a different application keeps its authorization"
+    )
+    assert _log(sessions).count(GrantAction.REVOKED) == 2, "one event per row"
+
+
+def test_owner_override_on_nothing_raises_distinctly(service):
+    """"Nothing to remove" must not read as "removed", here too."""
+    with pytest.raises(GrantNotFoundError):
+        service.revoke_app(bot_id="b-1", app_id=42)
+
+
+def test_deletion_sweep_withdraws_every_delegation_whoever_made_it(service, sessions):
+    """A deleted bot has no authorizations, from anyone, to any application."""
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=99, app_name="other"
+    )
+    service.grant(
+        bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
+
+    assert service.revoke_all_for_bot(bot_id="b-1") == 2
+
+    assert service.list_for_bot(bot_id="b-1") == []
+    assert [r.bot_id for r in service.list_for_bot(bot_id="b-2")] == ["b-2"], (
+        "another bot's authorizations are untouched"
+    )
+    assert _log(sessions).count(GrantAction.REVOKED) == 2
+
+
+def test_deletion_sweep_of_an_unauthorized_bot_is_not_an_error(service):
+    """Deleting a bot no application could reach is an ordinary deletion.
+
+    Unlike the two withdrawals, this reports a count rather than answering a
+    request to remove one named thing — so zero is an answer, not a failure.
+    """
+    assert service.revoke_all_for_bot(bot_id="b-1") == 0
+
+
+def test_sweeps_record_the_delegating_user_in_the_history(service, sessions):
+    """The audit has to answer "who let this application in" after the fact.
+
+    Both sweeps build their log rows from the live rows rather than from their
+    arguments, which is the only way they *can* record a delegator they were
+    never told about.
+    """
+    service.grant(
+        bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
+    )
+
+    service.revoke_all_for_bot(bot_id="b-1")
+
+    revoked = [
+        row for row in _rows(sessions, BotAppGrantLogModel)
+        if row.action == GrantAction.REVOKED
+    ]
+    assert [(r.user_id, r.owner_id, r.app_name) for r in revoked] == [
+        ("u-2", "u-1", "partner")
+    ]
 
 
 def test_one_bot_authorization_conveys_nothing_about_another(service):
-    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
+    service.grant(
+        bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
+    )
 
-    assert service.list_for_bot(bot_id="b-2", owner_id="u-1") == []
+    assert service.list_for_bot(bot_id="b-2") == []
 
 
 def test_grant_ignores_a_caller_supplied_env(repo, sessions):
@@ -385,11 +592,11 @@ def test_losing_the_insert_race_returns_the_winners_row(repo, monkeypatch, sessi
     real_live_row = BotAppGrantRepository._live_row
     calls = {"n": 0}
 
-    def blind_first_check(self, db, bot_id, owner_id, app_id, env, *, lock=False):
+    def blind_first_check(self, db, bot_id, user_id, app_id, env, *, lock=False):
         calls["n"] += 1
         if calls["n"] == 1:
             return None
-        return real_live_row(self, db, bot_id, owner_id, app_id, env, lock=lock)
+        return real_live_row(self, db, bot_id, user_id, app_id, env, lock=lock)
 
     monkeypatch.setattr(BotAppGrantRepository, "_live_row", blind_first_check)
 

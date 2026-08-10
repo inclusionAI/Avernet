@@ -12,10 +12,11 @@ would mean doing them twice:
   and confines every read to it. A comparison here would restate a guarantee
   already enforced a layer down, and would rot the moment someone trusted it
   instead of the guard.
-- **It does not check who may manage the bot.** The caller resolves the bot
-  through the owner-scoped read first; a non-owner never reaches this service.
-  That read answers a stranger exactly as it answers a caller naming a bot that
-  does not exist, and re-deciding it here would risk a second, different answer.
+- **It does not check who may manage the bot.** The caller adjudicates that
+  first — a user who cannot *operate* the bot never reaches this service. That
+  adjudication answers a stranger exactly as it answers a caller naming a bot
+  that does not exist, and re-deciding it here would risk a second, different
+  answer.
 
 What is left is the part that is genuinely this layer's: what a grant means when
 one already exists, and what a withdrawal means when one does not.
@@ -55,16 +56,25 @@ class BotAppGrantService:
         self,
         *,
         bot_id: str,
+        user_id: str,
         owner_id: str,
         app_id: int,
         app_name: str,
     ) -> BotAppGrantRecord:
-        """Authorize ``app_id`` to reach ``bot_id``.
+        """Authorize ``app_id`` to act as ``user_id`` on ``bot_id``.
 
-        ``owner_id`` is the **resolved** bot owner and ``app_id`` comes off the
-        verified App principal — neither is a value the request chose, which is
-        what stops a grant being pointed at someone else's bot or another
-        application.
+        ``user_id`` is the delegating user — whoever is lending their access —
+        and ``owner_id`` is the **resolved** owner of the bot, which is a
+        different person whenever the bot is shared. Both are resolved by the
+        caller and ``app_id`` comes off the verified App principal, so none of
+        the three is a value the request chose. That is what stops a grant being
+        pointed at someone else's bot, at another application, or at an
+        authority the delegator does not have.
+
+        Nothing about the delegator's permission level is recorded. The bound on
+        what the application may do is that user's *live* access, re-adjudicated
+        on every request; a level copied in here would keep saying "yes" after
+        they lost it.
 
         Repeating a live grant returns it unchanged rather than failing: the
         caller asked for a state that already holds, and a partner retrying a
@@ -83,68 +93,119 @@ class BotAppGrantService:
                 "app_id": app_id,
                 "app_name": app_name[:APP_NAME_MAX_LENGTH],
                 "bot_id": bot_id,
+                "user_id": user_id,
                 "owner_id": owner_id,
             }
         )
 
-    def revoke(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
-        """Withdraw ``app_id``'s authorization for ``bot_id``.
+    def revoke(self, *, bot_id: str, user_id: str, app_id: int) -> None:
+        """Withdraw ``user_id``'s delegation of ``app_id`` on ``bot_id``.
+
+        Scoped to one delegating user, because a delegation is theirs to
+        withdraw. A collaborator revoking their own grant must not remove a
+        colleague's delegation of the same application on the same bot — those
+        are two separate loans. The bot's *owner* has a wider withdrawal, which
+        is :meth:`revoke_app` rather than this.
 
         Raises:
             GrantNotFoundError: no live authorization matched. Distinct from a
-                successful withdrawal on purpose — an owner reconciling their
-                own records needs "there was nothing to remove" to read
-                differently from "removed".
+                successful withdrawal on purpose — someone reconciling their own
+                records needs "there was nothing to remove" to read differently
+                from "removed".
         """
-        if not self._repository.revoke(bot_id, owner_id, app_id):
+        if not self._repository.revoke(bot_id, user_id, app_id):
             raise GrantNotFoundError(
                 f"no live authorization for app {app_id} on bot {bot_id}"
             )
         logger.info(
-            "[bot_app_grant] owner=%s revoked app_id=%s on bot_id=%s",
-            owner_id,
+            "[bot_app_grant] user=%s revoked app_id=%s on bot_id=%s",
+            user_id,
             app_id,
             bot_id,
         )
 
-    def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]:
-        """The owner's view — which apps may reach this bot.
+    def revoke_app(self, *, bot_id: str, app_id: int) -> None:
+        """Withdraw **every** delegation of ``app_id`` on ``bot_id``.
+
+        The bot owner's override. An owner asking to revoke an application's
+        access to their bot means all of it: a withdrawal that left the
+        application still reaching the bot through a colleague's grant would not
+        be a withdrawal at all.
+
+        Raises:
+            GrantNotFoundError: nothing was live to withdraw, so the adapter can
+                answer 404 exactly as it does for the single-delegation form.
+        """
+        removed = self._repository.revoke_all_for_app_on_bot(bot_id, app_id)
+        if not removed:
+            raise GrantNotFoundError(
+                f"no live authorization for app {app_id} on bot {bot_id}"
+            )
+        logger.info(
+            "[bot_app_grant] owner revoked all %s delegation(s) of app_id=%s "
+            "on bot_id=%s",
+            removed,
+            app_id,
+            bot_id,
+        )
+
+    def revoke_all_for_bot(self, *, bot_id: str) -> int:
+        """Withdraw every authorization against ``bot_id``, whoever delegated it.
+
+        The bot-deletion sweep. Unlike the two withdrawals above this does not
+        raise when nothing matched: deleting a bot that no application could
+        reach is a perfectly ordinary deletion, and the caller is reporting a
+        count rather than answering a request to remove one named thing.
+        """
+        return self._repository.revoke_all_for_bot(bot_id)
+
+    def list_for_bot(self, *, bot_id: str) -> list[BotAppGrantRecord]:
+        """The bot's view — every app that may reach it, and who let each in.
 
         Live authorizations only, which the live table gives for free: it holds
         nothing else, so there is no filter to forget.
+
+        Deliberately **not** narrowed to one delegating user. The bot's owner has
+        to be able to see a grant a collaborator made, or machine access to their
+        own bot would be invisible to them — and invisible access is the failure
+        the whole record exists to prevent. A caller wanting one user's view
+        filters what comes back.
         """
-        return self._repository.list_for_bot(bot_id, owner_id)
+        return self._repository.list_for_bot(bot_id)
 
-    def list_for_app(self, *, app_id: int, owner_id: str) -> list[BotAppGrantRecord]:
-        """The app's view — which of this owner's bots may this app reach.
+    def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
+        """The app's view — which bots may this app reach as ``user_id``.
 
-        Names no bot, so there is nothing to *mask* — the result is the caller's
-        own authorizations over their own bots, and an empty list discloses
-        nothing. That is why this operation, alone among the four, does not
-        inherit the masked refusal from a named-bot resolve.
+        Names no bot, so there is nothing to *mask* — the result is one user's
+        own delegations to one application, and an empty list discloses nothing.
+        That is why this operation, alone among the reads, does not inherit the
+        masked refusal from a named-bot resolve.
 
         It does still have to answer honestly, and a grant outliving its bot
-        would make it lie. ``delete_bot`` soft-deletes the ``ac_bots`` row and
-        does not touch grants, so without this filter a withdrawn-by-deletion
-        bot would be reported as currently authorized indefinitely.
+        would make it lie. The deletion sweep now revokes on the way out, so
+        this filter is the second line rather than the only one: it still
+        matters for a bot deleted by a path that bypassed the sweep, and it
+        costs one id-only query.
+
+        **Filtered by bot id, not by owner.** The obvious filter —
+        ``list_live_bot_ids_by_owner(user_id)`` — is what this did while a grant
+        could only name the delegator's own bot, and it became wrong the moment
+        a collaborator could delegate: a granted bot the user does not own is
+        live and reachable, and filtering against that user's own bots would
+        drop every one of them. Silently, and precisely in the case the feature
+        exists to serve.
 
         **Two queries, not one per grant.** An earlier revision checked each
-        grant with its own ``get_by_id_and_owner`` and justified it as "bounded
-        by design"; that bound was not real — an owner can hold many bots when
-        the ceiling is disabled — and this route is unpaginated and calls a
+        grant with its own lookup and justified it as "bounded by design"; that
+        bound was not real, and this route is unpaginated and calls a
         synchronous service, so the round trips would have blocked the event
-        loop in proportion to the grant count. The owner's live bot ids come
-        back in a single id-only query and the filter happens in memory.
-
-        This filters the *report*; it does not revoke. Revoking on deletion is
-        the fuller fix and belongs with bot lifecycle rather than here — until
-        it exists, the row survives and only stops being advertised.
+        loop in proportion to the grant count.
         """
-        granted = self._repository.list_for_app(app_id, owner_id)
+        granted = self._repository.list_for_app(app_id, user_id)
         if not granted:
             # Skip the bot query entirely when there is nothing to filter.
             return []
-        live = set(self._bots.list_live_bot_ids_by_owner(owner_id))
+        live = self._bots.filter_live_bot_ids([r.bot_id for r in granted])
         return [record for record in granted if record.bot_id in live]
 
 

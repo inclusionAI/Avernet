@@ -16,8 +16,11 @@ Behavior:
   beside a live row — the app still reaching the bot while the audit says it
   cannot. Reads stay on ``orm_session()``; only the two mutations need a
   transaction.
-- ``revoke`` takes ``with_for_update()`` on the live row, so a concurrent
-  withdrawal of the same authorization waits rather than double-logging.
+- ``revoke`` and the two sweeps take ``with_for_update()`` on the rows they are
+  about to delete, so a concurrent withdrawal of the same authorization waits
+  rather than double-logging. (SQLite compiles the clause away and every session
+  a test can reach is SQLite, so a green suite says nothing about this; only
+  MySQL/OceanBase exercises it.)
   ``grant`` deliberately does **not**: there is no row to lock before the first
   insert, and on InnoDB at REPEATABLE READ a ``FOR UPDATE`` matching nothing
   takes a *gap* lock instead. Two such locks are mutually compatible while the
@@ -101,14 +104,15 @@ class BotAppGrantRepository(
         """
         app_id = data["app_id"]
         bot_id = data["bot_id"]
+        user_id = data["user_id"]
         owner_id = data["owner_id"]
         app_name = data["app_name"]
         env = get_current_env()
 
         try:
-            return self._insert_grant(app_id, app_name, bot_id, owner_id, env)
+            return self._insert_grant(app_id, app_name, bot_id, user_id, owner_id, env)
         except IntegrityError:
-            existing = self._reread_after_conflict(bot_id, owner_id, app_id, env)
+            existing = self._reread_after_conflict(bot_id, user_id, app_id, env)
             if existing is not None:
                 return existing
             # The winner's row was revoked before we could read it, so nothing
@@ -116,15 +120,17 @@ class BotAppGrantRepository(
             # attempt; a second conflict propagates rather than looping.
             logger.info(
                 "[bot_app_grant] insert conflict resolved to nothing live, "
-                "retrying once: app_id=%s bot_id=%s owner_id=%s",
+                "retrying once: app_id=%s bot_id=%s user_id=%s",
                 app_id,
                 bot_id,
-                owner_id,
+                user_id,
             )
-            return self._insert_grant(app_id, app_name, bot_id, owner_id, env)
+            return self._insert_grant(
+                app_id, app_name, bot_id, user_id, owner_id, env
+            )
 
     def _reread_after_conflict(
-        self, bot_id: str, owner_id: str, app_id: int, env: str
+        self, bot_id: str, user_id: str, app_id: int, env: str
     ) -> Optional[BotAppGrantRecord]:
         """The live row for this scope after an ``IntegrityError``, if any.
 
@@ -137,27 +143,33 @@ class BotAppGrantRepository(
         other row that happened to violate a constraint.
         """
         with self._db.orm_session() as db:
-            row = self._live_row(db, bot_id, owner_id, app_id, env)
+            row = self._live_row(db, bot_id, user_id, app_id, env)
             if row is None:
                 return None
             logger.info(
                 "[bot_app_grant] lost the insert race, returning the winner's "
-                "row: app_id=%s bot_id=%s owner_id=%s",
+                "row: app_id=%s bot_id=%s user_id=%s",
                 app_id,
                 bot_id,
-                owner_id,
+                user_id,
             )
             return row.to_record()
 
     def _insert_grant(
-        self, app_id: int, app_name: str, bot_id: str, owner_id: str, env: str
+        self,
+        app_id: int,
+        app_name: str,
+        bot_id: str,
+        user_id: str,
+        owner_id: str,
+        env: str,
     ) -> BotAppGrantRecord:
         """The write half of :meth:`grant`, in one transaction."""
         with self._db.transactional_orm_session() as db:
             # No lock: see the module docstring. The unique key is what
             # serializes this, and a FOR UPDATE matching no row would take a gap
             # lock that deadlocks a concurrent inserter instead.
-            existing = self._live_row(db, bot_id, owner_id, app_id, env)
+            existing = self._live_row(db, bot_id, user_id, app_id, env)
             if existing is not None:
                 # Idempotent, and deliberately silent in the log: a repeated
                 # grant is the same authorization, not a new period. Returning
@@ -165,10 +177,10 @@ class BotAppGrantRepository(
                 # when", rather than "when someone last called this".
                 logger.info(
                     "[bot_app_grant] grant is already live, returning it "
-                    "unchanged: app_id=%s bot_id=%s owner_id=%s",
+                    "unchanged: app_id=%s bot_id=%s user_id=%s",
                     app_id,
                     bot_id,
-                    owner_id,
+                    user_id,
                 )
                 return existing.to_record()
 
@@ -176,6 +188,7 @@ class BotAppGrantRepository(
                 app_id=app_id,
                 app_name=app_name,
                 bot_id=bot_id,
+                user_id=user_id,
                 owner_id=owner_id,
                 env=env,
             )
@@ -185,6 +198,7 @@ class BotAppGrantRepository(
                     app_id=app_id,
                     app_name=app_name,
                     bot_id=bot_id,
+                    user_id=user_id,
                     owner_id=owner_id,
                     action=GrantAction.GRANTED,
                     env=env,
@@ -193,63 +207,127 @@ class BotAppGrantRepository(
             db.flush()
             db.refresh(row)
             logger.info(
-                "[bot_app_grant] granted app_id=%s to bot_id=%s owner_id=%s",
+                "[bot_app_grant] granted app_id=%s on bot_id=%s as user_id=%s "
+                "(owner_id=%s)",
                 app_id,
                 bot_id,
+                user_id,
                 owner_id,
             )
             return row.to_record()
 
-    def revoke(self, bot_id: str, owner_id: str, app_id: int) -> bool:
-        """Withdraw an authorization, appending a ``revoked`` event."""
+    def revoke(self, bot_id: str, user_id: str, app_id: int) -> bool:
+        """Withdraw one user's delegation, appending a ``revoked`` event."""
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
-            row = self._live_row(db, bot_id, owner_id, app_id, env, lock=True)
+            row = self._live_row(db, bot_id, user_id, app_id, env, lock=True)
             if row is None:
                 logger.info(
                     "[bot_app_grant] nothing to revoke: app_id=%s bot_id=%s "
-                    "owner_id=%s",
+                    "user_id=%s",
                     app_id,
                     bot_id,
-                    owner_id,
+                    user_id,
                 )
                 return False
 
-            # The log row is built from the live row rather than from the
-            # caller's arguments, so the history records what was actually in
-            # force — including the app name as it stood when consent was
-            # given, which the caller never supplies on this path.
-            db.add(
-                self._Log(
-                    app_id=row.app_id,
-                    app_name=row.app_name,
-                    bot_id=row.bot_id,
-                    owner_id=row.owner_id,
-                    action=GrantAction.REVOKED,
-                    env=row.env,
-                )
-            )
+            self._log_revocation(db, row)
             db.delete(row)
             logger.info(
-                "[bot_app_grant] revoked app_id=%s from bot_id=%s owner_id=%s",
+                "[bot_app_grant] revoked app_id=%s on bot_id=%s as user_id=%s",
                 app_id,
                 bot_id,
-                owner_id,
+                user_id,
             )
             return True
+
+    def revoke_all_for_app_on_bot(self, bot_id: str, app_id: int) -> int:
+        """Withdraw every user's delegation of one app on one bot."""
+        return self._sweep(
+            bot_id,
+            app_id=app_id,
+            reason="owner revoked an app outright",
+        )
+
+    def revoke_all_for_bot(self, bot_id: str) -> int:
+        """Withdraw every authorization standing against a bot."""
+        return self._sweep(bot_id, app_id=None, reason="bot deleted")
+
+    def _sweep(self, bot_id: str, *, app_id: Optional[int], reason: str) -> int:
+        """Delete a set of live rows and log one ``revoked`` event for each.
+
+        One transaction for the whole set, not one per row: a sweep that
+        committed halfway would leave a deleted bot — or a supposedly withdrawn
+        application — still reaching it through whatever it did not get to.
+
+        ``app_id=None`` means "every application", which is the bot-deletion
+        case. It is an explicit parameter rather than two near-identical bodies
+        so the two sweeps cannot drift in their locking or their logging.
+
+        The rows are locked before deletion for the reason :meth:`revoke` locks
+        its single row: a concurrent withdrawal of the same authorization must
+        wait rather than log the revocation twice.
+        """
+        env = get_current_env()
+        with self._db.transactional_orm_session() as db:
+            query = db.query(self._Grant).filter(
+                self._Grant.bot_id == bot_id,
+                self._Grant.env == env,
+            )
+            if app_id is not None:
+                query = query.filter(self._Grant.app_id == app_id)
+            rows = query.with_for_update().all()
+            for row in rows:
+                self._log_revocation(db, row)
+                db.delete(row)
+            if rows:
+                logger.info(
+                    "[bot_app_grant] swept %s authorization(s) on bot_id=%s "
+                    "(app_id=%s): %s",
+                    len(rows),
+                    bot_id,
+                    app_id if app_id is not None else "all",
+                    reason,
+                )
+            return len(rows)
+
+    def _log_revocation(self, db: Any, row: BotAppGrantModel) -> None:
+        """Append the ``revoked`` event for one live row, from the row itself.
+
+        Built from the row rather than from the caller's arguments, so the
+        history records what was actually in force — including the app name as
+        it stood when consent was given, and the delegating user, neither of
+        which the sweeping callers supply.
+        """
+        db.add(
+            self._Log(
+                app_id=row.app_id,
+                app_name=row.app_name,
+                bot_id=row.bot_id,
+                user_id=row.user_id,
+                owner_id=row.owner_id,
+                action=GrantAction.REVOKED,
+                env=row.env,
+            )
+        )
 
     # ========================================================================
     # Reads
     # ========================================================================
 
-    def list_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]:
-        """The owner's view — which apps may reach this bot."""
+    def list_for_bot(self, bot_id: str) -> List[BotAppGrantRecord]:
+        """The bot's view — every app that may reach it, and who let each in.
+
+        No delegating-user predicate, deliberately: the bot's owner has to see a
+        grant a collaborator made, or machine access to their own bot would be
+        invisible to them. Served by ``idx_bot_app_grant_bot_owner``'s
+        ``(avernet_tenant, bot_id)`` prefix.
+        """
         with self._db.orm_session() as db:
             rows = (
                 db.query(self._Grant)
                 .filter(
                     self._Grant.bot_id == bot_id,
-                    self._Grant.owner_id == owner_id,
                     self._Grant.env == get_current_env(),
                 )
                 # id breaks the tie: gmt_create is second-granularity on
@@ -260,14 +338,14 @@ class BotAppGrantRepository(
             )
             return [row.to_record() for row in rows]
 
-    def list_for_app(self, app_id: int, owner_id: str) -> List[BotAppGrantRecord]:
-        """The app's view — which of this owner's bots may this app reach."""
+    def list_for_app(self, app_id: int, user_id: str) -> List[BotAppGrantRecord]:
+        """The app's view — which bots may this app reach as this user."""
         with self._db.orm_session() as db:
             rows = (
                 db.query(self._Grant)
                 .filter(
                     self._Grant.app_id == app_id,
-                    self._Grant.owner_id == owner_id,
+                    self._Grant.user_id == user_id,
                     self._Grant.env == get_current_env(),
                 )
                 # id breaks the tie: gmt_create is second-granularity on
@@ -279,11 +357,11 @@ class BotAppGrantRepository(
             return [row.to_record() for row in rows]
 
     def find(
-        self, bot_id: str, owner_id: str, app_id: int
+        self, bot_id: str, user_id: str, app_id: int
     ) -> Optional[BotAppGrantRecord]:
-        """One live authorization, or ``None`` when the app may not reach the bot."""
+        """One live authorization, or ``None`` when the app may not act as this user."""
         with self._db.orm_session() as db:
-            row = self._live_row(db, bot_id, owner_id, app_id, get_current_env())
+            row = self._live_row(db, bot_id, user_id, app_id, get_current_env())
             return row.to_record() if row else None
 
     # ========================================================================
@@ -294,13 +372,18 @@ class BotAppGrantRepository(
         self,
         db: Any,
         bot_id: str,
-        owner_id: str,
+        user_id: str,
         app_id: int,
         env: str,
         *,
         lock: bool = False,
     ) -> Optional[BotAppGrantModel]:
-        """The live row for one scope, inside an open session.
+        """The live row for one delegation, inside an open session.
+
+        Keyed on ``user_id`` rather than ``owner_id`` — this is the unique key,
+        so the lookup is a point probe, and scoping it to the delegating user is
+        what keeps two collaborators' grants on one bot from being mistaken for
+        each other.
 
         Takes the session rather than opening its own, so a caller that has
         already begun a transaction reads and writes within it — which is what
@@ -321,7 +404,7 @@ class BotAppGrantRepository(
         query = db.query(self._Grant).filter(
             self._Grant.app_id == app_id,
             self._Grant.bot_id == bot_id,
-            self._Grant.owner_id == owner_id,
+            self._Grant.user_id == user_id,
             self._Grant.env == env,
         )
         if lock:
