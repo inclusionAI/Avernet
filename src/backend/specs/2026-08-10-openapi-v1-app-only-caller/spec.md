@@ -3,34 +3,43 @@
 ## Summary
 
 A registered application holding only its own machine credential — no end user
-anywhere on the wire — can drive a bot it has been authorized for. The owner's
-authorization record, written by the half that shipped in #937, is what stands in
-for the absent human: given the calling application and the bot named in the
-request, the record yields the owner the call acts for.
+anywhere on the wire — can act for an owner who authorized it, across the public
+surface, confined to the bots that owner granted it.
 
-This is deliberately not a general relaxation. A named set of operations accepts
-this caller; every other operation on the public surface refuses it exactly as
-today, and a route added tomorrow refuses it too unless someone adds it to the
-list on purpose. The owner is read from the grant and from nowhere else — never
-from a parameter, never from anything the caller sends.
+The request still names the owner. `user_id` stays exactly where #692 and #911 put
+it: a required query parameter on every user-scoped operation. What changes is
+what that parameter is checked *against*. Today it must equal the verified
+caller's own id. For an application there is no such id to compare with, so the
+check becomes the grant: `(app_id, bot_id, user_id)` must have a live
+authorization. The parameter is never trusted — an application naming an owner
+who granted it nothing is refused exactly as one naming a bot that does not exist.
+
+Access is confined three ways, by the shape of the operation:
+
+- an operation that **names a bot** is admitted only if a live grant covers it;
+- an operation that **lists the owner's bots** is admitted and its results are
+  narrowed to the granted ones;
+- an operation with **no bot dimension** is admitted only where a grant has
+  nothing to say and the answer is already public to any authenticated caller in
+  the tenant.
+
+Everything else is refused, and a route added tomorrow is refused unless someone
+puts it in one of those groups on purpose.
 
 ## Motivation
 
 #937 shipped the record. Nothing reads it. A platform team can be authorized by a
 bot's owner, can see the authorization in both directions, and still cannot make
-a single operational call, because every route over that record — and every
-operational route on the surface — requires an end user. The feature exists for a
-server with no human at the keyboard, and that server is exactly the caller the
-surface refuses.
+a single operational call, because every route requires an end user. The feature
+exists for a server with no human at the keyboard, and that server is exactly the
+caller the surface refuses.
 
-The shape here is the inverse of what shipped. There, both parties were on the
-wire and the record was the *output*: consent, witnessed by an owner who was
-present. Here only the application is present, and the record is the *input*: the
-standing consent of an owner who is not. That inversion is why the guard cannot
-simply be dropped. Today's rule — a verified identity set must name an end user —
-is enforced during verification rather than per handler precisely so it holds for
-routes nobody has written yet. Relaxing it in the same place would relax it for
-all of them at once.
+The seam this needs already exists and was built for it. `require_user_id`'s
+docstring predicts this change almost line for line: *"When an App may act for a
+user, this function stops comparing the two ids and asks whether the delegation
+was granted — and no handler, schema or path changes, because none of them ever
+named the user."* Naming the user in the request was the preparatory work. This
+feature is the payoff.
 
 **Trigger:** GitHub issue #950, carrying the second half of #928 (auto-closed by
 #937).
@@ -38,160 +47,179 @@ all of them at once.
 ## User Stories
 
 - As a platform integrator holding only my application's credential, I want to
-  operate a bot an owner authorized me for, so that my server can drive it
+  operate an owner's bot the way that owner can, so that my server can drive it
   without a person signing in for every call.
-- As a platform integrator, I want to name only the bot in my request, so that I
-  never have to know, store, or send the owner's user id — a value the API has
-  never told me and should not require me to guess.
-- As a bot owner, I want an application's machine-only access to end the moment I
-  delete the bot, so that deletion means what it says.
-- As a bot owner, I want an application's machine-only access to be limited to
-  operating the bot, so that authorizing an integration cannot let it delete the
-  bot, re-authorize other applications, or reach my other bots.
-- As a security reviewer, I want an operation that has not explicitly opted in to
-  refuse a user-less caller, so that the safe answer is the one a route gets by
-  saying nothing.
-- As a security reviewer, I want the grant lookup to be impossible to point at
-  another application, so that a stolen bot id buys nothing.
-- As an engineer adding a route next month, I want to be unable to inherit this
-  relaxation by accident, so that the surface does not widen while nobody is
-  looking.
+- As a platform integrator, I want to ask which of an owner's bots I may reach
+  and get back exactly the granted ones, so that my own view of my scope comes
+  from the platform rather than from my records.
+- As a platform integrator, I want a listing operation to return only what I was
+  granted rather than refusing outright, so that discovery works without the
+  owner having to enumerate their bots to me out of band.
+- As a bot owner, I want an authorization to reach exactly the bots I named, so
+  that authorizing an integration for one bot tells it nothing about the others.
+- As a bot owner, I want an application's access to end the moment I delete the
+  bot, so that deletion means what it says.
+- As a bot owner, I want authorizing and withdrawing to stay mine alone, so that
+  an application can never widen its own access or read which other applications
+  I have authorized.
+- As a security reviewer, I want an operation that has not been placed in an
+  admission group to refuse a user-less caller, so that the safe answer is the
+  one a route gets by saying nothing.
+- As a security reviewer, I want a route that does not put a bot on the wire to
+  be refused unless its bot can be resolved before the handler runs, so that
+  "we could not check the grant" never resolves to "allow".
 
 ## Acceptance Criteria
 
 ### Who is admitted
 
 - [ ] A request carrying a verified **application identity and no end user** is
-      admitted on the operations named below, and refused with `401` on every
-      other operation of the public surface.
-- [ ] An operation not named below refuses the user-less caller **without any
-      code in that operation** — the refusal is a property of the surface, not
-      something each handler remembers.
-- [ ] Adding a new route to the public surface does not admit the user-less
-      caller. A test fails if a route becomes admissible without being added to
-      the declared list.
-- [ ] A request carrying an end user is unaffected on every operation of the
-      surface, including the named ones: same parameters, same scoping, same
-      refusals, same responses.
+      admitted on the operations placed in an admission group below, and refused
+      with `401` everywhere else on the public surface.
+- [ ] An operation in no admission group refuses the user-less caller **without
+      any code in that operation** — the refusal is a property of the surface.
+- [ ] Adding a new route does not admit the user-less caller. A test fails if a
+      route becomes admissible without being placed in a group.
+- [ ] A request carrying an end user is unaffected everywhere: same parameters,
+      same scoping, same refusals, same responses, same published schema.
 - [ ] A caller carrying neither an end user nor an application — an access-key or
-      bot identity alone — is refused everywhere, including on the named
-      operations.
+      bot identity alone — is refused everywhere.
 
-### Which owner the call acts for
+### How the owner is established
 
-- [ ] On an app-only call, the owner is resolved from the authorization record
-      alone, keyed on the calling application and the bot named in the request,
-      within the request's tenant and environment.
+- [ ] `user_id` remains a **required** query parameter on every operation that
+      requires it today. No operation's schema changes.
+- [ ] For a caller naming an end user, `user_id` must still equal that caller
+      (`403` otherwise). Unchanged.
+- [ ] For an app-only caller, `user_id` names the owner the request acts for and
+      is authorized against the grant, never trusted on its own.
 - [ ] The application is read from the verified credential and is never a
-      parameter, so no request can resolve against another application's grants.
-- [ ] Nothing the caller sends can widen or redirect the resolution. The tenant
-      comes from the record's anchor rather than from the wire.
-- [ ] With no live authorization for that application and bot, the call is
-      refused, and the refusal does not distinguish "no such bot" from "not
-      authorized for it" — a caller learns nothing about bots it has no grant for.
-- [ ] An app-only call **does not accept** a `user_id` parameter. Supplying one is
-      refused rather than ignored, so a request can never appear to name an owner
-      it does not select.
-- [ ] A user-bearing call still requires `user_id` and still refuses one naming
-      anybody but the caller, unchanged.
+      parameter, so no request can be authorized against another application's
+      grants.
+- [ ] The tenant comes from the verified principal and confines the grant lookup;
+      nothing the caller sends can widen it.
 
-### Which operations a grant admits
+### Grant-checked operations (the request names a bot)
 
-- [ ] A grant is all-or-nothing for the bot it names. It carries no per-operation
-      or per-group scopes.
-- [ ] An app-only caller may, for a bot it holds a live grant on: read the bot,
-      read its runtime status, restart it, drive its sessions (list, create, read,
-      update, delete), drive that session's messages (list, clear), and download a
-      file resource belonging to it.
-- [ ] Every other operation refuses the app-only caller, including — named
-      explicitly because refusing them is the point — creating, updating or
-      deleting a bot; granting, listing or withdrawing authorizations; reading bot
-      logs; and every skills, MCP, routines, identity, engine-config, models,
-      approvals, connection and resource-mutation operation.
-- [ ] The admitted set is stated in one place, and the published API description
-      says of each admitted operation that it accepts this caller.
+- [ ] Admitted only if a live authorization exists for the calling application,
+      that bot, and the named owner.
+- [ ] With no such authorization the call is refused, and the refusal does not
+      distinguish "no such bot" from "not authorized for it".
+- [ ] A grant for a different bot, or one held by a different application, does
+      not admit the call.
+- [ ] Once the grant is checked, the operation behaves identically to the same
+      call made by the owner.
+
+### Grant-filtered operations (the operation lists the owner's bots)
+
+- [ ] Admitted without naming a bot, and the result contains **only** bots the
+      owner granted the calling application.
+- [ ] An application with no grants from that owner gets an empty result, not an
+      error — it has asked a question with a legitimate empty answer.
+- [ ] The same operation called by the owner returns all their bots, unfiltered.
+- [ ] Pagination counts describe the filtered result, so a caller cannot infer
+      how many bots it was not granted.
+
+### Operations with no bot dimension
+
+- [ ] An operation whose answer concerns the owner's account is admitted only
+      while the application holds at least one live grant from that owner.
+- [ ] An operation whose answer is identical for every caller in the tenant, and
+      names no owner at all, is admitted on authentication alone. This is not a
+      new exposure: the same answer is already readable by any authenticated
+      caller in that tenant.
+- [ ] An operation that writes owner-level configuration with no bot dimension is
+      **refused**. A grant is consent to reach a bot, not to reconfigure an
+      account.
+
+### Refusals, named because refusing them is the point
+
+- [ ] Creating a bot is refused.
+- [ ] Granting, listing per bot, and withdrawing authorizations are refused. Only
+      the owner may widen or inspect who can reach their bots.
+- [ ] The bot-logs group is refused. Its `user_id` means "whose traces to read"
+      rather than "whose call this is", so a grant does not translate to it.
+- [ ] A route that names no bot and whose bot cannot be resolved before the
+      handler runs is refused rather than admitted unchecked.
 
 ### The deletion invariant
 
-- [ ] Deleting a bot withdraws every authorization standing against it, as part of
-      the deletion.
-- [ ] After a bot is deleted, an application that held a grant on it is refused,
-      by the same code path that refuses an application that never held one.
-- [ ] The withdrawal is recorded in the authorization history, so "when could this
-      application reach that bot" still answers honestly for a bot that is gone.
-- [ ] Deletion continues to succeed for a bot with no authorizations, and a
-      failure to withdraw fails the deletion rather than being swallowed.
+- [ ] Deleting a bot withdraws every authorization standing against it, as part
+      of the deletion.
+- [ ] This holds when the deletion is performed by an application, which thereby
+      removes its own access.
+- [ ] The withdrawal is recorded in the authorization history.
+- [ ] Deletion still succeeds for a bot with no authorizations; a failure to
+      withdraw fails the deletion rather than being swallowed.
 
 ### Nothing else changes
 
-- [ ] No existing operation gains, loses, or reshapes a parameter, a response
-      body, or a status code for a caller that names an end user.
-- [ ] The tenant isolation guard remains the sole enforcement of tenancy; this
-      feature adds no second comparison that could disagree with it.
-- [ ] Refusals stay indistinguishable to the caller: which half of admission
-      failed is logged for an operator and never returned.
+- [ ] No operation gains, loses, or reshapes a parameter, a response body, or a
+      status code for a caller that names an end user.
+- [ ] The tenant isolation guard remains the sole enforcement of tenancy.
+- [ ] Refusals stay indistinguishable to the caller; which check failed is logged
+      for an operator and never returned.
 
 ## In Scope
 
-- Making "an application with no end user" an expressible, per-operation opt-in on
-  the public surface, fail-closed by default.
-- Resolving the acting owner from the authorization record on `(application, bot)`
-  within the request's tenant and environment.
-- Deciding and enforcing what `user_id` means when no user is on the wire.
-- The named allow-list of operations, and the explicit refusal of everything else.
-- Revoking authorizations when a bot is deleted, as part of bot lifecycle.
-- Documenting the admitted set in the published API description.
+- Making "an application with no end user" verifiable and, per operation,
+  admissible — fail-closed by default.
+- Authorizing an app-only request against the grant rather than against an
+  identity comparison.
+- Filtering owner-scoped bot listings to the granted set.
+- Resolving the bot for admitted routes that carry a `skill_id` instead of a
+  `bot_id`.
+- Revoking authorizations when a bot is deleted.
+- The gateway route rules, and documenting the admitted set.
 
 ## Out of Scope
 
-- **Delegation** — an application acting for a *verified human* (auth design §15,
-  issue #911). That path names a person; this one deliberately does not, and the
-  two must not be collapsed into one relaxation.
-- **Per-group or per-operation grant scopes.** The record has no room for them and
-  no caller has asked for them; adding the column now would be speculative
-  abstraction. The allow-list is a property of the surface, identical for every
-  grant.
-- **Widening `owner_id` beyond 256 characters.** Held from #937: widening pushes
-  the unique key past InnoDB's 3072-byte cap. If a real owner id can exceed 256
-  this needs a hash column in the key, which is its own change.
-- **The `COLLATE utf8mb4_bin` drift** between the deployed DDL and the checked-in
-  `.sql`. A separate follow-up; this feature assumes byte-exact comparison, which
-  is what the deployed collation already gives.
-- **Singlebox coverage-manifest registration.** Unchanged from #937: singlebox has
-  no gateway to mint principals, so an app-only caller cannot be minted there
-  either. These routes land on `coverage_baseline.txt` (tracked by #651).
-- **WebSocket planes.** The message socket authenticates by a credential in the
-  handshake query and is exempt from route security today; nothing here changes
-  it.
+- **Delegation** — an application acting for a *verified* human (auth design §15,
+  issue #911). There the person is authenticated; here the grant stands in for an
+  owner who is absent, and `user_id` is authorized rather than verified. The two
+  must not be collapsed.
+- **Per-operation or per-group grant scopes.** A grant is all-or-nothing for the
+  bot it names. Adding a scope column now is speculative.
+- **Widening `owner_id` beyond 256 characters** (carried from #937 — widening
+  pushes the unique key past InnoDB's 3072-byte cap; a real owner id longer than
+  256 needs a hash column, which is its own change).
+- **The `COLLATE utf8mb4_bin` drift** between deployed DDL and the checked-in
+  `.sql`. This feature assumes byte-exact comparison, which the deployed
+  collation gives.
+- **Singlebox coverage-manifest registration** — unchanged from #937: singlebox
+  has no gateway to mint principals, so these routes land on
+  `coverage_baseline.txt` (tracked by #651).
+- **WebSocket planes**, which authenticate by a credential in the handshake.
 
 ## Decisions Made Without Asking
 
-Recorded here so they are easy to overturn at review rather than buried in the
-plan.
-
-1. **The allow-list is exactly the issue's three families**, read as: bot
-   lifecycle → read / status / restart (not create, update or delete); sessions
-   and messages → the whole `sessions` group; file download → the resource
-   download operation only. Listing, creating, updating or deleting resources is
-   *not* admitted, because "file download" is what the issue named.
-2. **`user_id` is not accepted at all on an app-only call**, rather than accepted
-   and validated against the resolved owner. The issue called this the possibly
-   cleanest answer; it is also the only one that does not require the application
-   to know a value the API never tells it — the app's own view of its grants
-   returns bot ids and grant times, never an owner id.
-3. **A grant is all-or-nothing per bot.** See Out of Scope.
-4. **Deleting a bot revokes its grants inside bot deletion**, not by a filter each
-   reader re-implements, and a revocation failure fails the deletion.
+1. **Creating a bot is refused.** No bot exists yet for a grant to cover, and
+   creation spends the owner's quota. The coherent alternative — admit creation
+   and auto-grant the new bot to the creating application — invents a consent the
+   owner never gave, so it is not taken silently. Easy to overturn; see Open
+   Question 1.
+2. **The four `skill_id`-only routes are brought into the grant-checked group by
+   resolving the skill's bot before the handler.** Refusing them instead would
+   leave a group where two operations are admitted and four are not, for a reason
+   invisible from the outside. Admitting them unchecked was never an option: the
+   owner-scoped service would happily reach a skill on a bot the application was
+   never granted.
+3. **MCP configuration routes are refused** even though they carry `user_id` and
+   no bot. They read and write the owner's account-level configuration, which a
+   grant does not speak to.
+4. **The four routes that carry no `user_id` at all** — bot name check and the
+   three MCP catalogue reads — are admitted on authentication alone, because
+   there is no owner on the wire to gate against and their answers are already
+   identical for every authenticated caller in the tenant.
 
 ## Open Questions
 
-1. Should `POST /openapi/v1/bots/{bot_id}/restart` really be admitted? It is the
-   one *mutating* lifecycle operation on the list. The case for it: an integration
-   whose bot is wedged cannot ask a human to press the button, which is the whole
-   premise. The case against: it is the only admitted operation that changes the
-   bot's state rather than a session's. Cheap to strike — one line of the
-   allow-list and one test.
-2. Should an app-only caller be able to *list* a bot's resources, not only
-   download one? Downloading requires knowing a `resource_id` the API would
-   otherwise never hand it. Reading the issue narrowly says no; usability says the
-   list is implied. Struck for now, and named here rather than assumed away.
+1. Should bot **creation** be admitted, with the new bot auto-granted to the
+   creating application? It would let an integration provision end to end, and
+   the owner has already consented to that application generally. Against: an
+   auto-grant is consent the owner did not give per bot, which is the unit this
+   whole feature is built on. Struck for now.
+2. Should a grant-filtered listing tell the caller that filtering happened — a
+   flag or a distinct count? Against: it leaks the size of what was withheld.
+   For: an integrator debugging a missing bot cannot currently tell "not granted"
+   from "does not exist". Currently silent.

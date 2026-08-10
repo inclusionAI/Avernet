@@ -4,368 +4,378 @@ Implements `spec.md` in this directory. Issue #950; follows #937.
 
 ## Approach
 
-Three changes, in dependency order, plus a blocker cleared first.
+The change is smaller than its blast radius suggests, because the seam it needs
+was built ahead of it. `user_id` already travels in the request on every
+user-scoped operation, and `require_user_id` is already the single place that
+decides what it means. Today that decision is an equality check against the
+verified caller. This feature replaces the check — not the parameter, not the
+schema, not a single handler signature that names a user.
 
-**0. Clear the blocker.** `delete_bot` revokes every grant standing against the
-bot, inside the deletion. Until this holds, app-only resolution would hand an
-application a bot its owner deleted.
+Four parts.
 
-**1. Make "an application with no end user" expressible, per route.** Today
-`verify_principal_token` refuses any identity set naming no end user. That guard
-moves **up one layer, not away**: verification starts admitting a set that names
-an end user *or* an application (and still refuses one naming neither), and
-`require_principal` — the dependency every public route already depends on,
-directly or through `UserIdDep` — takes over refusing the user-less set. Routes
-that opt in declare a *different* dependency instead.
+**1. Clear the blocker.** `delete_bot` revokes every grant standing against the
+bot, inside the deletion. It matters more now than the issue framed it: with
+deletion admitted for an application, an app can delete a bot it was granted, and
+its own authorization must go with it.
 
-The move is a move, not a deletion, and that is what preserves the property the
-guard was placed for. The refusal is still in one shared place rather than in 60
-handlers; "a rule every handler has to remember is not a rule" still holds. What
-changes is only that the shared place is now one the route selects, which is what
-"per-route opt-in" requires. A route that says nothing gets `require_principal`
-and refuses, so the default stays closed.
+**2. Make the user-less caller verifiable, and refused by default.**
+`verify_principal_token` stops requiring an end user and starts requiring an end
+user *or* an application; `require_principal` — which every public route already
+depends on, directly or through `UserIdDep` — takes over refusing the user-less
+set. The guard **moves up one layer; it is not deleted.** It is still one shared
+place rather than sixty handlers, so "a rule every handler has to remember is not
+a rule" still holds. What changes is that the shared place is now one a route
+selects, which is what per-route opt-in requires. A route that says nothing gets
+`require_principal` and refuses.
 
-Why not keep the guard in the verifier and pass it a per-route flag: the verifier
-is transport-agnostic (Rule 7) and route-blind by design, and the middleware that
-drives it (`AvernetTenantMiddleware` → `resolve_caller`) runs before routing. Any
-route awareness there means a second route table inside the backend, kept in step
-with the gateway's by hand. The dependency graph is already the surface's way of
-saying what a route requires, and it is already enumerable by a test.
+Not done in the verifier with a per-route flag: the verifier is transport-agnostic
+(Rule 7) and route-blind, and the middleware that drives it runs before routing.
+Route awareness there means a second route table in the backend, hand-synced with
+the gateway's.
 
-**2. Resolve the acting owner from the grant.** A new dependency replaces
-`UserIdDep` on admitted routes only. For a user-bearing caller it behaves exactly
-as `require_user_id` does today. For an app-only caller it refuses a `user_id`
-parameter outright and resolves the owner from the grant on
-`(app_id, bot_id)`, in the request's tenant and env.
+**3. Authorize against the grant.** A caller object carries the acting owner and,
+for an app-only caller, the application. Where the request names a bot, a
+dependency checks the grant before the handler runs. Where it does not, the
+handler either narrows its result to the granted set or the route is refused.
 
-**3. Name the admitted operations.** One declared table, consumed by the routers
-and by the fail-closed test, and reflected in the gateway's `route_security` and
-in the published description.
+**4. Say which operations are in which group**, in one table, consumed by the
+routers, the fail-closed test, and the published description.
 
-## Affected Components
+## The three admission modes
 
-| Component | Change |
-| --- | --- |
-| `core/gateway_principal/verifier.py` | `_require_user_principal` → `_require_admissible_principal`: admit user-or-app, refuse neither. |
-| `core/gateway_principal/verifier.py` | `VerifiedCaller.app_id` / `.has_user` accessors. |
-| `adapters/http/openapi_v1/dependencies.py` | `require_principal` gains the user requirement; new `require_operating_caller`. |
-| `adapters/http/openapi_v1/principal.py` | New `require_acting_owner` / `ActingOwnerDep`. |
-| `adapters/http/openapi_v1/app_only_routes.py` *(new)* | The declared allow-list, single source. |
-| `adapters/http/openapi_v1/errors.py`, `responses.py`, `app.py` | `GrantNotResolvableError` → masked 404. |
-| `core/bot_app_grant/services/grant_service.py` | `resolve_owner`, `revoke_all_for_bot`. |
-| `core/repository/protocols/bot/app_grant.py` + implementation | `find_by_app_and_bot`, `revoke_all_for_bot`. |
-| `api/bot_app_grant_service.py` | Protocol additions. |
-| `core/bot_management/services/bot_service.py` | `delete_bot` revokes grants. |
-| `adapters/http/openapi_v1/{bots,engine_runtime/sessions,resources}/router.py` | Swap the dependency on admitted routes. |
-| `src/gateway/configs/application.yaml` | `route_security` rules for the admitted paths. |
-| `core/bot_app_grant/README.md`, `docs/openapi-v1/` | Carried-gap note removed; admitted set documented. |
+Every public operation is in exactly one group. The group is a property of the
+operation's shape, not a taste judgement, which is what makes the table
+reviewable.
+
+| Mode | Shape | Rule |
+| --- | --- | --- |
+| **A — grant-checked** | the request names a bot | admitted iff a live grant exists for `(app_id, bot_id, user_id)` |
+| **B — grant-filtered** | the operation returns a set of the owner's bots | admitted; result narrowed to granted bots |
+| **C — owner-gated** | no bot dimension, answer concerns the owner's account | admitted iff the app holds ≥1 live grant from that owner |
+| **C-open** | no bot dimension, no `user_id`, answer identical for every caller in the tenant | admitted on authentication alone |
+| **D — refused** | everything else | `401` |
+
+### Mode A — grant-checked (≈50 operations)
+
+| Group | Operations | Where `bot_id` is |
+| --- | --- | --- |
+| `bots` | `GET`/`PUT`/`DELETE /{bot_id}`, `POST /{bot_id}/restart`, `GET /{bot_id}/{auth-status,status,passport}`, `GET`/`PUT /{bot_id}/engine-config` | path |
+| `sessions` | all 7 | path |
+| `approvals` | all 3 | path |
+| `engine` | all 3 | path |
+| `models` | both | path |
+| `connection` | `GET /{bot_id}` | path |
+| `identity` | all 3 | path |
+| `resources` | all 9 | required query |
+| `routines` | the 6 taking `bot_id` | required query |
+| `routines` | `POST ""` (create) | request **body** |
+| `skills` | `GET ""`, `POST /upload` | required query |
+| `skills` | `GET`/`DELETE /{skill_id}`, `POST /{skill_id}/{activate,deactivate}` | **resolved from `skill_id`** |
+
+### Mode B — grant-filtered (2 operations)
+
+- `GET /openapi/v1/bots` — the owner's bot list, narrowed to granted bots.
+- `GET /openapi/v1/bots/authorized` — the application's own view. It already
+  exists and already takes `user_id`; today it requires a user principal
+  alongside the app. Admitting it app-only makes it the discovery endpoint an
+  integration needs: *"which of this owner's bots may I reach?"* answered by the
+  credential the integration actually holds.
+
+Both are already computable: `BotAppGrantService.list_for_app(app_id, owner_id)`
+returns exactly the granted set, filtered against live bots.
+
+### Mode C / C-open (5 operations)
+
+- **C:** `GET /openapi/v1/bots/ceiling` — the owner's bot quota. Gated on holding
+  at least one live grant from that owner, so a stranger application learns
+  nothing about an account that never authorized it.
+- **C-open:** `GET /openapi/v1/bots/check-name` and the three MCP catalogue reads
+  (`/mcp/servers`, `/mcp/tenants`, `/mcp/servers/{server_code}`). These carry no
+  `user_id`, so there is no owner to gate against. They are admitted on
+  authentication alone, and that is not a new exposure — every authenticated
+  caller in the tenant already gets the identical answer.
+
+### Mode D — refused (14 operations)
+
+`POST /openapi/v1/bots` (create); the three per-bot authorization operations
+(`POST`/`GET`/`DELETE …/authorized-apps`); the five `bots/logs` operations; the
+three MCP configuration operations (`GET /servers/{code}/permissions`, `GET`/`PUT
+/servers/{code}/config`); and the two `loadtest` endpoints, which have no user
+scope and are untouched by this change.
+
+The bot-logs refusal has a reason worth keeping: on that group `user_id` means
+*whose traces to read* over a tenant-level observability surface, not *whose call
+this is*. A grant does not translate into that meaning, and admitting it would
+widen a surface that deliberately requires both a user and an app today.
 
 ## Data Model Changes
 
-**None.** No column, index or table changes. This is the point of #937 having
-shipped the record first: `ac_bot_app_grant` already holds `(avernet_tenant,
-app_id, bot_id, owner_id, env)` under `uk_bot_app_grant_scope`, and a row exists
-iff access is in force, so resolution needs no status filter and no migration.
+**None.** `uk_bot_app_grant_scope` is `(avernet_tenant, app_id, bot_id, owner_id,
+env)` — exactly the tuple Mode A checks — and a row exists iff access is in
+force, so the check needs no status filter and no migration.
 
-`idx_bot_app_grant_app_owner` is `(avernet_tenant, app_id, owner_id, env)` — it
-leads with tenant and app, so the new `(tenant, app_id, bot_id, env)` lookup uses
-its first two columns and filters the rest. An application holds few grants, so
-the residual filter is over a handful of rows. **No new index**; adding one for a
-lookup whose selectivity is already this good would be speculative.
+The existing `BotAppGrantRepositoryProtocol.find(bot_id, owner_id, app_id)`
+already answers Mode A. **No new repository read is needed for authorization**,
+which is a direct consequence of `user_id` staying on the wire: the owner is
+given, so the lookup is a unique-key probe rather than a search for an owner.
 
-`owner_id` stays at 256 (spec Out of Scope). Comparison is byte-exact under the
-deployed `utf8mb4_bin` collation, which is what resolution assumes.
+Mode B is `list_for_app`, which exists. Mode C is "does `list_for_app` return
+anything", answerable through the same call.
+
+The only new repository member is `revoke_all_for_bot`, for the deletion
+invariant.
 
 ## API / Interface Changes
 
-### The admitted operations
-
-| Method | Path | Family |
-| --- | --- | --- |
-| `GET` | `/openapi/v1/bots/{bot_id}` | bot lifecycle |
-| `GET` | `/openapi/v1/bots/{bot_id}/status` | bot lifecycle |
-| `POST` | `/openapi/v1/bots/{bot_id}/restart` | bot lifecycle |
-| `GET` | `/openapi/v1/bots/sessions/{bot_id}` | sessions |
-| `POST` | `/openapi/v1/bots/sessions/{bot_id}` | sessions |
-| `GET` | `/openapi/v1/bots/sessions/{bot_id}/{session_id}` | sessions |
-| `PATCH` | `/openapi/v1/bots/sessions/{bot_id}/{session_id}` | sessions |
-| `DELETE` | `/openapi/v1/bots/sessions/{bot_id}/{session_id}` | sessions |
-| `GET` | `/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | messages |
-| `DELETE` | `/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages` | messages |
-| `GET` | `/openapi/v1/bots/resources/{resource_id}/download` | file download |
-
-Eleven operations. Everything else on the surface refuses the app-only caller.
-
-### `user_id` on an admitted operation
-
-`user_id` becomes **optional in the schema** on these eleven operations only, and
-conditionally required in behavior:
-
-- caller names an end user → `user_id` **required**, must equal the caller
-  (`422` absent, `403` mismatched) — byte-identical to today;
-- caller is app-only → `user_id` **must be absent** (`403` if supplied), and the
-  owner comes from the grant.
-
-`str | None` here is an intentional contract state, not defensive widening: an
-app-only caller genuinely supplies none, and both branches define behavior for
-their own case. That is exactly the test AGENTS.md sets for an optional type.
-
-The other 45 user-scoped operations keep `UserIdDep` and a required `user_id`
-verbatim. This is why the swap is per route rather than a change to
-`require_user_id`.
+**No operation's request or response schema changes.** `user_id` stays required
+everywhere it is required today; no parameter is added, removed or made optional.
+Only the published *description* of `user_id` changes on admitted operations, to
+say what it means for an application caller.
 
 ### Refusals
 
 | Situation | Answer |
 | --- | --- |
-| App-only caller on a non-admitted route | `401 Unauthorized` |
+| App-only caller on a Mode D operation | `401 Unauthorized` |
 | Access-key-only or bot-only caller, anywhere | `401 Unauthorized` |
-| App-only caller, no live grant for `(app, bot)` | `404 Not found` (byte-identical to bot-not-found) |
-| App-only caller supplying `user_id` | `403 Forbidden` |
+| App-only caller, no live grant for `(app, bot, owner)` | `404 Not found` — byte-identical to bot-not-found |
+| App-only caller on a Mode C operation with no grant from that owner | `404 Not found` |
 | User caller, `user_id` naming another user | `403 Forbidden` (unchanged) |
 
-The `404` masks. An application that guesses a bot id it holds no grant on gets
-the same answer as for a bot that does not exist, so the surface discloses no bot
-it is not authorized for.
+The `404` masks: an application guessing a bot id it holds no grant on gets the
+same answer as for a bot that does not exist.
+
+`403` is deliberately **not** used for a missing grant. On this surface `403`
+means "you are authenticated and this is not yours", which confirms the bot
+exists. The masked `404` is the shape every other ownership refusal already uses.
 
 ### Gateway `route_security`
 
-The admitted paths become `{user: optional, app: optional}`:
+Enumerating ~55 admitted paths would be a table nobody can review. Enumerate the
+**refusals** instead — the shorter, more interesting list:
 
 ```yaml
-"/openapi/v1/bots/sessions/**":
+"/openapi/v1/bots/**":
   user: optional
   app: optional
+
+"POST /openapi/v1/bots":            {user: required}
+"/openapi/v1/bots/logs/**":         {user: required, app: required}
+"/openapi/v1/bots/{bot_id}/authorized-apps/**": {user: required, app: required}
+"/openapi/v1/bots/mcp/servers/*/config":        {user: required}
+"/openapi/v1/bots/mcp/servers/*/permissions":   {user: required}
 ```
 
-Both optional, because the rule must admit *either* shape and the table cannot
-express "at least one of". `_runner.py` resolves each declared identity and
-returns those present; with neither present the set is empty, the gateway adds no
-principal header, and the backend answers `401` from `require_principal`. So
-"neither" is still refused — one hop later than before, at the component rather
-than at the edge. That relocation is named in Risks.
+Both identities optional on the wide rule, because it must admit either shape and
+the table cannot express "at least one of". `_runner.py` resolves each declared
+identity and returns those present; with neither present the set is empty, the
+gateway adds no principal header, and the backend answers `401` from
+`require_principal`. "Neither" is still refused — one hop later, at the component
+rather than the edge. That relocation is named in Risks.
 
 Declaring `app` at all is what makes any of this possible: the runner resolves
-only declared identities, so on a `user: required` rule an App credential never
+only declared identities, so under `user: required` an App credential never
 reaches the signed principal.
 
-The bot-lifecycle rules must be method-qualified — `GET /openapi/v1/bots/{bot_id}`
-opts in while `PUT` and `DELETE` on the same path must not — following the
-precedent `POST …/authorized-apps` set.
+**The gateway table is a second expression of the same policy, and the two must
+not drift.** The refusal list above is derived from Mode D; a test asserts the
+gateway resolves `user: required` for exactly the Mode D paths and the optional
+pair for the rest.
 
 ## Key Files & Functions
 
 ### `core/gateway_principal/verifier.py`
 
-- `_require_user_principal` → `_require_admissible_principal(principals)`: refuse
-  a set naming neither a `user` nor an `app`; keep the blank-subject-id check for
-  the user it does name. Rewrite the docstring: it currently points at this issue
-  as the place to lift the guard, so it must now say where the guard *went* and
-  why that placement still holds for routes not yet written.
-- `VerifiedCaller.has_user -> bool` and `VerifiedCaller.app_id -> int | None`
+- `_require_user_principal` → `_require_admissible_principal`: refuse a set naming
+  neither a `user` nor an `app`; keep the blank-subject-id check for a user it
+  does name.
+- Rewrite its docstring. The current one names *this issue* as the place to lift
+  the guard, so the replacement must say where the guard went and why that
+  placement still holds for routes not yet written. A reader arriving from #950
+  must not be sent looking for a rule that moved.
+- `VerifiedCaller.has_user -> bool`, `VerifiedCaller.app_id -> int | None`
   (`None` = "this set names no application", a real contract state).
-- `VerifiedCaller.user_id` keeps its `""` fallback and gains a docstring note:
-  `""` is now *reachable* — an app-only caller — and `caller_owner_id` turning it
-  into a `401` is exactly the wanted answer on a non-admitted route.
-- `VerifiedCaller.tenant`: its docstring claims "asserts no tenant" always means
-  "a user and nothing else". Still true (an app asserts a tenant), but the
-  reasoning cites `_require_user_principal`; update the citation.
+- `VerifiedCaller.user_id`'s `""` fallback is now *reachable* (an app-only
+  caller); document that `caller_owner_id` turning it into `401` is the wanted
+  answer on a Mode D route, not a degraded one.
 
 ### `adapters/http/openapi_v1/dependencies.py`
 
 ```python
-async def require_principal(connection) -> Principal:      # + names an end user
-async def require_operating_caller(connection) -> Principal  # user OR app-only
+async def require_principal(connection) -> Principal        # + names an end user
+async def require_operating_caller(connection) -> Principal # user OR app-only
 ```
 
-`require_principal` keeps its name and its meaning for the 45 operations that
-have it today; the added check is the guard moving in from the verifier. Both
-funnel every refusal into the same `MissingPrincipalError` / `1008`, so a caller
-still cannot tell which half failed.
+`require_principal` keeps its name and meaning for every Mode D route; the added
+check is the guard arriving from the verifier. Both funnel refusals into the same
+`MissingPrincipalError` / `1008`.
 
 `resolve_avernet_tenant` is unchanged and now resolves an app-only caller's
-tenant from its `AppPrincipal` — previously such a token failed verification and
-fell back to the default. Safe on a non-admitted route because the route still
-`401`s before touching data, which is the same argument its docstring already
-makes; extend that docstring to cover the new case explicitly.
+tenant from its `AppPrincipal`. Safe on a Mode D route because the route still
+`401`s before touching data — the same argument its docstring already makes for
+the default fallback; extend it to cover this case.
 
-### `adapters/http/openapi_v1/app_only_routes.py` (new)
+### `adapters/http/openapi_v1/admission.py` (new)
+
+The policy table and the caller object, in one module so the routers, the test
+and the description generator cannot disagree.
 
 ```python
-APP_ONLY_OPERATIONS: frozenset[tuple[str, str]]   # (method, FastAPI path template)
+class AdmissionMode(StrEnum): GRANT_CHECKED, GRANT_FILTERED, OWNER_GATED, OPEN, REFUSED
+ADMISSION: dict[tuple[str, str], AdmissionMode]   # (method, FastAPI path template)
+
+@dataclass(frozen=True)
+class ActingCaller:
+    owner_id: str
+    app_id: int | None            # None = a human caller; no grant check applies
+    def require_bot(self, bot_id: str) -> None       # raises GrantNotResolvableError
+    def granted_bot_ids(self) -> frozenset[str] | None  # None = no filtering
 ```
 
-Literal FastAPI path templates, not patterns — the test compares them against
-`route.path` on the mounted app, so a typo fails loudly rather than silently
-matching nothing. One module so the routers, the test and the description
-generator read the same list.
+`app_id: int | None` is an intentional contract state — "this caller is a human"
+— and every consumer branches on it explicitly. That is the AGENTS.md test for an
+optional, not defensive widening.
 
 ### `adapters/http/openapi_v1/principal.py`
 
-```python
-async def require_acting_owner(
-    connection: HTTPConnection,
-    caller: Annotated[Principal, Depends(require_operating_caller)],
-    user_id: Annotated[str | None, Query(alias="user_id", min_length=1)] = None,
-) -> str
-ActingOwnerDep = Annotated[str, Depends(require_acting_owner)]
-```
+`require_user_id` gains the branch its own docstring predicted, and keeps its
+signature and its required `user_id`:
 
-- user-bearing → delegate to the existing comparison; missing `user_id` raises
-  the same `422` FastAPI produces today (raised explicitly, since the parameter
-  is now schema-optional — a detail the tests must pin).
-- app-only → `user_id` present ⇒ `UserIdMismatchError`; else `_request_bot_id`
-  then `grants.resolve_owner(...)`.
+- caller names an end user → compare with the caller, `403` on mismatch.
+  Unchanged, byte for byte.
+- app-only caller → `user_id` is the acting owner; authorization is the grant,
+  checked by the mode-specific dependency below.
 
-`_request_bot_id(connection)` reads `connection.path_params["bot_id"]`, falling
-back to `connection.query_params["bot_id"]` for the resources route, whose
-`bot_id` is a required query parameter. Path first: a path segment addresses the
-resource, so where both exist the path is what the operation is about. Absent
-both ⇒ refuse, which is unreachable for a declared route and is the fail-closed
-answer for one added to the list by mistake.
+New dependencies built on it:
 
-The `_for_log` bounding already in this module applies to the app-only refusals
-too — the rejected `user_id` is still caller-chosen text.
+- `GrantCheckedOwnerDep` — Mode A where `bot_id` is on the wire. Reads
+  `connection.path_params["bot_id"]`, falling back to
+  `connection.query_params["bot_id"]`; path first, because a path segment
+  addresses the resource. Absent both ⇒ refuse (unreachable for a correctly
+  placed route; the fail-closed answer for a misplaced one). Calls
+  `caller.require_bot(...)`, returns `owner_id`.
+- `ActingCallerDep` — Modes A-without-a-wire-`bot_id`, B and C. Returns the
+  `ActingCaller`; the handler does the rest, explicitly.
 
-### `core/bot_app_grant`
+**The grant probe runs once per request** — the dependency is evaluated once and
+the result is the returned owner id. It is a unique-key point lookup on an index
+that already exists.
 
-```python
-def resolve_owner(self, *, app_id: int, bot_id: str) -> str    # raises GrantNotFoundError
-def revoke_all_for_bot(self, *, bot_id: str, owner_id: str) -> int
-```
+### Handlers that do change
 
-`resolve_owner` raises rather than returning `str | None`: "not authorized" is an
-outcome the caller must handle, and a `None` here would be one `if` away from
-being scoped by nothing. The adapter maps it to the masked `404`.
+Almost all of Mode A is a dependency swap with **no body change**: once the owner
+is resolved and the grant checked, `bot_service.get_bot(bot_id, owner_id)`, the
+ownership-masked `404` and the tenant guard are the same code on the same values.
+Seven operations genuinely change:
 
-Repository additions:
+| Operation | Change |
+| --- | --- |
+| `GET /openapi/v1/bots` | narrow to `caller.granted_bot_ids()` when set |
+| `GET /openapi/v1/bots/authorized` | scope by the principal's `app_id` when app-only |
+| `POST /openapi/v1/bots/routines` | `caller.require_bot(body.bot_id)` after parsing |
+| `GET`/`DELETE /skills/{skill_id}`, `POST /skills/{skill_id}/{activate,deactivate}` | resolve the skill's bot, then `caller.require_bot(...)` |
 
-```python
-def find_by_app_and_bot(self, app_id: int, bot_id: str) -> Optional[BotAppGrantRecord]
-def revoke_all_for_bot(self, bot_id: str, owner_id: str) -> int
-```
+The skill routes need a bot for a `skill_id`. `LocalSkillQueryServiceProtocol`
+already resolves a skill for an actor; the plan is to read the skill's `bot_id`
+through it and check the grant before acting. Refusing these four instead would
+leave the skills group split two-admitted / four-refused for a reason invisible
+from outside; admitting them unchecked would let an application reach a skill on
+a bot it was never granted, because the underlying service scopes by owner only.
 
-`find_by_app_and_bot` takes **no `owner_id`** — that is the whole point, it is
-what the lookup produces. It takes no tenant either: `register_avernet_tenant_guard`
-appends the tenant predicate to every read, so the row it can return is
-necessarily in the request's tenant. `env` is `get_current_env()` as everywhere
-else in this repository.
+### Mode B filtering
 
-The unique key makes at most one row match `(tenant, app_id, bot_id, env)` per
-owner. Two owners cannot hold the same `bot_id` (`ac_bots.bot_id` is globally
-unique for bots created since the id generator landed), but the *table* does not
-enforce that, so the query must be deterministic: order by `id` and take the
-first, and log a warning if more than one row matched. Silently picking one would
-mean silently choosing whose data the application reads.
+`list_bots` must filter **before** paginating, so the page counts describe the
+filtered result. Filtering a page after the fact would leak the size of what was
+withheld and would return short pages.
 
-`revoke_all_for_bot` deletes every live row for the bot and appends one `revoked`
-log event per deleted row, in one `transactional_orm_session()` — the same atomicity
-argument `revoke` already makes. Log rows are built from the live rows, not from
-arguments, so the history records the app name as it stood at consent.
+### `core/bot_app_grant` and `core/bot_management`
 
-### `core/bot_management/services/bot_service.py`
-
-In `delete_bot`, after the ownership check and **before** `soft_delete_by_owner`:
-
-```python
-self._grant_service_provider().revoke_all_for_bot(bot_id=bot_id, owner_id=user_id)
-```
-
-Before the soft delete, so a revocation failure aborts the deletion and leaves a
-consistent pair; after it, a failure would leave a deleted bot with live grants —
-the exact state this task exists to prevent. Failures propagate (AGENTS.md: never
-swallow a failed write).
-
-Injected as a provider callable, following `_device_service_provider`, which is
-how this service already takes a late-bound collaborator. `BotAppGrantService`
-consumes `BotRepository` from `core.repository`, never `bot_management`, so the
-direction is acyclic.
-
-### Description regeneration
-
-`USER_ID_DESCRIPTION` is one shared string across all 56 operations and must stay
-that way for the 45. The eleven admitted operations get their own description
-constant stating that the parameter is required for a user caller and refused for
-an application caller. Then regenerate the published description exactly as
-#937's Task 12 did.
+- Repository: `revoke_all_for_bot(bot_id, owner_id) -> int` — deletes every live
+  row for the bot and appends one `revoked` log event per deleted row, in one
+  `transactional_orm_session()`, log rows built from the live rows so the recorded
+  `app_name` is the one at consent time.
+- Service: `revoke_all_for_bot(*, bot_id, owner_id) -> int`; no
+  `GrantNotFoundError` — "the bot had no authorizations" is a normal outcome of
+  deletion.
+- `BotService.delete_bot` calls it **before** `soft_delete_by_owner`, via a
+  provider callable following `_device_service_provider`. Before, so a failure
+  aborts the deletion; after, a failure would leave a deleted bot with live
+  grants. Failures propagate.
 
 ## Test Strategy
 
-The fail-closed property is the one that must be a *test*, not a review habit.
-
-1. **Route inventory (the anti-inheritance test).** Enumerate every route on the
-   built public app. Assert: every route depends on `require_principal` or
-   `require_operating_caller` and never both; the set depending on
-   `require_operating_caller` equals `APP_ONLY_OPERATIONS` exactly, compared as a
-   set of `(method, path)` so a route added to the surface *or* to the list
-   without the other fails. Extends `tests/.../test_principal_seam.py`, which
-   already enumerates routes this way.
-2. **Verifier.** App-only set admitted; user+app admitted; access-key-only and
-   bot-only refused; blank user subject id still refused; `app_id` read off the
-   set; contradictory-tenant behavior unchanged.
-3. **Admitted route, app-only, happy path** — owner resolved from the grant,
-   handler scoped by it, response identical to the same call by the owner.
-4. **Admitted route, app-only, no grant** → `404`, byte-identical to a
-   nonexistent bot; **with `user_id`** → `403`; **grant for another bot** →
-   `404`; **grant held by another application** → `404` (resolution never widens).
-5. **Non-admitted route, app-only** → `401`, sampled across groups plus one per
-   family adjacent to an admitted route (`PUT`/`DELETE /bots/{bot_id}`,
-   `POST /bots/resources/upload`).
-6. **User callers unchanged** — the existing suites must pass untouched; that is
-   the "nothing else changes" criterion, so no expectation may be edited to
-   accommodate this feature. Any edit to an existing expectation is a finding.
-7. **Deletion revokes.** Grant then delete → the grant is gone, one `revoked` log
-   row exists, and an app-only call against the deleted bot is refused by the
-   resolution path. Delete with no grants succeeds. A repository failure aborts
-   the deletion.
-8. **Gateway.** `RouteSecurity.resolve` returns the expected requirement for each
-   admitted path and, method-qualified, the unchanged one for its non-admitted
-   siblings.
+1. **Route inventory (the anti-inheritance test).** Every route on the built app
+   appears in `ADMISSION` exactly once, and its declared dependency matches its
+   mode. A route added to the surface without a mode, or given a mode without the
+   matching dependency, fails. The failure message names the route and says what
+   to do — it fires for someone who has never read this spec.
+2. **Verifier.** App-only admitted; user+app admitted; user-only unchanged;
+   access-key-only and bot-only refused; blank user subject id still refused.
+3. **Mode A.** Grant present → identical response to the owner's own call. No
+   grant → `404` compared **byte-for-byte** against the nonexistent-bot response.
+   Grant for another bot → `404`. Grant held by another application → `404`.
+   Deleted bot → refused.
+4. **Mode A without a wire `bot_id`.** The four skill routes and `create_routine`
+   refuse when the resolved bot is not granted — the case that would otherwise
+   silently pass.
+5. **Mode B.** Two bots, one granted → exactly one returned, and the page count
+   says one. The owner's own call still returns both. No grants → empty, `200`.
+6. **Mode C / C-open.** `ceiling` admitted with a grant, `404` without one;
+   `check-name` and the MCP catalogue admitted with no grant at all.
+7. **Mode D.** `401` on every one of the fourteen, enumerated from `ADMISSION`
+   rather than sampled, so the list cannot rot.
+8. **User callers unchanged** — the existing suites pass **with no expectation
+   edited**. An edited expectation is a finding, not a fix.
+9. **Deletion revokes**, including when the deleting caller is the application,
+   which removes its own access. Failure aborts the deletion.
+10. **Gateway.** `RouteSecurity.resolve` returns `user: required` for exactly the
+    Mode D paths and the optional pair for the rest, driven off the same table.
 
 ## Risks & Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| The guard's move silently opens a route that declares no principal dependency at all. | The route-inventory test asserts *every* route declares one of the two. It already exists in weaker form (`test_public_routes_require_principal`) and is strengthened rather than replaced. |
-| `{user: optional, app: optional}` moves the unauthenticated refusal from the gateway edge to the backend. | Refusal still happens, at `require_principal`, before any handler. Pinned by test 5. Named here because it changes *where* an unauthenticated request dies, which matters for edge rate-limiting and for reading gateway logs. |
-| `resolve_avernet_tenant` now returns an app's tenant on routes that will `401`. | No data is reachable — the route refuses first, the same argument the docstring already makes for the default fallback. Test 5 covers it. |
-| Two grant rows for one `bot_id` under different owners make resolution ambiguous. | Deterministic order plus a warning log; the unique key and globally-unique bot ids make it unreachable in practice, and the log says so if it ever is not. |
-| Revoking inside `delete_bot` adds a write to a long method with several failure paths. | Placed before the soft delete so a failure aborts cleanly; failures propagate. Test 7 pins both directions. |
-| Legacy `default` bots have non-unique ids across tenants. | The tenant guard scopes the lookup, so a `default` grant resolves only within the request's tenant. Worth a comment at the lookup; not a new exposure. |
+| The surface admitted here is wide (~55 of 63 operations), so a mistake in one mode assignment is a real authorization bug. | Modes are assigned by operation *shape*, not taste; the table is one reviewable artifact; the inventory test proves the surface matches it. |
+| The guard's move silently opens a route declaring no principal dependency at all. | The inventory test asserts every route declares one. Strengthens the existing `test_public_routes_require_principal` rather than replacing it. |
+| `{user: optional, app: optional}` moves the unauthenticated refusal from the gateway edge to the backend. | Still refused, at `require_principal`, before any handler. Named because it changes where unauthenticated traffic dies — relevant to edge rate-limiting and to reading gateway logs. |
+| The gateway table and `ADMISSION` drift apart. | Test 10 derives the expected gateway resolution from `ADMISSION`. |
+| A grant probe per Mode A request adds a DB read to ~50 operations. | Unique-key point lookup on an existing index, once per request. Only for app-only callers — a human caller's path is untouched. |
+| Mode B filtering applied after pagination would leak counts and return short pages. | Filter before paginate; test 5 asserts the count. |
+| The four skill routes depend on resolving a bot from a `skill_id`. | If resolution cannot be done cleanly before the handler, the fallback is to refuse those four and say so — never to admit them unchecked. |
+| Legacy `default` bot ids are non-unique across tenants. | The tenant guard scopes the grant lookup, so a `default` grant is only ever matched within the request's tenant. Comment at the lookup. |
 
 ## Alternatives Considered
 
-- **Relax the verifier and check per handler.** Rejected: it is the arrangement
-  the verifier's docstring exists to argue against, and it fails for exactly the
-  routes that forget.
-- **Keep the guard in the verifier, pass a route flag from `resolve_caller`.**
-  Rejected: puts a second route table in the backend, kept in step with the
-  gateway's by hand, and pushes routing knowledge into a Rule 7 module.
-- **Accept `user_id` and validate it against the resolved owner.** Rejected: the
-  application is never told the owner id — its own view of its grants returns bot
-  ids and grant times — so this would demand a value the API does not publish.
-- **A per-group scope column on the grant.** Rejected as speculative (AGENTS.md);
-  no caller has asked, and the allow-list is a property of the surface.
-- **Filter deleted bots at resolution instead of revoking on delete.** Rejected:
-  it is the carried gap re-implemented per reader, which is what #937 said not to
-  do. Revoking makes the invariant hold for every reader at once.
+- **Drop `user_id` on app-only calls and derive the owner from
+  `(app_id, bot_id)`.** Rejected on review: `user_id` was moved into the request
+  precisely so an operation would have somewhere to name a user when the identity
+  set stops carrying one. Deriving it would make the parameter optional across the
+  surface, change ~56 published schemas, and discard the check that makes a
+  guessed `bot_id` useless.
+- **Relax the verifier and check per handler.** Rejected: the arrangement the
+  verifier's docstring exists to argue against; it fails for the routes that
+  forget.
+- **Pass a route flag into `resolve_caller`.** Rejected: a second route table in
+  the backend, hand-synced with the gateway's, inside a Rule 7 module.
+- **Refuse every operation that does not name a bot.** Rejected on review: it
+  refuses `list_bots`, so an integration cannot discover its own scope and the
+  owner must enumerate bot ids out of band.
+- **Enumerate admitted paths in the gateway.** Rejected: ~55 rules nobody can
+  review, against 6 for the refusals.
+- **A per-group scope column on the grant.** Rejected as speculative.
 
 ## Rollout
 
-No migration, no config flag. The feature is live when the gateway's
-`route_security` rules ship, and inert before that: without the rules the App
-identity never reaches the backend's principal, so every request on the admitted
-paths is a user request and behaves exactly as today. The backend change is
-therefore safe to deploy first, and **must** be — an application reaching the
-backend before `require_operating_caller` exists would be refused, which is
-correct but makes the order matter for the partner, not for safety.
+No migration, no config flag. The backend change is inert until the gateway rules
+ship: without them the App identity never reaches the backend's principal, so
+every request is a user request and behaves exactly as today. Deploy the backend
+first.
 
-Rollback is the gateway config: revert the `route_security` rules and the App
-identity stops reaching the backend, with no code rollback and no data to undo.
+Rollback is the gateway config alone: revert the `route_security` rules and the
+App identity stops reaching the backend. No code rollback, no data to undo.
 
 ## Dependencies
 
-- `ac_bot_app_grant` and its repository (shipped, #937).
+- `ac_bot_app_grant`, its repository and `list_for_app` (shipped, #937).
 - Gateway `app` identity chain and `route_security` (shipped).
-- Nothing blocks: the deletion invariant is Task 1 of this plan, not a
-  prerequisite outside it.
+- Nothing external blocks; the deletion invariant is Task 1 here.
