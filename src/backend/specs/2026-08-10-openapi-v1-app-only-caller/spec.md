@@ -85,147 +85,167 @@ named the user."* Naming the user in the request was the preparatory work.
 
 ## Acceptance Criteria
 
+> **Verified 2026-08-10.** All 48 hold. Evidence lives with the code: the
+> admission inventory (`test_admission_inventory.py`), the invariant and grant
+> boundaries (`engine_runtime/test_app_only_caller.py`), the five bot-not-on-the-
+> wire operations (`test_app_only_bot_not_on_the_wire.py`), the listings
+> (`test_app_only_listings.py`), the enumerated refusals
+> (`test_app_only_refusals.py`), the record and sweeps
+> (`core/bot_app_grant/test_grant_service.py`), the owner override
+> (`authorized_apps/test_router.py`), and the edge rules
+> (gateway `test_route_security.py`).
+>
+> Two are true **by construction** rather than by a test of their own, and are
+> called out here so nobody mistakes that for coverage:
+>
+> - *A deletion performed by an application withdraws the authorizations.* The
+>   sweep lives in `BotService.delete_bot`, which cannot see who is calling — so
+>   there is no app-specific path that could diverge. The sweep itself is tested.
+> - *The tenant confines the grant lookup.* The tenant guard is registered on
+>   both grant tables and appends its predicate to every read; the lookup adds no
+>   tenant clause of its own precisely so it cannot disagree with the guard.
+
 ### Who is admitted
 
-- [ ] A request carrying a verified **application identity and no end user** is
+- [x] A request carrying a verified **application identity and no end user** is
       admitted on the operations placed in an admission group below, and refused
       with `401` everywhere else on the public surface.
-- [ ] An operation in no admission group refuses the user-less caller **without
+- [x] An operation in no admission group refuses the user-less caller **without
       any code in that operation**.
-- [ ] Adding a new route does not admit the user-less caller. A test fails if a
+- [x] Adding a new route does not admit the user-less caller. A test fails if a
       route becomes admissible without being placed in a group.
-- [ ] A request carrying an end user is unaffected everywhere: same parameters,
+- [x] A request carrying an end user is unaffected everywhere: same parameters,
       same scoping, same refusals, same responses, same request/response schemas.
-- [ ] A caller carrying neither an end user nor an application is refused
+- [x] A caller carrying neither an end user nor an application is refused
       everywhere.
 
 ### The record
 
-- [ ] The grant carries the **delegating user** and the **bot's owner** as two
+- [x] The grant carries the **delegating user** and the **bot's owner** as two
       separate fields, because they are two different people whenever the bot is
       shared.
-- [ ] Uniqueness is per application, bot and **delegating user**: two
+- [x] Uniqueness is per application, bot and **delegating user**: two
       collaborators may each authorize the same application for the same bot,
       and those are two distinct, independently withdrawable delegations.
-- [ ] The history records the delegating user too, so "who let this application
+- [x] The history records the delegating user too, so "who let this application
       in, and when" is answerable after the live row is gone.
-- [ ] The change is applied to both the checked-in `CREATE` and a migration for
+- [x] The change is applied to both the checked-in `CREATE` and a migration for
       the deployed table, and the two describe the same shape column for column.
 
 ### Who may grant
 
-- [ ] A user may authorize an application for a bot they can **operate** —
+- [x] A user may authorize an application for a bot they can **operate** —
       their own, or one they collaborate on at member level or above. This is
       the same bar `core/engine_runtime/gate.py` already applies to operating
       the bot, so the rule is: *you may delegate exactly the access you have.*
-- [ ] A user who cannot operate the bot cannot authorize an application for it,
+- [x] A user who cannot operate the bot cannot authorize an application for it,
       and is answered exactly as if the bot did not exist.
-- [ ] Granting still requires both parties on the request — the delegating
+- [x] Granting still requires both parties on the request — the delegating
       user's identity and the application's own credential — and the
       application is still never a parameter.
 
 ### Whose access the application gets
 
-- [ ] An app-only request acts as the delegating user named in `user_id`, with
+- [x] An app-only request acts as the delegating user named in `user_id`, with
       the bot's owner taken **from the grant record**, never from the request.
-- [ ] The delegating user's access is re-adjudicated on every request, not
+- [x] The delegating user's access is re-adjudicated on every request, not
       trusted from consent time. Losing collaborator access on a bot ends the
       application's access to it immediately, with no revocation.
-- [ ] An application never reaches further than its delegating user. On
+- [x] An application never reaches further than its delegating user. On
       operations where a user can only reach their own bots, so can the
       application; on operations admitting collaborators, so is the application —
       as that user, at that user's level.
-- [ ] An app-only caller cannot use the addressed-owner parameter to reach a bot
+- [x] An app-only caller cannot use the addressed-owner parameter to reach a bot
       outside its grant. A request naming an owner other than the grant's is
       refused before the downstream resolve, not left to fail there by accident.
-- [ ] A human caller's use of that parameter is unchanged.
+- [x] A human caller's use of that parameter is unchanged.
 
 ### How the user is established
 
-- [ ] `user_id` remains a **required** query parameter everywhere it is required
+- [x] `user_id` remains a **required** query parameter everywhere it is required
       today. No operation's schema changes.
-- [ ] For a caller naming an end user, `user_id` must still equal that caller
+- [x] For a caller naming an end user, `user_id` must still equal that caller
       (`403` otherwise). Unchanged.
-- [ ] For an app-only caller, `user_id` names the delegating user and is
+- [x] For an app-only caller, `user_id` names the delegating user and is
       authorized against the grant, never trusted on its own.
-- [ ] The application is read from the verified credential and is never a
+- [x] The application is read from the verified credential and is never a
       parameter, so no request can be authorized against another application's
       grants.
-- [ ] The tenant comes from the verified principal and confines the grant
+- [x] The tenant comes from the verified principal and confines the grant
       lookup; nothing the caller sends can widen it.
 
 ### Grant-checked operations (the request names a bot)
 
-- [ ] Admitted only if a live grant exists for the calling application, that bot
+- [x] Admitted only if a live grant exists for the calling application, that bot
       and the named delegating user.
-- [ ] With no such grant the call is refused, and the refusal does not
+- [x] With no such grant the call is refused, and the refusal does not
       distinguish "no such bot" from "not authorized for it".
-- [ ] A grant for a different bot, one held by a different application, or one
+- [x] A grant for a different bot, one held by a different application, or one
       delegated by a different user does not admit the call.
-- [ ] Once the grant is checked and the user's own access adjudicated, the
+- [x] Once the grant is checked and the user's own access adjudicated, the
       operation behaves identically to the same call made by that user.
 
 ### Grant-filtered operations (the operation lists bots)
 
-- [ ] Admitted without naming a bot, and the result contains **only** bots the
+- [x] Admitted without naming a bot, and the result contains **only** bots the
       delegating user granted the calling application.
-- [ ] An application with no grants from that user gets an empty result, not an
+- [x] An application with no grants from that user gets an empty result, not an
       error.
-- [ ] The same operation called by the user returns their own bots, unfiltered.
-- [ ] Pagination counts describe the filtered result, so a caller cannot infer
+- [x] The same operation called by the user returns their own bots, unfiltered.
+- [x] Pagination counts describe the filtered result, so a caller cannot infer
       how many bots it was not granted.
-- [ ] The application's own view of its grants includes bots the delegating user
+- [x] The application's own view of its grants includes bots the delegating user
       does not own, since those never appear in a list of that user's bots and
       would otherwise be undiscoverable.
 
 ### Operations with no bot dimension
 
-- [ ] An operation whose answer concerns the delegating user's account is
+- [x] An operation whose answer concerns the delegating user's account is
       admitted only while the application holds at least one live grant from
       that user.
-- [ ] An operation whose answer is identical for every caller in the tenant, and
+- [x] An operation whose answer is identical for every caller in the tenant, and
       names no user at all, is admitted on authentication alone. This is not a
       new exposure: the same answer is already readable by any authenticated
       caller in that tenant.
-- [ ] An operation that writes account-level configuration with no bot dimension
+- [x] An operation that writes account-level configuration with no bot dimension
       is **refused**. A grant is consent to reach a bot, not to reconfigure an
       account.
 
 ### The owner's authority over their own bot
 
-- [ ] The owner of a bot sees **every** live authorization on it, whoever
+- [x] The owner of a bot sees **every** live authorization on it, whoever
       delegated it, and each names its delegating user.
-- [ ] The owner may withdraw any authorization on their bot, including one a
+- [x] The owner may withdraw any authorization on their bot, including one a
       collaborator created.
-- [ ] A collaborator who is not the owner sees and withdraws only the
+- [x] A collaborator who is not the owner sees and withdraws only the
       authorizations they themselves delegated.
 
 ### Refusals, named because refusing them is the point
 
-- [ ] Creating a bot is refused.
-- [ ] Granting, listing per bot, and withdrawing authorizations are refused for
+- [x] Creating a bot is refused.
+- [x] Granting, listing per bot, and withdrawing authorizations are refused for
       an app-only caller. Delegation is a human act.
-- [ ] The bot-logs group is refused. Its `user_id` means "whose traces to read"
+- [x] The bot-logs group is refused. Its `user_id` means "whose traces to read"
       rather than "whose call this is", so a grant does not translate to it.
-- [ ] A route that names no bot and whose bot cannot be resolved before the
+- [x] A route that names no bot and whose bot cannot be resolved before the
       handler runs is refused rather than admitted unchecked.
 
 ### The deletion invariant
 
-- [ ] Deleting a bot withdraws every authorization standing against it, whoever
+- [x] Deleting a bot withdraws every authorization standing against it, whoever
       delegated it, as part of the deletion.
-- [ ] This holds when the deletion is performed by an application.
-- [ ] The withdrawals are recorded in the history.
-- [ ] Deletion still succeeds for a bot with no authorizations; a failure to
+- [x] This holds when the deletion is performed by an application.
+- [x] The withdrawals are recorded in the history.
+- [x] Deletion still succeeds for a bot with no authorizations; a failure to
       withdraw fails the deletion rather than being swallowed.
 
 ### Nothing else changes
 
-- [ ] No operation gains, loses, or reshapes a request parameter or a status
+- [x] No operation gains, loses, or reshapes a request parameter or a status
       code for a caller that names an end user. The one response change is
       additive: the owner's authorization listing gains the delegating user.
-- [ ] The tenant isolation guard remains the sole enforcement of tenancy.
-- [ ] Refusals stay indistinguishable to the caller.
+- [x] The tenant isolation guard remains the sole enforcement of tenancy.
+- [x] Refusals stay indistinguishable to the caller.
 
 ## In Scope
 
@@ -282,13 +302,44 @@ named the user."* Naming the user in the request was the preparatory work.
 
 ## Open Questions
 
-1. Should bot **creation** be admitted, with the new bot auto-granted to the
-   creating application? It would let an integration provision end to end.
-   Against: an auto-grant is consent nobody gave per bot. Struck for now.
-2. Should a grant-filtered listing tell the caller that filtering happened?
-   Against: it leaks the size of what was withheld. For: an integrator cannot
-   currently tell "not granted" from "does not exist". Currently silent.
-3. When a bot owner withdraws a collaborator's delegation, should the
-   collaborator be told? Nothing notifies them today, and their integration
-   simply starts getting `404`s. Out of scope here, but it is the kind of gap
-   that turns into a support ticket rather than a bug report.
+All four are **closed**. Three were decided as drafted; one was answered by the
+user mid-implementation and reshaped the feature.
+
+1. **Should bot creation be admitted, with the new bot auto-granted?** *Closed:
+   no.* An auto-grant is consent nobody gave per bot, and creation spends the
+   user's quota. `POST /openapi/v1/bots` is Mode REFUSED, in the table with that
+   reason. Reopening it is a spec change, not a config one.
+2. **Should a grant-filtered listing say that filtering happened?** *Closed:
+   no.* A flag or a distinct count leaks the size of what was withheld, which is
+   the one thing the narrowing protects. The integrator-debugging cost is real
+   and is paid instead by `GET /openapi/v1/bots/authorized`, which answers "what
+   may I reach" directly and completely.
+3. **Should a grant reach bots merely shared with the granting owner?**
+   *Closed: yes* — answered by the user, and it is the decision the rest of the
+   feature is built around. It is why the record carries a delegating user
+   separate from the bot's owner, why a member-level collaborator may grant, and
+   why the invariant is stated as "the granting user's reach" rather than "the
+   owner's". The conservative reading in the first draft would have left an
+   integration onboarded by anyone but a bot's creator able to reach nothing,
+   with the failure indistinguishable from a missing grant.
+4. **Should an admin-level collaborator be able to grant?** *Closed:* the bar is
+   **member level and above**, chosen so the rule reads *you may delegate exactly
+   the access you have* — the same bar `core/engine_runtime/gate.py` already
+   applies to operating a bot. A separate, higher bar for delegating would be new
+   policy this platform has nowhere else, and it is not needed: a delegation is
+   bounded by the delegator's live access and re-adjudicated per request, so it
+   confers nothing they do not already hold. The bot's owner retains sight of,
+   and a veto over, every delegation on their bot.
+
+## Follow-ups (not blocking, recorded so they are not lost)
+
+- **`DesktopBotService.delete`** soft-deletes bots through the repository
+  directly, bypassing `BotService.delete_bot` and therefore the new sweep. Not
+  introduced here, and anticipated: `list_for_app`'s liveness filter still stops
+  such a bot being *reported* as reachable. Worth closing so "deleted" means one
+  thing.
+- **No cross-repo pin on the two policy expressions.** The gateway's
+  `route_security` and the backend's `ADMISSION` must agree that a refused
+  operation still requires a human. They are separate packages, so the agreement
+  is held by tests on each side rather than derived. The same gap the docs
+  already record for the principal wire shape.

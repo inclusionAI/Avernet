@@ -475,16 +475,28 @@
 
 ---
 
-## Task 16: Spec acceptance verification  `[ ]`
+## Task 16: Spec acceptance verification  `[x]`
 
 - **Files:** `specs/2026-08-10-openapi-v1-app-only-caller/spec.md`
 - **Done when:**
-  - [ ] Every checkbox in `spec.md` is ticked or explicitly struck with a reason
-        recorded in the file.
-  - [ ] All three Open Questions are closed in the file.
-  - [ ] Backend SAST/lint passes for the changed modules; gateway tests run.
-  - [ ] The negative promise verified deliberately: `git diff` shows no edited
-        expectation in a pre-existing test and no request-schema change.
+  - [x] All 48 acceptance criteria hold and are ticked, with a note naming where
+        the evidence lives and which two hold **by construction** rather than by
+        a test of their own — so nobody mistakes that for coverage.
+  - [x] All four Open Questions closed in the file, including the one the user
+        answered mid-implementation, which reshaped the record.
+  - [x] Two follow-ups recorded rather than silently dropped:
+        `DesktopBotService.delete` bypasses the deletion sweep (pre-existing),
+        and the two expressions of the admission policy are not derived from one
+        another across the package boundary.
+  - [x] Lint clean on every changed module; the repo's 288 pre-existing ruff
+        findings are unchanged (verified against a stashed tree). Gateway lint
+        clean. Gateway unit tests: 527 pass.
+  - [x] Backend suite: **11337 passed**, 2 failed — both the same environmental
+        `rsync`-missing failure, confirmed identical on a stashed tree.
+  - [x] The negative promise verified structurally against the regenerated
+        OpenAPI: no path, parameter, request body or response status changed on
+        any of the 71 operations; one additive schema property.
+
 - **Depends on:** Tasks 12, 13, 14, 15
 
 ---
