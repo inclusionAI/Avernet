@@ -241,19 +241,22 @@ class BotAppGrantRepository(
             )
             return True
 
-    def revoke_all_for_app_on_bot(self, bot_id: str, app_id: int) -> int:
+    def revoke_all_for_app_on_bot(self, bot_id: str, owner_id: str, app_id: int) -> int:
         """Withdraw every user's delegation of one app on one bot."""
         return self._sweep(
             bot_id,
+            owner_id,
             app_id=app_id,
             reason="owner revoked an app outright",
         )
 
-    def revoke_all_for_bot(self, bot_id: str) -> int:
+    def revoke_all_for_bot(self, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization standing against a bot."""
-        return self._sweep(bot_id, app_id=None, reason="bot deleted")
+        return self._sweep(bot_id, owner_id, app_id=None, reason="bot deleted")
 
-    def _sweep(self, bot_id: str, *, app_id: Optional[int], reason: str) -> int:
+    def _sweep(
+        self, bot_id: str, owner_id: str, *, app_id: Optional[int], reason: str
+    ) -> int:
         """Delete a set of live rows and log one ``revoked`` event for each.
 
         One transaction for the whole set, not one per row: a sweep that
@@ -264,6 +267,15 @@ class BotAppGrantRepository(
         case. It is an explicit parameter rather than two near-identical bodies
         so the two sweeps cannot drift in their locking or their logging.
 
+        **``owner_id`` is part of which bot this is, not a permission filter.**
+        ``ac_bots`` carries no unique key on ``bot_id`` — the legacy ``default``
+        convention gave many owners a bot of the same id — so a sweep on
+        ``bot_id`` alone would reach across owners. Deleting one person's bot
+        would then hard-delete a stranger's live grants and write ``revoked``
+        events for them, killing an integration that had nothing to do with the
+        deletion. What these sweeps drop is the *delegating-user* scope, which
+        is a different column and a different question.
+
         The rows are locked before deletion for the reason :meth:`revoke` locks
         its single row: a concurrent withdrawal of the same authorization must
         wait rather than log the revocation twice.
@@ -272,6 +284,7 @@ class BotAppGrantRepository(
         with self._db.transactional_orm_session() as db:
             query = db.query(self._Grant).filter(
                 self._Grant.bot_id == bot_id,
+                self._Grant.owner_id == owner_id,
                 self._Grant.env == env,
             )
             if app_id is not None:
@@ -315,19 +328,25 @@ class BotAppGrantRepository(
     # Reads
     # ========================================================================
 
-    def list_for_bot(self, bot_id: str) -> List[BotAppGrantRecord]:
+    def list_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]:
         """The bot's view — every app that may reach it, and who let each in.
 
-        No delegating-user predicate, deliberately: the bot's owner has to see a
-        grant a collaborator made, or machine access to their own bot would be
-        invisible to them. Served by ``idx_bot_app_grant_bot_owner``'s
-        ``(avernet_tenant, bot_id)`` prefix.
+        No **delegating-user** predicate, deliberately: the bot's owner has to
+        see a grant a collaborator made, or machine access to their own bot
+        would be invisible to them.
+
+        ``owner_id`` stays, and is a different thing entirely — it is part of
+        *which bot this is*. ``ac_bots`` has no unique key on ``bot_id``, so
+        without it this listing would show one owner the applications authorized
+        on a same-named bot belonging to someone else. Exactly the index
+        ``idx_bot_app_grant_bot_owner`` was built for.
         """
         with self._db.orm_session() as db:
             rows = (
                 db.query(self._Grant)
                 .filter(
                     self._Grant.bot_id == bot_id,
+                    self._Grant.owner_id == owner_id,
                     self._Grant.env == get_current_env(),
                 )
                 # id breaks the tie: gmt_create is second-granularity on

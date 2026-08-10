@@ -293,7 +293,7 @@ def test_list_excludes_revoked_grants(service):
     service.grant(**GRANT)
     service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
 
-    assert service.list_for_bot(bot_id="b-1") == []
+    assert service.list_for_bot(bot_id="b-1", owner_id="u-1") == []
     assert service.list_for_app(app_id=42, user_id="u-1") == []
 
 
@@ -432,7 +432,7 @@ def test_list_for_bot_shows_every_delegation_whoever_made_it(service):
         bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=99, app_name="other"
     )
 
-    delegations = service.list_for_bot(bot_id="b-1")
+    delegations = service.list_for_bot(bot_id="b-1", owner_id="u-1")
 
     assert {(r.user_id, r.app_id) for r in delegations} == {("u-1", 42), ("u-2", 99)}
 
@@ -488,11 +488,11 @@ def test_owner_override_withdraws_every_delegation_of_one_app(service, sessions)
         bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=99, app_name="other"
     )
 
-    service.revoke_app(bot_id="b-1", app_id=42)
+    service.revoke_app(bot_id="b-1", owner_id="u-1", app_id=42)
 
     assert service.list_for_app(app_id=42, user_id="u-1") == []
     assert service.list_for_app(app_id=42, user_id="u-2") == []
-    assert [r.app_id for r in service.list_for_bot(bot_id="b-1")] == [99], (
+    assert [r.app_id for r in service.list_for_bot(bot_id="b-1", owner_id="u-1")] == [99], (
         "a different application keeps its authorization"
     )
     assert _log(sessions).count(GrantAction.REVOKED) == 2, "one event per row"
@@ -501,7 +501,7 @@ def test_owner_override_withdraws_every_delegation_of_one_app(service, sessions)
 def test_owner_override_on_nothing_raises_distinctly(service):
     """"Nothing to remove" must not read as "removed", here too."""
     with pytest.raises(GrantNotFoundError):
-        service.revoke_app(bot_id="b-1", app_id=42)
+        service.revoke_app(bot_id="b-1", owner_id="u-1", app_id=42)
 
 
 def test_deletion_sweep_withdraws_every_delegation_whoever_made_it(service, sessions):
@@ -516,13 +516,62 @@ def test_deletion_sweep_withdraws_every_delegation_whoever_made_it(service, sess
         bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
     )
 
-    assert service.revoke_all_for_bot(bot_id="b-1") == 2
+    assert service.revoke_all_for_bot(bot_id="b-1", owner_id="u-1") == 2
 
-    assert service.list_for_bot(bot_id="b-1") == []
-    assert [r.bot_id for r in service.list_for_bot(bot_id="b-2")] == ["b-2"], (
+    assert service.list_for_bot(bot_id="b-1", owner_id="u-1") == []
+    assert [r.bot_id for r in service.list_for_bot(bot_id="b-2", owner_id="u-1")] == ["b-2"], (
         "another bot's authorizations are untouched"
     )
     assert _log(sessions).count(GrantAction.REVOKED) == 2
+
+
+def test_bot_scoped_reads_and_sweeps_do_not_cross_owners(service, sessions):
+    """``bot_id`` is not unique across owners, and these operations must respect it.
+
+    ``ac_bots`` carries no unique key on ``bot_id`` — the retired ``default``
+    convention gave many owners a bot of that id — so "this bot" is
+    ``(bot_id, owner_id)``. An earlier revision dropped ``owner_id`` from the
+    bot-scoped read and both sweeps while dropping the *delegating-user* scope,
+    conflating two different columns. The result: one owner could read the
+    applications authorized on a stranger's same-named bot, and deleting their
+    own bot would hard-delete the stranger's live grants and log revocations for
+    them — silently killing an unrelated integration.
+    """
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="u-1", app_id=42, app_name="mine"
+    )
+    service.grant(
+        bot_id="default", user_id="u-2", owner_id="u-2", app_id=42, app_name="theirs"
+    )
+
+    assert [r.app_name for r in service.list_for_bot(bot_id="default", owner_id="u-1")] == [
+        "mine"
+    ], "one owner must not see what is authorized on another's same-named bot"
+
+    assert service.revoke_all_for_bot(bot_id="default", owner_id="u-1") == 1
+
+    survivors = service.list_for_bot(bot_id="default", owner_id="u-2")
+    assert [r.app_name for r in survivors] == ["theirs"], (
+        "deleting one owner's bot must not withdraw a stranger's authorizations"
+    )
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 1
+
+
+def test_owner_override_does_not_cross_owners(service):
+    """The same identity rule, on the owner's outright revocation."""
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="u-1", app_id=42, app_name="mine"
+    )
+    service.grant(
+        bot_id="default", user_id="u-2", owner_id="u-2", app_id=42, app_name="theirs"
+    )
+
+    service.revoke_app(bot_id="default", owner_id="u-1", app_id=42)
+
+    assert [r.app_name for r in service.list_for_bot(bot_id="default", owner_id="u-2")] == [
+        "theirs"
+    ]
 
 
 def test_deletion_sweep_of_an_unauthorized_bot_is_not_an_error(service):
@@ -531,7 +580,7 @@ def test_deletion_sweep_of_an_unauthorized_bot_is_not_an_error(service):
     Unlike the two withdrawals, this reports a count rather than answering a
     request to remove one named thing — so zero is an answer, not a failure.
     """
-    assert service.revoke_all_for_bot(bot_id="b-1") == 0
+    assert service.revoke_all_for_bot(bot_id="b-1", owner_id="u-1") == 0
 
 
 def test_sweeps_record_the_delegating_user_in_the_history(service, sessions):
@@ -545,7 +594,7 @@ def test_sweeps_record_the_delegating_user_in_the_history(service, sessions):
         bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
     )
 
-    service.revoke_all_for_bot(bot_id="b-1")
+    service.revoke_all_for_bot(bot_id="b-1", owner_id="u-1")
 
     revoked = [
         row for row in _rows(sessions, BotAppGrantLogModel)
@@ -561,7 +610,7 @@ def test_one_bot_authorization_conveys_nothing_about_another(service):
         bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
     )
 
-    assert service.list_for_bot(bot_id="b-2") == []
+    assert service.list_for_bot(bot_id="b-2", owner_id="u-1") == []
 
 
 def test_grant_ignores_a_caller_supplied_env(repo, sessions):

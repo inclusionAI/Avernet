@@ -124,7 +124,7 @@ class BotAppGrantService:
             bot_id,
         )
 
-    def revoke_app(self, *, bot_id: str, app_id: int) -> None:
+    def revoke_app(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
         """Withdraw **every** delegation of ``app_id`` on ``bot_id``.
 
         The bot owner's override. An owner asking to revoke an application's
@@ -136,7 +136,7 @@ class BotAppGrantService:
             GrantNotFoundError: nothing was live to withdraw, so the adapter can
                 answer 404 exactly as it does for the single-delegation form.
         """
-        removed = self._repository.revoke_all_for_app_on_bot(bot_id, app_id)
+        removed = self._repository.revoke_all_for_app_on_bot(bot_id, owner_id, app_id)
         if not removed:
             raise GrantNotFoundError(
                 f"no live authorization for app {app_id} on bot {bot_id}"
@@ -149,7 +149,7 @@ class BotAppGrantService:
             bot_id,
         )
 
-    def revoke_all_for_bot(self, *, bot_id: str) -> int:
+    def revoke_all_for_bot(self, *, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization against ``bot_id``, whoever delegated it.
 
         The bot-deletion sweep. Unlike the two withdrawals above this does not
@@ -157,9 +157,9 @@ class BotAppGrantService:
         reach is a perfectly ordinary deletion, and the caller is reporting a
         count rather than answering a request to remove one named thing.
         """
-        return self._repository.revoke_all_for_bot(bot_id)
+        return self._repository.revoke_all_for_bot(bot_id, owner_id)
 
-    def list_for_bot(self, *, bot_id: str) -> list[BotAppGrantRecord]:
+    def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]:
         """The bot's view — every app that may reach it, and who let each in.
 
         Live authorizations only, which the live table gives for free: it holds
@@ -170,8 +170,12 @@ class BotAppGrantService:
         own bot would be invisible to them — and invisible access is the failure
         the whole record exists to prevent. A caller wanting one user's view
         filters what comes back.
+
+        ``owner_id`` is not that narrowing. It names *which* bot: ``bot_id``
+        alone is not unique across owners, so without it this would show one
+        owner what is authorized on a stranger's same-named bot.
         """
-        return self._repository.list_for_bot(bot_id)
+        return self._repository.list_for_bot(bot_id, owner_id)
 
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which bots may this app reach as ``user_id``.

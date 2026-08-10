@@ -42,10 +42,16 @@ class BotAppGrantRepositoryProtocol(Protocol):
     - :meth:`find` and :meth:`list_for_app` take ``user_id``, because they
       answer "what may this application do **as this person**" — the delegation
       is the subject.
-    - :meth:`list_for_bot` and :meth:`revoke_all_for_bot` take neither user id,
-      because they answer "what stands against this bot, whoever allowed it" —
-      the bot is the subject, and narrowing to one delegator would hide from a
-      bot's owner exactly the grants they most need to see.
+    - :meth:`list_for_bot` and the two sweeps take ``owner_id`` but **not**
+      ``user_id``, because they answer "what stands against this bot, whoever
+      allowed it" — the bot is the subject, and narrowing to one delegator would
+      hide from a bot's owner exactly the grants they most need to see.
+
+    That surviving ``owner_id`` is *identity, not permission*. ``ac_bots``
+    carries no unique key on ``bot_id`` — the legacy ``default`` convention gave
+    many owners a bot of that id — so "this bot" is ``(bot_id, owner_id)``.
+    Dropping it would let one owner read, and a deletion sweep destroy, grants
+    belonging to a stranger's same-named bot.
     """
 
     @abstractmethod
@@ -96,7 +102,7 @@ class BotAppGrantRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def revoke_all_for_app_on_bot(self, bot_id: str, app_id: int) -> int:
+    def revoke_all_for_app_on_bot(self, bot_id: str, owner_id: str, app_id: int) -> int:
         """Withdraw **every** user's delegation of one app on one bot.
 
         The bot owner's override. An owner asking to revoke an application's
@@ -111,11 +117,12 @@ class BotAppGrantRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def revoke_all_for_bot(self, bot_id: str) -> int:
+    def revoke_all_for_bot(self, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization standing against a bot.
 
         The deletion sweep. Names no application and no delegating user: a
-        deleted bot has no authorizations, whoever granted them.
+        deleted bot has no authorizations, whoever granted them. It does name
+        the owner, because that is half of which bot is being deleted.
 
         One ``revoked`` event per row removed, and all of it in one
         transaction, so a partial sweep cannot leave a deleted bot reachable.
@@ -125,7 +132,7 @@ class BotAppGrantRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def list_for_bot(self, bot_id: str) -> List[BotAppGrantRecord]:
+    def list_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]:
         """The bot's view — every app that may reach it, and who let each in.
 
         Deliberately **not** scoped to a delegating user. The bot's owner has to
@@ -150,7 +157,16 @@ class BotAppGrantRepositoryProtocol(Protocol):
 
         The authorization probe for the machine-caller path: a unique-key point
         lookup, because the delegating user travels on the request rather than
-        having to be discovered.
+        having to be discovered. It names no owner because it does not need to —
+        the row it returns *carries* the owner, which is what tells the caller
+        which same-named bot the delegation was made on.
+
+        One consequence of the key, worth knowing: a single user cannot delegate
+        one application to two bots that share a ``bot_id``. The second grant
+        collides on the unique key and comes back as the first. Only reachable
+        through the retired ``default`` convention, and it fails safe (the
+        caller keeps the access they had) rather than resolving to the wrong
+        bot.
 
         ``None`` is a real state of the contract — "not authorized" is the
         answer this exists to give — not a widened return type.

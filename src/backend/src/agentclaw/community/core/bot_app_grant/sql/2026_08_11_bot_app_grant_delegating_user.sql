@@ -31,9 +31,16 @@
 -- runs; the deployed table carries utf8mb4_bin where the checked-in CREATE does
 -- not, and an unqualified ADD COLUMN would silently take a different collation
 -- in each place.
+-- COMMENT belongs to the column definition and must therefore precede the
+-- AFTER placement clause: the grammar is
+--   ADD [COLUMN] col_name column_definition [FIRST | AFTER col_name]
+-- and nothing may follow the placement clause. Written the other way round this
+-- is a 1064 on a strict parser -- aborting the migration before the rekeying
+-- below, leaving a table with no user_id under code that writes one -- or, on a
+-- lenient one, silently reassigns the TABLE's comment.
 ALTER TABLE ac_bot_app_grant
-  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL AFTER bot_id
-    COMMENT 'delegating user, resolved server-side';
+  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL
+    COMMENT 'delegating user, resolved server-side' AFTER bot_id;
 
 -- Rekey uniqueness onto the delegating user.
 --

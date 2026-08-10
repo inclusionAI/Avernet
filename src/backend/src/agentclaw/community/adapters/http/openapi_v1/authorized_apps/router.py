@@ -215,10 +215,10 @@ async def list_authorized_apps(
 ) -> Envelope[Page[AuthorizedApp]]:
     """Which applications can reach this bot, and who let each one in."""
     del principal  # authority comes from the adjudicated bot resolve below
-    resolve_delegable_bot(
+    owner_id, _ = resolve_delegable_bot(
         bot_service, collaborators, bot_id=bot_id, caller_id=user_id
     )
-    records = grants.list_for_bot(bot_id=bot_id)
+    records = grants.list_for_bot(bot_id=bot_id, owner_id=owner_id)
     items = [_to_authorized_app(record) for record in records]
     return page(len(items), items, request)
 

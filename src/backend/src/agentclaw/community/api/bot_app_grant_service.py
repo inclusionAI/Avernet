@@ -55,7 +55,7 @@ class BotAppGrantServiceProtocol(Protocol):
         adapter can answer 404 distinctly from a successful withdrawal.
         """
 
-    def revoke_app(self, *, bot_id: str, app_id: int) -> None:
+    def revoke_app(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
         """Withdraw **every** delegation of ``app_id`` on ``bot_id``.
 
         The bot owner's override, for whom "revoke this app" means all of it.
@@ -63,18 +63,19 @@ class BotAppGrantServiceProtocol(Protocol):
         Raises ``GrantNotFoundError`` when nothing was live to withdraw.
         """
 
-    def revoke_all_for_bot(self, *, bot_id: str) -> int:
+    def revoke_all_for_bot(self, *, bot_id: str, owner_id: str) -> int:
         """Withdraw every authorization against ``bot_id``. Returns the count.
 
         The bot-deletion sweep. Does not raise on an empty sweep: deleting a bot
         no application could reach is an ordinary deletion.
         """
 
-    def list_for_bot(self, *, bot_id: str) -> list[BotAppGrantRecord]:
+    def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]:
         """The bot's view — every app that may reach it, and who let each in.
 
         Live only, and not narrowed to one delegating user: the bot's owner must
-        be able to see a grant a collaborator made.
+        be able to see a grant a collaborator made. ``owner_id`` names which bot,
+        not which caller — ``bot_id`` is not unique across owners.
         """
 
     def list_for_app(self, *, app_id: int, user_id: str) -> list[BotAppGrantRecord]:
