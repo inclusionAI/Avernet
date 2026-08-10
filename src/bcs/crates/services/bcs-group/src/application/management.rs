@@ -1308,7 +1308,7 @@ impl GroupManagementService for GroupManagement {
             .get(&cmd.bot_id)
             .await
             .ok_or_else(|| ServiceError::BotNotFound(cmd.bot_id.clone()))?;
-        let role = member_role(cmd.role.as_deref());
+        let role = member_role(cmd.role.as_deref(), group.group_strategy);
 
         if bot.actor_kind == ActorKind::Human {
             let allowed = match group.group_strategy {
@@ -2043,13 +2043,15 @@ fn validate_human_constraints(
     Ok(())
 }
 
-fn member_role(role: Option<&str>) -> ParticipantRole {
+fn member_role(role: Option<&str>, strategy: GroupStrategy) -> ParticipantRole {
     match role {
         Some("driver") => ParticipantRole::Driver,
         Some("manager") => ParticipantRole::Manager,
         Some("worker") => ParticipantRole::Worker,
         Some("observer") => ParticipantRole::Observer,
-        _ => ParticipantRole::Consultant,
+        Some(_) => ParticipantRole::Consultant,
+        None if strategy == GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+        None => ParticipantRole::Consultant,
     }
 }
 

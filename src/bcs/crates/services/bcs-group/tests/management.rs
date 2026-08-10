@@ -435,6 +435,42 @@ async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
 }
 
 #[tokio::test]
+async fn add_member_defaults_to_worker_in_manager_worker_group() {
+    let fixture = Fixture::new()
+        .with_bot("manager", "Manager", "public", Some("alice"))
+        .with_bot("existing-worker", "Existing Worker", "public", None)
+        .with_bot("new-worker", "New Worker", "public", None);
+    let service = fixture.service_with_limits(5, 10, 10);
+
+    let mut cmd = create_cmd(
+        Some("manager"),
+        "manager",
+        vec![
+            participant("manager", Some("manager")),
+            participant("existing-worker", Some("worker")),
+        ],
+    );
+    cmd.group_strategy = Some(bcs_service_api::GroupStrategy::ManagerWorker);
+    let group = service
+        .create_group(cmd)
+        .await
+        .expect("manager_worker group should be created");
+
+    let result = service
+        .add_member(GroupAddMemberCommand {
+            caller_actor_id: Some("manager".to_string()),
+            human_actor_id: None,
+            group_id: group.group_id,
+            bot_id: "new-worker".to_string(),
+            role: None,
+        })
+        .await
+        .expect("member without an explicit role should be added");
+
+    assert_eq!(result.member.role, "worker");
+}
+
+#[tokio::test]
 async fn list_groups_orders_by_updated_at_desc_before_pagination() {
     let fixture = Fixture::new();
     let service = fixture.service_with_limits(5, 10, 10);
