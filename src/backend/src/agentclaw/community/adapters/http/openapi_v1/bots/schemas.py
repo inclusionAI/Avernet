@@ -43,9 +43,22 @@ _ENGINE_DESC = (
     "instead of being published as an enum here."
 )
 
-_BOT_TYPE_DESC = (
+# Two descriptions, not one, because the request and the response genuinely
+# differ. The request side is Literal-constrained, so "no other value" is a
+# promise the type keeps. The response side is a plain str copied straight out
+# of the record, and desktop bots — which this surface refuses to create or
+# manage but still reads — carry a third value. One shared description made the
+# response claim an exhaustiveness only the request has.
+_BOT_TYPE_REQUEST_DESC = (
     "'personal' for a bot only its owner operates, 'service' for one that can be "
     "published to verify/online runtimes. No other value is accepted."
+)
+
+_BOT_TYPE_RESPONSE_DESC = (
+    "'personal' for a bot only its owner operates, 'service' for one that can be "
+    "published to verify/online runtimes. Other values — 'desktop' in particular "
+    "— belong to bots created through a different flow, which this API can read "
+    "but not create or manage. Empty when the record carries no type."
 )
 
 
@@ -75,7 +88,7 @@ class Bot(BaseModel):
     bot_desc: str = Field(description="What the bot is for; may be empty.")
     engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    bot_type: str = Field(description=_BOT_TYPE_DESC)
+    bot_type: str = Field(description=_BOT_TYPE_RESPONSE_DESC)
     status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
     owner_entity_id: str = Field(description="The user this bot belongs to.")
 
@@ -101,7 +114,7 @@ class BotCreate(BaseModel):
         "to leave it blank.")
     engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    bot_type: BotType = Field(description=_BOT_TYPE_DESC)
+    bot_type: BotType = Field(description=_BOT_TYPE_REQUEST_DESC)
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
     # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
     # publish a contract slot the server rejects on every non-empty value —
