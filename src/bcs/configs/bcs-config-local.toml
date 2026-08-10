@@ -154,6 +154,8 @@ enabled = false
 url = "http://127.0.0.1:8765"
 fusion_timeout_ms = 120000
 sync_timeout_ms = 10000
+# Base backoff between worker-sync retry attempts; doubles per attempt.
+sync_retry_base_ms = 1000
 profile_id = "default"
 recommend_top_k = 10
 recommend_min_score = 0.1

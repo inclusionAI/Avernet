@@ -83,6 +83,7 @@ date
 # ---- Environment check ----
 # Any missing prerequisite blocks BCS build/test. See src/bcs/CLAUDE.md Prerequisites:
 # Rust/Cargo, cargo-nextest, protobuf. --coverage additionally needs cargo-llvm-cov + llvm-tools.
+# scripts/install_cargo_test_tools.sh installs the two cargo subcommands from prebuilt binaries.
 env_status=0
 check_bin() {
   local bin="$1"
@@ -97,11 +98,11 @@ check_bin() {
 
 echo "--- environment check ---"
 check_bin cargo "Install Rust toolchain via rustup: https://rustup.rs"
-check_bin cargo-nextest "Run: cargo install cargo-nextest --locked"
+check_bin cargo-nextest "Run: bash scripts/install_cargo_test_tools.sh nextest"
 # protobuf: BCS build.rs depends on protoc; CI images usually have it, local may not.
 check_bin protoc "Install protobuf compiler (macOS: brew install protobuf; Linux: yum/apt install protobuf-compiler)"
 if [[ "$coverage" -eq 1 ]]; then
-  check_bin cargo-llvm-cov "Run: cargo install cargo-llvm-cov --locked"
+  check_bin cargo-llvm-cov "Run: bash scripts/install_cargo_test_tools.sh llvm-cov"
   # llvm-cov requires the llvm-tools component. rustup component list --installed
   # prints entries with a target suffix (e.g. llvm-tools-aarch64-apple-darwin),
   # so match with ^llvm-tools.
