@@ -76,6 +76,7 @@ def _make_aix_template_config(
 def _make_service() -> BotService:
     """构造一个绕过 __init__ 的 BotService，只装填本测试关心的依赖。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._restart_lock_repo = MagicMock()
     svc._oss_record_repo = MagicMock()

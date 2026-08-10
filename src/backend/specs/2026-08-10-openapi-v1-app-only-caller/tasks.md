@@ -145,20 +145,31 @@
 
 ---
 
-## Task 5: Revoke grants when a bot is deleted  `[ ]`
+## Task 5: Revoke grants when a bot is deleted  `[x]`
 
 - **Goal:** Deleting a bot withdraws every authorization against it.
 - **Files:** `core/bot_management/services/bot_service.py`, `di/modules/`
 - **Done when:**
-  - [ ] `BotService.delete_bot` calls `revoke_all_for_bot` **before**
-        `soft_delete_by_owner`, via a provider callable following
-        `_device_service_provider`, with a comment carrying the ordering
-        argument: a failure must abort the deletion, never leave a deleted bot
-        with live grants.
-  - [ ] Failures propagate; nothing is caught and logged-as-success.
-  - [ ] Tests: grants → delete leaves none and one `revoked` row each; delete
-        with no grants succeeds; a repository failure aborts the deletion.
-  - [ ] The README's "Known gap, carried deliberately" note is **deleted**.
+  - [x] `BotService.delete_bot` sweeps via a **required** provider callable.
+        Required rather than defaulted-None: there is no "grants not
+        configured" state worth modelling, and the alternative to a provider is
+        a silent security hole.
+  - [x] Placed **earlier than planned** — before the device release and passport
+        destruction rather than just before `soft_delete_by_owner`. Same
+        argument, taken further: a failure after those steps would leave a bot
+        already unusable with live authorizations and no deletion left to
+        re-trigger the sweep. Recorded in the router, the README and the tests.
+  - [x] Failures propagate; nothing caught and logged as success.
+  - [x] Tests: sweep called with the right scope, a failed sweep aborts before
+        anything destructive, and an unauthorized bot deletes normally.
+  - [x] The README's "Known gap, carried deliberately" note is replaced by the
+        ordering argument.
+  - [x] 17 test files construct `BotService` directly (11 by kwargs, 17 via
+        `__new__`); all updated mechanically, then audited to confirm every
+        inserted kwarg landed inside a `BotService(...)` call — one had gone
+        into `BaasPublishPoller`, which shares the parameter name.
+  - [x] `core/bot_management`'s Context Boundary declares the new dependency.
+
 - **Depends on:** Task 2
 
 ---

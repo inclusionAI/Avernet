@@ -101,8 +101,13 @@ deployed tables, and **all three descriptions must agree** — models, `CREATE`,
 `ALTER`. The `ALTER` is a pure schema change only while the tables are empty; it
 says so at the top, and says what the migration becomes once they are not.
 
-**Known gap, carried deliberately:** grants are not revoked when a bot is
-deleted. `BotAppGrantService.list_for_app` filters the *report* against live
-bots, but `delete_bot` soft-deletes and leaves the row. Revoking on deletion
-belongs with bot lifecycle; until it exists, the later machine-caller path —
-which will resolve on `(app_id, bot_id)` — would still find the row.
+**Deletion withdraws everything, and the ordering is load-bearing.**
+`BotService.delete_bot` calls `revoke_all_for_bot` before the device release and
+the passport destruction, not after: a failure then aborts while the bot is
+still intact, instead of leaving a bot that is already unusable with live
+authorizations against it and no deletion left to trigger the sweep again.
+Failures propagate — swallowing one would reintroduce the gap quietly, which is
+worse than the gap, because the sweep would look like it ran.
+
+`list_for_app` still filters its report against live bots. That is now a second
+line rather than the only one, and it is cheap: one id-only query.

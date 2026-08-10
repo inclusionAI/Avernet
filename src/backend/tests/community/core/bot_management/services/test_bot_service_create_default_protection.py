@@ -23,6 +23,7 @@ from agentclaw.community.core.devices.errors import (
 
 def _make_service() -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = 0
     svc._repository.get_by_id_and_owner.return_value = None

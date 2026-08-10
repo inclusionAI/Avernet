@@ -50,6 +50,7 @@ def _make_binding(status: str = "ACTIVE"):
 def _make_service() -> BotService:
     """构造带 mock repository 的 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._passport_plugin = MagicMock()
     # Cycle-breaker providers installed by __init__; tests using __new__

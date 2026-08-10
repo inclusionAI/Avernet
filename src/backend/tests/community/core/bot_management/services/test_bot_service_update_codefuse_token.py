@@ -29,6 +29,7 @@ def _make_bot_service(repository=None, template_service=None) -> BotService:
         oss_record_repo=MagicMock(),
         bot_publish_service_provider=lambda: MagicMock(),
         device_service_provider=lambda: MagicMock(),
+        bot_app_grant_service_provider=lambda: MagicMock(),
         path_factory=MagicMock(),
         template_service=template_service or MagicMock(),
         workspace_hosting_service=MagicMock(),

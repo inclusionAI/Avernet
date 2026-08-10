@@ -10,6 +10,7 @@ from agentclaw.community.core.bot_management.services.bot_service import BotServ
 
 def _svc_with_count(count: int) -> BotService:
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = count
     return svc
@@ -31,6 +32,7 @@ class TestIsFirstBot:
 class TestIsFirstPersonalBot:
     def test_no_live_personal_bot_is_first_personal(self):
         svc = BotService.__new__(BotService)
+        svc._bot_app_grant_provider = lambda: MagicMock()
         svc._repository = MagicMock()
         svc._repository.exists_by_owner_and_bot_type.return_value = False
 
@@ -41,6 +43,7 @@ class TestIsFirstPersonalBot:
 
     def test_existing_live_personal_bot_is_not_first_personal(self):
         svc = BotService.__new__(BotService)
+        svc._bot_app_grant_provider = lambda: MagicMock()
         svc._repository = MagicMock()
         svc._repository.exists_by_owner_and_bot_type.return_value = True
 

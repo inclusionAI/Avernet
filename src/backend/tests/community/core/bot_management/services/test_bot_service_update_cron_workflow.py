@@ -53,6 +53,7 @@ def _make_service(
         oss_record_repo=MagicMock(spec=OssToNasRecordRepository),
         bot_publish_service_provider=MagicMock(),
         device_service_provider=MagicMock(),
+        bot_app_grant_service_provider=lambda: MagicMock(),
         path_factory=MagicMock(),
         template_service=MagicMock(),
         workspace_hosting_service=MagicMock(),

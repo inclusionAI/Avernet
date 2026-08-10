@@ -45,6 +45,7 @@ def repo_without_default():
 def _bare_service(repository) -> BotService:
     """Only the slice ``is_first_bot`` touches."""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = repository
     return svc
 

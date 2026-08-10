@@ -36,6 +36,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center    # repository contracts consumed by this module
   - agentclaw.community.api.policy_service
   - agentclaw.community.core.base
+  - agentclaw.community.core.bot_app_grant.services    # deletion withdraws the bot's app authorizations
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.config
   - agentclaw.community.core.config_compose

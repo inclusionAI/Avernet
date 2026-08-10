@@ -52,6 +52,7 @@ def _make_bot(
 def _make_service() -> BotService:
     """Construct a BotService with mock dependencies."""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._passport_plugin = MagicMock()
     svc._bot_publish_provider = lambda: MagicMock()

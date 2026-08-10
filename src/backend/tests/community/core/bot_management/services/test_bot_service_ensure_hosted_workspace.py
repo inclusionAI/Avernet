@@ -20,6 +20,8 @@ def _make_service():
     from agentclaw.community.core.bot_management.services.bot_service import BotService
 
     svc = BotService.__new__(BotService)
+
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._template_service = MagicMock()
     svc._workspace_hosting_service = MagicMock()

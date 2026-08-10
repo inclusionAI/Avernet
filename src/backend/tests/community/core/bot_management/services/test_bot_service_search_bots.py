@@ -12,6 +12,8 @@ def _make_service():
     from agentclaw.community.core.bot_management.services.bot_service import BotService
 
     svc = BotService.__new__(BotService)
+
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._device_binding_repo = None
     # Cycle-breaker provider attributes (set by __init__); tests using
@@ -463,6 +465,8 @@ class TestListBotsByOwnerCanEditBot:
         from agentclaw.community.core.bot_management.services.bot_service import BotService
 
         svc = BotService.__new__(BotService)
+
+        svc._bot_app_grant_provider = lambda: MagicMock()
         svc._repository = MagicMock()
         svc._device_binding_repo = None
         svc._bot_publish_provider = lambda: MagicMock()

@@ -24,6 +24,7 @@ from agentclaw.community.core.devices.repository.record import DeviceBindingReco
 def _make_service(*, current_bots: int = 0) -> BotService:
     """构造一个仅用于 create_bot 路由测试的最小 BotService。"""
     svc = BotService.__new__(BotService)
+    svc._bot_app_grant_provider = lambda: MagicMock()
     svc._repository = MagicMock()
     svc._repository.count_by_owner.return_value = current_bots
     svc._repository.get_by_id_and_owner.return_value = None

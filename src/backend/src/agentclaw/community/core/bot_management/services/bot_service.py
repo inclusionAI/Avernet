@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
+    from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->
     # bot_service). ``BotService`` is provider-constructed, so this
@@ -307,6 +308,7 @@ class BotService:
         oss_record_repo: "OssToNasRecordRepository",
         bot_publish_service_provider: "Callable[[], BotPublishService]",
         device_service_provider: "Callable[[], DeviceService]",
+        bot_app_grant_service_provider: "Callable[[], BotAppGrantService]",
         path_factory: WorkspacePathFactory,
         template_service: TemplateService,
         # Optional: DIMA (applicationCoding) hosting is corp-only. Community does
@@ -347,6 +349,12 @@ class BotService:
         # the cycle never closes during graph build.
         self._bot_publish_provider = bot_publish_service_provider
         self._device_service_provider = device_service_provider
+        # Required, not optional: deleting a bot has to withdraw the
+        # authorizations standing against it, and a BotService that could not
+        # would delete bots while leaving applications able to reach them.
+        # There is no "grants not configured" state worth modelling — the
+        # alternative to a provider here is a silent security hole.
+        self._bot_app_grant_provider = bot_app_grant_service_provider
         self._path_factory = path_factory
         self._template_service = template_service
         self._workspace_hosting_service = workspace_hosting_service
@@ -3396,6 +3404,30 @@ class BotService:
                 earliest_bot_id = earliest.get("bot_id")
                 if earliest_bot_id and bot_id == earliest_bot_id:
                     raise BotOperationNotAllowedError("不能删除首个创建的 Bot，该 Bot 受保护")
+
+            # Withdraw every application authorization standing against this
+            # bot — whoever delegated it — before anything destructive happens.
+            #
+            # Ordering is the whole point. Placed after the device release and
+            # the passport destruction, a failure here would leave a bot that is
+            # already unusable with live grants against it: applications still
+            # authorized to reach something that no longer works, and no
+            # deletion to trigger the sweep again. Placed here, a failure aborts
+            # while the bot is still intact, and the worst outcome is grants
+            # withdrawn from a bot that survived — recoverable by re-granting.
+            #
+            # Failures propagate deliberately. Swallowing this would reintroduce
+            # exactly the gap it closes, and quietly.
+            revoked = self._bot_app_grant_provider().revoke_all_for_bot(
+                bot_id=bot_id, owner_id=user_id
+            )
+            if revoked:
+                logger.info(
+                    "[bot_service.delete_bot] withdrew %s app authorization(s) "
+                    "on bot %s before deleting it",
+                    revoked,
+                    bot_id,
+                )
 
             # Release device if binding exists (包括 ACTIVE 和 PENDING 状态)
             binding_id = bot.get("binding_id")
