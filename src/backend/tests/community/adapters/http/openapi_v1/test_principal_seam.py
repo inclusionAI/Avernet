@@ -376,7 +376,7 @@ def test_bot_logs_routes_require_user_and_app_principal():
 
 
 _AUTHORIZED_APPS_PREFIX = "/openapi/v1/bots/{bot_id}/authorized-apps"
-_AUTHORIZED_BOTS_PATH = "/openapi/v1/authorized-bots"
+_AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
 
 
 def test_granting_a_bot_authorization_requires_user_and_app_principal():

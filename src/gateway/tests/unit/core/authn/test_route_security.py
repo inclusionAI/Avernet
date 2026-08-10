@@ -97,7 +97,7 @@ def test_collaboration_socket_exemption_does_not_reach_the_http_plane() -> None:
 
 
 _AUTHORIZED_APPS_PATH = "/openapi/v1/bots/bot-123/authorized-apps"
-_AUTHORIZED_BOTS_PATH = "/openapi/v1/authorized-bots"
+_AUTHORIZED_BOTS_PATH = "/openapi/v1/bots/authorized"
 
 
 def test_shipped_config_requires_user_and_app_to_grant_a_bot_authorization() -> None:

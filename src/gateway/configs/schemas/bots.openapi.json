@@ -4447,122 +4447,6 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/openapi/v1/authorized-bots": {
-      "get": {
-        "description": "The application's view — which of this owner's bots may it reach.\n\nNames no bot and so performs no bot-existence check, unlike the three above:\nthere is nothing to mask. The result is the caller's own authorizations over\ntheir own bots, and an empty page discloses nothing — which is why holding\nnone answers ``200`` with no items rather than ``404``.",
-        "operationId": "list_authorized_bots_openapi_v1_authorized_bots_get",
-        "parameters": [
-          {
-            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-            "in": "query",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
-              "minLength": 1,
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Envelope_Page_AuthorizedBot__"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Invalid request"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing or invalid credentials"
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "The user_id names a user the authenticated caller may not act for"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Not found — also returned when the resource exists but does not belong to the caller"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Conflicts with current state"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Request failed validation"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Internal error"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Upstream service error"
-          }
-        },
-        "summary": "List Authorized Bots",
-        "tags": [
-          "authorized-apps"
-        ]
-      }
-    },
     "/openapi/v1/bots": {
       "get": {
         "description": "List the caller's bots (filter + paginate).",
@@ -5429,6 +5313,122 @@
         "summary": "List Approval Modes",
         "tags": [
           "approvals"
+        ]
+      }
+    },
+    "/openapi/v1/bots/authorized": {
+      "get": {
+        "description": "The application's view — which of this owner's bots may it reach.\n\nNames no bot and so performs no bot-existence check, unlike the three above:\nthere is nothing to mask. The result is the caller's own authorizations over\ntheir own bots, and an empty page discloses nothing — which is why holding\nnone answers ``200`` with no items rather than ``404``.",
+        "operationId": "list_authorized_bots_openapi_v1_bots_authorized_get",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. It must currently be the authenticated caller's own id; naming another user is refused (403).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Page_AuthorizedBot__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          }
+        },
+        "summary": "List Authorized Bots",
+        "tags": [
+          "authorized-apps"
         ]
       }
     },

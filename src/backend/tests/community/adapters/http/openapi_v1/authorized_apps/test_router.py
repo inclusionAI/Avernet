@@ -281,8 +281,8 @@ def test_application_view_is_scoped_to_the_calling_app(grants, bots):
     )
     first.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
 
-    mine = _ok(first.get("/openapi/v1/authorized-bots"))
-    theirs = _ok(second.get("/openapi/v1/authorized-bots"))
+    mine = _ok(first.get("/openapi/v1/bots/authorized"))
+    theirs = _ok(second.get("/openapi/v1/bots/authorized"))
 
     assert [item["bot_id"] for item in mine["items"]] == [BOT]
     assert theirs["items"] == [], "another application must see nothing"
@@ -290,7 +290,7 @@ def test_application_view_is_scoped_to_the_calling_app(grants, bots):
 
 def test_application_view_empty_is_200_not_404(client):
     """Holding no authorizations is a valid answer, not a missing resource."""
-    resp = client.get("/openapi/v1/authorized-bots")
+    resp = client.get("/openapi/v1/bots/authorized")
 
     assert resp.status_code == 200, resp.json()
     assert resp.json()["data"]["items"] == []
@@ -300,7 +300,7 @@ def test_application_view_excludes_withdrawn(client):
     client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
     client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
 
-    data = _ok(client.get("/openapi/v1/authorized-bots"))
+    data = _ok(client.get("/openapi/v1/bots/authorized"))
     assert data["items"] == []
 
 

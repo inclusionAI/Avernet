@@ -75,11 +75,18 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/authorized-apps", tags=["authorized-apps"]
 )
 
-#: The app-scoped read, at its own top-level prefix. A second router rather than
-#: a second path on the first: it is not beneath a bot, and mounting it under
-#: ``{bot_id}`` would say it was.
+#: The app-scoped read, as its own literal component under the base. A second
+#: router rather than a second path on the first: it is not beneath a bot, and
+#: mounting it under ``{bot_id}`` would say it was.
+#:
+#: ``/openapi/v1/bots/authorized`` rather than a top-level
+#: ``/openapi/v1/authorized-bots``, and that is a routing constraint rather than
+#: a naming preference. The gateway resolves an upstream from the segment after
+#: the version base and forwards only into configured domains, so a path outside
+#: ``/openapi/v1/bots`` reaches no upstream at all — it would be refused at the
+#: edge rather than served. ``test_path_convention.py`` holds the rule.
 app_view_router = APIRouter(
-    prefix="/openapi/v1/authorized-bots", tags=["authorized-apps"]
+    prefix="/openapi/v1/bots/authorized", tags=["authorized-apps"]
 )
 
 #: Both parties. The APP half is checked here; the USER half is guaranteed

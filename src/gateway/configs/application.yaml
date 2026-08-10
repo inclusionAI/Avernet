@@ -156,7 +156,11 @@ user_config:
     #
     # Not method-qualified: GET is the only method this path has, and any method
     # it could grow answers the same "what may I reach" question.
-    "/openapi/v1/authorized-bots":
+    #
+    # Sits under /openapi/v1/bots because the gateway resolves an upstream from
+    # the segment after the version base; a top-level path here would match no
+    # domain and be refused at the edge rather than reaching the backend.
+    "/openapi/v1/bots/authorized":
       user: required
       app: required
 

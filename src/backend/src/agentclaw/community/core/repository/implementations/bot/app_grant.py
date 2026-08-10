@@ -16,10 +16,16 @@ Behavior:
   beside a live row — the app still reaching the bot while the audit says it
   cannot. Reads stay on ``orm_session()``; only the two mutations need a
   transaction.
-- The check-then-write in each mutation takes ``with_for_update()`` on the live
-  row, so two concurrent callers serialize rather than racing the unique key.
-  The insert path cannot lock a row that does not exist yet, so it also handles
-  the loser of that race — see :meth:`BotAppGrantRepository.grant`.
+- ``revoke`` takes ``with_for_update()`` on the live row, so a concurrent
+  withdrawal of the same authorization waits rather than double-logging.
+  ``grant`` deliberately does **not**: there is no row to lock before the first
+  insert, and on InnoDB at REPEATABLE READ a ``FOR UPDATE`` matching nothing
+  takes a *gap* lock instead. Two such locks are mutually compatible while the
+  insert-intention locks that follow them are not, so both callers would grant
+  their gap lock and then deadlock on each other's — surfacing as
+  ``OperationalError`` (ER 1213), a different class from the duplicate key and
+  therefore an unhandled 500. The unique key already serializes the insert
+  correctly; the loser is handled below.
 - The tenant is never passed in or filtered on here. ``register_avernet_tenant_guard``
   stamps it on insert and appends the tenant predicate to every read, so a
   query written without it is still tenant-scoped — and one written *with* it
@@ -78,12 +84,20 @@ class BotAppGrantRepository(
         """Authorize an app for a bot, appending a ``granted`` event.
 
         Idempotent under concurrency, not just in sequence. Two callers can both
-        pass the existence check before either inserts — the row they are
-        looking for does not exist, so there is nothing to lock — and the loser
-        hits the unique key. That is caught and re-read rather than raised: the
-        state the caller asked for now holds, which is precisely the outcome
-        idempotency promises. Letting it escape would 500 a partner retrying a
-        request that had in fact succeeded.
+        pass the existence check before either inserts — the row they are looking
+        for does not exist, so there is nothing to lock — and the loser hits the
+        unique key. That is caught and resolved rather than raised: the state the
+        caller asked for now holds, which is precisely what idempotency promises.
+        Letting it escape would 500 a partner retrying a request that had in fact
+        succeeded.
+
+        Resolving it means one of two things. Usually the winner's row is there
+        and is returned. Occasionally it is not — the winner revoked between the
+        conflict and the re-read — and then the caller's own request has still
+        not been served, so the insert is retried once. Retrying is bounded at a
+        single attempt: a caller racing an endless stream of revocations has a
+        problem no amount of looping here fixes, and an unbounded retry would
+        turn it into a hot loop.
         """
         app_id = data["app_id"]
         bot_id = data["bot_id"]
@@ -94,8 +108,38 @@ class BotAppGrantRepository(
         try:
             return self._insert_grant(app_id, app_name, bot_id, owner_id, env)
         except IntegrityError:
-            # The unique key fired, so a concurrent caller won. Re-read outside
-            # the failed transaction and return what they wrote.
+            existing = self._reread_after_conflict(bot_id, owner_id, app_id, env)
+            if existing is not None:
+                return existing
+            # The winner's row was revoked before we could read it, so nothing
+            # is live and this caller's grant still has not happened. One more
+            # attempt; a second conflict propagates rather than looping.
+            logger.info(
+                "[bot_app_grant] insert conflict resolved to nothing live, "
+                "retrying once: app_id=%s bot_id=%s owner_id=%s",
+                app_id,
+                bot_id,
+                owner_id,
+            )
+            return self._insert_grant(app_id, app_name, bot_id, owner_id, env)
+
+    def _reread_after_conflict(
+        self, bot_id: str, owner_id: str, app_id: int, env: str
+    ) -> Optional[BotAppGrantRecord]:
+        """The live row for this scope after an ``IntegrityError``, if any.
+
+        A fresh session, deliberately: the failed transaction has already rolled
+        back and closed, so this snapshot is taken after any winner committed.
+
+        The read is scoped to exactly the tuple the insert targeted, plus the
+        tenant guard's own predicate, so anything it can return is by
+        construction a live grant for precisely the requested scope — never some
+        other row that happened to violate a constraint.
+        """
+        with self._db.orm_session() as db:
+            row = self._live_row(db, bot_id, owner_id, app_id, env)
+            if row is None:
+                return None
             logger.info(
                 "[bot_app_grant] lost the insert race, returning the winner's "
                 "row: app_id=%s bot_id=%s owner_id=%s",
@@ -103,21 +147,17 @@ class BotAppGrantRepository(
                 bot_id,
                 owner_id,
             )
-            with self._db.orm_session() as db:
-                row = self._live_row(db, bot_id, owner_id, app_id, env)
-                if row is None:
-                    # The winner's row is gone already — revoked between the
-                    # conflict and this read. Nothing is live, so re-raising is
-                    # the honest answer rather than inventing a record.
-                    raise
-                return row.to_record()
+            return row.to_record()
 
     def _insert_grant(
         self, app_id: int, app_name: str, bot_id: str, owner_id: str, env: str
     ) -> BotAppGrantRecord:
         """The write half of :meth:`grant`, in one transaction."""
         with self._db.transactional_orm_session() as db:
-            existing = self._live_row(db, bot_id, owner_id, app_id, env, lock=True)
+            # No lock: see the module docstring. The unique key is what
+            # serializes this, and a FOR UPDATE matching no row would take a gap
+            # lock that deadlocks a concurrent inserter instead.
+            existing = self._live_row(db, bot_id, owner_id, app_id, env)
             if existing is not None:
                 # Idempotent, and deliberately silent in the log: a repeated
                 # grant is the same authorization, not a new period. Returning
@@ -266,10 +306,17 @@ class BotAppGrantRepository(
         already begun a transaction reads and writes within it — which is what
         makes the idempotent grant and the revoke atomic.
 
-        ``lock`` adds ``FOR UPDATE`` and belongs only to the two mutations: it
-        holds the row across their check-then-write so a concurrent caller
-        waits rather than interleaving. Reads leave it off — taking write locks
-        on a listing would serialize callers who are only looking.
+        ``lock`` adds ``FOR UPDATE`` and belongs only to ``revoke``, which holds
+        an existing row across its check-then-delete so a concurrent withdrawal
+        waits rather than double-logging. Reads leave it off — taking write
+        locks on a listing would serialize callers who are only looking — and so
+        does the insert path, where there is no row to lock and the clause would
+        take a deadlock-prone gap lock instead.
+
+        **SQLite compiles ``FOR UPDATE`` away entirely**, and every session a
+        test can reach is SQLite. So a green suite says nothing about the
+        locking below; only MySQL/OceanBase exercises it. Stated here because
+        the next reader will otherwise assume the tests cover it.
         """
         query = db.query(self._Grant).filter(
             self._Grant.app_id == app_id,
