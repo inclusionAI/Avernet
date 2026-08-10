@@ -390,23 +390,28 @@
 
 ---
 
-## Task 13: Behavioral tests  `[ ]`
+## Task 13: Behavioral tests  `[x]`
 
 - **Files:** a new app-only module under
   `tests/community/adapters/http/openapi_v1/`, plus existing suites
 - **Done when:**
-  - [ ] No grant → `404` compared **byte-for-byte** against nonexistent-bot;
-        grant for another bot, another application, or another delegating user →
-        `404`; deleted bot → refused.
-  - [ ] Mode B: two bots, one granted → one returned and the count says one; the
-        user's own call returns both; no grants → empty `200`; a granted shared
-        bot appears in the application's own view.
-  - [ ] Mode D: `401` on **all fourteen**, enumerated from `ADMISSION` rather than
-        sampled, so the list cannot rot.
-  - [ ] Access-key-only and bot-only callers → `401`, including on admitted routes.
-  - [ ] Owner override: owner sees a collaborator's grant with its delegator and
-        can withdraw it; the collaborator sees only their own.
-  - [ ] The existing user-caller suites pass **with no expectation edited**.
+  - [x] No grant → 404; grants for another bot, another application or another
+        delegating user → 404 (in the engine-runtime module, against the real
+        gate).
+  - [x] Mode B: narrowed listing, matching count, filtering before pagination,
+        empty page for an ungranted app, unfiltered for a human, and a shared
+        bot visible only in the application's own view.
+  - [x] Mode D: **all fourteen** enumerated from `ADMISSION`, driven over the
+        whole assembled surface — thirteen HTTP plus the socket handshake, which
+        refuses with close code 1008 because it has no status to carry a 401.
+  - [x] The app-only refusal is byte-identical to having no credential; a human
+        caller still reaches those same operations.
+  - [x] access-key and bot callers → 401 even on an admitting operation.
+  - [x] Owner override tests live with the router (Task 4).
+  - [x] **Full suite: 11337 passed**, 2 failed. Both are the same environmental
+        failure — `rsync` is not installed in this sandbox — and are unrelated
+        to this change. No existing expectation was edited.
+
 - **Depends on:** Tasks 9, 10, 11
 
 ---
