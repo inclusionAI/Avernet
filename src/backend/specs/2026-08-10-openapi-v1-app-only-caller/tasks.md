@@ -360,21 +360,32 @@
 
 ---
 
-## Task 12: The fail-closed inventory test  `[ ]`
+## Task 12: The fail-closed inventory test  `[x]`
 
 > The test the issue asks for by name.
 
 - **Files:** `tests/community/adapters/http/openapi_v1/test_principal_seam.py`
 - **Done when:**
-  - [ ] Every route on the built app appears in `ADMISSION` exactly once — on the
-        surface and absent from the table fails, and vice versa.
-  - [ ] Each route's declared dependency matches its mode; no route declares both
-        `require_principal` and `require_operating_caller`.
-  - [ ] Every A1/A2 route either takes the grant-checked dependency or is one of
-        the five in Task 10, named explicitly so the exception list cannot grow
-        silently.
-  - [ ] The failure message names the offending routes and says what to do.
-  - [ ] `test_public_routes_require_principal` is strengthened, not replaced.
+  - [x] Every route appears in `ADMISSION` exactly once, and every entry is a
+        live route — both directions, with messages naming the offenders and
+        what to do.
+  - [x] Every grant-checked mode actually runs the check, and **only** those do.
+        Checked against the built router's *effective* dependencies: the check
+        is declared three ways (group-level, per route, transitively via
+        `OwnerIdDep`), so a test looking for one spelling would pass while the
+        others rotted. The older helpers in this package walk
+        `original_router`, which does **not** carry include-time dependencies —
+        that would have made this test pass vacuously.
+  - [x] The five deferring operations are named, are still grant-checked modes,
+        and cannot overlap; the set size is pinned so growth is deliberate.
+  - [x] Every mode is used, and `ADMITTING_MODES` is total.
+  - [x] The failure messages name the routes and the fix.
+  - [x] `test_public_routes_require_principal` strengthened rather than
+        replaced, and extended to the socket plane, whose effective context
+        carries neither path nor dependant.
+  - [x] **Verified the guard fires**: removing one table entry fails two tests;
+        restoring it returns the file byte-identical and the suite to green.
+
 - **Depends on:** Tasks 9, 10, 11
 
 ---
