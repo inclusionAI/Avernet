@@ -374,7 +374,7 @@ async def require_granted_bot(
     ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
     which the app maps to a ``404`` byte-identical to a nonexistent bot.
 
-Seven operations cannot be checked here — one carries its bot in the body,
+    Seven operations cannot be checked here — one carries its bot in the body,
     four name a skill, and two name a bot but address an owner under their own
     parameter name. They are **named in the table**, not detected by their
     shape. This dependency defers for exactly those, and their handlers bind the
@@ -424,12 +424,17 @@ def _resolves_owner_scoped(request: Request) -> bool:
 def _defers_to_its_handler(request: Request) -> bool:
     """Whether this operation resolves its own bot, per ``admission.py``.
 
-    An allow-list read from the table rather than a shape test. "The request
-    carries no ``bot_id``" describes the five deferring operations *and* every
-    mistake that would look like them — a renamed parameter, a route placed in a
-    grant-checked mode by accident. Naming them means a mistake is refused while
-    the five are served, and that the exception list cannot grow by accident:
-    adding to it is an edit to a table the inventory test reads.
+    An allow-list read from the table rather than a shape test, and the seven
+    break a shape test from both sides. "The request carries no ``bot_id``"
+    over-matches five of them — it equally describes every mistake that would
+    look like them, a renamed parameter or a route placed in a grant-checked
+    mode by accident — and it misses the other two entirely, since the
+    owner-addressed pair carry a ``bot_id`` and defer anyway, because the owner
+    they act on arrives under a parameter of its own.
+
+    Naming them means a mistake is refused while the seven are served, and that
+    the exception list cannot grow by accident: adding to it is an edit to a
+    table the inventory test reads.
     """
     route = request.scope.get("route")
     path = getattr(route, "path", None)

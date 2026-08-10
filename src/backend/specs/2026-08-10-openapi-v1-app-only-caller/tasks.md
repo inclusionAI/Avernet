@@ -312,6 +312,19 @@
 
 > The five operations that would otherwise pass unchecked.
 
+> **Correction — the count is seven, not five.** This task shipped naming five
+> deferring operations: the body-carried `POST /bots/routines` and the four
+> `skills/{skill_id}` routes. Review found two more that belong here —
+> `GET /bots/skills` and `POST /bots/skills/upload` — which do carry a `bot_id`
+> but address an owner under `owner_entity_id`, so binding their grant to the
+> caller's own bot was wrong in *both* directions: it authorized a read of
+> another owner's same-named bot, and refused a legitimate grant on a shared
+> one. They are named in `OWNER_ADDRESSED_OPERATIONS`, and `require_bot`'s
+> `must_be_own_bot: bool` became `expected_owner_id: str | None` to express the
+> difference. See the commit `fix(openapi-v1): bind skills grants to the owner
+> those handlers address`. The "Done when" items below are left as they were
+> written; the inventory test asserts the live count.
+
 - **Files:** `routines/router.py`, `skills/router.py`, the skill query service
 - **Done when:**
   - [x] `POST /bots/routines` checks `body.bot_id` immediately after parsing,

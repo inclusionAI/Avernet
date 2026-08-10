@@ -87,7 +87,7 @@ named the user."* Naming the user in the request was the preparatory work.
 
 > **Verified 2026-08-10.** All 48 hold. Evidence lives with the code: the
 > admission inventory (`test_admission_inventory.py`), the invariant and grant
-> boundaries (`engine_runtime/test_app_only_caller.py`), the five bot-not-on-the-
+> boundaries (`engine_runtime/test_app_only_caller.py`), the seven bot-not-on-the-
 > wire operations (`test_app_only_bot_not_on_the_wire.py`), the listings
 > (`test_app_only_listings.py`), the enumerated refusals
 > (`test_app_only_refusals.py`), the record and sweeps

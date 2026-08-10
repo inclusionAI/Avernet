@@ -14,7 +14,7 @@ Three properties, and each fails for a different mistake:
 2. Every operation whose mode says "grant-checked" actually performs the check —
    verified against the built router's *effective* dependencies, not against
    what a handler declares.
-3. The five operations that check inside their handlers are named, and named
+3. The seven operations that check inside their handlers are named, and named
    only there. Catches the exception list growing by accident.
 
 These are checked against the router the application really builds, so a change
@@ -176,7 +176,7 @@ def test_every_grant_checked_operation_actually_checks():
 
 
 def test_the_deferring_operations_are_grant_checked_and_named_once():
-    """The five exceptions are exceptions to *where*, never to *whether*."""
+    """The seven exceptions are exceptions to *where*, never to *whether*."""
     deferring = (
         BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS | OWNER_ADDRESSED_OPERATIONS
     )
