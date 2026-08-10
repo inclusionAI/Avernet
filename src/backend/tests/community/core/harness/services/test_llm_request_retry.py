@@ -18,6 +18,7 @@ caller's ``max_tokens`` into the posted request body.
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,6 +60,23 @@ class _FakeResponse:
     def json(self):
         return self._payload
 
+    def iter_lines(self):
+        # llm._do_request streams; encode message.content as SSE delta + [DONE].
+        choices = self._payload.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+            if content:
+                yield "data: " + json.dumps(
+                    {"choices": [{"delta": {"content": content}}]}, ensure_ascii=False
+                )
+        yield "data: [DONE]"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
 
 class _ScriptedHttpClient:
     """Plays a scripted sequence of ``post()`` outcomes.
@@ -73,6 +91,15 @@ class _ScriptedHttpClient:
         self.calls: list[dict] = []
 
     def post(self, path, *, json=None, headers=None, timeout=None, **kwargs):
+        self.calls.append({"url": path, "json": json, "timeout": timeout})
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    def stream(self, method, path, *, json=None, headers=None, timeout=None, **kwargs):
+        # llm._do_request now calls stream(); mirror post() and return the
+        # outcome as a context manager (_FakeResponse supports __enter__).
         self.calls.append({"url": path, "json": json, "timeout": timeout})
         outcome = self._outcomes.pop(0)
         if isinstance(outcome, BaseException):

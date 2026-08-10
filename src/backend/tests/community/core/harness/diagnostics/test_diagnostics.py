@@ -1198,7 +1198,7 @@ class TestToolsMcpFormatBatching:
     def test_pack_splits_on_count(self):
         items = [("schema", f"block-{i}", {"server_code": f"mcp.{i}"}) for i in range(7)]
         batches = _pack_mcp_batches(items)
-        assert [len(b) for b in batches] == [_BATCH_MAX_MCPS, _BATCH_MAX_MCPS, 1]
+        assert [len(b) for b in batches] == [_BATCH_MAX_MCPS, 2]
 
     def test_pack_splits_on_chars(self):
         big = "x" * (_BATCH_CHAR_BUDGET - 100)
@@ -1227,7 +1227,7 @@ class TestToolsMcpFormatBatching:
         # A many-tool MCP (tools > _LARGE_MCP_TOOL_THRESHOLD) gets its own
         # batch so that batch's output is one spec draft, not several —
         # keeps the call inside the 90s window for big MCPs.
-        big = {"server_code": "mcp.big", "tools": [{} for _ in range(15)]}
+        big = {"server_code": "mcp.big", "tools": [{} for _ in range(25)]}
         small_a = {"server_code": "mcp.a", "tools": [{} for _ in range(3)]}
         small_b = {"server_code": "mcp.b", "tools": [{} for _ in range(3)]}
         items = [
@@ -1277,7 +1277,7 @@ class TestToolsMcpFormatBatching:
     @pytest.mark.asyncio
     async def test_analyze_splits_into_batches_and_aggregates(self):
         diag = ToolsMcpFormatDiagnostic()
-        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcde"]
+        mcps = [{"server_code": f"mcp.{c}", "name": c} for c in "abcdefg"]
         ctx = _make_ctx({"TOOLS.md": "# Tools\n\n- some tools"}, activated_mcps=mcps)
         ctx.mcp_center = _MockMCPCenter({
             f"mcp.{c}": {
@@ -1288,7 +1288,7 @@ class TestToolsMcpFormatBatching:
                     "inputSchema": {"type": "object", "properties": {"p": {"type": "string"}}},
                 }],
             }
-            for c in "abcde"
+            for c in "abcdefg"
         })
 
         captured: list[str] = []
@@ -1302,10 +1302,11 @@ class TestToolsMcpFormatBatching:
         ctx.llm.chat = fake_chat
         findings = await diag.analyze(ctx)
 
-        assert len(captured) == 2  # 5 MCPs / _BATCH_MAX_MCPS per batch
+        # 7 MCPs / _BATCH_MAX_MCPS(5) -> 2 batches [a-e],[f-g]
+        assert len(captured) == 2
         assert "第 1/2 批" in captured[0] and "第 2/2 批" in captured[1]
-        assert "mcp.a" in captured[0] and "mcp.d" not in captured[0]
-        assert "mcp.e" in captured[1] and "mcp.a" not in captured[1]
+        assert "mcp.a" in captured[0] and "mcp.f" not in captured[0]
+        assert "mcp.g" in captured[1] and "mcp.a" not in captured[1]
         assert len(findings) == 1
         assert findings[0].score == 70
         assert findings[0].short_summary == "规范缺失"

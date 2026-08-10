@@ -17,6 +17,7 @@ this file fills the remaining gaps:
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 import httpx
@@ -55,6 +56,23 @@ class _FakeResponse:
     def json(self):
         return self._payload
 
+    def iter_lines(self):
+        # llm._do_request streams; encode message.content as SSE delta + [DONE].
+        choices = self._payload.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+            if content:
+                yield "data: " + json.dumps(
+                    {"choices": [{"delta": {"content": content}}]}, ensure_ascii=False
+                )
+        yield "data: [DONE]"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
 
 class _RecordingHttpClient:
     """Returns a canned OpenAI-shaped body and records each ``post()`` call."""
@@ -64,6 +82,14 @@ class _RecordingHttpClient:
         self.calls: list[dict] = []
 
     def post(self, path, *, json=None, headers=None, timeout=None, **kwargs):
+        self.calls.append(
+            {"url": path, "json": json, "headers": headers, "timeout": timeout}
+        )
+        return _FakeResponse(self._payload)
+
+    def stream(self, method, path, *, json=None, headers=None, timeout=None, **kwargs):
+        # llm._do_request now calls stream(); mirror post(), return a
+        # context-manager _FakeResponse.
         self.calls.append(
             {"url": path, "json": json, "headers": headers, "timeout": timeout}
         )
