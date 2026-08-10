@@ -143,7 +143,7 @@
         a different owner.
 - **Depends on:** Task 2
 
-## Task 4: The grant service (domain policy)  `[ ]`
+## Task 4: The grant service (domain policy)  `[x]`
 
 - **Goal:** One transport-agnostic place holding the grant/withdraw/list rules.
 - **Files:**
@@ -151,25 +151,25 @@
   `…/core/bot_app_grant/services/grant_service.py` (new),
   `…/core/bot_app_grant/errors.py` (new)
 - **Done when:**
-  - [ ] `BotAppGrantService.grant(bot_id, owner_id, app_id, app_name, tenant)`
+  - [x] `BotAppGrantService.grant(bot_id, owner_id, app_id, app_name, tenant)`
         writes `owner_id` and `tenant` as **resolved values**, never anything
         the request supplied.
-  - [ ] Re-granting a live grant returns the existing record unchanged — same
+  - [x] Re-granting a live grant returns the existing record unchanged — same
         `gmt_create` — and creates no second row and no second log event.
-  - [ ] Re-granting after a withdraw inserts a fresh live row and appends a
+  - [x] Re-granting after a withdraw inserts a fresh live row and appends a
         second `granted`. The earlier period is already closed in the log by its
         `revoked` event, so the two periods stay distinguishable.
-  - [ ] `revoke` raises `GrantNotFoundError` when the repository reports no live
+  - [x] `revoke` raises `GrantNotFoundError` when the repository reports no live
         row, so the adapter can answer 404 distinctly from a successful
         withdraw.
-  - [ ] `list_for_bot` returns live grants only — which the live table gives for
+  - [x] `list_for_bot` returns live grants only — which the live table gives for
         free, since it holds nothing else.
-  - [ ] `list_for_app(app_id, owner_id)` returns the owner's bots this app may
+  - [x] `list_for_app(app_id, owner_id)` returns the owner's bots this app may
         reach, live only. It performs **no bot-existence check** — deliberately
         asymmetric with the other three, which resolve a named bot and inherit
         the masked 404 from that read. This one names no bot, so there is
         nothing to mask.
-  - [ ] No FastAPI/HTTP import anywhere in the module (Rule 7: core is
+  - [x] No FastAPI/HTTP import anywhere in the module (Rule 7: core is
         transport-agnostic).
 - **Depends on:** Task 3
 
