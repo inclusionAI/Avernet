@@ -278,35 +278,35 @@
         explicitly.
 - **Depends on:** Task 8
 
-## Task 10: Router and service tests  `[ ]`
+## Task 10: Router and service tests  `[x]`
 
 - **Goal:** The behaviors `spec.md` promises are pinned.
 - **Files:**
   `src/backend/tests/community/adapters/http/openapi_v1/authorized_apps/test_router.py` (new),
   `src/backend/tests/community/core/bot_app_grant/test_grant_service.py` (new)
 - **Done when:**
-  - [ ] `test_grant_reads_app_from_principal_not_from_request`
-  - [ ] `test_grant_is_idempotent_and_does_not_move_granted_at`
-  - [ ] `test_regrant_after_revoke_creates_a_new_period`
-  - [ ] `test_list_excludes_revoked_grants`
-  - [ ] `test_revoke_absent_grant_is_404_distinct_from_successful_revoke`
-  - [ ] `test_non_owner_answer_is_byte_identical_to_absent_bot` — compares
+  - [x] `test_grant_reads_app_from_principal_not_from_request`
+  - [x] `test_grant_is_idempotent_and_does_not_move_granted_at`
+  - [x] `test_regrant_after_revoke_creates_a_new_period`
+  - [x] `test_list_excludes_revoked_grants`
+  - [x] `test_revoke_absent_grant_is_404_distinct_from_successful_revoke`
+  - [x] `test_non_owner_answer_is_byte_identical_to_absent_bot` — compares
         status **and** body, since "byte-identical" is the promise.
-  - [ ] `test_collaborator_may_operate_but_may_not_grant` — pins that this
+  - [x] `test_collaborator_may_operate_but_may_not_grant` — pins that this
         surface is narrower than the MEMBER+ operator bar
         (`core/engine_runtime/gate.py:78`).
-  - [ ] `test_cross_tenant_bot_is_not_grantable` — the tenant guard is inherited
+  - [x] `test_cross_tenant_bot_is_not_grantable` — the tenant guard is inherited
         from `AvernetTenantMiddleware` rather than written here, so it is
         asserted rather than trusted; an untested inherited guard is one a later
         change can remove without noticing.
-  - [ ] `test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request`
-  - [ ] `test_grant_withdraw_grant_withdraw_survives` — the cycle that broke the
+  - [x] `test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request`
+  - [x] `test_grant_withdraw_grant_withdraw_survives` — the cycle that broke the
         first schema. Two full periods, four log events, no constraint error.
-  - [ ] `test_log_outlives_the_live_row` — after a withdrawal the live row is
+  - [x] `test_log_outlives_the_live_row` — after a withdrawal the live row is
         gone and the log still names the app and tenant, so the audit reads
         correctly at exactly the moment it is consulted.
-  - [ ] `test_duplicate_grant_appends_no_log_event` — a re-grant is not a period.
-  - [ ] The app's view — `test_list_authorized_bots_is_scoped_to_the_calling_app`
+  - [x] `test_duplicate_grant_appends_no_log_event` — a re-grant is not a period.
+  - [x] The app's view — `test_list_authorized_bots_is_scoped_to_the_calling_app`
         (two apps granted on one owner's bots see disjoint lists),
         `test_list_authorized_bots_is_scoped_to_the_calling_owner` (one app
         granted by two owners sees only the calling owner's bots),
@@ -316,22 +316,22 @@
         fails, so both scoping dimensions are pinned separately.
 - **Depends on:** Task 7
 
-## Task 11: Principal-seam assertions  `[ ]`
+## Task 11: Principal-seam assertions  `[x]`
 
 - **Goal:** The identity requirement is pinned at the route level, where a
   future route cannot quietly omit it.
 - **Files:** `src/backend/tests/community/adapters/http/openapi_v1/test_principal_seam.py`
 - **Done when:**
-  - [ ] `test_authorized_apps_post_requires_user_and_app_principal`, mirroring
+  - [x] `test_authorized_apps_post_requires_user_and_app_principal`, mirroring
         `test_bot_logs_routes_require_user_and_app_principal` (`:361`) — it
         walks the dependency tree, so it catches a handler that forgets the
         dependency even if the gateway rule is right.
-  - [ ] `test_authorized_bots_get_requires_user_and_app_principal` — the same
+  - [x] `test_authorized_bots_get_requires_user_and_app_principal` — the same
         walk. This one is load-bearing beyond auth: the handler scopes its query
         by the App principal, so a missing dependency would not merely weaken a
         check, it would leave the listing with nothing to filter by.
-  - [ ] `test_authorized_apps_get_and_delete_require_only_principal`.
-  - [ ] The existing assertion that every public route depends on
+  - [x] `test_authorized_apps_get_and_delete_require_only_principal`.
+  - [x] The existing assertion that every public route depends on
         `require_principal` still passes with the new group mounted.
 - **Depends on:** Task 7
 
