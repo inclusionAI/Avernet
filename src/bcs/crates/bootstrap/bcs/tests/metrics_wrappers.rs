@@ -542,7 +542,6 @@ fn group_add_member_cmd() -> GroupAddMemberCommand {
         human_actor_id: None,
         group_id: "group-wrapper".to_string(),
         bot_id: "bot-member".to_string(),
-        role: None,
     }
 }
 

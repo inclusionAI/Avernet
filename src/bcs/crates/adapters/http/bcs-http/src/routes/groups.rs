@@ -114,8 +114,6 @@ pub struct DeleteSessionQuery {
 #[derive(Debug, Deserialize)]
 pub struct AddMemberRequest {
     pub bot_uuid: String,
-    #[serde(default)]
-    pub role: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -757,7 +755,7 @@ pub async fn add_group_member(
     Json(req): Json<AddMemberRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
     let requester_bot_id = resolve_group_member_caller(&state, &headers, &uri, &id).await?;
-    let AddMemberRequest { bot_uuid, role } = req;
+    let AddMemberRequest { bot_uuid } = req;
     let result = state
         .services
         .group_management
@@ -766,7 +764,6 @@ pub async fn add_group_member(
             human_actor_id: extract_human_actor_id(&state, &headers, &uri).await,
             group_id: id.clone(),
             bot_id: bot_uuid,
-            role,
         })
         .await
         .map_err(group_use_case_error_to_http)?;

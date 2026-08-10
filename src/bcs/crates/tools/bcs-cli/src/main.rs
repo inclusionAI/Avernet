@@ -1206,10 +1206,6 @@ enum Commands {
         /// Bot UUID to add
         #[arg(long)]
         bot_uuid: String,
-
-        /// Role (driver/consultant)
-        #[arg(short, long)]
-        role: Option<String>,
     },
 
     /// Chat with another bot (1:1 message via BCS routing)
@@ -3392,7 +3388,6 @@ pub async fn run() -> Result<()> {
             token,
             group,
             bot_uuid,
-            role,
         } => {
             let token = get_token(token.as_deref())?;
             let client = create_client(
@@ -3407,21 +3402,24 @@ pub async fn run() -> Result<()> {
                 "POST",
                 &format!("/groups/{}/members", &group),
                 json!({
-                    "bot_id": &bot_uuid,
-                    "role": role.as_deref().unwrap_or("consultant")
+                    "bot_uuid": &bot_uuid,
                 })
             );
 
-            let result = client
-                .add_group_member(&group, &bot_uuid, role.as_deref())
-                .await?;
+            let result = client.add_group_member(&group, &bot_uuid).await?;
 
             debug_response!(debug, "200", &result);
 
             println!("✓ Member added to group:");
             println!("  Group: {}", group);
             println!("  Bot: {}", bot_uuid);
-            println!("  Role: {}", role.as_deref().unwrap_or("consultant"));
+            if let Some(role) = result
+                .get("member")
+                .and_then(|member| member.get("role"))
+                .and_then(|role| role.as_str())
+            {
+                println!("  Role: {}", role);
+            }
         }
 
         Commands::Chat {
@@ -4871,6 +4869,50 @@ mod tests {
         };
 
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_add_member_accepts_only_group_and_bot_uuid() {
+        let cli = Cli::try_parse_from([
+            "bcs-cli",
+            "add-member",
+            "--group",
+            "group-1",
+            "--bot-uuid",
+            "worker-1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::AddMember {
+                group, bot_uuid, ..
+            } => {
+                assert_eq!(group, "group-1");
+                assert_eq!(bot_uuid, "worker-1");
+            }
+            _ => panic!("expected add-member command"),
+        }
+    }
+
+    #[test]
+    fn test_add_member_rejects_role_argument() {
+        let result = Cli::try_parse_from([
+            "bcs-cli",
+            "add-member",
+            "--group",
+            "group-1",
+            "--bot-uuid",
+            "worker-1",
+            "--role",
+            "worker",
+        ]);
+
+        let error = match result {
+            Ok(_) => panic!("group add-member must not expose role selection"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.kind(), ErrorKind::UnknownArgument);
     }
 
     #[test]
