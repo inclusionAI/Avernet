@@ -94,12 +94,8 @@ impl OAuthProvider for GitHubOAuthProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            warn!(%status, %body, "GitHub token exchange failed");
-            return Err(OAuthError::TokenExchangeFailed(format!(
-                "token endpoint returned {}: {}",
-                status, body
-            )));
+            warn!(%status, "GitHub token exchange failed");
+            return Err(OAuthError::TokenExchangeFailed(format!("token endpoint returned {status}")));
         }
 
         let gh_token: GitHubTokenResponse = resp
@@ -127,12 +123,8 @@ impl OAuthProvider for GitHubOAuthProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            warn!(%status, %body, "GitHub userinfo request failed");
-            return Err(OAuthError::UserInfoFailed(format!(
-                "userinfo endpoint returned {}: {}",
-                status, body
-            )));
+            warn!(%status, "GitHub userinfo request failed");
+            return Err(OAuthError::UserInfoFailed(format!("userinfo endpoint returned {status}")));
         }
 
         let user: GitHubUserInfoResponse = resp
@@ -151,5 +143,15 @@ impl OAuthProvider for GitHubOAuthProvider {
             email: user.email,
             avatar: user.avatar_url,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn oauth_failures_do_not_expose_provider_response_bodies() {
+        let source = include_str!("provider.rs");
+        assert!(!source.contains(concat!("warn!(%status, %", "body")));
+        assert!(!source.contains(concat!("status, ", "body")));
     }
 }

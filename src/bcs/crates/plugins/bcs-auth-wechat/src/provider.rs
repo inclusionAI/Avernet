@@ -87,12 +87,12 @@ impl OAuthProvider for WeChatOAuthProvider {
             .get(&url)
             .send()
             .await
-            .map_err(|e| OAuthError::TokenExchangeFailed(e.to_string()))?;
+            .map_err(|e| OAuthError::TokenExchangeFailed(e.without_url().to_string()))?;
 
         let body = resp
             .text()
             .await
-            .map_err(|e| OAuthError::TokenExchangeFailed(format!("read token response body: {e}")))?;
+            .map_err(|e| OAuthError::TokenExchangeFailed(format!("read token response body: {}", e.without_url())))?;
 
         let wechat_token: WeChatTokenResponse = serde_json::from_str(&body)
             .map_err(|e| OAuthError::TokenExchangeFailed(format!("parse token response: {e}")))?;
@@ -147,12 +147,12 @@ impl OAuthProvider for WeChatOAuthProvider {
             .get(&url)
             .send()
             .await
-            .map_err(|e| OAuthError::UserInfoFailed(e.to_string()))?;
+            .map_err(|e| OAuthError::UserInfoFailed(e.without_url().to_string()))?;
 
         let body = resp
             .text()
             .await
-            .map_err(|e| OAuthError::UserInfoFailed(format!("read userinfo response body: {e}")))?;
+            .map_err(|e| OAuthError::UserInfoFailed(format!("read userinfo response body: {}", e.without_url())))?;
 
         let user: WeChatUserInfoResponse = serde_json::from_str(&body)
             .map_err(|e| OAuthError::UserInfoFailed(format!("parse userinfo response: {e}")))?;
@@ -179,5 +179,17 @@ impl OAuthProvider for WeChatOAuthProvider {
             email: None,
             avatar: user.headimgurl,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn oauth_request_errors_strip_credential_bearing_urls() {
+        let source = include_str!("provider.rs");
+        let production = source.split("#[cfg(test)]").next().expect("production source");
+        assert!(!production.contains(concat!("TokenExchangeFailed(e.", "to_string())")));
+        assert!(!production.contains(concat!("UserInfoFailed(e.", "to_string())")));
+        assert_eq!(production.matches("without_url()").count(), 4);
     }
 }

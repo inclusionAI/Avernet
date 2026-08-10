@@ -22,7 +22,7 @@ pub struct FuseClient {
 impl std::fmt::Debug for FuseClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FuseClient")
-            .field("base_url", &self.base_url)
+            .field("base_url", &url_for_log(&self.base_url))
             .finish()
     }
 }
@@ -119,10 +119,13 @@ impl FuseClient {
         request: RecommendWorkersRequest,
     ) -> Result<(RecommendWorkersResponse, serde_json::Value), FuseClientError> {
         let url = format!("{}/api/v1/recommend", self.base_url);
+        let logged_url = url_for_log(&url);
 
         tracing::info!(
-            url = %url,
-            request_body = %serde_json::to_string(&request).unwrap_or_default(),
+            url = %logged_url,
+            question_len = request.question.len(),
+            top_k = request.top_k,
+            min_score = request.min_score,
             "recommend_workers: sending request"
         );
 
@@ -132,23 +135,23 @@ impl FuseClient {
         let raw_body = resp.text().await?;
 
         tracing::debug!(
-            url = %url,
+            url = %logged_url,
             status = %status,
-            raw_body = %raw_body,
+            response_body_len = raw_body.len(),
             "recommend_workers: received response"
         );
 
         if !status.is_success() {
             return Err(FuseClientError::HttpError(format!(
-                "HTTP {} — {}",
-                status, raw_body
+                "HTTP {status}; body_len={}",
+                raw_body.len()
             )));
         }
 
         let response: RecommendWorkersResponse = serde_json::from_str(&raw_body).map_err(|e| {
             FuseClientError::InvalidResponse(format!(
-                "Failed to parse recommend response: {} — body: {}",
-                e, raw_body
+                "Failed to parse recommend response: {e}; body_len={}",
+                raw_body.len()
             ))
         })?;
 
@@ -178,18 +181,42 @@ impl FuseClient {
 
         if !status.is_success() {
             return Err(FuseClientError::HttpError(format!(
-                "HTTP {} — {}",
-                status, raw_body
+                "HTTP {status}; body_len={}",
+                raw_body.len()
             )));
         }
 
         let response: BatchWorkersResponse = serde_json::from_str(&raw_body).map_err(|e| {
             FuseClientError::InvalidResponse(format!(
-                "Failed to parse batch workers response: {} — body: {}",
-                e, raw_body
+                "Failed to parse batch workers response: {e}; body_len={}",
+                raw_body.len()
             ))
         })?;
 
         Ok(response)
+    }
+}
+
+fn url_for_log(raw_url: &str) -> String {
+    let Ok(mut url) = reqwest::Url::parse(raw_url) else {
+        return "<invalid URL>".to_string();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::url_for_log;
+
+    #[test]
+    fn diagnostic_url_removes_credentials_query_and_fragment() {
+        let logged = url_for_log("https://user:secret@example.com/fuse?token=value#fragment");
+        assert_eq!(logged, "https://example.com/fuse");
+        assert!(!logged.contains("secret"));
+        assert!(!logged.contains("token"));
     }
 }

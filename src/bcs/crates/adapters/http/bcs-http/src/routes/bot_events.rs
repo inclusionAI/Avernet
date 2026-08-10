@@ -103,12 +103,11 @@ where
             Err(rejection) => {
                 let status = rejection.status();
                 let body_text = rejection.body_text();
-                let request_body = String::from_utf8_lossy(&body_bytes);
                 warn!(
                     provider_id = %provider_id,
                     status = %status.as_u16(),
                     error = %body_text,
-                    request_body = %request_body,
+                    request_body_len = body_bytes.len(),
                     "provider callback: invalid bot event request"
                 );
                 Err(rejection.into_response())

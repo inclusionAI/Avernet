@@ -422,7 +422,6 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             post_provider(&self.client, &self.url_guard, &target, &body, &[])
                 .await
                 .map_err(|error| error.to_string())?;
-        let history_body = provider_history_log(&response);
         info!(
             target_bot_id = %target_bot_id,
             provider_id = %body.to_bot.provider_id,
@@ -440,7 +439,6 @@ impl GroupHistoryBotRequestPort for HttpProviderTransport {
             has_more = %response.has_more,
             next_before = ?response.next_before,
             next_after = ?response.next_after,
-            history_body = %history_body,
             "provider downlink: history response"
         );
         if !response.ok {
@@ -788,7 +786,8 @@ async fn send_provider_request_with_policy(
         session_id = %body.session_id,
         bcn_group_id = %body.bcn_group_id,
         from = ?body.from,
-        message = ?body.message,
+        message_present = body.message.is_some(),
+        message_len = body.message.as_ref().map_or(0, |message| message.to_string().len()),
         before = ?body.before,
         after = ?body.after,
         limit = ?body.limit,
@@ -803,7 +802,7 @@ async fn send_provider_request_with_policy(
         method = %body.method,
         frame_id = %body.id,
         message_id = %message_id,
-        webhook_url = %webhook_url,
+        webhook_url = %webhook_url_for_log(webhook_url),
         protocol_version = %protocol_version,
         accept = %accept,
         transport = %transport,
@@ -990,13 +989,17 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
             }
         }
     }
+    if let Some(message) = redacted.get_mut("message") {
+        if !message.is_null() {
+            *message = Value::String("<redacted>".to_string());
+        }
+    }
+    if let Some(extensions) = redacted.get_mut("extensions") {
+        if !extensions.is_null() {
+            *extensions = Value::String("<redacted>".to_string());
+        }
+    }
     serde_json::to_string(&redacted).unwrap_or_else(|error| {
-        format!("{{\"serialize_error\":\"{}\"}}", error)
-    })
-}
-
-fn provider_history_log(response: &ProviderHistoryResponse) -> String {
-    serde_json::to_string(response).unwrap_or_else(|error| {
         format!("{{\"serialize_error\":\"{}\"}}", error)
     })
 }
@@ -1776,7 +1779,7 @@ Connection: keep-alive\r\n\
     }
 
     #[test]
-    fn provider_body_log_redacts_temporary_attachment_urls() {
+    fn provider_body_log_redacts_content_and_temporary_attachment_urls() {
         let body = ProviderWebhookRequest {
             frame_type: "event".to_string(),
             id: "frame-1".to_string(),
@@ -1789,7 +1792,7 @@ Connection: keep-alive\r\n\
                 tags: Vec::new(),
             },
             from: None,
-            message: None,
+            message: Some(serde_json::json!("credential-like message")),
             attachments: vec![Attachment {
                 attachment_id: "att-1".to_string(),
                 attachment_type: bcs_protocol::AttachmentType::Image,
@@ -1804,13 +1807,17 @@ Connection: keep-alive\r\n\
             after: None,
             limit: None,
             timeout_ms: 1_000,
-            extensions: None,
+            extensions: Some(serde_json::json!({"authorization": "secret"})),
         };
 
         let logged = provider_body_log(&body);
 
         assert!(logged.contains("\"url\":\"<redacted>\""));
+        assert!(logged.contains("\"message\":\"<redacted>\""));
+        assert!(logged.contains("\"extensions\":\"<redacted>\""));
         assert!(!logged.contains("token=secret"));
+        assert!(!logged.contains("credential-like message"));
+        assert!(!logged.contains("authorization"));
         assert_eq!(
             body.attachments[0].url,
             "https://download.example.com/image?token=secret"

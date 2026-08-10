@@ -53,6 +53,15 @@ const DEFAULT_CACHE_KEY_PREFIX: &str = "bcs:";
 /// Cache key namespace for bot status.
 const STATUS_CACHE_KEY_NAMESPACE: &str = "status:";
 
+fn session_token_preview(token: &str) -> String {
+    let mut chars = token.chars();
+    let prefix: String = chars.by_ref().take(4).collect();
+    if chars.next().is_none() {
+        return "[redacted]".to_string();
+    }
+    format!("{prefix}...")
+}
+
 fn is_legacy_namespace(bot_uuid: &str, staff_no: &str) -> bool {
     let suffix = format!(":{}", staff_no);
     if !bot_uuid.ends_with(&suffix) {
@@ -855,8 +864,9 @@ impl PersistentBotRepo {
     async fn find_bot_by_token_in_db(&self, token: &str) -> Option<String> {
         let env = resolve_env();
         let sql = "SELECT bot_uuid FROM bcs_bots WHERE session_token = ? AND env = ? AND COALESCE(is_deleted, 0) = 0";
+        let token_preview = session_token_preview(token);
 
-        info!(token = %token, env = %env, "find_bot_by_token_in_db: executing query");
+        info!(token_preview = %token_preview, env = %env, "find_bot_by_token_in_db: executing query");
 
         let rows = match self
             .db_query(sql, vec![Value::from(token), Value::from(env.as_str())])
@@ -864,27 +874,27 @@ impl PersistentBotRepo {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(token = %token, env = %env, error = %e, "find_bot_by_token_in_db: database query failed");
+                warn!(token_preview = %token_preview, env = %env, error = %e, "find_bot_by_token_in_db: database query failed");
                 return None;
             }
         };
 
-        info!(token = %token, rows_count = rows.len(), "find_bot_by_token_in_db: query completed");
+        info!(token_preview = %token_preview, rows_count = rows.len(), "find_bot_by_token_in_db: query completed");
 
         if let Some(row) = rows.first() {
             match db_get_column::<String>(row, "bot_uuid") {
                 Ok(bot_uuid) => {
-                    info!(token = %token, bot_uuid = %bot_uuid, "find_bot_by_token_in_db: found bot");
+                    info!(token_preview = %token_preview, bot_uuid = %bot_uuid, "find_bot_by_token_in_db: found bot");
                     return Some(bot_uuid);
                 }
                 Err(e) => {
-                    warn!(token = %token, error = %e, "find_bot_by_token_in_db: failed to get bot_uuid");
+                    warn!(token_preview = %token_preview, error = %e, "find_bot_by_token_in_db: failed to get bot_uuid");
                     return None;
                 }
             }
         }
 
-        warn!(token = %token, "find_bot_by_token_in_db: no bot found");
+        warn!(token_preview = %token_preview, "find_bot_by_token_in_db: no bot found");
         None
     }
 
@@ -2258,8 +2268,8 @@ impl BotRepoPort for PersistentBotRepo {
         // Fall back to database indexed lookup
         let result = self.find_bot_by_token_in_db(token).await;
         if result.is_none() {
-            let prefix = &token[..8.min(token.len())];
-            warn!(token_prefix = %prefix, "find_bot_by_token: token not found in any layer (cache/memory/database)");
+            let token_preview = session_token_preview(token);
+            warn!(token_preview = %token_preview, "find_bot_by_token: token not found in any layer (cache/memory/database)");
         }
         result
     }
@@ -2355,20 +2365,20 @@ impl BotRepoPort for PersistentBotRepo {
         // Note: Token is NOT persisted to DB here. It will be saved during onboard
         // when save_to_db is called with the session_token.
 
-        let token_preview = format!("{}...", &session_token[..4]);
+        let token_preview = session_token_preview(&session_token);
         info!(bot_id = %bot_id, token_preview = %token_preview, "register_streaming_connection: connection registered (token in memory only, will persist on onboard)");
 
         Ok(session_token)
     }
 
     async fn reconnect_streaming(&self, existing_token: String) -> Result<(String, String), ()> {
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
+        let token_preview = session_token_preview(&existing_token);
         info!(token_preview = %token_preview, "reconnect_streaming: attempting reconnect");
 
         // Find bot by token (memory -> database)
         let bot_id = self.find_bot_by_token(&existing_token).await.ok_or(())?;
 
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
+        let token_preview = session_token_preview(&existing_token);
         info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: found bot by token");
 
         let mut bots = self.bots.write().await;
@@ -2435,7 +2445,7 @@ impl BotRepoPort for PersistentBotRepo {
         let mut token_to_bot = self.token_to_bot.write().await;
         token_to_bot.insert(existing_token.clone(), bot_id.clone());
 
-        let token_preview = format!("{}...", &existing_token[..existing_token.len().min(4)]);
+        let token_preview = session_token_preview(&existing_token);
         info!(bot_id = %bot_id, token_preview = %token_preview, "reconnect_streaming: connection re-established");
 
         Ok((bot_id, existing_token))
@@ -2449,7 +2459,7 @@ impl BotRepoPort for PersistentBotRepo {
                 // DO NOT remove token_to_bot mapping - token persists for reconnection
                 info!(
                     bot_id = %bot_id,
-                    token = %conn.session_token,
+                    token_preview = %session_token_preview(&conn.session_token),
                     duration_ms = conn.connected_at.elapsed().as_millis() as u64,
                     "Bot streaming connection removed (token preserved for reconnection)"
                 );
@@ -2482,7 +2492,7 @@ impl BotRepoPort for PersistentBotRepo {
     async fn store_token_mapping(&self, token: String, bot_id: String) {
         let mut token_to_bot = self.token_to_bot.write().await;
         token_to_bot.insert(token.clone(), bot_id.clone());
-        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+        debug!(bot_id = %bot_id, token_preview = %session_token_preview(&token), "Token mapping stored");
     }
 
     async fn register_http_connection(&self, bot_id: String, token: String) -> String {
@@ -2934,6 +2944,31 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_token_preview_is_bounded_and_utf8_safe() {
+        assert_eq!(session_token_preview("12345678"), "1234...");
+        assert_eq!(session_token_preview("短令牌测试"), "短令牌测...");
+        assert_eq!(session_token_preview("abc"), "[redacted]");
+        assert_eq!(session_token_preview(""), "[redacted]");
+    }
+
+    #[test]
+    fn bot_store_tracing_never_uses_known_raw_session_token_fields() {
+        let sources = [include_str!("lib.rs"), include_str!("memory.rs")];
+        let forbidden = [
+            concat!("token", " = %token"),
+            concat!("token", " = %session_token"),
+            concat!("token", " = %existing_token"),
+            concat!("token", " = %conn.session_token"),
+        ];
+
+        for source in sources {
+            for pattern in forbidden {
+                assert!(!source.contains(pattern), "raw session token log field: {pattern}");
+            }
+        }
+    }
 
     // Note: These tests require external cache and database connections.
     // Run with: cargo test --package bcs-bot -- --ignored

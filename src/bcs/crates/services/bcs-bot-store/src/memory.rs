@@ -1441,7 +1441,7 @@ impl BotRepoPort for MemoryBotRepo {
         let mut token_to_bot = self.token_to_bot.write().await;
         token_to_bot.insert(session_token.clone(), bot_id.clone());
 
-        info!(bot_id = %bot_id, token = %session_token, "Bot streaming connection registered");
+        info!(bot_id = %bot_id, token_preview = %super::session_token_preview(&session_token), "Bot streaming connection registered");
 
         Ok(session_token)
     }
@@ -1453,7 +1453,7 @@ impl BotRepoPort for MemoryBotRepo {
             match token_to_bot.get(&existing_token) {
                 Some(id) => id.clone(),
                 None => {
-                    warn!(token = %existing_token, "Unknown token for reconnection");
+                    warn!(token_preview = %super::session_token_preview(&existing_token), "Unknown token for reconnection");
                     return Err(());
                 }
             }
@@ -1499,7 +1499,7 @@ impl BotRepoPort for MemoryBotRepo {
             );
         }
 
-        info!(bot_id = %bot_id, token = %existing_token, "Bot streaming connection re-established");
+        info!(bot_id = %bot_id, token_preview = %super::session_token_preview(&existing_token), "Bot streaming connection re-established");
 
         Ok((bot_id, existing_token))
     }
@@ -1512,7 +1512,7 @@ impl BotRepoPort for MemoryBotRepo {
                 // DO NOT remove token_to_bot mapping - token should persist for reconnection
                 info!(
                     bot_id = %bot_id,
-                    token = %conn.session_token,
+                    token_preview = %super::session_token_preview(&conn.session_token),
                     duration_ms = conn.connected_at.elapsed().as_millis() as u64,
                     "Bot streaming connection removed (token preserved for reconnection)"
                 );
@@ -1545,7 +1545,7 @@ impl BotRepoPort for MemoryBotRepo {
     async fn store_token_mapping(&self, token: String, bot_id: String) {
         let mut token_to_bot = self.token_to_bot.write().await;
         token_to_bot.insert(token.clone(), bot_id.clone());
-        debug!(bot_id = %bot_id, token = %token, "Token mapping stored");
+        debug!(bot_id = %bot_id, token_preview = %super::session_token_preview(&token), "Token mapping stored");
     }
 
     async fn get_protocol_version(&self, bot_id: &str) -> u32 {

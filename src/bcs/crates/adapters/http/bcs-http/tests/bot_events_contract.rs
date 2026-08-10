@@ -651,8 +651,12 @@ async fn bot_events_logs_json_rejections_before_handler() {
         "expected serde rejection in log, got:\n{logs}"
     );
     assert!(
-        logs.contains("boom"),
-        "expected request body in log, got:\n{logs}"
+        logs.contains("request_body_len="),
+        "expected request body length in log, got:\n{logs}"
+    );
+    assert!(
+        !logs.contains("boom"),
+        "request body leaked into log:\n{logs}"
     );
 }
 
