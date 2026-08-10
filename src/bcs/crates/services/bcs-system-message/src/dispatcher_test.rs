@@ -246,6 +246,7 @@ async fn dispatch_bot_joined_delivers_to_all_participants() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
         },
+        session_id: "session-test".to_string(),
     };
 
     let registry = Arc::new(ProviderTargetRegistry::default());
@@ -325,6 +326,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
             role: ParticipantRole::Consultant, actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
         },
+        session_id: "session-test".to_string(),
     };
 
     let registry = Arc::new(ProviderTargetRegistry::default());
@@ -354,12 +356,12 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
         .expect("new-bot injection record");
     assert_eq!(injection.sender_id, "system");
     assert_eq!(injection.message_type, "system");
-    assert!(content_text(injection).contains("你加入了 BCS 协作群."),
+    assert!(content_text(injection).contains("<GroupContext>"),
         "new-bot context injection persisted under owner=new-bot");
     let notice = appended.iter().find(|m| m.owner_bot_id.is_none())
         .expect("public join notification record");
     assert!(content_text(notice).contains("已加入协作群"));
-    assert!(!content_text(notice).contains("你加入了 BCS 协作群."));
+    assert!(!content_text(notice).contains("<GroupContext>"));
     assert!(!appended.iter().any(|m| m.owner_bot_id.as_deref() == Some(&existing_bot_id)),
         "shared notice must not persist per-bot copies");
 
@@ -369,7 +371,7 @@ async fn dispatch_bot_joined_persists_per_recipient_and_ws_shows_notification_on
     assert_eq!(published.len(), 1, "WS publishes a single user_message");
     let payload = &published[0].event_json;
     assert!(payload.contains("已加入协作群"));
-    assert!(!payload.contains("你加入了 BCS 协作群."),
+    assert!(!payload.contains("<GroupContext>"),
         "WS must not leak the new-bot context injection");
 }
 
@@ -647,7 +649,7 @@ async fn dispatch_non_manager_worker_session_context_persists_per_recipient_reco
         let rec = appended.iter()
             .find(|m| m.owner_bot_id.as_deref() == Some(owner))
             .unwrap_or_else(|| panic!("owner record for {owner}"));
-        assert!(content_text(rec).contains("[GROUP CONTEXT]"));
+        assert!(content_text(rec).contains("<GroupContext>"));
     }
 }
 
@@ -745,9 +747,9 @@ async fn dispatch_session_context_uses_bcs_route_when_group_has_no_provider_down
     let calls = dispatch_session_context_with_provider_registry(&group, "普通协作").await;
     let text = delivered_text_for(&calls, "bot-ws");
 
-    assert!(text.contains("路由工具 (bcs_route)"));
-    assert!(text.contains("使用 bcs_route 工具指定下一个响应者"));
-    assert!(!text.contains("路由工具 (@mention)"));
+    assert!(text.contains("## 工具说明 (bcs_route)"));
+    assert!(text.contains("使用 `bcs_route` 工具替代 @mention 指定下一个响应者可以提高路由准确率"));
+    assert!(!text.contains("## 工具说明 (@mention)"));
     assert!(!text.contains("可@:"));
 }
 
@@ -769,21 +771,15 @@ async fn dispatch_session_context_uses_at_mention_when_group_has_provider_downli
 
     for recipient in ["bot-ws", "bot-provider"] {
         let text = delivered_text_for(&calls, recipient);
-        assert!(text.contains("路由工具 (@mention)"));
+        assert!(text.contains("## 工具说明 (@mention)"));
         assert!(text.contains("消息中任何 @ 标识都会触发路由，让被 @ 的 Bot 收到消息并被要求响应。"));
         assert!(text.contains("只有希望某个 Bot 响应时才使用 @"));
         assert!(text.contains("不要用 @ 表示引用、收到或转述某个 Bot 的消息"));
         assert!(text.contains("优先使用名称；名称为空、重复或不确定时，使用 Bot ID。"));
-        assert!(text.contains(
-            "- 名称: Driver | ID: bot-ws | 角色: driver | 可@: @Driver / @bot-ws"
-        ));
-        assert!(text.contains(
-            "- 名称: Reviewer | ID: bot-provider | 角色: consultant | 可@: @bot-provider"
-        ));
-        assert!(text.contains(
-            "- 名称: Reviewer | ID: bot-peer | 角色: consultant | 可@: @bot-peer"
-        ));
-        assert!(!text.contains("路由工具 (bcs_route)"));
+        assert!(text.contains("|Driver|bot-ws|driver|"));
+        assert!(text.contains("|Reviewer|bot-provider|consultant|"));
+        assert!(text.contains("|Reviewer|bot-peer|consultant|"));
+        assert!(!text.contains("## 工具说明 (bcs_route)"));
         assert!(!text.contains("等待 @mention、bcs_route 或任务点名后再响应。"));
     }
 }
