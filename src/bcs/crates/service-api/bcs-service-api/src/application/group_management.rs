@@ -71,7 +71,6 @@ pub struct GroupAddMemberCommand {
     pub human_actor_id: Option<String>,
     pub group_id: String,
     pub bot_id: String,
-    pub role: Option<String>,
 }
 
 /// Request for deleting a group.

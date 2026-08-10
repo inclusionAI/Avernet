@@ -1937,13 +1937,11 @@ impl BcsClient {
         &self,
         group_id: &str,
         bot_id: &str,
-        role: Option<&str>,
     ) -> Result<serde_json::Value> {
         let url = format!("{}/groups/{}/members", self.base_url, group_id);
 
         let payload = serde_json::json!({
-            "bot_uuid": bot_id,
-            "role": role.unwrap_or("consultant")
+            "bot_uuid": bot_id
         });
 
         let response = self

@@ -225,7 +225,7 @@ test_group_add_member_via_cli() {
     ensure_cli_token PM || { skip_case "no token"; TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
     local gid; gid="$(_cli_create_group)"
     [[ -z "$gid" ]] && { fail "setup create-group failed"; TESTS_FAILED=$((TESTS_FAILED+1)); TESTS_TOTAL=$((TESTS_TOTAL+1)); return; }
-    if bcs_cli PM add-member --group "$gid" --bot-uuid "$BOT_QA_UUID" --role consultant; then
+    if bcs_cli PM add-member --group "$gid" --bot-uuid "$BOT_QA_UUID"; then
         bcs_cli PM get-group --id "$gid" >/dev/null 2>&1 || true
         if _cli_contains "$BCS_CLI_STDOUT" "$BOT_QA_UUID"; then
             pass "add-member via CLI ok"; TESTS_PASSED=$((TESTS_PASSED+1))
