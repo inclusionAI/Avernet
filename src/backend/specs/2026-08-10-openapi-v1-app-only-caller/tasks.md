@@ -308,22 +308,28 @@
 
 ---
 
-## Task 10: Mode A where the bot is not on the wire  `[ ]`
+## Task 10: Mode A where the bot is not on the wire  `[x]`
 
 > The five operations that would otherwise pass unchecked.
 
 - **Files:** `routines/router.py`, `skills/router.py`, the skill query service
 - **Done when:**
-  - [ ] `POST /bots/routines` calls `require_bot(body.bot_id)` immediately after
-        parsing, before any service call.
-  - [ ] The four `skills/{skill_id}` routes resolve the skill's `bot_id` and
-        check the grant **before** acting, reading through the existing
-        user-scoped skill path so another user's skill is refused first.
-  - [ ] If clean pre-handler resolution proves impossible, these four move to
-        Mode D and `spec.md` Decision 2 is amended. **Admitting them unchecked is
-        not an option** — the service scopes by user only, so an application
-        would reach a skill on an ungranted bot.
-  - [ ] Tests: each of the five refuses when the resolved bot is not granted.
+  - [x] `POST /bots/routines` checks `body.bot_id` immediately after parsing,
+        before any service call.
+  - [x] The four `skills/{skill_id}` routes resolve the skill's bot through the
+        existing user-scoped read — so another user's skill is refused before
+        the grant is consulted — and check it before acting. The read is skipped
+        entirely for a human caller.
+  - [x] The shared dependency **defers** for exactly these five, read from
+        `admission.py`'s two frozensets rather than inferred from a missing
+        `bot_id`. Any *other* operation arriving with no bot id is refused, so
+        the exception list cannot grow by accident.
+  - [x] Tests: a skill on an ungranted bot **belonging to the same user** is
+        refused on all four operations and is not touched; the granted bot still
+        works; a routine on an ungranted bot is refused before creation.
+  - [x] Not needed: the fallback to Mode D. Clean pre-handler resolution was
+        available for all five.
+
 - **Depends on:** Task 8
 
 ---

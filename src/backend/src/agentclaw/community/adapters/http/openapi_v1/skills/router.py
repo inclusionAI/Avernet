@@ -19,7 +19,11 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
     PageParamsDep,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    UserIdDep,
+)
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
@@ -55,6 +59,36 @@ def _tags(value: Any) -> list[str]:
             return [value] if value else []
         return [str(tag) for tag in parsed] if isinstance(parsed, list) else []
     return []
+
+
+def _authorize_skills_bot(
+    caller: ActingCaller,
+    query_service: LocalSkillQueryServiceProtocol,
+    *,
+    skill_id: str,
+    actor_id: str,
+) -> None:
+    """Authorize the bot behind a skill, for an application caller.
+
+    The four ``{skill_id}`` operations name no bot, and the services beneath
+    them scope by *user* alone — so without this an application holding a grant
+    on one of a user's bots would reach that user's skills on **every** bot they
+    own. Admitting them unchecked was never an option; the choice was between
+    this and refusing all four.
+
+    The bot is resolved through the ordinary user-scoped read, deliberately.
+    That read already refuses a skill belonging to someone else, so another
+    user's skill is rejected *before* the grant is consulted and the grant check
+    never becomes the thing that leaks a skill's existence.
+
+    **A no-op for a human caller, without the read.** Their own operation's
+    user-scoped resolve is the check; re-deciding it here would cost a query per
+    request and risk a second, different answer.
+    """
+    if not caller.is_application:
+        return
+    record = query_service.get_local_skill(skill_id=skill_id, actor_id=actor_id)
+    caller.require_bot(str(record["bolt_id"]))
 
 
 def _to_skill(record: dict[str, Any]) -> Skill:
@@ -104,6 +138,7 @@ async def list_skills(
 async def get_skill(
     skill_id: str,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     query_service: LocalSkillQueryServiceProtocol = Injected(
         LocalSkillQueryServiceProtocol
@@ -113,6 +148,9 @@ async def get_skill(
     record = query_service.get_local_skill(
         skill_id=skill_id, actor_id=actor_id
     )
+    # The record is already in hand, so this one checks the grant directly
+    # rather than through the helper — one read, not two.
+    caller.require_bot(str(record["bolt_id"]))
     return envelope(_to_skill(record), request)
 
 
@@ -186,12 +224,19 @@ async def upload_skill(
 async def activate_skill(
     skill_id: str,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
+    query_service: LocalSkillQueryServiceProtocol = Injected(
+        LocalSkillQueryServiceProtocol
+    ),
     state_service: LocalSkillStateServiceProtocol = Injected(
         LocalSkillStateServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Activate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    _authorize_skills_bot(
+        caller, query_service, skill_id=skill_id, actor_id=actor_id
+    )
     result = await state_service.set_local_skill_active(
         skill_id=skill_id, actor_id=actor_id, active=True
     )
@@ -209,12 +254,19 @@ async def activate_skill(
 async def deactivate_skill(
     skill_id: str,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
+    query_service: LocalSkillQueryServiceProtocol = Injected(
+        LocalSkillQueryServiceProtocol
+    ),
     state_service: LocalSkillStateServiceProtocol = Injected(
         LocalSkillStateServiceProtocol
     ),
 ) -> Envelope[SkillState]:
     """Deactivate one Bot-owned Local Skill and synchronously reconcile runtime."""
+    _authorize_skills_bot(
+        caller, query_service, skill_id=skill_id, actor_id=actor_id
+    )
     result = await state_service.set_local_skill_active(
         skill_id=skill_id, actor_id=actor_id, active=False
     )
@@ -229,12 +281,19 @@ async def deactivate_skill(
 async def delete_skill(
     skill_id: str,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     delete_service: LocalSkillDeleteServiceProtocol = Injected(
         LocalSkillDeleteServiceProtocol
     ),
+    query_service: LocalSkillQueryServiceProtocol = Injected(
+        LocalSkillQueryServiceProtocol
+    ),
 ) -> Envelope[Deleted]:
     """Delete one inactive Bot-owned Local Skill by deployment-wide ID."""
+    _authorize_skills_bot(
+        caller, query_service, skill_id=skill_id, actor_id=actor_id
+    )
     await delete_service.delete_local_skill(
         skill_id=skill_id, actor_id=actor_id
     )

@@ -90,7 +90,11 @@ from typing import Annotated
 
 from fastapi import Depends, Query, Request
 
-from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    BODY_BOT_ID_OPERATIONS,
+    SKILL_SCOPED_OPERATIONS,
+    ActingCaller,
+)
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     Principal,
     require_principal,
@@ -376,12 +380,15 @@ async def require_granted_bot(
     ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
     which the app maps to a ``404`` byte-identical to a nonexistent bot.
 
-    A request that reaches here with **no** bot id is refused rather than waved
-    through. It means an operation was placed in a grant-checked mode without
-    the bot being on the wire — the five such operations resolve their bot
-    themselves (see ``admission.py``'s ``BODY_BOT_ID_OPERATIONS`` and
-    ``SKILL_SCOPED_OPERATIONS``) and do not take this dependency.
+    Five operations have no bot on the wire — one carries it in the body, four
+    name a skill — and they are **named in the table**, not detected by their
+    emptiness. This dependency defers for exactly those, and their handlers
+    resolve the bot and call ``require_bot`` themselves before acting. Naming
+    them is what keeps "no bot id" from becoming a way through: any *other*
+    operation arriving here without one is refused.
     """
+    if _defers_to_its_handler(request):
+        return caller.user_id
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
     )
@@ -395,6 +402,24 @@ async def require_granted_bot(
             "its own bot before acting"
         )
     return caller.require_bot(str(bot_id))
+
+
+def _defers_to_its_handler(request: Request) -> bool:
+    """Whether this operation resolves its own bot, per ``admission.py``.
+
+    An allow-list read from the table rather than a shape test. "The request
+    carries no ``bot_id``" describes the five deferring operations *and* every
+    mistake that would look like them — a renamed parameter, a route placed in a
+    grant-checked mode by accident. Naming them means a mistake is refused while
+    the five are served, and that the exception list cannot grow by accident:
+    adding to it is an edit to a table the inventory test reads.
+    """
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return False
+    key = (request.method, path)
+    return key in BODY_BOT_ID_OPERATIONS or key in SKILL_SCOPED_OPERATIONS
 
 
 #: What a grant-checked handler declares to have its bot authorized.
