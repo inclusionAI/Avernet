@@ -172,46 +172,63 @@ def test_access_key_alongside_a_user_is_carried():
     assert caller.user_id == "u-1"
 
 
-# ── identity-set admission (only callers that name an end user) ───────────────
+# ── identity-set admission (a user, or an application acting under a grant) ───
 
 
 @pytest.mark.parametrize(
     ("label", "payload"),
     [
-        ("app", app_principal()),
         ("access_key", access_key_principal()),
         ("bot", bot_principal()),
     ],
 )
-def test_a_set_naming_no_end_user_is_refused(label: str, payload: dict):
-    """Refused at verification, so no handler can be reached with an unscopeable caller.
+def test_a_set_naming_neither_a_user_nor_an_app_is_refused(label: str, payload: dict):
+    """Refused at verification, so no handler can be reached with such a caller.
 
-    ``app.owners`` is free-text org attribution and the access-key registry has
-    no owner column, so neither names a person. ``bot`` does carry ``owner_id``,
-    but a bot acting as its own owner across the public contract is a grant
-    nobody made — see ``_require_user_principal``.
+    The access-key registry has no owner column, so an access key names no
+    person and never will. ``bot`` does carry ``owner_id``, but a bot acting as
+    its own owner across the public contract is a grant nobody made. Neither can
+    be authorized against a delegation either, which is what separates them from
+    an ``app``.
     """
-    with pytest.raises(PrincipalVerificationError, match="no user identity"):
+    with pytest.raises(PrincipalVerificationError, match="neither a user nor an app"):
         verify_principal_token(mint([payload]), CONFIG)
 
 
-def test_a_set_of_several_non_user_identities_is_refused():
-    """Two identities that each name no person still name no person."""
-    with pytest.raises(PrincipalVerificationError, match="no user identity"):
-        verify_principal_token(
-            mint([app_principal(), access_key_principal()]), CONFIG
-        )
+def test_an_application_acting_alone_is_admitted_here():
+    """The one relaxation, and it is only about *shape*.
+
+    An application can be authorized to act for a person — a grant naming the
+    delegating user, checked per request — so an identity set naming one is a
+    caller this surface can do something with. Whether it may reach the
+    operation it called is decided per route, upstairs: ``require_principal``
+    still refuses it everywhere that has not deliberately opted in.
+    """
+    caller = verify_principal_token(mint([app_principal()]), CONFIG)
+
+    assert caller.has_user is False
+    assert caller.user_id == "", "names no end user, and says so"
+    assert caller.app_id is not None
+
+
+def test_an_app_beside_an_unusable_identity_is_still_admitted():
+    """The app is what makes the set admissible; the rest is ignored."""
+    caller = verify_principal_token(
+        mint([app_principal(), access_key_principal()]), CONFIG
+    )
+
+    assert caller.app_id is not None
 
 
 def test_the_refusal_names_the_types_carried_for_the_operator():
     """The log line has to be diagnosable; the caller still sees one fixed 401."""
     with pytest.raises(PrincipalVerificationError) as exc_info:
         verify_principal_token(
-            mint([access_key_principal(), app_principal()]), CONFIG
+            mint([access_key_principal(), bot_principal()]), CONFIG
         )
 
     assert "access_key" in str(exc_info.value)
-    assert "app" in str(exc_info.value)
+    assert "bot" in str(exc_info.value)
 
 
 @pytest.mark.parametrize("blank", ["", "   ", "\t"])
@@ -241,15 +258,28 @@ def test_a_blank_first_user_is_refused_even_behind_a_usable_one():
         verify_principal_token(token, CONFIG)
 
 
-def test_a_blank_subject_id_is_refused_distinctly_from_a_missing_user():
+def test_a_blank_subject_id_is_refused_distinctly_from_an_inadmissible_set():
     """Two different operator diagnoses, so two different messages."""
     with pytest.raises(PrincipalVerificationError) as blank:
         verify_principal_token(mint([user_principal(user_id="")]), CONFIG)
-    with pytest.raises(PrincipalVerificationError) as missing:
-        verify_principal_token(mint([app_principal()]), CONFIG)
+    with pytest.raises(PrincipalVerificationError) as inadmissible:
+        verify_principal_token(mint([access_key_principal()]), CONFIG)
 
-    assert "no user identity" not in str(blank.value)
-    assert "blank subject id" not in str(missing.value)
+    assert "neither a user nor an app" not in str(blank.value)
+    assert "blank subject id" not in str(inadmissible.value)
+
+
+def test_a_blank_user_id_is_not_rescued_by_an_app_alongside_it():
+    """A blank user is a broken set, not an app-only one.
+
+    The set *names* an end user — badly — so it must be refused rather than
+    quietly demoted to "an application acting alone", which would scope the
+    request by a delegation the caller never asked for.
+    """
+    token = mint([user_principal(user_id=""), app_principal()])
+
+    with pytest.raises(PrincipalVerificationError, match="blank subject id"):
+        verify_principal_token(token, CONFIG)
 
 
 def test_unknown_fields_do_not_break_verification():

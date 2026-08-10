@@ -114,9 +114,11 @@ app_view_router = APIRouter(
     prefix="/openapi/v1/bots/authorized", tags=["authorized-apps"]
 )
 
-#: Both parties. The APP half is checked here; the USER half is guaranteed
-#: upstream by ``verify_principal_token``, which admits no identity set naming
-#: no end user.
+#: Both parties. The APP half is checked here; the USER half comes from
+#: ``require_principal``, which this depends on and which refuses a caller
+#: naming no end user. Granting is a consent moment, so it is one of the
+#: operations that must never admit a machine caller acting alone — the
+#: dependency chain is what guarantees that rather than a check in the handler.
 UserAndAppDep = Annotated[Principal, Depends(require_user_and_app_principal)]
 
 #: The owner alone.

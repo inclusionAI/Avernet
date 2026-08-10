@@ -6,9 +6,13 @@ backend end of that contract. It holds the two seams the rest of the public
 surface was built against, and nothing else changes when they go live:
 
 - :func:`require_principal` — the FastAPI dependency every public route already
-  declares. Returns the verified caller, or raises so the route answers ``401``
-  (a WebSocket handshake is refused with close code ``1008`` instead — same
-  rule, and the only shape a handshake can be refused in).
+  declares. Returns the verified caller **naming an end user**, or raises so the
+  route answers ``401`` (a WebSocket handshake is refused with close code
+  ``1008`` instead — same rule, and the only shape a handshake can be refused
+  in).
+- :func:`require_operating_caller` — the opt-in that additionally admits an
+  **application acting alone**, under a grant. Only operations deliberately
+  placed in an admission group declare it.
 - :func:`resolve_avernet_tenant` — the data-isolation tenant for the request,
   read by ``AvernetTenantMiddleware`` before any route runs.
 
@@ -163,8 +167,36 @@ def _verify_from_headers(connection: HTTPConnection) -> VerifiedCaller | None:
         return None
 
 
+def _refuse(connection: HTTPConnection, reason: str) -> None:
+    """Refuse this connection in the shape its plane can carry.
+
+    One refusal for both planes and for both dependencies below, so "no caller
+    we can trust" and "no caller of an admissible shape" are indistinguishable
+    from outside — which they must be, or the surface would tell an unauthorized
+    caller which half it failed.
+    """
+    if connection.scope["type"] == "websocket":
+        raise WebSocketException(code=WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+    raise MissingPrincipalError(reason)
+
+
 async def require_principal(connection: HTTPConnection) -> Principal:
-    """Return the verified caller, or refuse the connection.
+    """Return the verified caller **naming an end user**, or refuse.
+
+    **This is where the end-user guard now lives.** It used to sit inside
+    ``verify_principal_token``, which refused an identity set naming no end user
+    before any route ran. That could not stay: an application acting alone is
+    now a caller some operations admit, and the verifier is transport-agnostic
+    and route-blind (Rule 7) — the middleware that drives it runs before
+    routing, so deciding per operation there would mean a second route table in
+    the backend, hand-synced with the gateway's.
+
+    Moving it *here* keeps the property that actually mattered: **a route
+    inherits the refusal by saying nothing.** Every public route already
+    declares this dependency, so a route written tomorrow gets the end-user
+    requirement for free, and a route can only become admissible to a machine
+    caller by deliberately naming :func:`require_operating_caller` instead. The
+    guard moved one layer up; it did not become optional.
 
     One dependency for both planes, because the surface's rule is one rule:
     every public route requires an authenticated caller. Only the *shape* of the
@@ -183,11 +215,35 @@ async def require_principal(connection: HTTPConnection) -> Principal:
     """
     caller = resolve_caller(connection)
     if caller is None:
-        if connection.scope["type"] == "websocket":
-            raise WebSocketException(
-                code=WS_1008_POLICY_VIOLATION, reason="Unauthorized"
-            )
-        raise MissingPrincipalError("no verified caller for this request")
+        _refuse(connection, "no verified caller for this request")
+    elif not caller.has_user:
+        # Verified, but names only an application. Refused here rather than at
+        # the handler's owner lookup: this operation has not opted into
+        # admitting a machine caller, and the answer must be the same ``401``
+        # an unverified caller gets.
+        _refuse(connection, "this operation requires a caller naming an end user")
+    return caller
+
+
+async def require_operating_caller(connection: HTTPConnection) -> Principal:
+    """Return the verified caller, admitting an **application acting alone**.
+
+    The opt-in half of the pair above, declared only by operations placed in an
+    admission group. It relaxes exactly one thing — that the identity set name
+    an end user — and nothing else: an unverified caller is still refused with
+    the identical answer, and a caller naming neither a user nor an application
+    never reaches here at all, having been refused during verification.
+
+    **Admitting the caller is not authorizing the call.** This says only that
+    the shape is one the operation is prepared to consider. Which bot it may
+    reach, and as whom, is decided downstream against the grant — and for an
+    app-only caller that check is the only thing standing between it and the
+    operation, which is why no route should declare this without also taking the
+    grant-checked dependency for its bot.
+    """
+    caller = resolve_caller(connection)
+    if caller is None:
+        _refuse(connection, "no verified caller for this request")
     return caller
 
 
@@ -214,8 +270,14 @@ def resolve_avernet_tenant(request: Request) -> str:
     With no trustworthy caller this falls back to the internal default, which is
     what every non-public path resolves to anyway. That is safe because the
     request cannot get data out: every public route depends on
-    :func:`require_principal` and therefore answers ``401`` first — a property
-    pinned by ``test_public_routes_require_principal``, not left to inspection.
+    :func:`require_principal` or :func:`require_operating_caller` and therefore
+    answers ``401`` first — a property pinned by
+    ``test_public_routes_require_principal``, not left to inspection.
+
+    An **app-only** caller resolves its tenant from its ``AppPrincipal``, which
+    is registered to one. The same argument extends unchanged: on an operation
+    that has not admitted a machine caller the route still answers ``401``
+    before anything is read, so resolving a tenant for it grants nothing.
     """
     caller = resolve_caller(request)
     if caller is None:

@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     Principal,
+    require_operating_caller,
     require_principal,
     require_user_and_app_principal,
 )
@@ -86,7 +87,7 @@ def signing_key():
 def mint(
     *,
     tenant: str | None = TENANT,
-    user_id: str = "u-1",
+    user_id: str | None = "u-1",
     include_app: bool | None = None,
     **overrides,
 ) -> str:
@@ -98,12 +99,17 @@ def mint(
     because a user principal cannot carry one — see ``gateway_principal/models``.
     """
     now = int(time.time())
-    principals: list[dict] = [
-        {
-            "type": "user",
-            "subject": {"id": user_id, "username": "alice@example.com"},
-        }
-    ]
+    # ``user_id=None`` mints the **app-only** set: a machine caller with no
+    # human anywhere on the wire, which is the shape the admission split exists
+    # to distinguish.
+    principals: list[dict] = []
+    if user_id is not None:
+        principals.append(
+            {
+                "type": "user",
+                "subject": {"id": user_id, "username": "alice@example.com"},
+            }
+        )
     if include_app is None:
         include_app = tenant is not None
     if include_app and tenant is not None:
@@ -114,7 +120,10 @@ def mint(
                 "app": {
                     "app_id": 1,
                     "app_name": "bot-logs-test-app",
-                    "owners": user_id,
+                    # Free-text org attribution, never an identity — and it has
+                    # to stand alone here, because an app-only set has no
+                    # ``user_id`` to borrow.
+                    "owners": "platform-team",
                     "tenant": tenant,
                     "app_type": "integration",
                 },
@@ -159,6 +168,16 @@ def probe_app():
                 "tenant": get_current_avernet_tenant(),
             },
             request,
+        )
+
+    @app.get("/openapi/v1/bots/_operable_probe")
+    @envelope_errors
+    async def operable_probe(
+        request: Request,
+        principal: Principal = Depends(require_operating_caller),
+    ):
+        return envelope(
+            {"has_user": principal.has_user, "app_id": principal.app_id}, request
         )
 
     @app.get("/openapi/v1/bots/logs/_probe")
@@ -494,3 +513,86 @@ def _body_without_request_id(response) -> dict:
     body = dict(response.json())
     body.pop("request_id", None)
     return body
+
+
+# ── the admission split: where the end-user guard now lives ──────────────────
+
+
+def test_an_app_only_caller_is_refused_by_the_default_dependency(client):
+    """A route that says nothing still refuses a machine caller.
+
+    This is the whole reason the guard could move out of the verifier: every
+    public route already declares ``require_principal``, so the refusal is
+    inherited rather than remembered. A route written tomorrow gets it too.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+
+    assert response.status_code == 401
+
+
+def test_an_app_only_refusal_is_identical_to_no_credential(client):
+    """The caller learns nothing about which half it failed.
+
+    A verified application refused for its *shape* must be indistinguishable
+    from an unverified caller, or the surface reports that the credential was
+    good and the identity type wrong — which tells a prober what to change.
+    """
+    refused = client.get(
+        "/openapi/v1/bots/_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+    absent = client.get("/openapi/v1/bots/_probe")
+
+    assert refused.status_code == absent.status_code == 401
+    assert _body_without_request_id(refused) == _body_without_request_id(absent)
+
+
+def test_an_app_only_caller_is_admitted_where_a_route_opts_in(client):
+    """The opt-in half, and it relaxes only the identity *shape*."""
+    response = client.get(
+        "/openapi/v1/bots/_operable_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None)},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"] == {"has_user": False, "app_id": 1}
+
+
+def test_the_opt_in_still_refuses_an_unverified_caller(client):
+    """Opting into a machine caller is not opting out of authentication."""
+    assert client.get("/openapi/v1/bots/_operable_probe").status_code == 401
+    assert (
+        client.get(
+            "/openapi/v1/bots/_operable_probe",
+            headers={PRINCIPAL_HEADER: "not-a-token"},
+        ).status_code
+        == 401
+    )
+
+
+def test_a_user_caller_is_unchanged_on_an_opted_in_route(client):
+    """The relaxation adds a caller shape; it removes nothing."""
+    response = client.get(
+        "/openapi/v1/bots/_operable_probe",
+        headers={PRINCIPAL_HEADER: mint()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["has_user"] is True
+
+
+def test_an_app_only_caller_still_scopes_to_its_own_tenant(client):
+    """A machine caller is tenant-scoped by its app registration.
+
+    Asserted on the opted-in route, because the default one refuses it — the
+    tenant has to be right for the operations that *do* admit it.
+    """
+    response = client.get(
+        "/openapi/v1/bots/_operable_probe",
+        headers={PRINCIPAL_HEADER: mint(user_id=None, tenant="other-tenant")},
+    )
+
+    assert response.status_code == 200

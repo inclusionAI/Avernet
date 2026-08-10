@@ -174,27 +174,33 @@
 
 ---
 
-## Task 6: Move the admission guard out of the verifier  `[ ]`
+## Task 6: Move the admission guard out of the verifier  `[x]`
 
 > The highest-risk edit here. The guard **moves up one layer; it is not deleted.**
 
 - **Files:** `core/gateway_principal/verifier.py`, its `README.md`,
   `adapters/http/openapi_v1/dependencies.py`
 - **Done when:**
-  - [ ] `_require_user_principal` → `_require_admissible_principal`: refuses a set
-        naming neither a `user` nor an `app`; keeps the blank-subject-id check.
-  - [ ] Its docstring is rewritten to say **where the guard went** and why that
-        placement still holds for routes nobody has written. A reader arriving
-        from #950 must not be sent looking for a rule that moved.
-  - [ ] `VerifiedCaller.has_user` and `.app_id -> int | None` added, `None`
-        documented as "names no application".
-  - [ ] `require_principal` gains the end-user requirement;
-        `require_operating_caller` added as the opt-in. Both funnel into the same
-        `MissingPrincipalError` / `1008`.
-  - [ ] `resolve_avernet_tenant`'s docstring extended for the app-only case.
-  - [ ] Verifier tests across the admission matrix.
-  - [ ] **No route behavior changes in this task.** The existing suite passes
-        untouched.
+  - [x] `_require_user_principal` → `_require_admissible_principal`: refuses a
+        set naming neither a user nor an app; `access_key` and `bot` stay
+        refused outright; the blank-subject-id check is kept, and a blank user
+        beside an app is still refused rather than demoted to "app-only".
+  - [x] Its docstring says where the guard went and why the placement holds for
+        routes nobody has written.
+  - [x] `VerifiedCaller.has_user` and `.app_id -> int | None` added.
+        `user_id`'s `""` fallback is now **reachable**, and its docstring
+        reframes the property as "the end user the credential names", not
+        "the user this request acts for".
+  - [x] `require_principal` carries the end-user requirement;
+        `require_operating_caller` is the opt-in. Both refuse through one
+        `_refuse` helper so the two failures are indistinguishable from outside.
+  - [x] `resolve_avernet_tenant`'s docstring extended for the app-only case.
+  - [x] Verifier tests updated to the new contract; six seam tests added for the
+        admission split, including that an app-only refusal is byte-identical to
+        no credential.
+  - [x] **No route behavior changed**: the whole `openapi_v1` suite passes
+        untouched (819 tests with the principal and architecture suites).
+
 - **Depends on:** —
 
 ---
