@@ -2314,6 +2314,45 @@ async fn post_group_member_delegates_to_group_management_add_member() {
 }
 
 #[tokio::test]
+async fn post_group_member_preserves_missing_role_for_group_policy() {
+    let temp_dir = TempDir::new().unwrap();
+    let registry = Arc::new(BotCore::with_base_dir(temp_dir.path().to_path_buf()));
+    register_bot(&registry, "driver-bot", "Driver").await;
+    registry
+        .store_token_mapping("driver-token".to_string(), "driver-bot".to_string())
+        .await;
+    let recorder = Arc::new(RecordingGroupManagement::default());
+    let services = Services::builder()
+        .registry(registry)
+        .group_management(recorder.clone())
+        .build_for_test();
+    let chain = static_auth_chain("alice", "Alice");
+    let app = build_router(
+        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(chain))),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/groups/group-1/members")
+                .header("authorization", "Bearer driver-token")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "bot_uuid": "target-bot" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let calls = recorder.add_member_calls.lock().await;
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].role, None);
+}
+
+#[tokio::test]
 async fn delete_group_route_delegates_to_group_management_and_preserves_response_shape() {
     let (app, recorder, _temp_dir) = test_app().await;
 
