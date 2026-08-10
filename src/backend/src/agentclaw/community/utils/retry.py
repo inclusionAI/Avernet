@@ -35,9 +35,26 @@ an exception carrying a 5xx **is**. That follows from classifying by "did this
 carry a client-error response", and it is the desirable default (a 5xx is often
 transient, a 4xx never is). Callers that do not want 5xx retried should keep
 status handling outside the thunk, as ``BaasService.get_http_info`` does.
+
+**Retry is disabled on an event loop.** The thunk is synchronous and the backoff
+is ``time.sleep``, so retrying inside a coroutine would park the whole loop for
+a second deadline plus the sleep, stalling every unrelated request on that
+worker — the exact head-of-line blocking this component exists to absorb, turned
+back on the caller. Many call sites in this codebase reach a synchronous HTTP
+call from a coroutine through one or more sync wrappers, and that blocking
+predates this module; what this module must not do is *amplify* it. So when a
+running loop is detected the call is made exactly once, with no sleep, and the
+failure propagates exactly as it did before retry existed.
+
+Callers that want the retry from async code should offload the whole call —
+``await asyncio.to_thread(...)`` — which is both how you avoid blocking the loop
+and how you re-enable retry. ``LocalDeviceFileSystem`` and ``LocalHealthProbe``
+do this, so the skill-upload path that motivated this component keeps full
+retry: it runs on a worker thread, not the loop.
 """
 from __future__ import annotations
 
+import asyncio
 import random
 import time
 from typing import Callable, TypeVar
@@ -69,6 +86,21 @@ DEFAULT_BACKOFF_SECONDS = 0.1
 #: arrive in synchronized clusters across unrelated callers, so an un-jittered
 #: backoff would re-converge every one of them on the same tick.
 _JITTER_FRACTION = 0.5
+
+
+def _on_event_loop() -> bool:
+    """True when called from a thread with a running asyncio event loop.
+
+    ``asyncio.get_running_loop()`` raises ``RuntimeError`` off-loop, which is
+    what distinguishes a coroutine frame from a thread-pool worker — including
+    one entered via ``asyncio.to_thread``, where the loop runs on a *different*
+    thread and is correctly not "running" here.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
 
 def client_error_status(exc: BaseException) -> int | None:
@@ -184,6 +216,17 @@ def retry_transport_call(
         raise ValueError(f"attempts must be >= 1, got {attempts}")
     if backoff_seconds < 0:
         raise ValueError(f"backoff_seconds must be >= 0, got {backoff_seconds}")
+
+    # See module docstring: retrying a synchronous thunk from a coroutine would
+    # park the event loop for a second deadline plus a blocking sleep. Degrade
+    # to exactly the pre-retry behavior rather than amplify the stall.
+    if attempts > 1 and _on_event_loop():
+        logger.debug(
+            "[%s] running on the event loop — retry disabled for this call; "
+            "offload with asyncio.to_thread to enable it",
+            operation,
+        )
+        attempts = 1
 
     for attempt in range(1, attempts + 1):
         started = time.monotonic()

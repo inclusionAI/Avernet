@@ -6,6 +6,10 @@ if retry silently did nothing.
 """
 from __future__ import annotations
 
+import asyncio
+
+from unittest.mock import patch
+
 import pytest
 
 from agentclaw.community.utils import retry as retry_mod
@@ -277,3 +281,77 @@ class TestDescribeException:
         exc = RuntimeError("boom")
         exc.request = _Request()  # type: ignore[attr-defined]
         assert describe_exception(exc) == "RuntimeError: boom"
+
+
+# ── Event-loop safety ─────────────────────────────────────────────────
+#
+# The thunk is synchronous and the backoff is ``time.sleep``, so retrying from
+# a coroutine would park the loop for a second deadline plus the sleep. Many
+# call sites reach a sync HTTP call from a coroutine through sync wrappers;
+# that blocking predates this module, and this module must not amplify it.
+
+
+class TestEventLoopSafety:
+    @pytest.mark.asyncio
+    async def test_no_retry_when_called_on_the_event_loop(self, no_sleep):
+        """Inline in a coroutine: exactly one attempt, no sleep."""
+        original = RuntimeError("connection reset")
+        call = _Counter(original)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            retry_transport_call(call, operation="op")
+
+        assert call.calls == 1, "retried on the event loop — would block it"
+        assert no_sleep == [], "slept on the event loop"
+        # Behavior is exactly what it was before retry existed.
+        assert excinfo.value is original
+
+    @pytest.mark.asyncio
+    async def test_retry_restored_when_offloaded_to_a_thread(self):
+        """``asyncio.to_thread`` is both how you avoid blocking and how you
+        re-enable retry — this is the skill-upload path's shape."""
+        call = _Counter(RuntimeError("connection reset"), "payload")
+
+        # Real sleep patched out inside the worker thread too.
+        with patch.object(retry_mod.time, "sleep", lambda _s: None):
+            result = await asyncio.to_thread(
+                retry_transport_call, call, operation="op"
+            )
+
+        assert result == "payload"
+        assert call.calls == 2, "offloaded call did not retry"
+
+    def test_retry_active_in_plain_sync_code(self, no_sleep):
+        """No loop anywhere: unchanged full retry."""
+        call = _Counter(RuntimeError("connection reset"), "payload")
+        assert retry_transport_call(call, operation="op") == "payload"
+        assert call.calls == 2
+
+    @pytest.mark.asyncio
+    async def test_success_on_the_event_loop_is_unaffected(self):
+        """Disabling retry must not disturb the happy path."""
+        call = _Counter("payload")
+        assert retry_transport_call(call, operation="op") == "payload"
+        assert call.calls == 1
+
+    @pytest.mark.asyncio
+    async def test_attempts_one_on_the_loop_is_not_an_error(self, no_sleep):
+        """attempts=1 already means no retry; the guard must be a no-op."""
+        call = _Counter(RuntimeError("boom"))
+        with pytest.raises(RuntimeError):
+            retry_transport_call(call, operation="op", attempts=1)
+        assert call.calls == 1
+
+
+def test_on_event_loop_detects_all_three_contexts():
+    """The predicate itself, since everything above depends on it."""
+    assert retry_mod._on_event_loop() is False  # plain sync
+
+    async def _inline():
+        return retry_mod._on_event_loop()
+
+    async def _threaded():
+        return await asyncio.to_thread(retry_mod._on_event_loop)
+
+    assert asyncio.run(_inline()) is True
+    assert asyncio.run(_threaded()) is False

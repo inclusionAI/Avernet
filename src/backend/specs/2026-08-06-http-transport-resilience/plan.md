@@ -80,10 +80,26 @@ event loop on one HTTP call; retry would have made it two plus a blocking sleep,
 and the health probe fans its coroutines out through `asyncio.gather`, so each
 would block before yielding and the bindings would probe serially.
 
-All three now `await asyncio.to_thread(...)`. Any future async caller must do the
-same — this is the same head-of-line blocking that caused the incident this
-feature exists to absorb, and adding retry to a sync function called from a
-coroutine amplifies it rather than fixing it.
+Those three now `await asyncio.to_thread(...)`, as do the four skill routes
+reached via `sync_symlinks`.
+
+**But patching call sites did not converge.** Three review rounds each found more
+of them, and a bounded reverse-reachability scan from `get_http_info` found
+roughly **60** async functions reaching it inline — across `resources`,
+`openapi_v1/resources`, `cron_relay`, `expert_chat`, `identity`, `channel`,
+`skill_center`, `skills_pool` and more. That blocking is **pre-existing**: those
+paths already parked the loop on one HTTP call before this change. What this
+change did was roughly double it.
+
+So the component is now **loop-aware** instead: `retry_transport_call` detects a
+running event loop and degrades to a single attempt with no sleep, making the
+amplification exactly zero on every one of those ~60 paths without editing any
+of them. Retry still applies in full off-loop — including the skill-upload path
+that motivated this work, which reaches `get_http_info` through
+`LocalDeviceFileSystem._baas_write_file` and therefore runs on a worker thread.
+
+Fixing the ~60 pre-existing inline call sites is a separate, much larger piece of
+work in other modules' code, and is deliberately not attempted here.
 
 ## Change 2 — `core/harness/services/llm.py`
 
