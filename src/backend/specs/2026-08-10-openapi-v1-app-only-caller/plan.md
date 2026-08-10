@@ -1,381 +1,485 @@
-# Plan — Admit the App-Principal-Only Caller Against an Owner's Grant
+# Plan — Admit the App-Principal-Only Caller Against a User's Grant
 
 Implements `spec.md` in this directory. Issue #950; follows #937.
 
 ## Approach
 
-The change is smaller than its blast radius suggests, because the seam it needs
-was built ahead of it. `user_id` already travels in the request on every
-user-scoped operation, and `require_user_id` is already the single place that
-decides what it means. Today that decision is an equality check against the
-verified caller. This feature replaces the check — not the parameter, not the
-schema, not a single handler signature that names a user.
+Five parts, in dependency order.
 
-Four parts.
+**1. Reshape the record.** `ac_bot_app_grant` gains `user_id`, the delegating
+user, distinct from `owner_id`, the bot's owner. The unique key rekeys onto it.
+The tables are deployed but empty, so this is an `ALTER` with nothing to
+backfill — a window that closes the moment the first grant is written.
 
-**1. Clear the blocker.** `delete_bot` revokes every grant standing against the
-bot, inside the deletion. It matters more now than the issue framed it: with
-deletion admitted for an application, an app can delete a bot it was granted, and
-its own authorization must go with it.
+**2. Let a collaborator delegate.** `grant_authorized_app` stops resolving the
+bot through an owner-scoped read and starts adjudicating "may this user operate
+this bot", which is the bar `core/engine_runtime/gate.py` already applies. The
+owner gains visibility of, and override on, every grant against their bot.
 
-**2. Make the user-less caller verifiable, and refused by default.**
+**3. Clear the deletion blocker.** `delete_bot` revokes every grant standing
+against the bot, whoever delegated it, inside the deletion.
+
+**4. Make the user-less caller verifiable, and refused by default.**
 `verify_principal_token` stops requiring an end user and starts requiring an end
 user *or* an application; `require_principal` — which every public route already
-depends on, directly or through `UserIdDep` — takes over refusing the user-less
-set. The guard **moves up one layer; it is not deleted.** It is still one shared
-place rather than sixty handlers, so "a rule every handler has to remember is not
-a rule" still holds. What changes is that the shared place is now one a route
-selects, which is what per-route opt-in requires. A route that says nothing gets
+depends on — takes over refusing the user-less set. The guard **moves up one
+layer; it is not deleted.** It is still one shared place rather than sixty
+handlers. What changes is that the shared place is now one a route selects,
+which is what per-route opt-in requires; a route that says nothing gets
 `require_principal` and refuses.
 
 Not done in the verifier with a per-route flag: the verifier is transport-agnostic
 (Rule 7) and route-blind, and the middleware that drives it runs before routing.
-Route awareness there means a second route table in the backend, hand-synced with
-the gateway's.
+Route awareness there means a second route table in the backend, hand-synced
+with the gateway's.
 
-**3. Authorize against the grant.** A caller object carries the acting owner and,
-for an app-only caller, the application. Where the request names a bot, a
-dependency checks the grant before the handler runs. Where it does not, the
-handler either narrows its result to the granted set or the route is refused.
+**5. Authorize against the grant, and re-adjudicate the user.** The app-only
+request names its delegating user; the grant supplies the bot's owner; the
+existing gate then decides whether that user may operate that bot — live, on
+every request.
 
-**4. Say which operations are in which group**, in one table, consumed by the
-routers, the fail-closed test, and the published description.
+## The invariant, and where it is enforced
 
-## The three admission modes
+> An application's reach is exactly its granting user's reach, and never more.
 
-Every public operation is in exactly one group. The group is a property of the
-operation's shape, not a taste judgement, which is what makes the table
-reviewable.
+It holds because of *where* the checks sit, not because anything compares two
+capability sets:
 
-| Mode | Shape | Rule |
+| Question | Answered by | Consulted |
 | --- | --- | --- |
-| **A — grant-checked** | the request names a bot | admitted iff a live grant exists for `(app_id, bot_id, user_id)` |
-| **B — grant-filtered** | the operation returns a set of the owner's bots | admitted; result narrowed to granted bots |
-| **C — owner-gated** | no bot dimension, answer concerns the owner's account | admitted iff the app holds ≥1 live grant from that owner |
-| **C-open** | no bot dimension, no `user_id`, answer identical for every caller in the tenant | admitted on authentication alone |
-| **D — refused** | everything else | `401` |
+| May this application act as this user at all, on this bot? | the grant record | per request |
+| May this user operate this bot, and at what level? | the existing collaborator gate | per request, unchanged |
 
-### Mode A — grant-checked (≈50 operations)
+The second is the one that makes the invariant *live* rather than a snapshot.
+Nothing is copied into the grant at consent time — no level, no capability list
+— so nothing can go stale. Removing U as a collaborator on B ends the
+application's access to B on the next request, with no revocation and no
+cleanup, because the gate that refuses U now refuses the application acting as
+U. Conversely, promoting U from member to admin widens the application in step,
+which is the same rule read forwards.
 
-| Group | Operations | Where `bot_id` is |
-| --- | --- | --- |
-| `bots` | `GET`/`PUT`/`DELETE /{bot_id}`, `POST /{bot_id}/restart`, `GET /{bot_id}/{auth-status,status,passport}`, `GET`/`PUT /{bot_id}/engine-config` | path |
-| `sessions` | all 7 | path |
-| `approvals` | all 3 | path |
-| `engine` | all 3 | path |
-| `models` | both | path |
-| `connection` | `GET /{bot_id}` | path |
-| `identity` | all 3 | path |
-| `resources` | all 9 | required query |
-| `routines` | the 6 taking `bot_id` | required query |
-| `routines` | `POST ""` (create) | request **body** |
-| `skills` | `GET ""`, `POST /upload` | required query |
-| `skills` | `GET`/`DELETE /{skill_id}`, `POST /{skill_id}/{activate,deactivate}` | **resolved from `skill_id`** |
-
-### Mode B — grant-filtered (2 operations)
-
-- `GET /openapi/v1/bots` — the owner's bot list, narrowed to granted bots.
-- `GET /openapi/v1/bots/authorized` — the application's own view. It already
-  exists and already takes `user_id`; today it requires a user principal
-  alongside the app. Admitting it app-only makes it the discovery endpoint an
-  integration needs: *"which of this owner's bots may I reach?"* answered by the
-  credential the integration actually holds.
-
-Both are already computable: `BotAppGrantService.list_for_app(app_id, owner_id)`
-returns exactly the granted set, filtered against live bots.
-
-### Mode C / C-open (5 operations)
-
-- **C:** `GET /openapi/v1/bots/ceiling` — the owner's bot quota. Gated on holding
-  at least one live grant from that owner, so a stranger application learns
-  nothing about an account that never authorized it.
-- **C-open:** `GET /openapi/v1/bots/check-name` and the three MCP catalogue reads
-  (`/mcp/servers`, `/mcp/tenants`, `/mcp/servers/{server_code}`). These carry no
-  `user_id`, so there is no owner to gate against. They are admitted on
-  authentication alone, and that is not a new exposure — every authenticated
-  caller in the tenant already gets the identical answer.
-
-### Mode D — refused (14 operations)
-
-`POST /openapi/v1/bots` (create); the three per-bot authorization operations
-(`POST`/`GET`/`DELETE …/authorized-apps`); the five `bots/logs` operations; the
-three MCP configuration operations (`GET /servers/{code}/permissions`, `GET`/`PUT
-/servers/{code}/config`); and the two `loadtest` endpoints, which have no user
-scope and are untouched by this change.
-
-The bot-logs refusal has a reason worth keeping: on that group `user_id` means
-*whose traces to read* over a tenant-level observability surface, not *whose call
-this is*. A grant does not translate into that meaning, and admitting it would
-widen a surface that deliberately requires both a user and an app today.
+This is also why the grant needs no scope column: the bound is a person's live
+authority, which the platform already models.
 
 ## Data Model Changes
 
-**None.** `uk_bot_app_grant_scope` is `(avernet_tenant, app_id, bot_id, owner_id,
-env)` — exactly the tuple Mode A checks — and a row exists iff access is in
-force, so the check needs no status filter and no migration.
+### `ac_bot_app_grant`
 
-The existing `BotAppGrantRepositoryProtocol.find(bot_id, owner_id, app_id)`
-already answers Mode A. **No new repository read is needed for authorization**,
-which is a direct consequence of `user_id` staying on the wire: the owner is
-given, so the lookup is a unique-key probe rather than a search for an owner.
+```
++ user_id VARCHAR(256) NOT NULL COLLATE utf8mb4_bin   -- the delegating user
+  owner_id VARCHAR(256) NOT NULL                       -- the bot's owner (kept)
 
-Mode B is `list_for_app`, which exists. Mode C is "does `list_for_app` return
-anything", answerable through the same call.
+- UNIQUE KEY uk_bot_app_grant_scope (avernet_tenant, app_id, bot_id, owner_id, env)
++ UNIQUE KEY uk_bot_app_grant_scope (avernet_tenant, app_id, bot_id, user_id, env)
 
-The only new repository member is `revoke_all_for_bot`, for the deletion
-invariant.
+- KEY idx_bot_app_grant_app_owner (avernet_tenant, app_id, owner_id, env)
++ KEY idx_bot_app_grant_app_user  (avernet_tenant, app_id, user_id,  env)
+
+  KEY idx_bot_app_grant_bot_owner (avernet_tenant, bot_id, owner_id, env)   -- unchanged
+```
+
+**`user_id` replaces `owner_id` in the key rather than joining it**, and the
+reason is a hard limit rather than a preference. The key is 2392 bytes today
+(`avernet_tenant` 64×4 + `app_id` 8 + `bot_id` 256×4 + `owner_id` 256×4 + `env`
+20×4). Adding a 256-character column gives 3416, past InnoDB's 3072-byte cap —
+the same wall that holds `owner_id` at 256 in the first place. Swapping keeps it
+at 2392.
+
+It is also the correct semantics. Two collaborators may each authorize the same
+application for the same bot; those are two delegations with two different
+scopes of authority, independently withdrawable. Keyed on `owner_id` they would
+collide and the second would be silently swallowed by the idempotent grant path.
+
+`owner_id` stays as a non-key column: it is what the app-only path reads to
+address the bot, and denormalizing it keeps that read from needing a bot lookup.
+
+`idx_bot_app_grant_bot_owner` is untouched. Its `(avernet_tenant, bot_id)`
+prefix already serves both new bot-scoped reads — the owner's "every grant on my
+bot, whoever delegated it" and the deletion sweep — neither of which supplies an
+`app_id` to reach past the unique key's second column.
+
+### `ac_bot_app_grant_log`
+
+Gains `user_id` on the same terms. Free: the table has no unique key by design,
+so nothing is constrained by the addition. Its bot-history index is unchanged.
+
+### Migration
+
+The tables ship in `core/bot_app_grant/sql/2026_08_10_bot_app_grant.sql` and are
+**deployed but unpopulated**, so the `ALTER` has nothing to backfill and no
+`NOT NULL` default to invent. That window closes as soon as one grant is
+written; if it has closed by the time this lands, the migration needs a backfill
+(`user_id := owner_id`, correct for every row #937 could have produced, since
+only owners could grant) and this plan must be revised to say so rather than
+assumed still open.
+
+Two files must move together, and the README already names their drift as the
+failure the DDL exists to prevent: a new dated migration carrying the `ALTER`s,
+and the original `CREATE` updated so a fresh install lands in the identical
+shape. A task checkbox compares them column for column.
+
+`user_id` declares `COLLATE utf8mb4_bin` explicitly. The deployed table pins that
+collation where the checked-in `.sql` does not — the drift #950 names as a
+separate follow-up — so an `ALTER` without an explicit collation would inherit
+`utf8mb4_bin` on the deployed table and the default elsewhere. This is the
+column every app-only request resolves on; it must compare byte-exact in both
+places, whatever happens to the follow-up.
+
+## The three admission modes
+
+### First: the surface has two id models, not one
+
+Easy to miss, because both spell their parameter `user_id`.
+
+**User-scoped groups** (`bots`, `resources`, `routines`, `skills`, `identity`,
+`mcp`): `user_id` is the caller, and the bot is resolved by
+`get_by_id_and_owner(bot_id, user_id)`. Caller and owner are necessarily the
+same person; a non-owner gets a masked `404`. **A shared bot is unreachable here
+for a human too**, so an application acting as that human inherits the same
+limit automatically — no special handling, and the invariant holds by
+construction.
+
+**Engine-runtime groups** (`sessions`, `engine`, `models`, `approvals`,
+`connection` — 16 operations): `user_id` is the **caller**, and `owner_id` names
+the **addressed bot's owner**, defaulting to the caller. `resolve_operable_bot`
+adjudicates, admitting the owner *or a member-level collaborator*. This is where
+a shared bot is reachable, and therefore where the delegation actually pays off.
+
+For an app-only caller on these, `owner_id` comes **from the grant record**, not
+from the request. An explicitly supplied value must equal it; anything else is
+refused before the resolve. Leaving it to fail downstream would work today by
+coincidence — two independent refusals lining up — and coincidence is not a
+boundary.
+
+### The modes
+
+| Mode | Shape | Rule |
+| --- | --- | --- |
+| **A1 — grant-checked, user-scoped** | names a bot; caller *is* the owner | live grant for `(app_id, bot_id, user_id)` |
+| **A2 — grant-checked, owner-addressed** | names a bot *and* an owner | A1, plus `owner_id` taken from the record; a supplied value must match |
+| **B — grant-filtered** | returns a set of bots | admitted; narrowed to granted bots |
+| **C — user-gated** | no bot dimension, concerns the user's account | ≥1 live grant from that user |
+| **C-open** | no bot dimension, no `user_id`, tenant-identical answer | authentication alone |
+| **D — refused** | everything else | `401` |
+
+### Mode A1 — user-scoped (≈34 operations)
+
+`bots` (`GET`/`PUT`/`DELETE /{bot_id}`, `POST /{bot_id}/restart`,
+`GET /{bot_id}/{auth-status,status,passport}`, `GET`/`PUT /{bot_id}/engine-config`);
+`identity` (3, path); `resources` (9, required query); `routines` (6, required
+query) and `POST ""` (body); `skills` `GET ""` / `POST /upload` (query) and the
+four `{skill_id}` routes (**resolved from `skill_id`**).
+
+### Mode A2 — owner-addressed (16 operations)
+
+`sessions` (7), `engine` (3), `approvals` (3), `models` (2), `connection` (1).
+All take `bot_id` in the path and `OwnerIdDep` alongside `UserIdDep`.
+
+`connection` runs its gate inside `EngineConnectionService` rather than through
+`gating.py`, so the owner-substitution must be applied at its own seam. A
+comment must say so: it is the one group where reading the router does not show
+the adjudication.
+
+### Mode B — grant-filtered (2 operations)
+
+- `GET /openapi/v1/bots` — the user's own bots, narrowed to granted ones.
+- `GET /openapi/v1/bots/authorized` — the application's own view, and now the
+  **complete** one: a granted bot the delegating user does not own never appears
+  in the list above, so without this it would be undiscoverable. It already
+  takes `user_id`; admitting it app-only makes it reachable by the credential an
+  integration actually holds.
+
+### Mode C / C-open (5 operations)
+
+- **C:** `GET /openapi/v1/bots/ceiling` — gated on ≥1 live grant from the named
+  user, so a stranger application learns nothing about an account that never
+  authorized it.
+- **C-open:** `GET /openapi/v1/bots/check-name` and the three MCP catalogue
+  reads. No `user_id`, so nothing to gate on; every authenticated caller in the
+  tenant already gets the identical answer.
+
+### Mode D — refused (14 operations)
+
+`POST /openapi/v1/bots`; the three per-bot authorization operations; the five
+`bots/logs` operations; the three MCP configuration operations; the two
+`loadtest` endpoints (no user scope, untouched).
+
+The bot-logs refusal has a reason worth keeping: there `user_id` means *whose
+traces to read* over a tenant-level observability surface, not *whose call this
+is*. A grant does not translate into that meaning.
 
 ## API / Interface Changes
 
-**No operation's request or response schema changes.** `user_id` stays required
-everywhere it is required today; no parameter is added, removed or made optional.
-Only the published *description* of `user_id` changes on admitted operations, to
-say what it means for an application caller.
+**No request schema changes.** `user_id` stays required everywhere it is
+required today; no parameter is added, removed or made optional. One **additive**
+response change: the owner's authorization listing gains the delegating user,
+without which the owner cannot tell who let an application in.
+
+### Granting, reshaped
+
+`grant_authorized_app` today resolves the bot through
+`bot_service.get_bot(bot_id, owner_id=caller)` — an owner-scoped read, which is
+exactly what confines grants to owned bots. It becomes: resolve the bot and
+adjudicate that the caller may **operate** it (owner, or collaborator at member
+level or above), then record `user_id = caller` and `owner_id = the resolved
+bot's owner`.
+
+The refusal shape does not change: a caller who may not operate the bot gets the
+masked `404` a caller naming a nonexistent bot gets.
+
+`authorized_apps`' module docstring currently argues the opposite position —
+that the grant bar is *deliberately narrower* than the operate bar, because
+"handing a machine credential durable, human-free access to a bot is not the
+same power as driving it." That argument is now overruled, and the docstring
+must be rewritten rather than left contradicting the code. The counter-argument
+to record: a delegation is bounded by the delegator's own live access and
+re-adjudicated per request, so it confers no power the delegator does not
+already hold and cannot outlive it.
+
+### The owner's override
+
+- `GET /bots/{bot_id}/authorized-apps` — the owner sees **every** live grant on
+  the bot with its delegating user; a non-owner collaborator sees only their own.
+- `DELETE /bots/{bot_id}/authorized-apps/{app_id}` — the owner may withdraw any;
+  a collaborator only their own. Since the key is now
+  `(app_id, bot_id, user_id)`, a withdrawal must name *which* delegation: the
+  owner's call targets a grant by its delegating user, and the collaborator's
+  implicitly targets their own.
+
+That last point is a genuine API question the spec leaves open by implication:
+`DELETE …/{app_id}` no longer identifies one row when two users delegated the
+same app. **Resolution: the owner's withdrawal removes every delegation of that
+application on that bot.** It matches what an owner means by "revoke this app's
+access to my bot", and it needs no new path segment. A collaborator's withdrawal
+removes only their own.
 
 ### Refusals
 
 | Situation | Answer |
 | --- | --- |
-| App-only caller on a Mode D operation | `401 Unauthorized` |
-| Access-key-only or bot-only caller, anywhere | `401 Unauthorized` |
-| App-only caller, no live grant for `(app, bot, owner)` | `404 Not found` — byte-identical to bot-not-found |
-| App-only caller on a Mode C operation with no grant from that owner | `404 Not found` |
-| User caller, `user_id` naming another user | `403 Forbidden` (unchanged) |
+| App-only caller on a Mode D operation | `401` |
+| Access-key-only or bot-only caller, anywhere | `401` |
+| App-only caller, no live grant for `(app, bot, user)` | `404` — byte-identical to bot-not-found |
+| App-only caller whose delegating user may no longer operate the bot | `404` — from the existing gate, unchanged |
+| App-only caller naming an owner other than the grant's | `404` |
+| App-only caller on a Mode C operation with no grant from that user | `404` |
+| User caller, `user_id` naming another user | `403` (unchanged) |
 
-The `404` masks: an application guessing a bot id it holds no grant on gets the
-same answer as for a bot that does not exist.
-
-`403` is deliberately **not** used for a missing grant. On this surface `403`
-means "you are authenticated and this is not yours", which confirms the bot
-exists. The masked `404` is the shape every other ownership refusal already uses.
+`403` is deliberately **not** used for a missing grant: on this surface it means
+"you are authenticated and this is not yours", which confirms the bot exists.
 
 ### Gateway `route_security`
 
 Enumerating ~55 admitted paths would be a table nobody can review. Enumerate the
-**refusals** instead — the shorter, more interesting list:
+**refusals** instead:
 
 ```yaml
-"/openapi/v1/bots/**":
-  user: optional
-  app: optional
-
-"POST /openapi/v1/bots":            {user: required}
-"/openapi/v1/bots/logs/**":         {user: required, app: required}
+"/openapi/v1/bots/**":            {user: optional, app: optional}
+"POST /openapi/v1/bots":          {user: required}
+"/openapi/v1/bots/logs/**":       {user: required, app: required}
 "/openapi/v1/bots/{bot_id}/authorized-apps/**": {user: required, app: required}
-"/openapi/v1/bots/mcp/servers/*/config":        {user: required}
-"/openapi/v1/bots/mcp/servers/*/permissions":   {user: required}
+"/openapi/v1/bots/mcp/servers/*/config":      {user: required}
+"/openapi/v1/bots/mcp/servers/*/permissions": {user: required}
 ```
 
-Both identities optional on the wide rule, because it must admit either shape and
-the table cannot express "at least one of". `_runner.py` resolves each declared
-identity and returns those present; with neither present the set is empty, the
-gateway adds no principal header, and the backend answers `401` from
+Both identities optional on the wide rule, because it must admit either shape
+and the table cannot express "at least one of". `_runner.py` resolves each
+declared identity and returns those present; with neither present the set is
+empty, the gateway adds no principal header, and the backend answers `401` from
 `require_principal`. "Neither" is still refused — one hop later, at the component
-rather than the edge. That relocation is named in Risks.
+rather than the edge. Named in Risks.
 
 Declaring `app` at all is what makes any of this possible: the runner resolves
 only declared identities, so under `user: required` an App credential never
 reaches the signed principal.
 
-**The gateway table is a second expression of the same policy, and the two must
-not drift.** The refusal list above is derived from Mode D; a test asserts the
-gateway resolves `user: required` for exactly the Mode D paths and the optional
-pair for the rest.
-
 ## Key Files & Functions
 
 ### `core/gateway_principal/verifier.py`
 
-- `_require_user_principal` → `_require_admissible_principal`: refuse a set naming
-  neither a `user` nor an `app`; keep the blank-subject-id check for a user it
-  does name.
-- Rewrite its docstring. The current one names *this issue* as the place to lift
+- `_require_user_principal` → `_require_admissible_principal`: refuse a set
+  naming neither a `user` nor an `app`; keep the blank-subject-id check.
+- Rewrite its docstring — it currently names *this issue* as the place to lift
   the guard, so the replacement must say where the guard went and why that
-  placement still holds for routes not yet written. A reader arriving from #950
-  must not be sent looking for a rule that moved.
-- `VerifiedCaller.has_user -> bool`, `VerifiedCaller.app_id -> int | None`
-  (`None` = "this set names no application", a real contract state).
-- `VerifiedCaller.user_id`'s `""` fallback is now *reachable* (an app-only
-  caller); document that `caller_owner_id` turning it into `401` is the wanted
-  answer on a Mode D route, not a degraded one.
+  placement still holds for routes not yet written.
+- `VerifiedCaller.has_user`, `VerifiedCaller.app_id -> int | None` (`None` = "no
+  application in this set", a real contract state).
+- `VerifiedCaller.user_id`'s `""` fallback is now reachable; document that
+  `caller_owner_id` turning it into `401` is the wanted answer on a Mode D route.
 
 ### `adapters/http/openapi_v1/dependencies.py`
 
-```python
-async def require_principal(connection) -> Principal        # + names an end user
-async def require_operating_caller(connection) -> Principal # user OR app-only
-```
+`require_principal` gains the end-user requirement (the guard arriving from the
+verifier); `require_operating_caller` admits user-bearing **or** app-only. Both
+funnel refusals into the same `MissingPrincipalError` / `1008`.
 
-`require_principal` keeps its name and meaning for every Mode D route; the added
-check is the guard arriving from the verifier. Both funnel refusals into the same
-`MissingPrincipalError` / `1008`.
-
-`resolve_avernet_tenant` is unchanged and now resolves an app-only caller's
-tenant from its `AppPrincipal`. Safe on a Mode D route because the route still
-`401`s before touching data — the same argument its docstring already makes for
-the default fallback; extend it to cover this case.
+`resolve_avernet_tenant` now resolves an app-only caller's tenant from its
+`AppPrincipal`; safe on a Mode D route because the route still `401`s before
+touching data — the argument its docstring already makes, extended.
 
 ### `adapters/http/openapi_v1/admission.py` (new)
 
-The policy table and the caller object, in one module so the routers, the test
-and the description generator cannot disagree.
-
 ```python
-class AdmissionMode(StrEnum): GRANT_CHECKED, GRANT_FILTERED, OWNER_GATED, OPEN, REFUSED
-ADMISSION: dict[tuple[str, str], AdmissionMode]   # (method, FastAPI path template)
+class AdmissionMode(StrEnum): A1, A2, B, C, OPEN, REFUSED
+ADMISSION: dict[tuple[str, str], AdmissionMode]   # every public operation
 
 @dataclass(frozen=True)
 class ActingCaller:
-    owner_id: str
-    app_id: int | None            # None = a human caller; no grant check applies
-    def require_bot(self, bot_id: str) -> None       # raises GrantNotResolvableError
-    def granted_bot_ids(self) -> frozenset[str] | None  # None = no filtering
+    user_id: str                     # the delegating user, or the human caller
+    app_id: int | None               # None = a human caller; no grant applies
+    def require_bot(self, bot_id: str) -> str          # → the bot's owner_id
+    def granted_bot_ids(self) -> frozenset[str] | None # None = no filtering
 ```
 
-`app_id: int | None` is an intentional contract state — "this caller is a human"
-— and every consumer branches on it explicitly. That is the AGENTS.md test for an
-optional, not defensive widening.
+`require_bot` returns the owner because A2 needs it and A1 discards it — one
+lookup, one place. `app_id: int | None` is an intentional contract state ("this
+caller is a human") and every consumer branches on it explicitly, which is the
+AGENTS.md test for an optional.
 
-### `adapters/http/openapi_v1/principal.py`
+### `adapters/http/openapi_v1/principal.py` and `engine_runtime/params.py`
 
-`require_user_id` gains the branch its own docstring predicted, and keeps its
-signature and its required `user_id`:
+`require_user_id` keeps its signature and its required `user_id`, and gains the
+branch its own docstring predicted: compare with the caller when there is one,
+consult the grant when there is not.
 
-- caller names an end user → compare with the caller, `403` on mismatch.
-  Unchanged, byte for byte.
-- app-only caller → `user_id` is the acting owner; authorization is the grant,
-  checked by the mode-specific dependency below.
+`resolve_owner_id` (A2's `OwnerIdDep`) gains the app-only branch: default to the
+**grant's** `owner_id` rather than to `user_id`, and refuse a supplied value that
+disagrees. This is the single point where the app-only path differs from the
+human path on those 16 operations.
 
-New dependencies built on it:
+`GrantNotResolvableError` → `(404, "Not found")` byte-identical to
+`BotNotFoundError`, with an `app.py` handler alongside `UserIdMismatchError`,
+because a dependency-raised error never reaches `@envelope_errors`.
 
-- `GrantCheckedOwnerDep` — Mode A where `bot_id` is on the wire. Reads
-  `connection.path_params["bot_id"]`, falling back to
-  `connection.query_params["bot_id"]`; path first, because a path segment
-  addresses the resource. Absent both ⇒ refuse (unreachable for a correctly
-  placed route; the fail-closed answer for a misplaced one). Calls
-  `caller.require_bot(...)`, returns `owner_id`.
-- `ActingCallerDep` — Modes A-without-a-wire-`bot_id`, B and C. Returns the
-  `ActingCaller`; the handler does the rest, explicitly.
+### Handlers that change
 
-**The grant probe runs once per request** — the dependency is evaluated once and
-the result is the returned owner id. It is a unique-key point lookup on an index
-that already exists.
+Almost all of A1/A2 is a dependency swap with **no body change**: once the user
+is established and the grant checked, the downstream calls are the same code on
+the same values. Seven operations genuinely change: the two listings (filter),
+`POST /routines` (`require_bot(body.bot_id)` after parsing), and the four
+`skills/{skill_id}` routes (resolve the skill's bot, then check).
 
-### Handlers that do change
+`list_bots` must filter **before** paginating, so page counts describe the
+filtered result; filtering after would leak the size of what was withheld and
+return short pages.
 
-Almost all of Mode A is a dependency swap with **no body change**: once the owner
-is resolved and the grant checked, `bot_service.get_bot(bot_id, owner_id)`, the
-ownership-masked `404` and the tenant guard are the same code on the same values.
-Seven operations genuinely change:
+### `core/bot_app_grant`
 
-| Operation | Change |
-| --- | --- |
-| `GET /openapi/v1/bots` | narrow to `caller.granted_bot_ids()` when set |
-| `GET /openapi/v1/bots/authorized` | scope by the principal's `app_id` when app-only |
-| `POST /openapi/v1/bots/routines` | `caller.require_bot(body.bot_id)` after parsing |
-| `GET`/`DELETE /skills/{skill_id}`, `POST /skills/{skill_id}/{activate,deactivate}` | resolve the skill's bot, then `caller.require_bot(...)` |
+- `BotAppGrantRecord` gains `user_id`; `grant()` takes it.
+- `find(bot_id, user_id, app_id)` — the same member, rekeyed from `owner_id` to
+  `user_id`. **No new read is needed for authorization**, which follows from
+  `user_id` staying on the wire: the delegating user is given, so the lookup is a
+  unique-key probe.
+- `list_for_app(app_id, user_id)` — rekeyed. Its liveness filter currently runs
+  `list_live_bot_ids_by_owner(owner_id)`, which is **wrong under the new model**:
+  granted bots need not belong to the delegating user, so that filter would drop
+  every shared one. It becomes a liveness check by `bot_id`.
+- `list_for_bot(bot_id)` — no longer takes `owner_id` as a scope; the caller
+  decides whether to narrow to one delegating user.
+- `revoke(bot_id, user_id, app_id)` — rekeyed; plus an owner-override form that
+  removes every delegation of one application on one bot.
+- `revoke_all_for_bot(bot_id) -> int` — the deletion sweep, whoever delegated.
+  Deletes every live row and appends one `revoked` event per row in one
+  `transactional_orm_session()`, log rows built from the live rows.
 
-The skill routes need a bot for a `skill_id`. `LocalSkillQueryServiceProtocol`
-already resolves a skill for an actor; the plan is to read the skill's `bot_id`
-through it and check the grant before acting. Refusing these four instead would
-leave the skills group split two-admitted / four-refused for a reason invisible
-from outside; admitting them unchecked would let an application reach a skill on
-a bot it was never granted, because the underlying service scopes by owner only.
+### `core/bot_management/services/bot_service.py`
 
-### Mode B filtering
-
-`list_bots` must filter **before** paginating, so the page counts describe the
-filtered result. Filtering a page after the fact would leak the size of what was
-withheld and would return short pages.
-
-### `core/bot_app_grant` and `core/bot_management`
-
-- Repository: `revoke_all_for_bot(bot_id, owner_id) -> int` — deletes every live
-  row for the bot and appends one `revoked` log event per deleted row, in one
-  `transactional_orm_session()`, log rows built from the live rows so the recorded
-  `app_name` is the one at consent time.
-- Service: `revoke_all_for_bot(*, bot_id, owner_id) -> int`; no
-  `GrantNotFoundError` — "the bot had no authorizations" is a normal outcome of
-  deletion.
-- `BotService.delete_bot` calls it **before** `soft_delete_by_owner`, via a
-  provider callable following `_device_service_provider`. Before, so a failure
-  aborts the deletion; after, a failure would leave a deleted bot with live
-  grants. Failures propagate.
+`delete_bot` calls `revoke_all_for_bot` **before** `soft_delete_by_owner`, via a
+provider callable following `_device_service_provider`. Before, so a failure
+aborts the deletion; after, a failure would leave a deleted bot with live
+grants. Failures propagate.
 
 ## Test Strategy
 
 1. **Route inventory (the anti-inheritance test).** Every route on the built app
-   appears in `ADMISSION` exactly once, and its declared dependency matches its
-   mode. A route added to the surface without a mode, or given a mode without the
-   matching dependency, fails. The failure message names the route and says what
-   to do — it fires for someone who has never read this spec.
+   appears in `ADMISSION` exactly once and declares the dependency its mode
+   requires. A route added without a mode, or a mode without the dependency,
+   fails with a message naming the route and what to do.
 2. **Verifier.** App-only admitted; user+app admitted; user-only unchanged;
-   access-key-only and bot-only refused; blank user subject id still refused.
-3. **Mode A.** Grant present → identical response to the owner's own call. No
-   grant → `404` compared **byte-for-byte** against the nonexistent-bot response.
-   Grant for another bot → `404`. Grant held by another application → `404`.
-   Deleted bot → refused.
-4. **Mode A without a wire `bot_id`.** The four skill routes and `create_routine`
-   refuse when the resolved bot is not granted — the case that would otherwise
-   silently pass.
-5. **Mode B.** Two bots, one granted → exactly one returned, and the page count
-   says one. The owner's own call still returns both. No grants → empty, `200`.
-6. **Mode C / C-open.** `ceiling` admitted with a grant, `404` without one;
-   `check-name` and the MCP catalogue admitted with no grant at all.
-7. **Mode D.** `401` on every one of the fourteen, enumerated from `ADMISSION`
-   rather than sampled, so the list cannot rot.
-8. **User callers unchanged** — the existing suites pass **with no expectation
-   edited**. An edited expectation is a finding, not a fix.
-9. **Deletion revokes**, including when the deleting caller is the application,
-   which removes its own access. Failure aborts the deletion.
-10. **Gateway.** `RouteSecurity.resolve` returns `user: required` for exactly the
-    Mode D paths and the optional pair for the rest, driven off the same table.
+   access-key-only and bot-only refused; blank subject id still refused.
+3. **The invariant, directly.** U collaborates on P's bot B at member level;
+   U grants app A. A reaches B. **Remove U as a collaborator → A is refused on
+   the next request, with the grant row still present.** Re-add → A works again.
+   This is the test that proves the bound is live rather than a snapshot; if
+   only one test survives review, it is this one.
+4. **Level, not just presence.** A acting as a member-level U is refused what a
+   member-level U is refused, and the refusal is the gate's, not a new one.
+5. **A1/A2.** Grant present → response identical to the delegating user's own
+   call. No grant → `404` compared **byte-for-byte** against nonexistent-bot.
+   Grant for another bot, another app, or another delegating user → `404`.
+   A2 with `owner_id` naming anyone but the grant's owner → `404`.
+   A2 with `owner_id` omitted → resolves from the record.
+6. **A shared bot is unreachable on A1 groups** even with a grant — because it
+   is unreachable for the human too. Pins that the invariant needs no special
+   handling there.
+7. **Two collaborators, one app, one bot** → two rows, independently
+   withdrawable; withdrawing one leaves the other working.
+8. **Owner override.** Owner sees a collaborator's grant with its delegating
+   user, and can withdraw it; the collaborator sees only their own.
+9. **Mode B.** Two bots, one granted → one returned, count says one; the user's
+   own call returns both; no grants → empty `200`; a granted *shared* bot appears
+   in the application's own view and not in the bot list.
+10. **Mode C / C-open / D.** C admitted with a grant and `404` without; C-open
+    admitted with none; D `401` on **all fourteen**, enumerated from `ADMISSION`
+    rather than sampled.
+11. **Deletion revokes** every delegation, including when an application
+    performs the deletion; failure aborts.
+12. **Migration.** The `ALTER` and the `CREATE` produce the same shape column for
+    column and index for index.
+13. **User callers unchanged** — existing suites pass **with no expectation
+    edited**. An edited expectation is a finding, not a fix.
+14. **Gateway.** `RouteSecurity.resolve` yields `user: required` for exactly the
+    Mode D paths and the optional pair for the rest, derived from `ADMISSION` so
+    the two expressions of the policy cannot drift.
 
 ## Risks & Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| The surface admitted here is wide (~55 of 63 operations), so a mistake in one mode assignment is a real authorization bug. | Modes are assigned by operation *shape*, not taste; the table is one reviewable artifact; the inventory test proves the surface matches it. |
-| The guard's move silently opens a route declaring no principal dependency at all. | The inventory test asserts every route declares one. Strengthens the existing `test_public_routes_require_principal` rather than replacing it. |
-| `{user: optional, app: optional}` moves the unauthenticated refusal from the gateway edge to the backend. | Still refused, at `require_principal`, before any handler. Named because it changes where unauthenticated traffic dies — relevant to edge rate-limiting and to reading gateway logs. |
-| The gateway table and `ADMISSION` drift apart. | Test 10 derives the expected gateway resolution from `ADMISSION`. |
-| A grant probe per Mode A request adds a DB read to ~50 operations. | Unique-key point lookup on an existing index, once per request. Only for app-only callers — a human caller's path is untouched. |
-| Mode B filtering applied after pagination would leak counts and return short pages. | Filter before paginate; test 5 asserts the count. |
-| The four skill routes depend on resolving a bot from a `skill_id`. | If resolution cannot be done cleanly before the handler, the fallback is to refuse those four and say so — never to admit them unchecked. |
-| Legacy `default` bot ids are non-unique across tenants. | The tenant guard scopes the grant lookup, so a `default` grant is only ever matched within the request's tenant. Comment at the lookup. |
+| The empty-table window closes before this lands, making the `ALTER` a data migration. | Verify emptiness at implementation time; if populated, backfill `user_id := owner_id` (correct for every row #937 could produce) and revise this plan rather than assume. |
+| Widening who may grant is an authorization change, not a data change. | It is bounded by an existing gate rather than a new rule, and re-adjudicated per request. Tests 3 and 4 pin the bound; the contradicted docstring is rewritten rather than left to mislead. |
+| A bot owner discovers machine access they did not authorize. | The owner's listing shows every grant with its delegator, and the owner can withdraw any. That is the whole of the override, and it is why "see only" was not taken. |
+| The surface admitted here is wide (~55 of 63 operations). | Modes are assigned by operation *shape*, not taste; the table is one reviewable artifact; the inventory test proves the surface matches it. |
+| `{user: optional, app: optional}` moves the unauthenticated refusal from the edge to the backend. | Still refused at `require_principal` before any handler. Named because it changes where unauthenticated traffic dies — relevant to edge rate-limiting and gateway logs. |
+| `list_for_app`'s owner-based liveness filter silently drops every shared bot. | Called out above as a required change, with test 9 pinning a shared granted bot in the result. |
+| `DELETE …/{app_id}` no longer identifies one row. | Resolved above: the owner's withdrawal removes every delegation of that app on that bot; a collaborator's removes their own. |
+| A grant probe per request on ~50 operations. | Unique-key point lookup on an index that exists, once per request, and only for app-only callers. |
+| Legacy `default` bot ids are non-unique across tenants. | The tenant guard scopes the lookup. Comment at the lookup. |
 
 ## Alternatives Considered
 
-- **Drop `user_id` on app-only calls and derive the owner from
-  `(app_id, bot_id)`.** Rejected on review: `user_id` was moved into the request
-  precisely so an operation would have somewhere to name a user when the identity
-  set stops carrying one. Deriving it would make the parameter optional across the
-  surface, change ~56 published schemas, and discard the check that makes a
-  guessed `bot_id` useless.
+- **Keep the grant owner-only** (the first draft). Rejected by review: a person
+  who collaborates on their team's bots rather than owning them could authorize
+  nothing, and the failure would look identical to a missing grant.
+- **Add `user_id` to the unique key alongside `owner_id`.** Rejected: 3416 bytes,
+  past InnoDB's cap.
+- **Snapshot the delegator's permission level into the grant.** Rejected: it
+  makes the bound a copy that goes stale, and re-adjudicating costs nothing
+  because the gate already runs.
+- **Drop `user_id` and derive the user from `(app_id, bot_id)`.** Rejected: the
+  parameter exists precisely so an operation has somewhere to name a user when
+  the identity set stops carrying one; deriving it would make it optional across
+  the surface and discard the check that makes a guessed `bot_id` useless.
 - **Relax the verifier and check per handler.** Rejected: the arrangement the
-  verifier's docstring exists to argue against; it fails for the routes that
-  forget.
-- **Pass a route flag into `resolve_caller`.** Rejected: a second route table in
-  the backend, hand-synced with the gateway's, inside a Rule 7 module.
-- **Refuse every operation that does not name a bot.** Rejected on review: it
-  refuses `list_bots`, so an integration cannot discover its own scope and the
-  owner must enumerate bot ids out of band.
+  verifier's docstring exists to argue against.
+- **Refuse every operation that does not name a bot.** Rejected: it refuses the
+  listings, so an integration cannot discover its own scope.
 - **Enumerate admitted paths in the gateway.** Rejected: ~55 rules nobody can
   review, against 6 for the refusals.
-- **A per-group scope column on the grant.** Rejected as speculative.
 
 ## Rollout
 
-No migration, no config flag. The backend change is inert until the gateway rules
-ship: without them the App identity never reaches the backend's principal, so
-every request is a user request and behaves exactly as today. Deploy the backend
-first.
+The schema change ships first and alone — it is additive and inert. The backend
+change is then inert until the gateway rules ship: without them the App identity
+never reaches the backend's principal, so every request is a user request and
+behaves as today.
 
 Rollback is the gateway config alone: revert the `route_security` rules and the
-App identity stops reaching the backend. No code rollback, no data to undo.
+App identity stops reaching the backend. No code rollback. The column stays;
+dropping it is neither necessary nor safe once grants exist.
 
 ## Dependencies
 
-- `ac_bot_app_grant`, its repository and `list_for_app` (shipped, #937).
+- `ac_bot_app_grant` and its repository (shipped, #937), reshaped here.
+- `core/engine_runtime/gate.py`'s operator adjudication (shipped).
 - Gateway `app` identity chain and `route_security` (shipped).
-- Nothing external blocks; the deletion invariant is Task 1 here.
