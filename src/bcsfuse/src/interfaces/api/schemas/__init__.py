@@ -19,6 +19,7 @@ from src.interfaces.api.schemas.fusion_schemas import (
     FusionPerspective,
     FusionRequest,
     FusionResult,
+    Recommendation,
     RiskAssessment,
 )
 from src.interfaces.api.schemas.verify_schemas import (

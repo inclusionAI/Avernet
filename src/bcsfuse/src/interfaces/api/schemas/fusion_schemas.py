@@ -312,6 +312,36 @@ class FusionPerspective(BaseModel):
     )
 
 
+class Recommendation(BaseModel):
+    """
+    Final fusion recommendation.
+
+    Attributes:
+        summary: Recommendation summary
+        decision: Decision conclusion
+        risks: Identified risks
+        next_actions: Suggested next actions
+    """
+
+    summary: str = Field(
+        description="Recommendation summary",
+    )
+
+    decision: Literal["yes", "no", "conditional_yes", "needs_more_information"] = Field(
+        description="Decision conclusion",
+    )
+
+    risks: list[str] = Field(
+        default_factory=list,
+        description="Identified risks",
+    )
+
+    next_actions: list[str] = Field(
+        default_factory=list,
+        description="Suggested next actions",
+    )
+
+
 class ConflictPoint(BaseModel):
     """
     Conflict point detected in G2 mode.
@@ -535,7 +565,7 @@ class FusionResult(BaseModel):
         description="Risk assessments (G5)",
     )
 
-    recommendation: Optional[str] = Field(
+    recommendation: Optional[Recommendation] = Field(
         default=None,
         description="Final recommendation",
     )

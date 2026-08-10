@@ -100,15 +100,25 @@ impl FuseClient {
     ) -> Result<FuseResponse, FuseClientError> {
         let url = format!("{}/api/v1/groups/{}/fuse", self.base_url, group_id);
 
-        let response = self
+        let resp = self
             .fusion_client
             .post(&url)
             .json(&request)
             .send()
             .await?
-            .error_for_status()?
-            .json::<FuseResponse>()
-            .await?;
+            .error_for_status()?;
+
+        // Temporary debug logging for response deserialization issues.
+        let status = resp.status();
+        let raw_body = resp.text().await?;
+        tracing::info!(
+            url = %url,
+            status = %status,
+            raw_body = %raw_body,
+            "fuse: received bcsfuse response"
+        );
+        let response = serde_json::from_str::<FuseResponse>(&raw_body)
+            .map_err(|e| FuseClientError::InvalidResponse(format!("{e}, body={raw_body}")))?;
 
         Ok(response)
     }
