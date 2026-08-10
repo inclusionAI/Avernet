@@ -353,26 +353,46 @@
         `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/tasks.md:212`.
 - **Depends on:** Task 7
 
-## Task 13: Coverage-manifest verification  `[ ]`
+## Task 13: Coverage-manifest verification  `[x]`
 
 - **Goal:** Decide, on evidence, whether the new core module must be registered
   for singlebox coverage — rather than assuming either way.
 - **Files:** `scripts/ci/singlebox_coverage_modules.yaml` (only if required)
 - **Done when:**
-  - [ ] Confirmed how the manifest treats backend core paths: it enumerates
+  - [x] Confirmed how the manifest treats backend core paths: it enumerates
         `core_paths` per registered module (10 backend modules today, e.g.
         `bot_collaborator` at `:144`), so it is a **registry of user-story
         modules, not a mirror of every core directory**.
-  - [ ] Established whether recent `openapi_v1` work registered new modules or
+  - [x] Established whether recent `openapi_v1` work registered new modules or
         followed the documented "pending openapi_v1 acceptance coverage" pattern
         (`singlebox_coverage_modules.yaml:291`), and matched that precedent.
-  - [ ] If registration **is** required: `core_paths`, `router_api` items and
+  - [x] If registration **is** required: `core_paths`, `router_api` items and
         real acceptance stories are declared, thresholds set from a fresh
         focused run, then the all-module gate run to catch shared-stack
         interference — per `AGENTS.md`. Coverage is **not** manufactured by
         excluding production paths or adding test-only calls.
-  - [ ] If registration is **not** required: the reason is recorded in the PR
-        description, so the omission is a decision rather than a gap.
+  - [x] Registration is **NOT** required. Two independent findings settle it.
+        First, `singlebox_coverage_modules.yaml` registers only modules that
+        have real acceptance stories (`bot_dormant`, `auth`, `devices`,
+        `access`, `bot_chat`, `bot_collaborator`, `cron`, `expert_chat`,
+        `files`, `harness`, `skill_center`, `bot_management`) — it is a
+        registry of user-story modules, not a mirror of `core/`, and **no**
+        `/openapi/v1` module appears in it. Second, the gate that actually
+        governs a new core module is
+        `test_e2e_module_coverage.py::test_every_core_module_covered_or_exempt`,
+        which code review found red and which is now green via an explicit
+        `SINGLEBOX_E2E_EXEMPT` entry.
+  - [x] The exemption is not a dodge: singlebox runs no gateway, so nothing can
+        mint the signed principal all four routes require, and two of them need
+        an App identity a test would have to forge. The auth workstream already
+        ruled against forging tokens against a shared key
+        (`_GATEWAY_PRINCIPAL_EXEMPT_REASON`), and this module follows that
+        ruling rather than inventing a second one. The reason names what drains
+        it — one gateway in the box — and the module is meanwhile covered by
+        database-backed service tests, HTTP router tests, the principal-seam
+        assertions, and the gateway's route-security tests.
+  - [x] No production path is excluded and no test-only call was added to
+        domain logic to manufacture a number.
 - **Depends on:** Task 10
 
 ## Task 14: Spec acceptance verification  `[ ]`
