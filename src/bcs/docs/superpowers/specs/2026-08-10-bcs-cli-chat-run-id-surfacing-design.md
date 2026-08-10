@@ -1,7 +1,7 @@
 # bcs-cli chat 透出 run_id / session_id 设计
 
 - 日期：2026-08-10
-- 状态：设计已确认，待实现（v3：据 Codex PR #927 第二轮 review 修订——detach 接受 `completed`）
+- 状态：设计已确认，待实现（v4：据 Codex PR #927 第三轮 review 修订——poll 签名携带 submit 元数据；新增 `submit_indeterminate`。spec 实现就绪，其余边缘场景归实现 PR）
 - 范围：`crates/tools/bcs-cli`（`main.rs` + `client.rs`），仅 CLI 侧输出契约
 
 ## 背景
@@ -25,8 +25,8 @@
 1. `client.chat_async(...)` → `ChatRunSubmitResponse { run_id, session_id, bot_uuid, ... }`（已存在）。
 2. `main.rs` 打印早 ack（见 §3）。
 3. 新增轮询方法返回结构化结果 `ChatRunOutcome`（见 §5），不再返回裸 `Err`：
-   - 同步：`chat_poll_run(run_id, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到终态）。
-   - detach：`chat_poll_run_until_running(run_id, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到 `running`）。
+   - 同步：`chat_poll_run(submit: &ChatRunSubmitResponse, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到终态；用 `submit.run_id` 轮询，`submit.session_id`/`bot_uuid` 填充无 status 响应的 timeout/poll_error 结果）。
+   - detach：`chat_poll_run_until_running(submit: &ChatRunSubmitResponse, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到 `running`/`completed`；同样用 submit 元数据填充无 status 的结果）。
 4. `main.rs` 用 `ChatRunOutcome` 决定最终输出与退出码。
 
 `client.rs` 继续保持纯传输层，不做任何 stdout/stderr 打印；所有打印仍在 `main.rs`。
@@ -83,7 +83,7 @@ struct ChatRunOutcome {
     submitted: bool,          // run 是否被创建（chat_async 返回了 run_id）；仅提交级失败为 false
     run_id: Option<String>,   // 仅提交失败时为 None
     session_id: Option<String>,
-    state: String,            // running|completed|failed|cancelled|timeout|submitted|submit_failed|poll_error
+    state: String,            // running|completed|failed|cancelled|timeout|submitted|submit_failed|poll_error|submit_indeterminate
     bot_uuid: Option<String>,
     response_content: Option<String>,
     error_message: Option<String>,
@@ -94,7 +94,8 @@ struct ChatRunOutcome {
 - 提交成功后轮询方法返回 `Ok(ChatRunOutcome)`；`delivered=false` 表示未交付。
 - `submitted` 仅表示「run 是否被创建」，**不**用于表达成败；退出码由 `state` 推导（成功 = sync 下 `completed`，或 detach 下 `running`/`completed`——含 run 在首次状态响应前已完成，对齐现有 `chat_polling_detach` 接受 `Completed|Running` `client.rs:1469`；其余 = 失败）。
 - 错误映射（`main.rs` 统一做，确保 stdout 在「run 已创建」时绝不空）：
-  - 提交级 HTTP 错误（非 2xx / 反序列化失败） → `submit_failed`（`submitted=false`、`run_id/session_id=null`）。
+  - 提交级非 2xx / 反序列化失败（服务器明确拒绝或响应不可读） → `submit_failed`（`submitted=false`、`run_id/session_id=null`）。
+  - 提交级传输错误（连接 reset / 10s 客户端超时等，`chat_async` 的 `.send()` 失败，见 §7） → `submit_indeterminate`（`submitted=false`、`run_id/session_id=null`、`error_message` 注明「run 可能在服务端已创建但 CLI 未知其 ID」）。不加分类地塞进 `submit_failed` 不安全——run 可能已存在但 202 未抵达。
   - 轮询期 `chat_run_status` 错误（传输 / 非 2xx / 反序列化，发生在 run 已创建后） → `poll_error`（`submitted=true`、IDs 取自提交响应，见 §7）。
 - `ChatRunOutcome` 是 `bcs-cli` crate 内部结构（位于 `client.rs`），不是 bcs-protocol 线上 DTO；由现有 `ChatRunSubmitResponse` / `ChatRunStatusResponse` 的既有字段组装，不引入任何新的线上字段。
 
@@ -156,12 +157,15 @@ detach json 成功（exit 0）/ 失败（exit 1）：
 }
 ```
 
+提交传输错误变体：`state="submit_indeterminate"`（与上方结构相同，`run_id/session_id=null`、`submitted=false`）、`error_message="chat_async transport error: ...; run may have been created server-side, ID unknown"`——run 是否已创建未知，见 §7。`submit_failed` = 服务器明确未接受（非 2xx）/ 响应不含可读 run（deser）；两者 IDs 均为 null，仅语义不同。
+
 ### 7. 失败语义
 
 - `Failed` / `Cancelled`：`delivered=false`、`submitted=true`、`state=failed/cancelled`、`error_message` 取自 status。结构化 stdout 输出，exit 1。
-- 本地轮询超时（deadline 到，run 在服务端仍活动）：`delivered=false`、`submitted=true`、`state="timeout"`、`error_message="local polling timeout after N ms; run <rid> still active"`。结构化输出，exit 1。透出的 run_id 允许 agent 自行后续查询/取消。
+- 本地轮询超时（deadline 到，run 在服务端仍活动）：`delivered=false`、`submitted=true`、`state="timeout"`、`error_message="local polling timeout after N ms; run <rid> still active"`。结构化输出，exit 1。透出的 run_id 允许 agent 自行后续查询/取消。`run_id`/`session_id`/`bot_uuid` 取自提交响应（由 `chat_poll_run`/`chat_poll_run_until_running` 接收的 submit 元数据填充），即便因零/极短 `--timeout-ms` 在首次状态响应前超时、从未拿到 `ChatRunStatusResponse` 也保留。
 - **轮询请求错误**（修复 Codex P2）：`chat_run_status` 在 run 已创建后的传输错误 / 非 2xx / 反序列化失败：`delivered=false`、`submitted=true`、`state="poll_error"`、`run_id`+`session_id` 取自提交响应（已知）、`error_message="<err>"`。结构化输出，exit 1。`main.rs` 将该 Err 映射为 `poll_error` 的 `ChatRunOutcome`，**不**作为裸 Err 冒泡——避免「stdout 空 + 已知 ID 丢失」的原缺陷。
 - 提交本身失败（非 2xx 或反序列化失败）：`submitted=false`、`run_id/session_id=null`、`state="submit_failed"`、`error_message=body`，结构化输出，exit 1。
+- 提交传输不确定（修复 Codex #3b）：`chat_async` 的 `.send()` 报连接 reset / 10s 客户端超时等：`submitted=false`、`run_id/session_id=null`、`state="submit_indeterminate"`、`error_message` 注明「run 可能在服务端已创建但 CLI 未知其 ID」。结构化输出，exit 1。区别于 `submit_failed`（非 2xx/deser = 服务器明确未接受）；本态表示「不确定是否已创建」，agent 不应假设无 run 残留。
 
 ### 8. 兼容性与退出码
 
@@ -190,7 +194,9 @@ detach json 成功（exit 0）/ 失败（exit 1）：
 - 同步与 detach 在提交后立刻输出带时间戳的纯文本 ack，行内含 `run_id` 与 `session_id`；non-json 走 stdout 且在 `Response from` 块之前，json 走 stderr。
 - 同步失败（run failed / local timeout / 轮询请求错误）时，stdout（json：单 JSON 对象；non-json：`Run/Session/State/Error` 行）包含 run_id 与 session_id，且 exit 1。
 - detach 成功与失败均输出 run_id 与 session_id；成功接受 `state=running` **或** `state=completed`（run 在首次状态前已完成的快/legacy 情况），均 `delivered:true`、exit 0；失败时 `submitted=true`、`state=failed/cancelled`、exit 1。
-- 提交级失败（如 404）输出结构化失败（json：单对象，`run_id/session_id=null`、`submitted=false`；non-json：`Error:` 行），exit 1，无 panic。
+- 提交级失败（如 404 非 2xx / 反序列化）输出结构化失败 `state="submit_failed"`（json：单对象，`run_id/session_id=null`、`submitted=false`；non-json：`Error:` 行），exit 1，无 panic。
+- 提交级传输错误（`chat_async` `.send()` reset/超时）映射为 `state="submit_indeterminate"` 结构化结果（IDs null、`submitted=false`、`error_message` 注明可能已创建），exit 1，stdout 非空；agent 不应假设无 run 残留。
+- 本地轮询在首次状态响应前超时（零/极短 `--timeout-ms`）时，结果仍含 `run_id`+`session_id`（取自提交响应），`state="timeout"`，exit 1。
 - 轮询期 `chat_run_status` 错误映射为 `state="poll_error"` 的结构化结果（含来自提交的 run_id+session_id），exit 1，stdout 非空。
 - `--json` 模式下，stdout 成功与失败均为且仅为一个 JSON 对象，`jq '.'` 可解析。
 - run_id 与 session_id 同时出现在早 ack 与最终 stdout 块（除提交级失败外，最终块均为非 null 顶层字段）。
@@ -206,6 +212,8 @@ detach json 成功（exit 0）/ 失败（exit 1）：
 - 新增：detach 首个状态为 `completed`（快/legacy run）→ `delivered=true`、`state=completed`、exit 0（兼容回归，对齐 `chat_polling_detach` 的 `Completed` 接受）。
 - 新增：提交级失败（404）输出结构化失败、`submitted=false`、ID=null、exit 1、无 panic。
 - 新增：轮询期 `chat_run_status` 返回 500 → `state="poll_error"` 结构化结果，含 run_id+session_id（取自提交响应），exit 1，stdout 非空。
+- 新增：`chat_async` `.send()` 连接重置/超时 → `state="submit_indeterminate"` 结构化结果（IDs null、`submitted=false`、`error_message` 注明可能已创建），exit 1，stdout 非空。
+- 新增：零/极短 `--timeout-ms` 在首次状态响应前超时 → 结果仍含 `run_id`+`session_id`（取自提交响应），`state="timeout"`，exit 1。
 
 ## 非目标
 
