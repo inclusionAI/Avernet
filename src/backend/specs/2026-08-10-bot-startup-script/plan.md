@@ -205,15 +205,14 @@ _k8s: PaasServiceProtocol = K8sPaasService(...)         # declares True
 ```python
 # src/backend/.../core/bot_startup_script/services/_support.py (new)
 def _resolve_support(bot: dict) -> tuple[bool, str]:
-    """Two independent reasons a bot cannot run a script — both must clear.
+    """Support keys on the PROVIDER, not the bot type.
 
-    A personal bot is excluded by its START PIPELINE, not by its provider: its
-    container init runs only on create (BaasCreateInitTaskHandler) and never on
-    restart, so an Arca-backed personal bot would report a capable provider and
-    then never run the script — the exact silent no-op the spec forbids.
+    Personal and service bots share one create path — _allocate_via_baas accepts
+    both (baas_device_service.py:295) and calls the same _build_create_bot_payload,
+    which sets after_create_cmd_hook unconditionally. Bot type does not select a
+    provider either: the template comes from template_config.template_uid, so a
+    personal bot and a service bot can land on the same provider or different ones.
     """
-    if bot["bot_type"] == PERSONAL:
-        return False, "personal bots do not yet re-run provisioning on restart"
     if not provider_supports_startup_script(bot):     # BaaS capability, cached
         return False, f"provider {bot['provider_type']} cannot execute scripts"
     return True, ""
@@ -291,11 +290,13 @@ already in use.
   **Mitigation:** backend pushes the script on create *and* restart; a run row
   records `script_sha256`, so the API can show an instance running a stale script
   rather than hiding it.
-- **Risk:** a personal bot on a capable provider reads as supported and silently
-  never runs, because its exclusion is a pipeline property while the capability is
-  a provider property.
-  **Mitigation:** `_resolve_support` above ANDs both, with bot type checked first;
-  a test asserts an Arca-backed personal bot reads unsupported.
+- **Risk:** `BaasContainerInitializer` (the post-create exec sequence that runs for
+  every BaaS-allocated binding) does the steps commented out of `_get_start_cmd` —
+  sync service, engine dirs, skill symlinks, codefuse token — and it runs on
+  **create only**. A user script that depends on those is depending on create-time
+  state that a restart does not rebuild.
+  **Mitigation:** out of scope to change, but documented in the API docs as a
+  property of the environment the script runs in.
 - **Risk:** secrets leaking into run output.
   **Mitigation:** secrets arrive as env vars resolved at dispatch, never in the
   body; stored stdout/stderr are masked against the resolved values before persist.

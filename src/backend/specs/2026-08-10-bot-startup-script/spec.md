@@ -47,6 +47,9 @@ otherwise tell a completed install from one that never happened.
 - As a bot owner whose bot runs somewhere the script cannot execute, I want the
   API to tell me so, so that I do not believe provisioning happened when it did
   not.
+- As the owner of a **personal** bot, I want the same behavior as a service bot,
+  because a personal bot is provisioned through the same platform startup
+  sequence and differs only in which container provider its template resolves to.
 - As a bot owner, I want a failed script to leave my agent running, so that a
   bad script costs me a feature and not the bot.
 
@@ -105,10 +108,6 @@ otherwise tell a completed install from one that never happened.
 - Executing the script on container providers that support neither command
   execution nor restart today. Those bots get the explicit unsupported answer;
   making them capable is separate work, in part outside this repository.
-- Executing the script for personal bots. Their containers are provisioned by a
-  different path that does not re-run on restart, so honoring "every start"
-  there is a change to that path and is deferred to a follow-up. The API answers
-  for personal bots the same way it answers for any bot it cannot yet run on.
 - Binding the script to a service bot's publication stage. One script per bot,
   used by whichever stage starts.
 - Streaming or live-tailing a run. Results are read after the fact.

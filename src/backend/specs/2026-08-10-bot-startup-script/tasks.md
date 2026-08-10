@@ -122,11 +122,10 @@
   - [ ] `GET /openapi/v1/bots/{bot_id}/startup-script/runs` returns one entry per instance.
   - [ ] Each entry carries status, exit code, output, truncation, and timestamps.
   - [ ] A scaled bot whose instances disagree reports both outcomes, not a summary.
-  - [ ] `GET .../startup-script` reports `supported` / `unsupported_reason` as the
-        AND of provider capability **and** start-pipeline support for the bot type.
-  - [ ] An Arca-backed **personal** bot reads as unsupported — its provider is
-        capable, but its container init only runs on create, so provider capability
-        alone would promise a run that never happens.
+  - [ ] `GET .../startup-script` reports `supported` / `unsupported_reason` from the
+        bot's **container provider**; bot type is not an input.
+  - [ ] A personal bot and a service bot on the same provider get the same answer —
+        both reach the platform startup hook through `_build_create_bot_payload`.
   - [ ] A TeClaw-backed bot reads as unsupported, with the provider named as the reason.
   - [ ] A run whose recorded hash differs from the stored script is still returned
         (stale-instance visibility).
