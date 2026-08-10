@@ -48,6 +48,35 @@ still require an authenticated caller — ``_PUBLIC_AUTH`` below — they just h
 no user-shaped answer to give. The load-test group is exempt on the same
 grounds and for the plainest reason of all: it reads and writes nothing.
 
+Who may call: a person, or an application acting for one
+--------------------------------------------------------
+
+Two caller shapes reach this surface, and the difference is whether a human is
+on the wire at all.
+
+A **person** is the ordinary case and is unchanged by everything below: their
+``user_id`` must name themselves, and every read and write is scoped to them.
+
+An **application acting alone** presents its own credential and no end user. It
+names the user it acts for in the same ``user_id`` parameter, and that parameter
+is *authorized against a grant* — a record saying "this application may act as
+this person on this bot" (``core/bot_app_grant``) — rather than compared with a
+caller that is not there. The application then inherits exactly that person's
+access, re-adjudicated on every request by the same gates they would face. It is
+never more: nothing about their authority is stored in the grant, so there is
+nothing to go stale, and the application loses a bot the moment the person does.
+
+**Which operations admit it is a per-operation decision, written down.**
+``admission.py`` holds one entry per operation; an operation absent from that
+table refuses a machine caller, so a route added later is refused by omission
+rather than by someone remembering not to opt in.
+``test_admission_inventory.py`` is what makes the omission loud.
+
+Refusals are indistinguishable on purpose. An application that reaches an
+operation it may not gets the same ``401`` an unauthenticated caller gets; one
+that names a bot it holds no grant for gets the same ``404`` a nonexistent bot
+gets, byte for byte. Anything finer would be an enumeration oracle.
+
 Planes
 ------
 

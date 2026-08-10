@@ -117,8 +117,11 @@ USER_ID_QUERY = "user_id"
 #: parameter reads identically across all 56 of them.
 USER_ID_DESCRIPTION = (
     "The end user this request acts for. Every read and write is scoped to it. "
-    "It must currently be the authenticated caller's own id; naming another "
-    "user is refused (403)."
+    "A caller authenticated as a person must name themselves; naming another "
+    "user is refused (403). An application calling with its own credential and "
+    "no end user names the user who authorized it, and reaches only what that "
+    "user has authorized it for — anything else is answered exactly as if it "
+    "did not exist (404)."
 )
 
 

@@ -37,6 +37,14 @@ Nothing here reads a framework, a request, or an HTTP status (Rule 7). The HTTP
 seam is `adapters/http/openapi_v1/authorized_apps/`; the Service API contract the
 adapter depends on is `api/bot_app_grant_service.py`.
 
+**Who reads this record, and when.** `find` is the authorization probe the
+public API runs on every bot-scoped request from an application acting alone —
+one unique-key lookup, and the only thing standing between that caller and the
+operation. `adapters/http/openapi_v1/admission.py` decides which operations
+consult it at all. A record coming back means the delegation exists; whether the
+delegating user may *still* operate that bot is asked separately and live, which
+is what makes the invariant above true rather than aspirational.
+
 ## Context Boundary
 
 ```yaml
@@ -51,6 +59,9 @@ provides:
 consumes:
   - "BotAppGrantRepositoryProtocol (core.repository) — persistence for both tables"
   - "BotRepository (core.repository) — live-bot ids, so a grant outliving its bot is not reported as access"
+consumed_by:
+  - "adapters/http/openapi_v1 — the public API's admission seam reads a grant on every request from an application acting alone"
+  - "core/bot_management (delete_bot) — withdraws every authorization on a bot as part of deleting it"
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.repository

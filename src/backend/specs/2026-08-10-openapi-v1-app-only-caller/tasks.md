@@ -451,23 +451,26 @@
 
 ---
 
-## Task 15: Documentation and the published description  `[ ]`
+## Task 15: Documentation and the published description  `[x]`
 
 - **Files:** `core/bot_app_grant/README.md`, `openapi_v1/__init__.py`,
   `docs/openapi-v1/`
 - **Done when:**
-  - [ ] The grant README's "nothing here admits such a caller today" is replaced,
-        its Context Boundary lists the new members, and its model description
-        carries the delegation meaning and the invariant.
-  - [ ] `openapi_v1/__init__.py` gains a section on the admission modes and the
-        two id models, pointing at `admission.py`. Its existing note on why
-        bot-logs sits outside the caller-scope rule is extended — the same
-        asymmetry is why bot-logs is Mode D.
-  - [ ] The `user_id` description on admitted operations says what the parameter
-        means for an application caller.
-  - [ ] The published description is regenerated and the diff inspected: **no
-        request-schema change may appear**; the only response change is the
-        additive delegating user on `AuthorizedApp`.
+  - [x] The grant README's stale line is gone (Task 1), its Context Boundary
+        gains a `consumed_by` naming both new readers, and it says who reads
+        `find` and when.
+  - [x] `openapi_v1/__init__.py` gains a "Who may call" section covering the two
+        caller shapes, the per-operation decision and the indistinguishable
+        refusals, pointing at `admission.py`.
+  - [x] The `user_id` description says what the parameter means for an
+        application caller.
+  - [x] `docs/openapi-v1/README.md`: the identity-admission row updated from
+        "user only" and a changelog entry added.
+  - [x] Published description regenerated and the diff **checked
+        structurally**, not by eye: no path added or removed, no parameter,
+        request body or response status changed on any of the 71 operations, and
+        exactly one schema property added — `AuthorizedApp.user_id`.
+
 - **Depends on:** Tasks 9, 10, 11, 14
 
 ---
