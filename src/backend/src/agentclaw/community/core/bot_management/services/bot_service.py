@@ -2155,6 +2155,7 @@ class BotService:
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """
         List bots by conditions with pagination.
@@ -2169,6 +2170,10 @@ class BotService:
             status: Filter by lifecycle status (exact match)
             page: Page number (1-based)
             page_size: Items per page
+            bot_ids: Restrict to this explicit set. ``None`` means unrestricted;
+                an empty list means none. The distinction is load-bearing —
+                treating empty as unrestricted would show a caller entitled to
+                nothing everything.
 
         Returns:
             Dictionary with 'total' and 'items' keys
@@ -2183,6 +2188,7 @@ class BotService:
             status=status,
             page=page,
             page_size=page_size,
+            bot_ids=bot_ids,
         )
         self._attach_template_configs_to_bots(items)
         return {

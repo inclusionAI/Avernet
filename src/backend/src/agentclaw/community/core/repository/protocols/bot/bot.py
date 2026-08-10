@@ -165,8 +165,14 @@ class BotRepository(Protocol):
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: list[str] | None = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         """List bots by conditions with pagination.
+
+        ``bot_ids`` restricts the result to an explicit set. ``None`` means no
+        restriction; an **empty list means none**, and the two must stay
+        distinguishable — collapsing them would turn "this caller may reach no
+        bots" into "show everything".
 
         ``owner_id`` scopes to a single owner (exact), ``engine`` filters on the
         active engine (exact), ``status`` filters on lifecycle status (exact).

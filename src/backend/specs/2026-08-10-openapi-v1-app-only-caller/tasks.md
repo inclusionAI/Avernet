@@ -334,25 +334,28 @@
 
 ---
 
-## Task 11: Modes B, C and C-open  `[ ]`
+## Task 11: Modes B, C and C-open  `[x]`
 
 - **Files:** `bots/router.py`, `authorized_apps/router.py`, `mcp/router.py`
 - **Done when:**
-  - [ ] `GET /openapi/v1/bots` narrows to `granted_bot_ids()` when set; the
-        user's own call is unfiltered.
-  - [ ] Filtering happens **before** pagination, with a comment on why: filtering
-        a page afterwards leaks the size of what was withheld and returns short
-        pages.
-  - [ ] `GET /bots/authorized` accepts the app-only caller and is the **complete**
-        discovery view — a granted bot the delegating user does not own appears
-        here and in no bot listing.
-  - [ ] `GET /bots/ceiling` admits an app-only caller holding ≥1 live grant from
-        the named user, `404` otherwise.
-  - [ ] `GET /bots/check-name` and the three MCP catalogue reads admit on
-        authentication alone, with a comment recording why that is not a new
-        exposure.
-  - [ ] The three MCP **configuration** operations stay refused, reason in the
-        router.
+  - [x] `GET /openapi/v1/bots` narrows to the granted set; a human caller is
+        unfiltered. Needed a `bot_ids` filter threaded through
+        `list_bots_by_conditions` and `list_by_conditions` — `None` means
+        unrestricted, `[]` means none, and the two must stay distinguishable or
+        "may reach nothing" becomes "show everything".
+  - [x] Filtering happens in the query, **before** pagination, asserted through
+        the call the service receives rather than the page that comes back.
+        Granted nothing short-circuits without asking for a page to discard.
+  - [x] `GET /bots/authorized` accepts the app-only caller and is the complete
+        discovery view — pinned with a bot the delegating user does not own,
+        which can never appear in the owner-scoped listing.
+  - [x] `GET /bots/ceiling` admits an app holding ≥1 delegation from the named
+        user, 404 otherwise.
+  - [x] `GET /bots/check-name` admits on authentication alone; the three MCP
+        catalogue reads inherit the same OPEN mode from the table.
+  - [x] The three MCP configuration operations stay refused (table entries with
+        their reason).
+
 - **Depends on:** Task 8
 
 ---

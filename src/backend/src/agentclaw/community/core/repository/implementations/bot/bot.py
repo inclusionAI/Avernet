@@ -393,6 +393,7 @@ class BotRepository(
         status: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
+        bot_ids: Optional[List[str]] = None,
     ) -> tuple[int, List[Dict[str, Any]]]:
         with self._db.orm_session() as db:
             query = db.query(self.Model).filter(
@@ -414,6 +415,11 @@ class BotRepository(
                 )
             if bot_id:
                 query = query.filter(self.Model.bot_id == bot_id)
+            if bot_ids is not None:
+                # An empty list is a real restriction — "none of them" — and must
+                # not be read as "no filter". Callers that mean "unrestricted"
+                # pass None; the difference is the whole point of the parameter.
+                query = query.filter(self.Model.bot_id.in_(bot_ids))
             if owner_id:
                 query = query.filter(self.Model.owner_id == owner_id)
             if engine:

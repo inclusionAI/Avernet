@@ -36,6 +36,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
     UserIdDep,
     require_granted_bot,
 )
@@ -299,12 +300,36 @@ async def list_bots(
     request: Request,
     page_params: PageParamsDep,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     keyword: str | None = None,
     engine: str | None = None,
     status: str | None = None,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Page[Bot]]:
-    """List the caller's bots (filter + paginate)."""
+    """List the user's bots (filter + paginate), narrowed to what may be reached.
+
+    For a human caller this is their own bots, unfiltered — unchanged.
+
+    For an **application** the result is narrowed to the bots that user granted
+    it. Filtering here rather than in the service keeps the narrowing beside the
+    thing it protects, and it is applied **before** paginating: filtering a page
+    after the fact would return short pages and, worse, let a caller infer how
+    many bots it was *not* granted from the gaps. The count reports the narrowed
+    set for the same reason.
+
+    An application granted nothing gets an empty page, not an error: naming no
+    bot, this operation has nothing to mask.
+
+    Note this listing can never show a bot the user does not own, for an
+    application any more than for the user — it is owner-scoped underneath. The
+    complete view of what an application may reach, including bots delegated by
+    a collaborator, is ``GET /openapi/v1/bots/authorized``.
+    """
+    granted = caller.granted_bot_ids()
+    if granted is not None and not granted:
+        # Granted nothing: answer without asking the service for a page it
+        # would have to discard entirely.
+        return page(0, [], request)
     result = bot_service.list_bots_by_conditions(
         owner_id=owner_id,
         bot_name=keyword,
@@ -312,6 +337,7 @@ async def list_bots(
         status=status,
         page=page_params.page,
         page_size=page_params.page_size,
+        bot_ids=sorted(granted) if granted is not None else None,
     )
     items = [_to_bot(b) for b in result["items"]]
     return page(result["total"], items, request)
@@ -361,9 +387,19 @@ async def check_bot_name(
 async def get_bots_ceiling(
     request: Request,
     owner_id: UserIdDep,
+    caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> Envelope[Ceiling]:
-    """Get the caller's bot-creation quota ceiling.
+    """Get the named user's bot-creation quota ceiling.
+
+    Names no bot, so there is no grant to check against one — but the answer is
+    still *about a person's account*, and a stranger application must not be
+    able to read it by naming a user id. So it is gated on the application
+    holding **at least one** live delegation from that user: proof of a
+    relationship, which is the closest thing this operation has to a scope.
+
+    An application with no delegation from them is answered as if the user were
+    not there. It learns nothing it did not already know.
 
     Resolved through the same method creation enforces, not
     ``PolicyService.get_bots_ceiling`` directly: that one falls back to its own
@@ -371,6 +407,9 @@ async def get_bots_ceiling(
     ``max_devices_per_entity``. Reading it directly would advertise 5 to a caller
     whose deployment allows (or rejects at) a different number.
     """
+    granted = caller.granted_bot_ids()
+    if granted is not None and not granted:
+        raise BotNotFoundError(f"no authorization from user {owner_id}")
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
