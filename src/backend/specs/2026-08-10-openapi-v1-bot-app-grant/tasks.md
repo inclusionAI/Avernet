@@ -4,9 +4,11 @@
 >
 > Branch: `claude/github-issue-928-investigation-bia0fl`, based on `dev`.
 >
-> Scope reminder: this ships the authorization **record** and the owner's three
-> operations over it. It admits no application-only caller to any operational
-> route — that is the remaining half of issue #928 and a separate piece of work.
+> Scope reminder: this ships the authorization **record** and four operations
+> over it — the owner's grant / list / withdraw, plus the application's read of
+> which of that owner's bots it may reach. Every one of the four still requires
+> an end user. It admits no application-only caller anywhere — that is the
+> remaining half of issue #928 and a separate piece of work.
 > `verify_principal_token::_require_user_principal` and `require_user_id` must
 > come out of this feature **unchanged**; a diff touching either is a scope
 > escape, not a fix.
@@ -47,8 +49,10 @@
         Both `env` and `status` are in the key, and the module docstring says
         why: `env` so one row cannot collide across environments sharing a
         database, `status` so a withdrawn grant does not block a later re-grant.
-  - [ ] Indexes `idx_bot_owner_env_status` and `idx_app_env_status` exist —
-        the list read and the later machine-caller read respectively.
+  - [ ] Indexes `idx_bot_owner_env_status` and `idx_app_owner_env_status`
+        exist — the record's two reading ends. The second is not redundant with
+        the unique key: that key's second column is `bot_id`, so it cannot serve
+        an `(app_id, owner_id)` lookup that names no bot.
   - [ ] `revoked_at` is nullable, and a comment states this is an intentional
         contract state (an active grant has no revocation time), per `CLAUDE.md`.
   - [ ] `GrantStatus` is an enum with `ACTIVE` / `REVOKED`, not bare strings.
@@ -67,9 +71,12 @@
   `…/core/repository/implementations/bot/__init__.py`
 - **Done when:**
   - [ ] `BotAppGrantRepositoryProtocol` declares `upsert_active`,
-        `list_active_for_bot`, `find_active`, `mark_revoked` — **every member
-        `@abstractmethod`**, domain imports under `TYPE_CHECKING` only, per
-        `core/repository/README.md`.
+        `list_active_for_bot`, `list_active_for_app`, `find_active`,
+        `mark_revoked` — **every member `@abstractmethod`**, domain imports
+        under `TYPE_CHECKING` only, per `core/repository/README.md`.
+  - [ ] Both `list_active_*` members take `owner_id`, so neither can return a
+        row belonging to anyone but the caller. The scoping is in the contract,
+        not left to each caller to remember.
   - [ ] The protocol is re-exported from `protocols/bot/__init__.py` so
         importers see one module, as the other `bot` contracts are.
   - [ ] `BotAppGrantRepository` declares the Protocol as a base and takes
@@ -101,6 +108,11 @@
   - [ ] `revoke` raises `GrantNotFoundError` when no live grant matches, so the
         adapter can answer 404 distinctly from a successful withdraw.
   - [ ] `list_for_bot` returns live grants only.
+  - [ ] `list_for_app(app_id, owner_id)` returns the owner's bots this app may
+        reach, live only. It performs **no bot-existence check** — deliberately
+        asymmetric with the other three, which resolve a named bot and inherit
+        the masked 404 from that read. This one names no bot, so there is
+        nothing to mask.
   - [ ] No FastAPI/HTTP import anywhere in the module (Rule 7: core is
         transport-agnostic).
 - **Depends on:** Task 3
@@ -122,7 +134,7 @@
 
 ## Task 6: The `authorized-apps` router group  `[ ]`
 
-- **Goal:** Three routes with the consent asymmetry wired through existing
+- **Goal:** Four routes with the consent asymmetry wired through existing
   dependencies and no new authorization code.
 - **Files:**
   `…/adapters/http/openapi_v1/authorized_apps/__init__.py` (new),
@@ -135,7 +147,15 @@
         cannot name an application other than its own.
   - [ ] `GET ""` and `DELETE "/{app_id}"` declare `require_principal` only, so
         an owner can list and withdraw without any application credential.
-  - [ ] All three take `UserIdDep` (`principal.py:205`), unchanged in meaning.
+  - [ ] A second router at prefix `/authorized-bots` serves the app's view:
+        `GET ""` declaring `require_user_and_app_principal`, scoped by the
+        `app_id` read off the principal. **No `app_id` parameter** — it cannot
+        be used to ask what some other application may reach.
+  - [ ] The app's view answers `200` with an empty page when the app holds no
+        grants from this owner — not `404`. "You have nothing here" is a valid
+        answer, and the owner's existence is already implied by their own
+        credential being on the call.
+  - [ ] All four take `UserIdDep` (`principal.py:205`), unchanged in meaning.
   - [ ] Owner-only authority comes from the existing owner-scoped bot read
         raising `BotNotFoundError` — no new permission check is written, and a
         non-owner's answer is byte-identical to an absent bot's.
@@ -150,9 +170,10 @@
 - **Goal:** The routes are mounted, documented, and not shadowed.
 - **Files:** `…/adapters/http/openapi_v1/__init__.py:155`
 - **Done when:**
-  - [ ] The router is added to the literal sub-group list, mounted **before**
-        the `{bot_id}` wildcard `bots` router.
-  - [ ] The three routes resolve to their handlers — asserted by a test, not by
+  - [ ] Both routers are added to the literal sub-group list, mounted **before**
+        the `{bot_id}` wildcard `bots` router. `authorized-bots` is a top-level
+        literal and genuinely needs to precede it.
+  - [ ] All four routes resolve to their handlers — asserted by a test, not by
         starting the app and looking.
   - [ ] The group inherits the surface-wide error-response table; it is not
         added to `_GROUPS_WITHOUT_CALLER_SCOPE` (every route here **is** scoped
@@ -167,10 +188,16 @@
 - **Done when:**
   - [ ] `"POST /openapi/v1/bots/{bot_id}/authorized-apps": {user: required,
         app: required}` is present.
-  - [ ] The comment block from `plan.md` is included: why granting needs both
-        parties, and why GET/DELETE deliberately inherit `user: required` from
-        `/openapi/v1/bots/**` rather than restating it — written in the style of
-        the existing `WEBSOCKET` rule commentary in that file, which is the
+  - [ ] `"/openapi/v1/authorized-bots": {user: required, app: required}` is
+        present — not method-qualified, since GET is the only method this path
+        has and every method it could grow answers the same question.
+  - [ ] Both comment blocks from `plan.md` are included: why granting needs both
+        parties; why GET/DELETE deliberately inherit `user: required` from
+        `/openapi/v1/bots/**` rather than restating it; and why the app's view
+        declares `app` — the runner resolves only declared identities
+        (`_runner.py:40`), so without it the App would be invisible and the
+        query would have nothing to scope by. Written in the style of the
+        existing `WEBSOCKET` rule commentary in that file, which is the
         precedent for explaining a non-obvious rule in place.
   - [ ] No other rule in the table changes.
 - **Depends on:** — (independent of the backend tasks; ships with them)
@@ -184,7 +211,9 @@
         `{user: required, app: required}`, beating `/openapi/v1/bots/**`.
   - [ ] A test asserts `GET` and `DELETE` on the same path resolve to
         `user: required` only.
-  - [ ] Both load the **real** `src/gateway/configs/application.yaml` via
+  - [ ] A test asserts `GET /openapi/v1/authorized-bots` resolves to
+        `{user: required, app: required}`, beating the `"/**"` default.
+  - [ ] All load the **real** `src/gateway/configs/application.yaml` via
         `RouteSecurity.from_yaml`, not a fixture table — a typo in the shipped
         config must fail the suite.
   - [ ] `pytest src/gateway/tests/unit/core/authn/test_route_security.py` passes.
@@ -216,6 +245,14 @@
         change can remove without noticing.
   - [ ] `test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request`
   - [ ] `test_revoked_row_retains_its_interval`
+  - [ ] The app's view — `test_list_authorized_bots_is_scoped_to_the_calling_app`
+        (two apps granted on one owner's bots see disjoint lists),
+        `test_list_authorized_bots_is_scoped_to_the_calling_owner` (one app
+        granted by two owners sees only the calling owner's bots),
+        `test_list_authorized_bots_excludes_revoked`, and
+        `test_list_authorized_bots_empty_is_200_not_404`. The first two are the
+        ones that matter: a listing that silently widens is worse than one that
+        fails, so both scoping dimensions are pinned separately.
 - **Depends on:** Task 7
 
 ## Task 11: Principal-seam assertions  `[ ]`
@@ -228,6 +265,10 @@
         `test_bot_logs_routes_require_user_and_app_principal` (`:361`) — it
         walks the dependency tree, so it catches a handler that forgets the
         dependency even if the gateway rule is right.
+  - [ ] `test_authorized_bots_get_requires_user_and_app_principal` — the same
+        walk. This one is load-bearing beyond auth: the handler scopes its query
+        by the App principal, so a missing dependency would not merely weaken a
+        check, it would leave the listing with nothing to filter by.
   - [ ] `test_authorized_apps_get_and_delete_require_only_principal`.
   - [ ] The existing assertion that every public route depends on
         `require_principal` still passes with the new group mounted.
@@ -235,13 +276,13 @@
 
 ## Task 12: Regenerate the published description  `[ ]`
 
-- **Goal:** The gateway's served OpenAPI document includes the three new
+- **Goal:** The gateway's served OpenAPI document includes the four new
   operations and nothing else moves.
 - **Files:** `src/gateway/configs/schemas/bots.openapi.json` (regenerated output)
 - **Done when:**
   - [ ] `python src/backend/scripts/dump_openapi.py` has been run and the
         artifact regenerated.
-  - [ ] The diff adds exactly the three operations — no unrelated churn. A
+  - [ ] The diff adds exactly the four operations — no unrelated churn. A
         noisy diff means the dump is non-deterministic and must be investigated,
         not committed.
   - [ ] `src/gateway/tests/fixtures/bots.openapi.json` is **NOT** regenerated —
@@ -280,7 +321,9 @@
         traceable to a named passing test.
   - [ ] `_require_user_principal` and `require_user_id` are **unmodified** —
         confirmed by `git diff`, not by memory. The out-of-scope promise is that
-        no application-only caller reaches any operational route.
+        no application-only caller reaches anything, **including the four routes
+        this feature adds** — the application's view requires the owner
+        alongside it.
   - [ ] Backend gate green: `scripts/ci/pre_push.sh` (or
         `OCB_PRE_PUSH_RUN_CI=1 git push`) — SAST, unit tests, changed-line
         coverage, singlebox coverage.
@@ -301,9 +344,9 @@
     Lands green and useful on its own — the record exists and is writable
     through the container before anything exposes it.
 - **Group C — The HTTP surface:** Tasks 6, 7
-  - Theme: The owner's three operations, wired through existing dependencies.
-    After this group the feature is end-to-end usable against a locally-signed
-    principal.
+  - Theme: The owner's three operations plus the application's view, wired
+    through existing dependencies. After this group the feature is end-to-end
+    usable against a locally-signed principal.
 - **Group D — The gateway rule:** Tasks 8, 9
   - Theme: The consent requirement enforced at the edge, and proved against the
     config that actually ships.

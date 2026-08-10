@@ -2,11 +2,23 @@
 
 ## Approach
 
-One new persisted record (`ac_bot_app_grant`) and one new router group
-(`/openapi/v1/bots/{bot_id}/authorized-apps`) with three operations. Nothing in
-the admission path moves: the verifier still refuses every identity set that
-names no end user, `UserIdDep` still requires the request's `user_id` to be the
+One new persisted record (`ac_bot_app_grant`) read from both ends: a bot-scoped
+group (`/openapi/v1/bots/{bot_id}/authorized-apps`, three operations) and an
+app-scoped read (`/openapi/v1/authorized-bots`, one operation). Nothing in the
+admission path moves: the verifier still refuses every identity set that names
+no end user, `UserIdDep` still requires the request's `user_id` to be the
 verified caller, and no existing route changes who may call it.
+
+The app-scoped read is a **user + app** call, not an application-only one — the
+same both-parties posture as granting. That is what keeps it inside this
+feature: it needs no verifier relaxation. It is also forced rather than chosen,
+and the reason is worth stating because it forecloses the obvious alternative:
+the gateway's auth runner iterates **only the identities a route declares**
+(`gateway/core/authn/_runner.py:40`), so an app presenting its token to a
+`user: required` route is never resolved and never reaches the signed principal.
+There is no way to carry an app identity onto a user-only route to scope an
+answer by it. Either the route declares `app` — and then the app is mandatory —
+or the app is invisible. Declaring it is the option that needs no new admission.
 
 The consent shape is enforced by two mechanisms that **already exist and are
 already proven in production code**, so this feature adds no auth machinery:
@@ -32,9 +44,11 @@ in the path.
 - `src/backend/src/agentclaw/community/core/repository/implementations/bot/app_grant.py`
   — **new** ORM body.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorized_apps/`
-  — **new** router group (3 routes).
+  — **new** router group: 3 bot-scoped routes + the 1 app-scoped read. One
+  module because both ends read one record and share its schemas; two routers
+  because they mount at different prefixes.
 - `src/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py:100-165`
-  — register the group **before** the `{bot_id}` wildcard `bots` router.
+  — register both **before** the `{bot_id}` wildcard `bots` router.
 - `src/backend/src/agentclaw/community/di/modules/` — **new** DI module binding
   the protocol to the implementation, modelled on `bot_collaborator_module.py:52`.
 - `src/gateway/configs/application.yaml:111` — one `route_security` entry.
@@ -65,10 +79,17 @@ class BotAppGrantModel(Base):
     __table_args__ = (
         UniqueConstraint("app_id", "bot_id", "owner_id", "env", "status",
                          name="uk_app_bot_owner_env_status"),
+        # the owner's view: which apps reach this bot
         Index("idx_bot_owner_env_status", "bot_id", "owner_id", "env", "status"),
-        Index("idx_app_env_status", "app_id", "env", "status"),
+        # the app's view: which of this owner's bots may this app reach
+        Index("idx_app_owner_env_status", "app_id", "owner_id", "env", "status"),
     )
 ```
+
+`idx_app_owner_env_status` is not redundant with the unique key even though both
+lead on `app_id`: the unique key's second column is `bot_id`, so it cannot serve
+an `(app_id, owner_id)` lookup that does not also name a bot — which is exactly
+the app's view.
 
 Notes on the shape, each already argued through:
 
@@ -139,6 +160,23 @@ async def revoke_authorized_app(
 ) -> Envelope[Deleted]: ...
 ```
 
+```python
+# .../authorized_apps/router.py — the app's view, mounted at a second prefix
+app_view_router = APIRouter(prefix="/authorized-bots", tags=["Authorized Apps"])
+
+@app_view_router.get("", response_model=Envelope[Page[AuthorizedBot]],
+                     responses=USER_SCOPED_403)
+@envelope_errors
+async def list_authorized_bots(
+    request: Request, owner_id: UserIdDep, principal: UserAndAppDep,
+) -> Envelope[Page[AuthorizedBot]]:
+    """Which of this owner's bots may the CALLING app reach.
+
+    ``app_id`` comes off the principal, never a parameter — so this cannot be
+    used to ask what some other application may reach.
+    """
+```
+
 ```jsonc
 // POST /openapi/v1/bots/{bot_id}/authorized-apps?user_id=… → 201
 { "data": { "app_id": 42, "app_name": "partner-platform", "bot_id": "…",
@@ -150,6 +188,15 @@ async def revoke_authorized_app(
 //   404 — bot absent OR caller is not the owner (byte-identical, deliberately)
 //   403 — user_id names someone other than the verified caller (UserIdDep, unchanged)
 //   401 — POST without an app identity, refused at the gateway before this runs
+
+// GET /openapi/v1/authorized-bots?user_id=… → 200
+//   the app's view: this owner's bots that the CALLING app may reach
+{ "data": { "items": [ { "bot_id": "…", "granted_at": "2026-08-10T00:00:00Z" } ],
+            "total": 1 }, "request_id": "…" }
+//   401 — no app identity, refused at the gateway before this runs
+//   200 with an empty page — the app holds no grants from this owner. NOT a 404:
+//   "you have nothing here" is a valid answer, and the owner's existence is
+//   already implied by their own credential being on the call.
 ```
 
 No existing signature changes. This is additive to the published description.
@@ -182,6 +229,19 @@ No existing signature changes. This is additive to the published description.
 +    "POST /openapi/v1/bots/{bot_id}/authorized-apps":
 +      user: required
 +      app: required
++
++    # The app's view — "which of this owner's bots may I reach?". Both parties
++    # again, and here the App is not merely required, it is what the answer is
++    # SCOPED BY: the handler reads app_id off this principal, so declaring the
++    # identity is what makes the scoping possible at all. The runner resolves
++    # only the identities a route declares, so on a user-only rule the App would
++    # be invisible here and the query would have nothing to filter on.
++    #
++    # Not method-qualified: GET is the only method this path has, and every
++    # method it could grow answers the same "what may I reach" question.
++    "/openapi/v1/authorized-bots":
++      user: required
++      app: required
 ```
 
 Resolution is already correct with no grammar change, verified against
@@ -199,9 +259,16 @@ class BotAppGrantService:
     def grant(self, *, bot_id: str, owner_id: str, app_id: int,
               app_name: str, tenant: str) -> BotAppGrantRecord: ...
     def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]: ...
+    def list_for_app(self, *, app_id: int, owner_id: str) -> list[BotAppGrantRecord]: ...
     def revoke(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
         """Raises GrantNotFoundError when no live grant matches."""
 ```
+
+`list_for_app` needs **no bot-existence check**, and that is a deliberate
+asymmetry with the other three. They resolve a named bot and inherit the masked
+404 from that read; this one names no bot, so there is nothing to mask — it
+returns the owner's own grant rows for the calling app, and an owner learns
+nothing about anyone else's bots from their own empty list.
 
 ```python
 # src/backend/.../core/repository/protocols/bot/app_grant.py (new)
@@ -211,10 +278,16 @@ class BotAppGrantRepositoryProtocol(Protocol):
     @abstractmethod
     def list_active_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]: ...
     @abstractmethod
+    def list_active_for_app(self, app_id: int, owner_id: str) -> List[BotAppGrantRecord]: ...
+    @abstractmethod
     def find_active(self, bot_id: str, owner_id: str, app_id: int) -> Optional[BotAppGrantRecord]: ...
     @abstractmethod
     def mark_revoked(self, grant_id: int) -> bool: ...
 ```
+
+The two `list_active_*` members are the record's two reading ends. Both take
+`owner_id`, so neither can return a row belonging to anyone but the caller —
+the scoping is in the contract, not left to each caller to remember.
 
 Every member `@abstractmethod` and the implementation declares the Protocol as a
 base — the enforceable-contract rule from `core/repository/README.md`, held by
@@ -224,6 +297,7 @@ base — the enforceable-contract rule from `core/repository/README.md`, held by
 # src/backend/.../adapters/http/openapi_v1/__init__.py:155 — mount order
  _SUBGROUPS = [
 +    authorized_apps_router,
++    authorized_bots_router,
      identity_router,
      resources_router,
      routines_router,
@@ -236,6 +310,9 @@ Must be in `_SUBGROUPS` (or another literal list) rather than after `bots`: the
 sub-groups are not shadowed by it. `authorized-apps` sits *under* `{bot_id}`, so
 it is not shadowed by path shape — but registering it with the literals keeps it
 under the same `USER_SCOPED_ERROR_RESPONSES` table the rest of the surface uses.
+`authorized-bots` is a top-level literal and genuinely does need to precede
+`bots`, since nothing else keeps a future `/openapi/v1/{something}` from
+claiming it.
 
 ### Ownership, tenancy and the masked refusal
 
@@ -293,7 +370,14 @@ None. No new packages, no version bumps, no new internal service calls.
 - **Risk:** `authorized-apps` sits under the `{bot_id}` wildcard, so mount order
   or a future route could shadow it.
   **Mitigation:** register with the literal sub-groups (before `bots`), and
-  assert the three routes resolve in a router test.
+  assert all four routes resolve in a router test.
+- **Risk:** the app's view is scoped by `app_id` read off the principal. If that
+  route's rule ever loses `app: required`, the runner stops resolving the App
+  (`_runner.py:40`) and the handler has no `app_id` to filter by — a listing
+  that silently widens is far worse than one that fails.
+  **Mitigation:** the handler takes `require_user_and_app_principal`, which
+  refuses rather than defaults, so the failure mode is a 401 and never an
+  unscoped list. The gateway test pins the rule as the outer net.
 - **Risk:** the record is written now and read by a *later* feature; a shape
   mistake is expensive to correct once rows exist.
   **Mitigation:** the row answers "whose bot, in which tenant" on its own
@@ -324,6 +408,15 @@ None. No new packages, no version bumps, no new internal service calls.
   property that makes this a consent moment.
 - **Hard delete on withdraw** — rejected. The spec requires "could reach this bot
   between T1 and T2" to stay answerable.
+- **An application-only reverse view** (`GET /authorized-bots` with no user) —
+  deferred, not dismissed. It is what an integrator's own reconciliation loop
+  really wants, since it needs no owner session. But it is an application-only
+  route, so it needs the global `_require_user_principal` relaxation plus the
+  per-route fail-closed opt-in that keeps the other ~56 operations from widening
+  with it — the whole of the next workstream, pulled forward to serve one
+  listing. The user+app view shipped here answers the same question whenever the
+  owner is present, which is the same posture the integrator is already in when
+  granting.
 - **A separate `ac_bot_app_grant_log` table** (mirroring `ac_bot_collab_log`) —
   rejected as redundant here. Under owner-only authority the operator is always
   the owner, so a log row would carry nothing the soft-deleted grant row does not.
@@ -368,6 +461,14 @@ def test_revoke_absent_grant_is_404_distinct_from_successful_revoke(): ...
 def test_non_owner_answer_is_byte_identical_to_absent_bot(): ...
 def test_collaborator_may_operate_but_may_not_grant(): ...
 def test_cross_tenant_bot_is_not_grantable(): ...
+
+# the app's view
+def test_list_authorized_bots_is_scoped_to_the_calling_app(): ...
+    # two apps granted on the same owner's bots see disjoint lists
+def test_list_authorized_bots_is_scoped_to_the_calling_owner(): ...
+    # the same app, granted by two owners, sees only the calling owner's bots
+def test_list_authorized_bots_excludes_revoked(): ...
+def test_list_authorized_bots_empty_is_200_not_404(): ...
 ```
 
 ```python
@@ -380,7 +481,8 @@ def test_revoked_row_retains_its_interval(): ...
 # src/gateway/tests/unit/core/authn/test_route_security.py
 def test_post_authorized_apps_requires_user_and_app(): ...
 def test_get_and_delete_authorized_apps_require_user_only(): ...
-    # both assert against the real configs/application.yaml, not a fixture table,
+def test_authorized_bots_requires_user_and_app(): ...
+    # all assert against the real configs/application.yaml, not a fixture table,
     # so a typo in the shipped config fails the suite
 ```
 
