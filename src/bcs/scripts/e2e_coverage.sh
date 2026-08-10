@@ -36,6 +36,7 @@ cov_dir="$bcs_dir/target/cov-e2e"
 out_xml="$cov_dir/cobertura.xml"
 report_file="$cov_dir/coverage.txt"
 bcs_port="${BCS_PORT:-21000}"
+bcsfuse_port="${BCSFUSE_PORT:-8765}"
 compat_min="${BCS_E2E_COVERAGE_MIN:-0}"
 line_min="${BCS_E2E_LINE_MIN:-$compat_min}"
 method_min="${BCS_E2E_METHOD_MIN:-$compat_min}"
@@ -99,20 +100,23 @@ if [[ "$no_stop" -eq 0 ]]; then
   trap cleanup_e2e EXIT
 fi
 
-# The 5 bot ports, matching the BOT1..BOT5_PORT defaults in scripts/modules/bcs.sh.
+# The 5 bot ports, matching the BOT1..BOT5_PORT defaults in scripts/modules/bcs.sh,
+# plus the bcsfuse port (8765) now that the e2e suite exercises the BCS -> bcsfuse
+# fuse delegation path.
 bot_ports=(30001 30011 30021 30031 30041)
 
 # Preflight reclamation: the coverage bcs must be the instrumented build, and
 # bots_start hard-errors if any of 30001-30041 are occupied. So before launch,
-# if 21000 (bcs) or any bot port is already in use (leftover from a prior run /
-# a bcs_bots started elsewhere / full stack / non-singlebox processes), kill
-# the occupying bcs/openclaw processes with a warning, then start the
+# if 21000 (bcs), 8765 (bcsfuse) or any bot port is already in use (leftover from
+# a prior run / a bcs_bots started elsewhere / full stack / non-singlebox
+# processes), kill the occupying processes with a warning, then start the
 # instrumented stack. Do NOT call `singlebox stop` here (it would also tear down
 # the frontend, which e2e does not need).
 # Skipped under --skip-start (caller takes responsibility for the instrumented bcs).
 preflight_reclaim_ports() {
   local busy=() p
   lsof -tiTCP:"$bcs_port" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$bcs_port")
+  lsof -tiTCP:"$bcsfuse_port" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$bcsfuse_port")
   for p in "${bot_ports[@]}"; do
     lsof -tiTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && busy+=("$p")
   done
@@ -134,7 +138,7 @@ preflight_reclaim_ports() {
   sleep 1
 }
 
-# 1. Start the instrumented service + 5 bots (unless --skip-start).
+# 1. Start the instrumented service + bcsfuse + 5 bots (unless --skip-start).
 #    Uses --standalone so bot profiles live under <checkout>/.standalone-openclaw
 #    (per-checkout isolation) instead of the shared ~/.openclaw-* that --local
 #    writes. Without this, running in a second checkout/worktree collides with
@@ -171,7 +175,9 @@ if [[ "$skip_start" -eq 0 ]]; then
   # below so the endpoint report counts only the e2e suite's hits, not singlebox's
   # bot-onboarding setup requests nor a stale log from a prior run.
   bcs_log="$repo_root/scripts/.dependencies/logs/bcs.log"
-  "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcs_bots
+  # Use bcsfuse dev mode (SQLite) so e2e does not need an external MySQL.
+  export BCSFUSE_PROVIDER_MODE=dev
+  "$repo_root/scripts/singlebox.sh" --standalone --with-bcs-coverage start bcsfuse bcs_bots
 elif [[ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]]; then
   bcs_e2e_mock_start "$cov_dir/mock-services"
 fi
@@ -253,11 +259,12 @@ if [[ "$no_stop" -eq 0 ]]; then
     echo "WARN: no bcs listening on :$bcs_port; skip SIGTERM" >&2
   fi
 
-  # 4. Stop bots (bcs already stopped via SIGTERM; bots are non-Rust, so
-  #    SIGKILL is harmless). Stop bcs_bots only, not the frontend (e2e needs no
-  #    frontend; do not kill the user's dev server). Pass --standalone so singlebox
-  #    resolves the per-checkout standalone pid/profile paths started in step 1.
-  "$repo_root/scripts/singlebox.sh" --standalone stop bcs_bots
+  # 4. Stop bots and bcsfuse (bcs already stopped via SIGTERM; bots/bcsfuse are
+  #    non-Rust, so SIGKILL is harmless). Stop bcs_bots + bcsfuse, not the
+  #    frontend (e2e needs no frontend; do not kill the user's dev server). Pass
+  #    --standalone so singlebox resolves the per-checkout standalone
+  #    pid/profile paths started in step 1.
+  "$repo_root/scripts/singlebox.sh" --standalone stop bcs_bots bcsfuse
 
   # 5. Aggregate cobertura + text table + JSON summary.
   # Three report passes over the on-disk profraw (no rebuild, ~seconds each):
