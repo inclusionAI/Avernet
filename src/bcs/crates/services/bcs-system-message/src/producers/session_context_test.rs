@@ -57,7 +57,6 @@ impl NamedRegistry {
         self.surfaces.insert(bot_id.to_string(), surface);
         self
     }
-
 }
 
 #[async_trait]
