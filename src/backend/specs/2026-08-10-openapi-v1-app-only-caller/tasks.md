@@ -21,7 +21,7 @@
 
 ---
 
-## Task 1: Add the delegating user to the record  `[ ]`
+## Task 1: Add the delegating user to the record  `[x]`
 
 > **Time-boxed by reality.** The tables are deployed but unpopulated, so this is
 > an `ALTER` with nothing to backfill. Verify that is still true before writing
@@ -31,30 +31,31 @@
 - **Files:** `core/bot_app_grant/models.py`, `core/bot_app_grant/sql/`,
   `core/bot_app_grant/README.md`
 - **Done when:**
-  - [ ] **First:** confirm both tables are empty. If not, add a backfill
-        (`user_id := owner_id`, correct for every row #937 could produce, since
-        only owners could grant) and record in `plan.md` that the window closed.
-  - [ ] `user_id VARCHAR(256) NOT NULL` added to both tables, with an explicit
-        `COLLATE utf8mb4_bin` and a comment saying why: the deployed table pins
-        that collation where the checked-in `.sql` does not, and this is the
-        column every app-only request resolves on.
-  - [ ] `uk_bot_app_grant_scope` rekeyed to
-        `(avernet_tenant, app_id, bot_id, user_id, env)` — `user_id` **replaces**
-        `owner_id`, and a comment carries the arithmetic: adding it would give
-        3416 bytes against InnoDB's 3072 cap, and uniqueness per
-        `(app, bot, delegating user)` is the correct semantics besides.
-  - [ ] `idx_bot_app_grant_app_owner` → `idx_bot_app_grant_app_user` on
+  - [x] **First:** confirm both tables are empty. **Not verifiable from here** —
+        this environment has no access to the deployed database. Carried on the
+        user's statement that the tables are unpopulated. The migration states
+        the assumption at the top and spells out the backfill it needs if that
+        has stopped being true, so applying it blind fails loudly rather than
+        silently mis-migrating.
+  - [x] `user_id VARCHAR(256) NOT NULL` added to both tables, with an explicit
+        `COLLATE utf8mb4_bin` and a comment saying why. **Collation is in the
+        DDL only, not the ORM** — SQLite is the local runtime and has no
+        `utf8mb4_bin`, so declaring it on the model would break `create_all`.
+        Every comparison on the column is against a bound parameter rather than
+        another column, so the runtimes agree regardless; noted at both sites.
+  - [x] `uk_bot_app_grant_scope` rekeyed to
+        `(avernet_tenant, app_id, bot_id, user_id, env)`, with the arithmetic and
+        the collision argument in the comment.
+  - [x] `idx_bot_app_grant_app_owner` → `idx_bot_app_grant_app_user` on
         `(avernet_tenant, app_id, user_id, env)`.
-  - [ ] `idx_bot_app_grant_bot_owner` left **unchanged**, with a comment noting
-        its `(tenant, bot_id)` prefix now also serves the owner's cross-delegator
-        listing and the deletion sweep.
-  - [ ] A new dated migration carries the `ALTER`s; the original `CREATE` is
-        updated so a fresh install lands identically. The two are compared
-        column for column and index for index — the drift the README names as
-        the failure this DDL exists to prevent.
-  - [ ] `BotAppGrantRecord` gains `user_id`; the README's model description is
-        rewritten to say the record means "app A may act as user U on bot B,
-        which O owns".
+  - [x] `idx_bot_app_grant_bot_owner` left **unchanged**, with the note on its
+        `(tenant, bot_id)` prefix serving the owner's listing and the sweep.
+  - [x] `sql/2026_08_11_bot_app_grant_delegating_user.sql` carries the `ALTER`s;
+        the `CREATE` updated to match. Verified by compiling the ORM metadata and
+        diffing against both files — same columns in the same order, same four
+        indexes.
+  - [x] `BotAppGrantRecord` gains `user_id`; README rewritten around the record's
+        new meaning and the live-reach invariant.
 - **Depends on:** —
 
 ---
