@@ -30,7 +30,43 @@
         sees what was weighed.
 - **Depends on:** — (resolved at the review gate, not during implementation)
 
-## Task 2: The grant record  `[ ]`
+## Task 2: The grant record  `[!]`
+
+> **BLOCKED — the approved unique key does not survive a second withdrawal.**
+>
+> `UniqueConstraint(app_id, bot_id, owner_id, env, status)` breaks on
+> grant → withdraw → grant → **withdraw**: two rows then hold
+> `status='revoked'` for the same `(app_id, bot_id, owner_id, env)`, and
+> `status` is `NOT NULL`, so MySQL/OceanBase reject the second withdrawal with
+> a duplicate-key error. The plan reasoned about the second *grant* colliding
+> with the withdrawn row — that is why `status` is in the key — and did not
+> walk one step further. A second withdrawal is ordinary: authorize, withdraw,
+> re-authorize, withdraw.
+>
+> No portable fix exists at this layer. A filtered unique index
+> (`WHERE status='active'`) is the textbook answer, but OceanBase is
+> MySQL-compatible and MySQL has no partial indexes. Moving `revoked_at` into
+> the key inverts the problem: MySQL treats `NULL`s as distinct, so multiple
+> *active* rows would be admitted — losing the one invariant that matters.
+>
+> Two ways out, awaiting a decision:
+>
+> 1. **Two tables (recommended).** `ac_bot_app_grant` holds live grants only,
+>    unique on `(app_id, bot_id, owner_id, env)`, hard-deleted on withdraw;
+>    `ac_bot_app_grant_log` is append-only, one row per grant and per withdraw.
+>    DB-enforced uniqueness on the live grant, an audit trail that holds
+>    unboundedly many periods, and it matches the existing
+>    `ac_bot_collaborator` / `ac_bot_collab_log` pair. This **overturns**
+>    `plan.md` → Alternatives, which rejected a log table as redundant on the
+>    grounds that "a log row would carry nothing the soft-deleted grant row
+>    does not" — false, since the soft-deleted row carries exactly one period.
+> 2. **One table, repository-enforced.** Drop `status` from the unique key and
+>    enforce "at most one active" in the repository inside a transaction.
+>    Smaller diff, keeps soft-delete, but moves the guarantee off the database
+>    and into code — on a permission record.
+>
+> Groups C–F all depend on this, so the run stopped here rather than running
+> ahead. Nothing schema-shaped has landed.
 
 - **Goal:** One ORM model and its Pydantic record, with a unique key that makes
   grant → withdraw → grant expressible.
