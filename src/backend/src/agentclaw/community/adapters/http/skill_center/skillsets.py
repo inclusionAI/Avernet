@@ -3,6 +3,8 @@
 Migrated from: services/openclawserver/server/routers/skillsets.py
 SkillSet router for managing capability sets and their skills.
 """
+
+import asyncio
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -1534,7 +1536,13 @@ async def sync_skills_to_device(
         # 通过 DeviceSyncPlugin 同步到设备
         ctx_dev = resolver.resolve_for_bot(effective_bot_id, user_id)
         device_sync = device_sync_dispatcher.dispatch(ctx_dev)
-        sync_result = device_sync.sync_symlinks(symlinks_dict)
+        # Offloaded: sync_symlinks resolves connection info through the
+        # synchronous BaasService.get_http_info, which retries — so inline it
+        # would park the event loop for up to two HTTP deadlines plus a
+        # time.sleep backoff, freezing unrelated requests on this worker.
+        sync_result = await asyncio.to_thread(
+            device_sync.sync_symlinks, symlinks_dict
+        )
 
         logger.info(
             f"[sync_skills_to_device] bot_id={effective_bot_id}, "
