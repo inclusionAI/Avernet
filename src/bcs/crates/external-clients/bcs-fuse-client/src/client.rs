@@ -108,17 +108,19 @@ impl FuseClient {
             .await?
             .error_for_status()?;
 
-        // Temporary debug logging for response deserialization issues.
         let status = resp.status();
         let raw_body = resp.text().await?;
-        tracing::info!(
-            url = %url,
-            status = %status,
-            raw_body = %raw_body,
-            "fuse: received bcsfuse response"
-        );
         let response = serde_json::from_str::<FuseResponse>(&raw_body)
-            .map_err(|e| FuseClientError::InvalidResponse(format!("{e}, body={raw_body}")))?;
+            .map_err(|e| {
+                tracing::warn!(
+                    url = %url,
+                    status = %status,
+                    raw_body = %raw_body,
+                    error = %e,
+                    "fuse: failed to deserialize bcsfuse response"
+                );
+                FuseClientError::InvalidResponse(format!("{e}, body={raw_body}"))
+            })?;
 
         Ok(response)
     }
