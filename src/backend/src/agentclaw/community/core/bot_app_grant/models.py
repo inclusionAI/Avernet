@@ -51,6 +51,27 @@ from agentclaw.community.utils.env_utils import get_current_env
 #: recognition. An authorization must not fail because a display name is long.
 APP_NAME_MAX_LENGTH = 1024
 
+#: How long a user id may be for a grant to be *representable*.
+#:
+#: Both user columns are ``VARCHAR(256)`` and cannot grow: they are in the
+#: unique key, which is already at 2392 of InnoDB's 3072 bytes (see the key's
+#: own note). So unlike ``app_name`` above, this is a real limit rather than a
+#: chosen one.
+#:
+#: **And unlike ``app_name``, truncating is not safe here.** That constant's
+#: note gives the reason: truncation is fine precisely *because* ``app_name`` is
+#: not identity. ``user_id`` is — it is the column every app-only request
+#: resolves on — so a truncated value produces a row that no lookup can ever
+#: match, and the application is silently unauthorized forever with a grant
+#: that looks live in every listing.
+#:
+#: The identity boundary genuinely admits longer ids: ``GatewayUser.id`` is an
+#: unconstrained ``str`` and ``require_user_id`` refuses to cap it, deliberately
+#: (capping there would lock a caller out of the whole surface for a value the
+#: gateway accepts). That mismatch is real, and it is resolved by **refusing the
+#: grant loudly at consent time** rather than by writing a row that cannot work.
+IDENTITY_MAX_LENGTH = 256
+
 
 class GrantAction(StrEnum):
     """What a log row records. The live table needs no such enum — existence

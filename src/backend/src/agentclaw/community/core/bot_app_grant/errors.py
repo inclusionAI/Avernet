@@ -17,3 +17,19 @@ from __future__ import annotations
 
 class GrantNotFoundError(Exception):
     """No live authorization matched the scope named."""
+
+
+class GrantIdentityTooLongError(Exception):
+    """A user id is too long for a grant to be stored and later found.
+
+    Raised at consent time rather than letting the write happen. The two user
+    columns are capped by the unique key's byte budget, and a value beyond it
+    would be rejected on a strict server or **silently truncated** on a
+    permissive one — and a truncated identity is worse than a rejected one: the
+    row looks live in every listing while no lookup can ever match it, so the
+    application is unauthorized forever and nothing says why.
+
+    Distinct from :class:`GrantNotFoundError` because it is not a statement
+    about what exists. The caller asked for something this record cannot
+    represent, which is a bad request rather than a missing one.
+    """

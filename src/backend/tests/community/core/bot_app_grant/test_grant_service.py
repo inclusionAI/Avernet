@@ -16,9 +16,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
-from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
+from agentclaw.community.core.bot_app_grant.errors import (
+    GrantIdentityTooLongError,
+    GrantNotFoundError,
+)
 from agentclaw.community.core.bot_app_grant.models import (
     APP_NAME_MAX_LENGTH,
+    IDENTITY_MAX_LENGTH,
     BotAppGrantLogModel,
     BotAppGrantModel,
     GrantAction,
@@ -315,6 +319,45 @@ def test_list_for_app_is_scoped_to_the_calling_app(service):
 
     assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-1")] == ["b-1"]
     assert [r.bot_id for r in service.list_for_app(app_id=99, user_id="u-1")] == ["b-2"]
+
+
+def test_an_over_long_identity_is_refused_rather_than_truncated(service, sessions):
+    """The opposite decision from ``app_name``, and for the stated reason.
+
+    ``app_name`` is truncated because it is not identity. A user id **is** — it
+    is what every app-only request resolves on — so truncating writes a row that
+    looks live in every listing while no lookup can ever match it. The
+    application would be unauthorized forever with nothing to say why. Refusing
+    at consent time is the only outcome that tells anyone.
+
+    The identity boundary really does admit ids this long: ``require_user_id``
+    deliberately imposes no cap, because one there would lock a caller out of
+    the whole surface for a value the gateway accepts.
+    """
+    too_long = "u" * (IDENTITY_MAX_LENGTH + 1)
+
+    with pytest.raises(GrantIdentityTooLongError):
+        service.grant(
+            bot_id="b-1", user_id=too_long, owner_id="u-1", app_id=42, app_name="p"
+        )
+    with pytest.raises(GrantIdentityTooLongError):
+        service.grant(
+            bot_id="b-1", user_id="u-1", owner_id=too_long, app_id=42, app_name="p"
+        )
+
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 0, "and nothing written"
+
+
+def test_an_identity_at_the_limit_is_accepted(service):
+    """The boundary itself is usable — the refusal starts one character later."""
+    at_limit = "u" * IDENTITY_MAX_LENGTH
+
+    record = service.grant(
+        bot_id="b-1", user_id=at_limit, owner_id="u-1", app_id=42, app_name="p"
+    )
+
+    assert record.user_id == at_limit
 
 
 def test_grant_truncates_an_over_long_app_name_instead_of_failing(service, sessions):

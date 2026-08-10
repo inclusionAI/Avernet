@@ -26,9 +26,13 @@ from __future__ import annotations
 
 from injector import inject
 
-from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
+from agentclaw.community.core.bot_app_grant.errors import (
+    GrantIdentityTooLongError,
+    GrantNotFoundError,
+)
 from agentclaw.community.core.bot_app_grant.models import (
     APP_NAME_MAX_LENGTH,
+    IDENTITY_MAX_LENGTH,
     BotAppGrantRecord,
 )
 from agentclaw.community.core.repository.protocols.bot import (
@@ -88,6 +92,15 @@ class BotAppGrantService:
         permissive ones. The authorization is what matters, and it does not
         depend on the display name — see the note on the constant.
         """
+        for label, value in (("user_id", user_id), ("owner_id", owner_id)):
+            if len(value) > IDENTITY_MAX_LENGTH:
+                # Refused, not truncated. See IDENTITY_MAX_LENGTH: truncating an
+                # identity produces a grant that can never be found, which is a
+                # silent authorization failure rather than a visible one.
+                raise GrantIdentityTooLongError(
+                    f"{label} exceeds {IDENTITY_MAX_LENGTH} characters, which a "
+                    "grant cannot store or later resolve"
+                )
         return self._repository.grant(
             {
                 "app_id": app_id,
