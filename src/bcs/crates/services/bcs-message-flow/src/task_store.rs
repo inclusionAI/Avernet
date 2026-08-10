@@ -54,6 +54,19 @@ impl TaskStore {
     }
 
     pub async fn record_response_text(&self, task_id: &str, text: &str) {
+        self.record_response_text_with_final(task_id, text, false).await;
+    }
+
+    pub async fn record_final_response_text(&self, task_id: &str, text: &str) {
+        self.record_response_text_with_final(task_id, text, true).await;
+    }
+
+    async fn record_response_text_with_final(
+        &self,
+        task_id: &str,
+        text: &str,
+        is_final: bool,
+    ) {
         if text.is_empty() {
             return;
         }
@@ -67,6 +80,14 @@ impl TaskStore {
         if !entry.response_seen_tool_call {
             merge_snapshot_or_delta(&mut entry.response_full_content, text);
             entry.response_content = entry.response_full_content.clone();
+            return;
+        }
+
+        if is_final
+            && !entry.response_content.is_empty()
+            && text.ends_with(&entry.response_content)
+        {
+            entry.response_full_content = text.to_string();
             return;
         }
 
