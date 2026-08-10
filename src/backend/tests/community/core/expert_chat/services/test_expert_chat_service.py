@@ -1422,3 +1422,91 @@ class TestGetChatSessionCallerAuthorization:
         mock_instance.get_caller_connection.assert_called_once_with(
             user_id="user1", bot_id="bot1", owner_id="owner1", iam_token=None
         )
+
+
+class TestChatEngineResolution:
+
+    @pytest.mark.asyncio
+    async def test_create_session_uses_bot_template_engine_when_conn_falls_back_openclaw(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="openclaw")
+        resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.conn_info = conn
+        ctx.provider = "baas"
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_resolver=resolver,
+            mock_transport=transport,
+        )
+        bot = dict(
+            ACTIVE_BOT,
+            active_engine="claude_code",
+            template_type="architect",
+            template_config={"active_runtime_engine_type": "aicoding"},
+        )
+
+        session_key = await svc._create_session(bot, "owner1")
+
+        assert session_key.startswith("session:")
+        assert conn["engine_type"] == "aicoding"
+        transport.invoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_check_session_exists_skips_adapter_when_bot_template_maps_to_aicoding(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        conn = dict(DEVICE_CONN, engine_type="openclaw")
+        resolver = MagicMock()
+        ctx = MagicMock()
+        ctx.conn_info = conn
+        ctx.provider = "baas"
+        resolver.resolve_for_binding = MagicMock(return_value=ctx)
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_resolver=resolver,
+            mock_transport=transport,
+        )
+        bot = dict(
+            ACTIVE_BOT,
+            active_engine="claude_code",
+            template_type="architect",
+            template_config={"active_runtime_engine_type": "aicoding"},
+        )
+
+        assert await svc._check_session_exists(bot, "session:old", "owner1") is True
+        assert conn["engine_type"] == "aicoding"
+        transport.invoke.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_session_skips_adapter_when_bot_template_maps_to_aicoding(
+        self, mock_repository, mock_bot_repo, mock_device_provider
+    ):
+        transport = MagicMock()
+        transport.invoke = AsyncMock()
+        svc = _make_service(
+            mock_repository,
+            mock_bot_repo,
+            mock_device_provider,
+            mock_transport=transport,
+        )
+        bot = dict(
+            ACTIVE_BOT,
+            active_engine="claude_code",
+            template_type="architect",
+            template_config={"active_runtime_engine_type": "aicoding"},
+        )
+
+        await svc._delete_adapter_session(bot, "session:old", "owner1")
+
+        transport.invoke.assert_not_awaited()
