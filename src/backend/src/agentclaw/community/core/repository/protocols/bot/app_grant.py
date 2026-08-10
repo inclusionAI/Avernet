@@ -38,16 +38,21 @@ class BotAppGrantRepositoryProtocol(Protocol):
         Inserts the live row and appends a ``granted`` event **in one
         transaction**.
 
-        Idempotent: when a live row already exists it is returned untouched and
-        **nothing is appended**. ``gmt_create`` therefore keeps answering "could
+        Idempotent, and under concurrency as well as in sequence: when a live
+        row already exists it is returned untouched and **nothing is appended**,
+        and a caller that loses the insert race receives the winner's row rather
+        than a constraint error. ``gmt_create`` therefore keeps answering "could
         reach this bot from T1" honestly, and a duplicate call does not invent
         an authorization period that never began.
 
         Args:
-            data: ``app_id``, ``app_name``, ``bot_id``, ``owner_id``; ``env``
-                optional and defaulted. The tenant is **not** passed — the
-                tenant guard stamps it from the request context and refuses a
-                row naming another tenant.
+            data: ``app_id``, ``app_name``, ``bot_id``, ``owner_id``. Neither
+                ``env`` nor the tenant is accepted, and both omissions are
+                deliberate: the tenant guard stamps the tenant from the request
+                context and refuses a row naming another, and ``env`` is always
+                the running process's. A caller-chosen ``env`` could write a row
+                that is live, invisible to every read, and impossible to revoke
+                while still occupying the unique key.
 
         Returns:
             The live authorization, new or pre-existing.

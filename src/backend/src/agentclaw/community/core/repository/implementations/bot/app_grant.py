@@ -9,17 +9,31 @@ Behavior:
 - The live table holds authorizations that are in force; withdrawal deletes the
   row rather than flagging it, and the log preserves the closed period.
 - Each mutation writes its live row and its log event inside **one**
-  ``orm_session()``, so the history can never disagree with the live state.
+  ``transactional_orm_session()``, so the history cannot disagree with the live
+  state. ``orm_session()`` would not do: the corp engine runs it at
+  ``AUTOCOMMIT`` (``plugin_api/database.py``), so its two statements commit
+  independently and a failure between them would leave a ``revoked`` event
+  beside a live row — the app still reaching the bot while the audit says it
+  cannot. Reads stay on ``orm_session()``; only the two mutations need a
+  transaction.
+- The check-then-write in each mutation takes ``with_for_update()`` on the live
+  row, so two concurrent callers serialize rather than racing the unique key.
+  The insert path cannot lock a row that does not exist yet, so it also handles
+  the loser of that race — see :meth:`BotAppGrantRepository.grant`.
 - The tenant is never passed in or filtered on here. ``register_avernet_tenant_guard``
   stamps it on insert and appends the tenant predicate to every read, so a
   query written without it is still tenant-scoped — and one written *with* it
   would merely restate what the guard already guarantees.
+- ``env`` is always this process's ``get_current_env()``, never a caller's. A
+  row written under one env and read under another would be live, invisible to
+  every read, and impossible to revoke while still occupying the unique key.
 """
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
 from injector import inject
+from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantLogModel,
@@ -48,7 +62,9 @@ class BotAppGrantRepository(
         """Initialize with DatabasePlugin instance.
 
         Args:
-            db: DatabasePlugin providing orm_session() context manager.
+            db: DatabasePlugin providing both session entrypoints — reads take
+                ``orm_session()``, the two mutations take
+                ``transactional_orm_session()``.
         """
         self._db = db
         self._Grant = BotAppGrantModel
@@ -59,15 +75,49 @@ class BotAppGrantRepository(
     # ========================================================================
 
     def grant(self, data: Dict[str, Any]) -> BotAppGrantRecord:
-        """Authorize an app for a bot, appending a ``granted`` event."""
+        """Authorize an app for a bot, appending a ``granted`` event.
+
+        Idempotent under concurrency, not just in sequence. Two callers can both
+        pass the existence check before either inserts — the row they are
+        looking for does not exist, so there is nothing to lock — and the loser
+        hits the unique key. That is caught and re-read rather than raised: the
+        state the caller asked for now holds, which is precisely the outcome
+        idempotency promises. Letting it escape would 500 a partner retrying a
+        request that had in fact succeeded.
+        """
         app_id = data["app_id"]
         bot_id = data["bot_id"]
         owner_id = data["owner_id"]
         app_name = data["app_name"]
-        env = data.get("env") or get_current_env()
+        env = get_current_env()
 
-        with self._db.orm_session() as db:
-            existing = self._live_row(db, bot_id, owner_id, app_id, env)
+        try:
+            return self._insert_grant(app_id, app_name, bot_id, owner_id, env)
+        except IntegrityError:
+            # The unique key fired, so a concurrent caller won. Re-read outside
+            # the failed transaction and return what they wrote.
+            logger.info(
+                "[bot_app_grant] lost the insert race, returning the winner's "
+                "row: app_id=%s bot_id=%s owner_id=%s",
+                app_id,
+                bot_id,
+                owner_id,
+            )
+            with self._db.orm_session() as db:
+                row = self._live_row(db, bot_id, owner_id, app_id, env)
+                if row is None:
+                    # The winner's row is gone already — revoked between the
+                    # conflict and this read. Nothing is live, so re-raising is
+                    # the honest answer rather than inventing a record.
+                    raise
+                return row.to_record()
+
+    def _insert_grant(
+        self, app_id: int, app_name: str, bot_id: str, owner_id: str, env: str
+    ) -> BotAppGrantRecord:
+        """The write half of :meth:`grant`, in one transaction."""
+        with self._db.transactional_orm_session() as db:
+            existing = self._live_row(db, bot_id, owner_id, app_id, env, lock=True)
             if existing is not None:
                 # Idempotent, and deliberately silent in the log: a repeated
                 # grant is the same authorization, not a new period. Returning
@@ -113,8 +163,8 @@ class BotAppGrantRepository(
     def revoke(self, bot_id: str, owner_id: str, app_id: int) -> bool:
         """Withdraw an authorization, appending a ``revoked`` event."""
         env = get_current_env()
-        with self._db.orm_session() as db:
-            row = self._live_row(db, bot_id, owner_id, app_id, env)
+        with self._db.transactional_orm_session() as db:
+            row = self._live_row(db, bot_id, owner_id, app_id, env, lock=True)
             if row is None:
                 logger.info(
                     "[bot_app_grant] nothing to revoke: app_id=%s bot_id=%s "
@@ -162,7 +212,10 @@ class BotAppGrantRepository(
                     self._Grant.owner_id == owner_id,
                     self._Grant.env == get_current_env(),
                 )
-                .order_by(self._Grant.gmt_create.desc())
+                # id breaks the tie: gmt_create is second-granularity on
+                # MySQL, so grants issued in the same second would otherwise
+                # come back in an arbitrary order.
+                .order_by(self._Grant.gmt_create.desc(), self._Grant.id.desc())
                 .all()
             )
             return [row.to_record() for row in rows]
@@ -177,7 +230,10 @@ class BotAppGrantRepository(
                     self._Grant.owner_id == owner_id,
                     self._Grant.env == get_current_env(),
                 )
-                .order_by(self._Grant.gmt_create.desc())
+                # id breaks the tie: gmt_create is second-granularity on
+                # MySQL, so grants issued in the same second would otherwise
+                # come back in an arbitrary order.
+                .order_by(self._Grant.gmt_create.desc(), self._Grant.id.desc())
                 .all()
             )
             return [row.to_record() for row in rows]
@@ -195,21 +251,32 @@ class BotAppGrantRepository(
     # ========================================================================
 
     def _live_row(
-        self, db: Any, bot_id: str, owner_id: str, app_id: int, env: str
+        self,
+        db: Any,
+        bot_id: str,
+        owner_id: str,
+        app_id: int,
+        env: str,
+        *,
+        lock: bool = False,
     ) -> Optional[BotAppGrantModel]:
         """The live row for one scope, inside an open session.
 
         Takes the session rather than opening its own, so a caller that has
         already begun a transaction reads and writes within it — which is what
         makes the idempotent grant and the revoke atomic.
+
+        ``lock`` adds ``FOR UPDATE`` and belongs only to the two mutations: it
+        holds the row across their check-then-write so a concurrent caller
+        waits rather than interleaving. Reads leave it off — taking write locks
+        on a listing would serialize callers who are only looking.
         """
-        return (
-            db.query(self._Grant)
-            .filter(
-                self._Grant.app_id == app_id,
-                self._Grant.bot_id == bot_id,
-                self._Grant.owner_id == owner_id,
-                self._Grant.env == env,
-            )
-            .first()
+        query = db.query(self._Grant).filter(
+            self._Grant.app_id == app_id,
+            self._Grant.bot_id == bot_id,
+            self._Grant.owner_id == owner_id,
+            self._Grant.env == env,
         )
+        if lock:
+            query = query.with_for_update()
+        return query.first()

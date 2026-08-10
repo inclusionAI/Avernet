@@ -185,6 +185,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.models
   - agentclaw.community.core.models
   - agentclaw.community.core.access
+  - agentclaw.community.core.bot_app_grant
   - agentclaw.community.core.bot_chat
   - agentclaw.community.core.bot_collaborator
   - agentclaw.community.core.bot_management

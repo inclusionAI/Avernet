@@ -106,8 +106,27 @@ _ENGINE_RUNTIME_EXEMPT_REASON = (
     "is the same event that unblocks the whole track's definition of done."
 )
 
+_BOT_APP_GRANT_EXEMPT_REASON = (
+    "TEMPORARY, and blocked on the same single thing as "
+    "_GATEWAY_PRINCIPAL_EXEMPT_REASON above rather than on anything in this "
+    "module. All four of its routes are /openapi/v1 and require a signed "
+    "principal; two of them require an App identity as well, which only a "
+    "gateway can mint. Singlebox runs the backend without a gateway and ships "
+    "no local signing key, so a flow here could asserts 401s and nothing else "
+    "— and for the grant and application-view routes it could not even "
+    "construct the App half of the request. Following the auth workstream's "
+    "ruling that tests do not forge tokens against a shared key, rather than "
+    "inventing a second answer for this module. Covered meanwhile by "
+    "repository and service tests over a real database, HTTP router tests, "
+    "the principal-seam route assertions, and the gateway's own "
+    "route-security resolution tests against the shipped config. Drain this "
+    "together with _GATEWAY_PRINCIPAL_EXEMPT_REASON — one gateway in the box "
+    "unblocks both."
+)
+
 SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
     "aicoding": _EXEMPT_REASON,
+    "bot_app_grant": _BOT_APP_GRANT_EXEMPT_REASON,
     "engine_runtime": _ENGINE_RUNTIME_EXEMPT_REASON,
     # antcode relocated to agentclaw/corp/core (B11 T3.3) — no longer a core module.
     "bot_dormant": _EXEMPT_REASON,
