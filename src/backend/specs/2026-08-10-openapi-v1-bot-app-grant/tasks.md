@@ -188,7 +188,7 @@
         container/bootstrap test, not by inspection.
 - **Depends on:** Task 4
 
-## Task 6: The `authorized-apps` router group  `[ ]`
+## Task 6: The `authorized-apps` router group  `[x]`
 
 - **Goal:** Four routes with the consent asymmetry wired through existing
   dependencies and no new authorization code.
@@ -197,41 +197,41 @@
   `…/adapters/http/openapi_v1/authorized_apps/router.py` (new),
   `…/adapters/http/openapi_v1/authorized_apps/schemas.py` (new)
 - **Done when:**
-  - [ ] `POST ""` declares `require_user_and_app_principal`
+  - [x] `POST ""` declares `require_user_and_app_principal`
         (`dependencies.py:194`) and reads `app_id` / `app_name` / `tenant` off
         the `AppPrincipal`. **No `app_id` request parameter exists** — a caller
         cannot name an application other than its own.
-  - [ ] `GET ""` and `DELETE "/{app_id}"` declare `require_principal` only, so
+  - [x] `GET ""` and `DELETE "/{app_id}"` declare `require_principal` only, so
         an owner can list and withdraw without any application credential.
-  - [ ] A second router at prefix `/authorized-bots` serves the app's view:
+  - [x] A second router at prefix `/authorized-bots` serves the app's view:
         `GET ""` declaring `require_user_and_app_principal`, scoped by the
         `app_id` read off the principal. **No `app_id` parameter** — it cannot
         be used to ask what some other application may reach.
-  - [ ] The app's view answers `200` with an empty page when the app holds no
+  - [x] The app's view answers `200` with an empty page when the app holds no
         grants from this owner — not `404`. "You have nothing here" is a valid
         answer, and the owner's existence is already implied by their own
         credential being on the call.
-  - [ ] All four take `UserIdDep` (`principal.py:205`), unchanged in meaning.
-  - [ ] Owner-only authority comes from the existing owner-scoped bot read
+  - [x] All four take `UserIdDep` (`principal.py:205`), unchanged in meaning.
+  - [x] Owner-only authority comes from the existing owner-scoped bot read
         raising `BotNotFoundError` — no new permission check is written, and a
         non-owner's answer is byte-identical to an absent bot's.
-  - [ ] Responses use the surface's `Envelope` / `Page` / `Deleted` contracts
+  - [x] Responses use the surface's `Envelope` / `Page` / `Deleted` contracts
         and `envelope_errors`, as `bots/router.py` does.
-  - [ ] The module docstring states the asymmetry and why (consent needs both
+  - [x] The module docstring states the asymmetry and why (consent needs both
         parties; withdrawal needs only the one withdrawing).
 - **Depends on:** Task 5
 
-## Task 7: Register the group  `[ ]`
+## Task 7: Register the group  `[x]`
 
 - **Goal:** The routes are mounted, documented, and not shadowed.
 - **Files:** `…/adapters/http/openapi_v1/__init__.py:155`
 - **Done when:**
-  - [ ] Both routers are added to the literal sub-group list, mounted **before**
+  - [x] Both routers are added to the literal sub-group list, mounted **before**
         the `{bot_id}` wildcard `bots` router. `authorized-bots` is a top-level
         literal and genuinely needs to precede it.
-  - [ ] All four routes resolve to their handlers — asserted by a test, not by
+  - [x] All four routes resolve to their handlers — asserted by a test, not by
         starting the app and looking.
-  - [ ] The group inherits the surface-wide error-response table; it is not
+  - [x] The group inherits the surface-wide error-response table; it is not
         added to `_GROUPS_WITHOUT_CALLER_SCOPE` (every route here **is** scoped
         by the caller's user).
 - **Depends on:** Task 6
