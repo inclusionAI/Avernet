@@ -212,16 +212,33 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
 #: before any service call.
 BODY_BOT_ID_OPERATIONS = frozenset({("POST", "/openapi/v1/bots/routines")})
 
-#: A1 operations that name a *skill* and no bot. The bot is resolved from the
-#: skill through the existing user-scoped read — so another user's skill is
-#: refused before the grant is even consulted — and the grant checked against
-#: the result.
+#: A1 operations that name a *skill* and no bot. The bot **and its owner** are
+#: resolved from the skill through the existing user-scoped read — so another
+#: user's skill is refused before the grant is even consulted — and the grant
+#: checked against that pair.
 SKILL_SCOPED_OPERATIONS = frozenset(
     {
         ("GET", "/openapi/v1/bots/skills/{skill_id}"),
         ("DELETE", "/openapi/v1/bots/skills/{skill_id}"),
         ("POST", "/openapi/v1/bots/skills/{skill_id}/activate"),
         ("POST", "/openapi/v1/bots/skills/{skill_id}/deactivate"),
+    }
+)
+
+#: Operations that name a bot **and their own owner parameter**, under a name
+#: the shared dependency does not know: ``skills`` takes ``owner_entity_id`` and
+#: resolves ``owner_entity_id or actor_id``.
+#:
+#: They are grant-checked like any other bot-scoped operation, but only the
+#: handler knows which owner it is about to address — so the shared dependency
+#: defers and the handler binds the grant to the pair it actually acts on.
+#: Classifying them as plain owner-scoped was wrong in **both** directions: it
+#: let a grant on the delegator's own ``default`` authorize work on another
+#: owner's ``default``, and it refused a legitimate grant on a shared bot.
+OWNER_ADDRESSED_OPERATIONS = frozenset(
+    {
+        ("GET", "/openapi/v1/bots/skills"),
+        ("POST", "/openapi/v1/bots/skills/upload"),
     }
 )
 
@@ -268,19 +285,24 @@ class ActingCaller:
         """Whether a grant governs this request."""
         return self.app_id is not None
 
-    def require_bot(self, bot_id: str, *, must_be_own_bot: bool) -> str:
+    def require_bot(self, bot_id: str, *, expected_owner_id: str | None) -> str:
         """The addressed bot's owner, refusing an application without a grant.
 
-        ``must_be_own_bot`` says which bot the *operation* is about to act on,
-        and it has no default because getting it wrong is an authorization bug
-        rather than a preference:
+        ``expected_owner_id`` names **the owner of the bot this operation is
+        about to act on**, and it has no default because getting it wrong is an
+        authorization bug rather than a preference:
 
-        - ``True`` — the operation resolves owner-scoped, as the user-scoped
-          groups do (``get_by_id_and_owner(bot_id, user_id)``). The grant is
-          only about that bot if it names the delegating user as owner.
-        - ``False`` — the operation takes the addressed owner from what this
-          returns, as the engine-runtime groups do. The grant names the bot
-          directly, so no further comparison is possible or needed.
+        - a **value** — the operation has already decided whose bot it will
+          touch, from its own scoping (the user-scoped groups: the delegating
+          user) or from its own parameter (``skills``, which takes
+          ``owner_entity_id``). The grant authorizes this request only if it
+          names that same owner.
+        - ``None`` — the operation takes the addressed owner from what this
+          returns, as the engine-runtime groups do. There is nothing to compare
+          against because the grant *is* the answer.
+
+        ``None`` is a real state of the contract, not an "unknown": it says the
+        caller will use the returned owner rather than one it already holds.
 
         For a **human** caller this returns their own id and asks nothing: on
         the user-scoped groups the owner *is* the caller, and on the
@@ -340,19 +362,17 @@ class ActingCaller:
             raise GrantNotResolvableError(
                 f"app {self.app_id} holds no live grant for the requested bot"
             )
-        if must_be_own_bot and record.owner_id != self.user_id:
-            # The grant names a bot belonging to someone else, but this
-            # operation resolves owner-scoped and would act on the delegating
-            # user's *own* same-named bot. Two different bots, one ``bot_id``.
+        if expected_owner_id is not None and record.owner_id != expected_owner_id:
+            # The grant names one bot and the operation is about to act on
+            # another — same ``bot_id``, different owner, and ``ac_bots`` has no
+            # unique key on ``bot_id`` so both can exist at once.
             #
             # Refused rather than reconciled: the caller is entitled to neither
-            # of them here. The granted bot is unreachable on an owner-scoped
-            # operation — it is unreachable there for the delegating user too,
-            # which is the point of the A1/A2 split — and the user's own bot was
-            # never granted.
+            # here. The granted bot is not the one being addressed, and the one
+            # being addressed was never granted.
             logger.warning(
-                "[bot_app_grant] app_id=%s holds a grant on bot=%s owned by "
-                "another user; refusing an owner-scoped request from user=%s",
+                "[bot_app_grant] app_id=%s holds a grant on bot=%s owned by a "
+                "different user than the request addresses (delegator=%s)",
                 self.app_id,
                 for_log(bot_id),
                 for_log(self.user_id),

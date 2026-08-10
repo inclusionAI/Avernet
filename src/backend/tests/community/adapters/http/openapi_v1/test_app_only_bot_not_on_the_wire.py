@@ -1,9 +1,10 @@
-"""The five operations whose bot is not on the wire, for an application caller.
+"""The seven operations the shared grant check cannot bind, for an app caller.
 
-Four name a skill and one carries its bot in the body, so the shared
-grant-checked dependency cannot resolve a bot for them. It **defers** for
-exactly these five — they are named in ``admission.py``, not detected by their
-emptiness — and each handler runs the check itself before acting.
+Four name a skill, one carries its bot in the body, and two name a bot but
+address an owner under their own parameter (``owner_entity_id``). The shared
+dependency **defers** for exactly these seven — they are named in
+``admission.py``, not detected by their shape — and each handler binds the grant
+to the ``(bot, owner)`` it actually acts on before acting.
 
 This file exists because these are the operations most likely to be quietly
 wrong. The services beneath the skill routes scope by *user* alone, so an
@@ -37,6 +38,9 @@ from agentclaw.community.api.local_skill_query_service import (
 )
 from agentclaw.community.api.local_skill_state_service import (
     LocalSkillStateServiceProtocol,
+)
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
 )
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.gateway_principal import (
@@ -109,12 +113,17 @@ class _Skills:
     def __init__(self) -> None:
         self.deleted: list[str] = []
         self.activated: list[str] = []
+        self.listed: list[tuple[str, str]] = []
+        self.uploaded: list[tuple[str, str]] = []
 
     def get_local_skill(self, *, skill_id: str, actor_id: str):
         bot = GRANTED_BOT if skill_id == GRANTED_SKILL else OTHER_BOT
         return {
             "id": int(skill_id),
             "bolt_id": bot,
+            # The bot's owner, carried on the record. Both skills belong to
+            # ``USER``'s own bots here; the cross-owner case has its own test.
+            "user_id": USER,
             "name": f"skill-{skill_id}",
             "active": True,
             "gmt_created": datetime(2026, 8, 1),
@@ -128,6 +137,17 @@ class _Skills:
         self.activated.append(skill_id)
         return {**self.get_local_skill(skill_id=skill_id, actor_id=actor_id),
                 "changed": True}
+
+    def list_local_skills(self, *, bot_id, owner_id, actor_id, page, page_size,
+                          active=None, keyword=None):
+        self.listed.append((bot_id, owner_id))
+        return 0, []
+
+    async def upload_local_skill(self, *, bot_id, owner_id, actor_id, package):
+        self.uploaded.append((bot_id, owner_id))
+        return {"operation": "created",
+                "skill": self.get_local_skill(skill_id=GRANTED_SKILL,
+                                              actor_id=actor_id)}
 
 
 class _Cron:
@@ -157,6 +177,7 @@ def client(skills, cron):
             binder.bind(LocalSkillQueryServiceProtocol, to=skills)
             binder.bind(LocalSkillDeleteServiceProtocol, to=skills)
             binder.bind(LocalSkillStateServiceProtocol, to=skills)
+            binder.bind(LocalSkillUploadServiceProtocol, to=skills)
             binder.bind(CronRelayServiceProtocol, to=cron)
 
     app = FastAPI()
@@ -249,3 +270,61 @@ def test_creating_a_routine_on_the_granted_bot_works(client, cron):
 
     assert response.status_code == 201, response.json()
     assert cron.created == [GRANTED_BOT]
+
+
+# ── the two operations that address an owner of their own ────────────────────
+
+
+def test_listing_skills_on_an_ungranted_bot_is_refused(client, skills):
+    """``owner_entity_id`` names whose bot this reads, and the grant must match.
+
+    Classifying these as plainly owner-scoped was wrong in both directions: a
+    grant on the caller's own same-named bot would authorize a read of someone
+    else's, and a legitimate grant on a shared bot would be refused.
+    """
+    response = client.get(
+        "/openapi/v1/bots/skills", params={"bot_id": OTHER_BOT}
+    )
+
+    assert response.status_code == 404, response.json()
+    assert skills.listed == [], "refused before the read"
+
+
+def test_listing_skills_on_the_granted_bot_works(client, skills):
+    response = client.get(
+        "/openapi/v1/bots/skills", params={"bot_id": GRANTED_BOT}
+    )
+
+    assert response.status_code == 200, response.json()
+    assert skills.listed == [(GRANTED_BOT, USER)]
+
+
+def test_listing_another_owners_bot_is_refused_even_with_a_same_named_grant(
+    client, skills
+):
+    """The over-permissive half, concretely.
+
+    The grant names ``GRANTED_BOT`` owned by ``USER``. Naming another owner for
+    the *same* bot id addresses a different bot, and the grant does not cover
+    it.
+    """
+    response = client.get(
+        "/openapi/v1/bots/skills",
+        params={"bot_id": GRANTED_BOT, "owner_entity_id": "someone-else"},
+    )
+
+    assert response.status_code == 404, response.json()
+    assert skills.listed == []
+
+
+def test_uploading_a_skill_to_an_ungranted_bot_is_refused(client, skills):
+    """A write makes the mis-binding worse — it would create a skill there."""
+    response = client.post(
+        "/openapi/v1/bots/skills/upload",
+        params={"bot_id": OTHER_BOT},
+        content=b"PK\x03\x04",
+        headers={"content-type": "application/zip"},
+    )
+
+    assert response.status_code == 404, response.json()
+    assert skills.uploaded == []

@@ -93,6 +93,7 @@ from fastapi import Depends, Query, Request
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     BODY_BOT_ID_OPERATIONS,
+    OWNER_ADDRESSED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     ActingCaller,
     AdmissionMode,
@@ -373,16 +374,17 @@ async def require_granted_bot(
     ``(app, bot, delegating user)`` raises :class:`GrantNotResolvableError`,
     which the app maps to a ``404`` byte-identical to a nonexistent bot.
 
-    Five operations have no bot on the wire — one carries it in the body, four
-    name a skill — and they are **named in the table**, not detected by their
-    emptiness. This dependency defers for exactly those, and their handlers
-    resolve the bot and call ``require_bot`` themselves before acting. Naming
-    them is what keeps "no bot id" from becoming a way through: any *other*
-    operation arriving here without one is refused.
+Seven operations cannot be checked here — one carries its bot in the body,
+    four name a skill, and two name a bot but address an owner under their own
+    parameter name. They are **named in the table**, not detected by their
+    shape. This dependency defers for exactly those, and their handlers bind the
+    grant to the ``(bot, owner)`` they actually act on before acting. Naming
+    them is what keeps "the dependency could not tell" from becoming a way
+    through: any *other* operation arriving here without a bot id is refused.
     """
     if _defers_to_its_handler(request):
         return caller.user_id
-    own_bot = _resolves_owner_scoped(request)
+    expected_owner = caller.user_id if _resolves_owner_scoped(request) else None
     bot_id = request.path_params.get(_BOT_ID_KEY) or request.query_params.get(
         _BOT_ID_KEY
     )
@@ -395,7 +397,7 @@ async def require_granted_bot(
             "no bot id on a grant-checked request; the operation must resolve "
             "its own bot before acting"
         )
-    return caller.require_bot(str(bot_id), must_be_own_bot=own_bot)
+    return caller.require_bot(str(bot_id), expected_owner_id=expected_owner)
 
 
 def _resolves_owner_scoped(request: Request) -> bool:
@@ -434,7 +436,11 @@ def _defers_to_its_handler(request: Request) -> bool:
     if path is None:
         return False
     key = (request.method, path)
-    return key in BODY_BOT_ID_OPERATIONS or key in SKILL_SCOPED_OPERATIONS
+    return (
+        key in BODY_BOT_ID_OPERATIONS
+        or key in SKILL_SCOPED_OPERATIONS
+        or key in OWNER_ADDRESSED_OPERATIONS
+    )
 
 
 #: What a grant-checked handler declares to have its bot authorized.

@@ -30,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.admission import (
     ADMISSION,
     ADMITTING_MODES,
     BODY_BOT_ID_OPERATIONS,
+    OWNER_ADDRESSED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
     AdmissionMode,
 )
@@ -176,9 +177,11 @@ def test_every_grant_checked_operation_actually_checks():
 
 def test_the_deferring_operations_are_grant_checked_and_named_once():
     """The five exceptions are exceptions to *where*, never to *whether*."""
-    deferring = BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS
+    deferring = (
+        BODY_BOT_ID_OPERATIONS | SKILL_SCOPED_OPERATIONS | OWNER_ADDRESSED_OPERATIONS
+    )
 
-    assert len(deferring) == 5, (
+    assert len(deferring) == 7, (
         "the deferring set changed size. Every entry is an operation the shared "
         "dependency waves through, so each one added is a promise that a "
         "handler checks instead — make that deliberate."
@@ -195,8 +198,10 @@ def test_the_deferring_operations_are_grant_checked_and_named_once():
         f"about where the check runs, not whether: {wrong_mode}"
     )
 
-    overlap = BODY_BOT_ID_OPERATIONS & SKILL_SCOPED_OPERATIONS
-    assert not overlap, f"an operation cannot defer for two reasons: {sorted(overlap)}"
+    sets = (BODY_BOT_ID_OPERATIONS, SKILL_SCOPED_OPERATIONS, OWNER_ADDRESSED_OPERATIONS)
+    assert sum(len(part) for part in sets) == len(deferring), (
+        "an operation cannot defer for two different reasons — the sets overlap"
+    )
 
 
 @pytest.mark.parametrize("mode", sorted(AdmissionMode, key=lambda m: m.name))

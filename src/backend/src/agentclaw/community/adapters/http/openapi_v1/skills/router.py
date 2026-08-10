@@ -88,7 +88,20 @@ def _authorize_skills_bot(
     if not caller.is_application:
         return
     record = query_service.get_local_skill(skill_id=skill_id, actor_id=actor_id)
-    caller.require_bot(str(record["bolt_id"]), must_be_own_bot=True)
+    _require_skills_grant(caller, record)
+
+
+def _require_skills_grant(caller: ActingCaller, record: dict[str, Any]) -> None:
+    """Bind the grant to the ``(bot, owner)`` this skill actually belongs to.
+
+    Both halves come off the record. A skill can belong to another owner's bot
+    and still be readable here — the user-scoped read admits a collaborator — so
+    checking the grant against the *caller* rather than the skill's owner would
+    authorize work on one bot with a grant for a different, same-named one.
+    """
+    caller.require_bot(
+        str(record["bolt_id"]), expected_owner_id=str(record["user_id"])
+    )
 
 
 def _to_skill(record: dict[str, Any]) -> Skill:
@@ -109,6 +122,7 @@ def _to_skill(record: dict[str, Any]) -> Skill:
 async def list_skills(
     page: PageParamsDep,
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     bot_id: str = Query(..., description="Bot ID whose Local Skills are listed."),
     owner_entity_id: str | None = Query(
@@ -120,7 +134,16 @@ async def list_skills(
         LocalSkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
-    """List exact Bot-owned Local Skills from database desired state."""
+    """List exact Bot-owned Local Skills from database desired state.
+
+    Grant-checked **here** rather than by the shared dependency, because only
+    this handler knows whose bot it is about to read: ``owner_entity_id`` names
+    an owner and defaults to the caller. Checking against the caller instead
+    would be wrong in both directions — it would let a grant on the caller's own
+    same-named bot authorize a read of someone else's, and refuse a legitimate
+    grant on a bot shared with them.
+    """
+    caller.require_bot(bot_id, expected_owner_id=owner_entity_id or actor_id)
     total, records = query_service.list_local_skills(
         bot_id=bot_id,
         owner_id=owner_entity_id or actor_id,
@@ -150,7 +173,7 @@ async def get_skill(
     )
     # The record is already in hand, so this one checks the grant directly
     # rather than through the helper — one read, not two.
-    caller.require_bot(str(record["bolt_id"]), must_be_own_bot=True)
+    _require_skills_grant(caller, record)
     return envelope(_to_skill(record), request)
 
 
@@ -182,6 +205,7 @@ async def get_skill(
 @envelope_errors
 async def upload_skill(
     actor_id: UserIdDep,
+    caller: ActingCallerDep,
     request: Request,
     response: Response,
     package: bytes = Body(..., media_type="application/zip"),
@@ -193,7 +217,14 @@ async def upload_skill(
         LocalSkillUploadServiceProtocol
     ),
 ) -> Envelope[SkillUpload]:
-    """Create one inactive Local Skill from a complete raw ZIP package."""
+    """Create one inactive Local Skill from a complete raw ZIP package.
+
+    Grant-checked here for the same reason as the listing above: the owner this
+    writes under is ``owner_entity_id or actor_id``, which only the handler
+    knows. A write makes the mis-binding worse — it would create a skill on a
+    bot the application was never granted.
+    """
+    caller.require_bot(bot_id, expected_owner_id=owner_entity_id or actor_id)
     if (
         request.headers.get("content-type", "").split(";", 1)[0].lower()
         != "application/zip"
