@@ -831,8 +831,8 @@ list still equals the literals the routes actually publish:
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity  logs
-mcp  models  resources  routines  sessions  skills
+approvals  ceiling  check-name  connection  engine  identity  loadtest
+logs  mcp  models  resources  routines  sessions  skills
 ```
 
 **Reserved ahead of their routes.** A second, separate list — names claimed here
@@ -1001,6 +1001,65 @@ enum whitelist. No own Track A stage — scoped by bots isolation (Stage 1 ✅).
 | GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Read one identity file | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | Overwrite one identity file (`content`) | `Envelope[IdentityFileRef]` |
 
+### ✅ loadtest (2 endpoints) · `openapi_v1/loadtest/router.py` — **IMPLEMENTED**
+
+Two synthetic endpoints that do nothing, so a load run can measure what the
+*path* costs — gateway authentication and forwarding, this service's middleware
+stack, the framework's request handling — without a database round trip, an
+engine call, or a bot's state in the same number. Not a product surface: they
+are the baseline every other endpoint's number is read against.
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/loadtest/hello` | Answer the constant `hello world` | `Envelope[HelloWorld]` (`data.message == "hello world"`) |
+| WEBSOCKET | `/openapi/v1/bots/loadtest/ws/echo` | Send every received frame straight back | — (see below) |
+
+**Authentication — the same as every other operation on this surface.** Both
+declare `require_principal`, so a caller with no verified `X-Avernet-Principal`
+is refused before the handler runs: `401` with the standard `ErrorEnvelope` on
+the HTTP endpoint, and close code `1008` on the socket — the handshake is
+refused before the socket is accepted, which a client sees as an HTTP `403`.
+Through the gateway both inherit `user: required` from `/openapi/v1/bots/**`;
+neither is exempted in `route_security`. A measurement taken without the auth
+would describe a path no caller can take, which is why they are not exempt.
+
+**Not user-scoped.** Neither takes `?user_id=` — they read and write nothing, so
+there is no scope for it to name. See "Naming the end user" above; the HTTP one
+is recorded in `test_explicit_user_id.py` alongside the four catalogue reads
+that are exempt for the same reason, and it documents no `403`.
+
+**The socket's contract**, written out here because a WebSocket has no OpenAPI
+representation and therefore appears in **no** generated artifact — this table
+is the whole of it, not a summary of something machine-readable:
+
+- **Frames.** Text and binary are both accepted, and each is echoed back as the
+  same type it arrived as. The payload is returned byte for byte: nothing is
+  trimmed, re-encoded, parsed, or interpreted, so a driver picks its own payload
+  shape.
+- **Ordering.** One frame in, one frame out, in order. No batching, no coalescing,
+  and no server-initiated frames — the socket says nothing the client did not
+  say first.
+- **Disconnect.** The client closing ends the connection; the server does not
+  close first and sends no close frame of its own. A dropped transport is the
+  same outcome. Neither is an error, and neither is logged as one.
+- **Lifetime.** No idle timeout, no ping/pong, no message-count or size limit
+  beyond whatever the ASGI server and any L7 hop impose.
+
+**Routing.** The HTTP endpoint reaches the backend through the `bots` domain
+with no gateway change. The socket needs its own domain — `bots` declares no
+`protocols` and so serves HTTP only — which is `bots-loadtest-ws` in
+`src/gateway/configs/application.yaml`: socket-only, forwarded verbatim to the
+backend, no rewrite. The `ws` segment is what that claim is pinned to, following
+`/openapi/v1/bots/messages/ws/**`, so an HTTP endpoint added under `loadtest`
+later falls outside it by construction.
+
+> **Known gap.** `AvernetTenantMiddleware` and the public access log both return
+> early on a non-HTTP scope, so the socket runs under the **default** tenant and
+> writes no access line. Harmless here — it reads and writes nothing — and the
+> first thing to fix before any socket route on this surface touches data, since
+> a tenant-scoped read under the default tenant is a data-isolation failure
+> rather than a missing log.
+
 ### ⬜ unassigned · Track C — engine runtime (16 endpoints)
 Not a Track B category — these wrap the **engine adapter** on the bot's device
 rather than a backend service. The per-endpoint checklist, the engine route each
@@ -1161,6 +1220,21 @@ in **[`engine-surface.md`](engine-surface.md)**. Summary:
   draft/published separation is binding storage — `ac_bots.binding_id` vs
   `ac_bot_publish.ext.binding.{verify,online}`) and was corrected by the
   access expansion.
+
+- **2026-08-09** — **A `loadtest` component was added, and it is the surface's
+  first WebSocket.** Two synthetic endpoints — `GET …/loadtest/hello` answering a
+  constant, and `WEBSOCKET …/loadtest/ws/echo` echoing its input — so a load run
+  can measure the shared path without a service call in the number. Both require
+  `require_principal` like everything else here; neither is user-scoped, so the
+  HTTP one joins the four operations with no user dimension. To make one
+  dependency serve both planes, `require_principal` and `resolve_caller` now take
+  an `HTTPConnection` rather than a `Request`, and a handshake with no verified
+  caller is refused with close code `1008` instead of a `401` envelope it cannot
+  carry — **HTTP behaviour is unchanged**. Because a WebSocket appears in no
+  generated artifact, the socket's full contract is written out under
+  **Endpoints per component** above rather than published; the gateway serves it
+  through a socket-only `bots-loadtest-ws` domain, and the tenant/access-log gap
+  on the socket plane is recorded there too.
 
 - **2026-08-09** — **The public surface now names its end user explicitly.** 56
   of the 65 operations take a required `user_id` query parameter instead of

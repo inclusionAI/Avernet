@@ -276,6 +276,11 @@ _NO_USER_DIMENSION = {
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/servers/{{server_code}}"),
     ("get", f"{PUBLIC_API_PREFIX}/bots/mcp/tenants"),
+    # The load-test endpoint answers a constant. It reads nothing and writes
+    # nothing, so there is no scope for a user id to name — and a synthetic
+    # endpoint measuring the shared path must not be the one exception that
+    # measures a dependency the path does not have.
+    ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
 }
 
 #: Bot Logs is excluded for a different reason and must stay that way — see the
@@ -285,8 +290,10 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 
 #: What ``bot_id`` looks like, and must keep looking like: an address where it
 #: addresses a bot, a query parameter where it is one, and never a body field.
-#: This change deliberately moved none of them.
-_BOT_ID_PLACEMENT = {"path": 28, "query": 18, "none": 19}
+#: This change deliberately moved none of them. ``none`` counts operations with
+#: no ``bot_id`` at all, so it grows by one for each such operation added — the
+#: load-test endpoint is the twentieth.
+_BOT_ID_PLACEMENT = {"path": 28, "query": 18, "none": 20}
 
 
 def _schema() -> dict:

@@ -626,8 +626,8 @@ id 恰好等于某个组件名，它在该地址上就不可达。这个集合�
 
 <!-- reserved-component-names -->
 ```text
-approvals  ceiling  check-name  connection  engine  identity  logs
-mcp  models  resources  routines  sessions  skills
+approvals  ceiling  check-name  connection  engine  identity  loadtest
+logs  mcp  models  resources  routines  sessions  skills
 ```
 
 **先于路由保留的名字。** 另有一份独立清单 —— 在任何路由发布它们之前就已在此占位的名字。
@@ -781,6 +781,52 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
 | GET | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 读取单个身份文件 | `Envelope[IdentityFile]` |
 | PUT | `/openapi/v1/bots/identity/{bot_id}/{file_type}` | 覆写单个身份文件（`content`） | `Envelope[IdentityFileRef]` |
 
+### ✅ loadtest（2 个端点）· `openapi_v1/loadtest/router.py` —— **已实现**
+
+两个刻意什么都不做的端点，用于让压测量出**链路本身**的开销 —— 网关的鉴权与转发、
+本服务的中间件栈、框架的请求处理 —— 而不让这个数字里混进数据库往返、engine 调用或
+Agent 状态。它们不是产品面，而是其它端点的数字所参照的基线。
+
+| 方法 | 路径 | 用途 | 成功响应 |
+|---|---|---|---|
+| GET | `/openapi/v1/bots/loadtest/hello` | 返回常量 `hello world` | `Envelope[HelloWorld]`（`data.message == "hello world"`） |
+| WEBSOCKET | `/openapi/v1/bots/loadtest/ws/echo` | 把收到的每一帧原样回送 | ——（见下） |
+
+**鉴权 —— 与本面上其它操作完全一致。** 两者都声明了 `require_principal`，因此没有通过
+校验的 `X-Avernet-Principal` 的调用方在 handler 运行前就会被拒绝：HTTP 端点返回标准
+`ErrorEnvelope` 的 `401`；socket 则以关闭码 `1008` 拒绝 —— 在 accept 之前拒绝握手，
+客户端看到的是 HTTP `403`。经网关时两者都从 `/openapi/v1/bots/**` 继承
+`user: required`，`route_security` 中没有为它们开豁免。**不豁免是刻意的**：绕开鉴权测出
+的数字描述的是一条没有调用方能走的链路。
+
+**不按用户维度收敛。** 两者都不带 `?user_id=` —— 它们不读也不写任何数据，没有可供该参数
+指称的范围。参见上文"为终端用户命名"；HTTP 那个已与另外四个同理豁免的目录类读操作一起
+记录在 `test_explicit_user_id.py` 中，并且不声明 `403`。
+
+**socket 的契约**（在此写全，因为 WebSocket 没有 OpenAPI 表示，**不会**出现在任何生成
+产物里 —— 下面这份就是契约全文，而不是某份机器可读文件的摘要）：
+
+- **帧类型。** 文本帧与二进制帧都接受，并按收到时的类型原样回送。载荷逐字节返回：不做
+  裁剪、不重新编码、不解析、不作任何解释，因此驱动端可以自行选择载荷形态。
+- **顺序。** 进一帧、出一帧，保持顺序。不做批处理与合并，也没有服务端主动发起的帧 ——
+  客户端没先说的话，socket 不会说。
+- **断开。** 由客户端关闭结束连接；服务端不主动先关，也不自行发送关闭帧。传输层掉线是
+  同样的结果。两者都不是错误，也不会按错误记录日志。
+- **生命周期。** 无空闲超时、无 ping/pong，除 ASGI server 及前置 L7 跳所施加的限制外，
+  不设消息条数或大小上限。
+
+**路由。** HTTP 端点通过 `bots` domain 直达后端，网关无需改动。socket 需要自己的
+domain —— `bots` 未声明 `protocols`，因此只服务 HTTP 平面 —— 即
+`src/gateway/configs/application.yaml` 中的 `bots-loadtest-ws`：仅 socket 平面、
+原样转发到后端、无 rewrite。`ws` 这一段正是该占用所锚定的位置，与
+`/openapi/v1/bots/messages/ws/**` 同形，因此日后在 `loadtest` 下新增的 HTTP 端点
+天然落在其外。
+
+> **已知缺口。** `AvernetTenantMiddleware` 与公共访问日志在非 HTTP scope 上都会提前
+> 返回，因此该 socket 运行在**默认**租户下，且不写访问日志行。在这里无害 —— 它不读也
+> 不写数据 —— 但在本面上任何 socket 路由开始接触数据之前，这是第一件要修的事：在默认
+> 租户下执行按租户收敛的读取是数据隔离故障，而不只是少了一行日志。
+
 ### ⬜ 未分配 · Track C —— engine 运行时（16 个端点）
 这不是一个 Track B 类别 —— 它们包装的是 Bot 设备上的 **engine adapter**，
 而不是某个后端服务。逐端点清单、每个端点对应的 engine 路由，以及那约 72 条
@@ -910,6 +956,17 @@ Track A 阶段 —— 由 bots 隔离（Stage 1 ✅）覆盖。
   `publish_bot_id = bot_id`；draft 与已发布运行态的真正分界是 binding 的存放位置 ——
   `ac_bots.binding_id` 与 `ac_bot_publish.ext.binding.{verify,online}`），已由访问扩展
   修正。
+
+- **2026-08-09** —— **新增 `loadtest` 组件，也是本面上第一个 WebSocket。** 两个刻意
+  什么都不做的端点 —— `GET …/loadtest/hello` 返回常量，`WEBSOCKET …/loadtest/ws/echo`
+  原样回送 —— 让压测能够测出公共链路本身的开销，而不把服务调用混进这个数字。两者都和其它
+  端点一样要求 `require_principal`；都不按用户维度收敛，因此 HTTP 那个与另外四个没有用户
+  维度的操作归为一类。为了让同一个依赖服务于两个平面，`require_principal` 与
+  `resolve_caller` 的入参从 `Request` 放宽为 `HTTPConnection`，没有已验证调用方的握手以
+  关闭码 `1008` 拒绝，而不是用它根本无法承载的 `401` envelope —— **HTTP 行为没有变化**。
+  由于 WebSocket 不会出现在任何生成产物中，socket 的完整契约写在上文 **各组件端点** 一节
+  里而非通过文档发布；网关经仅 socket 平面的 `bots-loadtest-ws` domain 提供该地址，
+  socket 平面上的租户与访问日志缺口也一并记录在那里。
 
 - **2026-08-09** —— **公共面现在显式指定终端用户。** 65 个操作中的 56 个改为接受必填的
   `user_id` query 参数，不再从已验证 principal 推导 owner；指定其他用户返回 `403`。四个

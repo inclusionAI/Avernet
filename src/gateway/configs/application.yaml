@@ -321,6 +321,34 @@ user_config:
           from: /openapi/v1/bots/messages/ws
           to: /proxypass
 
+      # The load-test socket — the backend's echo endpoint, forwarded verbatim.
+      #
+      # It exists so a load run can measure this relay: what a handshake and a
+      # round trip cost through the gateway, with an upstream that does nothing
+      # but send the frame back. The HTTP half of the same group needs no entry
+      # here — `bots` above already carries `/openapi/v1/bots/**` to the backend
+      # on the HTTP plane — but the socket plane has no such catch-all, because
+      # `bots` declares no `protocols` and so serves HTTP only. Without this
+      # domain the handshake is refused with "no route for path" and only the
+      # HTTP endpoint is measurable.
+      #
+      # Socket-only, like the domain above, so an HTTP request under this prefix
+      # is not this domain's at all and still resolves through `bots`.
+      #
+      # No `rewrite:` — the backend serves this address itself, so only the
+      # origin changes. And no `schema:`: a WebSocket has no OpenAPI
+      # representation.
+      #
+      # Authentication is inherited, deliberately. This prefix appears nowhere
+      # in `route_security`, so it falls to `/openapi/v1/bots/**` — user
+      # required — and the relay signs that identity into the handshake the
+      # backend verifies. A load test that measured an exempted path would be
+      # measuring a path no caller can take.
+      bots-loadtest-ws:
+        match: /openapi/v1/bots/loadtest/ws/**
+        server: backend
+        protocols: [websocket]
+
     servers:
       backend:
         base_url: "${backend_server_url}"
