@@ -1,5 +1,6 @@
 //! E2E test suite for bcs-cli
 
+mod chat_test;
 mod common;
 mod custom_collaboration_test;
 mod discover_test;
