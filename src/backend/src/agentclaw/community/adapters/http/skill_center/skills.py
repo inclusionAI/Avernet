@@ -4,8 +4,6 @@ Migrated from: services/openclawserver/server/skills
 Unified Skills router for skill management, activation, and metadata.
 Combines functionality from skills, skills_metadata, and skillset_switch routers.
 """
-
-import asyncio
 import io
 import json
 import os
@@ -1087,13 +1085,7 @@ async def activate_skill(
             mapping_kwargs["additional_skill_paths"] = [actual_skill_id]
         symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
-        # Offloaded: sync_symlinks resolves connection info through the
-        # synchronous BaasService.get_http_info, which retries — so inline it
-        # would park the event loop for up to two HTTP deadlines plus a
-        # time.sleep backoff, freezing unrelated requests on this worker.
-        sync_result = await asyncio.to_thread(
-            device_sync.sync_symlinks, symlinks_dict
-        )
+        sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skill] Device sync skipped or failed: {e}")
@@ -1177,13 +1169,7 @@ async def deactivate_skill(
             bolt_id=effective_bot_id,
         )
         symlinks_dict = [sm.to_dict() for sm in symlinks]
-        # Offloaded: sync_symlinks resolves connection info through the
-        # synchronous BaasService.get_http_info, which retries — so inline it
-        # would park the event loop for up to two HTTP deadlines plus a
-        # time.sleep backoff, freezing unrelated requests on this worker.
-        sync_result = await asyncio.to_thread(
-            device_sync.sync_symlinks, symlinks_dict
-        )
+        sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.deactivate_skill] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.deactivate_skill] Device sync skipped or failed: {e}")
@@ -1681,13 +1667,7 @@ async def activate_skills_batch(
             ]
         symlinks = skill_set_service.get_symlink_mappings(**mapping_kwargs)
         symlinks_dict = [sm.to_dict() for sm in symlinks]
-        # Offloaded: sync_symlinks resolves connection info through the
-        # synchronous BaasService.get_http_info, which retries — so inline it
-        # would park the event loop for up to two HTTP deadlines plus a
-        # time.sleep backoff, freezing unrelated requests on this worker.
-        sync_result = await asyncio.to_thread(
-            device_sync.sync_symlinks, symlinks_dict
-        )
+        sync_result = device_sync.sync_symlinks(symlinks_dict)
         logger.info(f"[skills.activate_skills_batch] Device sync result: {sync_result}")
     except Exception as e:
         logger.warning(f"[skills.activate_skills_batch] Device sync skipped or failed: {e}")
