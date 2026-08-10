@@ -1,0 +1,186 @@
+# bcs-cli chat 透出 run_id / session_id 设计
+
+- 日期：2026-08-10
+- 状态：设计已确认，待实现
+- 范围：`crates/tools/bcs-cli`（`main.rs` + `client.rs`），仅 CLI 侧输出契约
+
+## 背景
+
+`bcs-cli chat` 走 `POST /bots/{id}/chat-async` 提交 + 长轮询 `GET /chat/runs/{run_id}` 的流程，分两种模式：
+
+- `--detach`：run 进入 `running` 即返回（`chat_polling_detach`）。
+- 同步默认：阻塞到 run 终态（`chat_polling`）。
+
+两类问题经核对属真实：
+
+1. **同步等待模式下 agent 不知道 run_id**：`chat_polling` 成功返回的 JSON 内含 `run_id`/`session_id`，但 `main.rs` 的同步分支只打印 `Session:`，不打印 `Run:`；`--detach` 分支则有 `Run:`。整个阻塞等待期间 agent 也拿不到任何标识符。
+2. **同步失败时响应里没有 run_id/session_id**：失败时 `chat_polling` 返回 `Err(anyhow!(...))`，经 `main.rs` 的 `?` 直接冒泡，结构化结果块（含 `--json` 分支）完全跳过，最终由 `fn main() -> Result<()>` 以纯文本打到 stderr。其中 `run_id` 只是混在错误串里（`run {}`），`session_id` 完全缺失——即便 `reported_session` 在提交后已经拿到（`client.rs:1350`）。`--detach` 失败路径同样丢失 `session_id`。
+
+## 决策
+
+### 1. 架构：submit → ack → poll → print，由 `main.rs` 驱动打印
+
+当前 `chat_polling` / `chat_polling_detach` 把「提交 + 轮询 + 失败即 Err」揉在 `client.rs` 中，导致 `main.rs` 没有机会在提交后、轮询前介入打印。改为把流程切分，让 `main.rs`（交付层，按 CLAUDE.md 分层负责 CLI 打印）显式驱动：
+
+1. `client.chat_async(...)` → `ChatRunSubmitResponse { run_id, session_id, bot_uuid, ... }`（已存在）。
+2. `main.rs` 打印早 ack（见 §3）。
+3. 新增轮询方法返回结构化结果 `ChatRunOutcome`（见 §5），不再返回裸 `Err`：
+   - 同步：`chat_poll_run(run_id, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到终态）。
+   - detach：`chat_poll_run_until_running(run_id, poll_wait_ms, deadline) -> Result<ChatRunOutcome>`（轮询到 `running`）。
+4. `main.rs` 用 `ChatRunOutcome` 决定最终输出与退出码。
+
+`client.rs` 继续保持纯传输层，不做任何 stdout/stderr 打印；所有打印仍在 `main.rs`。
+
+### 2. run_id / session_id 透出位置
+
+run_id + session_id 必须在两处出现：早 ack（提交后立刻）与最终块（成功与失败都含），覆盖 sync/detach × json/non-json 全部分支。
+
+### 3. 早 ack：带时间戳的纯文本日志行（非 JSON）
+
+格式（时间戳为本地时区 RFC3339，含毫秒）：
+
+```
+2026-08-10T14:23:01.123+08:00 [chat] submitted run_id=run-9f3a session_id=bcs-cli:default:197262:a9c8432f
+```
+
+通道按模式分流（混合策略，对 `--json` stdout 保持纯净）：
+
+- non-json：ack 打到 **stdout**，在 `Response from <bot>` 块之前。
+- json：ack 打到 **stderr**，stdout 保持单个 JSON 对象（`jq` 可直接解析）。
+
+> 备选：统一 stderr / 统一 stdout，实现时如需调整以该决策为准；当前选混合是为了同时满足「non-json 在 Response 块前可见」与「json stdout 纯净」。
+
+### 4. 输出契约
+
+统一规则：早 ack → 见 §3；最终结果 → stdout 恰一个实体；退出码 → 成败。
+
+| 模式 | 早 ack（提交后） | 最终结果（stdout） | Exit |
+|---|---|---|---|
+| sync non-json | stdout，在 Response 块前：`<ts> [chat] submitted run_id=<rid> session_id=<sid>` | 成功：`Response from <bot>`+content+`Session:`；失败：`Run:`+`Session:`+`State: failed`+`Error: <msg>` | 0/1 |
+| sync json | stderr：`<ts> [chat] submitted run_id=<rid> session_id=<sid>` | 成功见下方 §6；失败见下方 §6 | 0/1 |
+| detach non-json | stdout，在 Response 块前 | 成功：`Run:`+`Session:`+`State: running`（现有）；失败：`Run:`+`Session:`+`State: failed`+`Error: <msg>` | 0/1 |
+| detach json | stderr 同上 | 成功/失败见 §6 | 0/1 |
+
+### 5. `ChatRunOutcome`（替代裸 `Result<Value>` / Err）
+
+```rust
+struct ChatRunOutcome {
+    delivered: bool,          // Completed（sync）/ 进入 Running（detach）
+    submitted: bool,          // 仅当提交本身失败时为 false
+    run_id: Option<String>,   // 仅提交失败时为 None
+    session_id: Option<String>,
+    state: String,            // running|completed|failed|cancelled|timeout|submitted|submit_failed
+    bot_uuid: Option<String>,
+    response_content: Option<String>,
+    error_message: Option<String>,
+    content_truncated: bool,
+}
+```
+
+- 提交成功后轮询方法返回 `Ok(ChatRunOutcome)`；`delivered=false` 表示未交付。
+- 提交级 HTTP 错误（非 2xx / 反序列化失败）返回 `Err`，由 `main.rs` 转成 `submit_failed` 的 `ChatRunOutcome` 再打印。
+- `ChatRunOutcome` 是 `bcs-cli` crate 内部结构（位于 `client.rs`），不是 bcs-protocol 线上 DTO；由现有 `ChatRunSubmitResponse` / `ChatRunStatusResponse` 的既有字段组装，不引入任何新的线上字段。
+
+### 6. 最终 stdout JSON 显式字段
+
+run_id 与 session_id 始终为顶层字段；仅提交失败（服务器未创建 run）时为 `null`。sync 与 detach 的 JSON 顶层布尔字段不同：sync 以 `delivered` 表成败并携带 `response` / `content_truncated`；detach 以 `submitted` 表成败，因 run 未等到完成故省略 `response` / `content_truncated`。两者均始终包含 `run_id` 与 `session_id`。
+
+sync json 成功（exit 0）：
+```json
+{
+  "delivered": true,
+  "bot_uuid": "default:197262",
+  "run_id": "run-9f3a",
+  "session_id": "bcs-cli:default:197262:a9c8432f",
+  "state": "completed",
+  "response": { "content": "嘿，我是元歌的分身 …" },
+  "error_message": null,
+  "content_truncated": false
+}
+```
+
+sync json 失败（exit 1）：
+```json
+{
+  "delivered": false,
+  "bot_uuid": "default:197262",
+  "run_id": "run-9f3a",
+  "session_id": "bcs-cli:default:197262:a9c8432f",
+  "state": "failed",
+  "response": { "content": "" },
+  "error_message": "provider returned error: …",
+  "content_truncated": false
+}
+```
+超时变体：`"state": "timeout"`、`"error_message": "local polling timeout after 1800000 ms; run run-9f3a still active"`。
+
+detach json 成功（exit 0）/ 失败（exit 1）：
+```json
+{ "submitted": true, "bot_uuid": "…", "run_id": "…", "session_id": "…", "state": "running", "error_message": null }
+{ "submitted": false, "bot_uuid": "…", "run_id": "…", "session_id": "…", "state": "failed", "error_message": "…" }
+```
+
+提交本身失败（如 404 bot 不存在，未创建 run）（exit 1）：
+```json
+{
+  "delivered": false,
+  "submitted": false,
+  "bot_uuid": "default:197262",
+  "run_id": null,
+  "session_id": null,
+  "state": "submit_failed",
+  "response": { "content": "" },
+  "error_message": "chat_async failed (404): Bot not found"
+}
+```
+
+### 7. 失败语义
+
+- `Failed` / `Cancelled`：`delivered=false`、`state=failed/cancelled`、`error_message` 取自 status。结构化 stdout 输出，exit 1。
+- 本地轮询超时（deadline 到，run 在服务端仍活动）：`delivered=false`、`state="timeout"`、`error_message="local polling timeout after N ms; run <rid> still active"`。结构化输出，exit 1。透出的 run_id 允许 agent 自行后续查询/取消。
+- 提交本身失败（非 2xx 或反序列化失败）：无 run_id/session_id，`state="submit_failed"`，`error_message=body`，结构化输出，exit 1。
+
+### 8. 兼容性与退出码
+
+- 退出码：成功 0，任何失败 1（与现状一致，仅输出内容改善）。
+- `--json` stdout 在所有情况下都恰为一个 JSON 对象（成功或失败）；失败路径为严格增量修复（现状打印空）。
+- `chat_polling` / `chat_polling_detach` 被 `chat_async` + `chat_poll_run(_until_running)` 取代；`client.rs` 内现有 `test_chat_polling_*` 测试需更新为断言新的结构化结果，而非自由文本 `Err`。
+- 该 `client.rs` 为 `bcs-cli` crate 内部，无外部 crate 依赖其 `chat_polling`，API 变更影响面仅在 crate 内及 crate 内测试。
+
+## 跨版本兼容（无服务端变更）
+
+本设计仅改动 `bcs-cli` crate，不触达服务端、端点、或线上 DTO：
+
+- 不改 `POST /bots/{id}/chat-async`、`GET /chat/runs/{run_id}`，不改 `ChatRunSubmitResponse` / `ChatRunStatusResponse`；这些 DTO 已含 `run_id`、`session_id`、`state`、`response`、`error_message` 字段，CLI 今日已解析，只是未打印 / 在失败时丢弃。本设计只改打印与失败结构化。
+- 因此本功能**不需要服务端升级**，也不引入 CLI↔Server 新版本耦合。
+- 双向兼容：
+  - 老存量 CLI ↔ 当前/未来 Server：不受本改动影响（服务端无任何变化），行为与今天一致。
+  - 新 CLI ↔ 老 Server：可用。新 CLI 只读老 Server 已发送的既有字段；不新增请求字段、不新增/不提升 `X-BCS-CHAT-VERSION`（仍为 `2`）。
+- 失败时 run_id 取自提交响应、session_id 取自提交时的 `reported_session`，因此即便某 Server 的失败状态体遗漏这些字段，CLI 仍可透出，不依赖 Server 状态体形状。
+- 仓库已有 `BCS_CHAT_VERSION` / `X-BCS-CHAT-VERSION` 版本协商用于任何真实的线上协议变更；本设计不触碰它。
+
+## 验收标准
+
+- 同步 non-json 成功时，stdout 出现 `Run:`（修复问题 1 的 run_id）。
+- 同步与 detach 在提交后立刻输出带时间戳的纯文本 ack，行内含 `run_id` 与 `session_id`；non-json 走 stdout 且在 `Response from` 块之前，json 走 stderr。
+- 同步失败（run failed / local timeout）时，stdout（json：单 JSON 对象；non-json：`Run/Session/State/Error` 行）包含 run_id 与 session_id，且 exit 1。
+- detach 成功与失败均输出 run_id 与 session_id；失败时 exit 1。
+- 提交级失败（如 404）输出结构化失败（json：单对象，`run_id/session_id=null`；non-json：`Error:` 行），exit 1，无 panic。
+- `--json` 模式下，stdout 成功与失败均为且仅为一个 JSON 对象，`jq '.'` 可解析。
+- run_id 与 session_id 同时出现在早 ack 与最终 stdout 块（除提交级失败外，最终块均为非 null 顶层字段）。
+
+## 测试
+
+- 更新 `test_chat_polling_timeout_leaves_server_run_active`：断言 `outcome.delivered==false`、`state=="timeout"`、含 `run_id` 与 `session_id`，而非断言自由文本 `Err` 含 `run-local-timeout is still active`。
+- 新增：同步 non-json 成功打印 `Run:`（问题 1 回归）。
+- 新增：同步 json 失败在 stdout 打印单个失败 JSON 对象且 exit 1（问题 2）。
+- 新增：提交后立刻在正确通道（non-json→stdout，json→stderr）输出带时间戳的纯文本 ack（含 run_id+session_id），覆盖 sync 与 detach。
+- 新增：detach 失败在 stdout 输出 run_id 与 session_id 且 exit 1。
+- 新增：提交级失败（404）输出结构化失败、exit 1、ID 为 null、无 panic。
+
+## 非目标
+
+- 不改服务端 run 生命周期、端点、或 `chat_run_status` 长轮询协议。
+- 不新增 CLI 子命令用于复轮询（透出的 run_id 允许 agent 直接打 `GET /chat/runs/{run_id}`，另行跟进）。
+- 不动 `wait_for_service_completion`（群组 / state-machine 流程，已打印 `StateRun:`）。
+- 不改 `client.rs` 之外 crate 的对外 API。
