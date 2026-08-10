@@ -30,7 +30,8 @@ dependencies = [
     "pyyaml>=6.0.0",
     "greenlet>=2.0.0",
     "opentelemetry-instrumentation-openai>=0.62.1",
-    "pyjwt>=2.8.0"
+    "pyjwt>=2.8.0",
+    "alibabacloud-kms20160120>=3.2.0",
 ]
 description = "secbaas community edition"
 name = "secbaas-community"

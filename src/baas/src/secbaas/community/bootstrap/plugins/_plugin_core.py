@@ -49,6 +49,7 @@ from secbaas.community.plugins.sandbox.k8s.real import K8sClientManager
 from secbaas.community.plugins.sandbox.poolab import StubPoolabSandboxPlugin
 from secbaas.community.plugins.sandbox.teclaw import StubTeClawBotPlugin
 from secbaas.community.plugins.sandbox.utils.arca_utils import ArcaUtils
+from secbaas.community.plugins.secret import AliyunKmsSecretStorePlugin
 from secbaas.community.plugins.secret.stub import StubSecretStorePlugin
 
 
@@ -70,6 +71,10 @@ class PluginContainer(containers.DeclarativeContainer):
 
     secret_plugin = providers.Selector(
         config.plugins.secret,
+        aliyun_kms=providers.Singleton(
+            AliyunKmsSecretStorePlugin,
+            config=config.plugins.secret_aliyun_kms,
+        ),
         stub=providers.Singleton(StubSecretStorePlugin),
     )
 
