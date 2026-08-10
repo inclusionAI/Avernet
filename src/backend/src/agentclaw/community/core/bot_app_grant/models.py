@@ -80,8 +80,12 @@ class BotAppGrantModel(Base):
     app_id = Column(
         AutoIncrementBigInteger, nullable=False, comment="gateway avernet_application.id"
     )
+    # 1024, matching the unconstrained gateway boundary (``AppRow.app_name``)
+    # as closely as a VARCHAR can. Widening is free here precisely because
+    # ``app_name`` is in no index — contrast ``owner_id`` below, which is in the
+    # unique key and cannot grow without pushing it past InnoDB's 3072-byte cap.
     app_name = Column(
-        String(256), nullable=False, comment="app display name, snapshotted at consent"
+        String(1024), nullable=False, comment="app display name, snapshotted at consent"
     )
     bot_id = Column(String(256), nullable=False, comment="the authorized bot")
     owner_id = Column(
@@ -177,7 +181,7 @@ class BotAppGrantLogModel(Base):
 
     id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     app_id = Column(AutoIncrementBigInteger, nullable=False)
-    app_name = Column(String(256), nullable=False)
+    app_name = Column(String(1024), nullable=False)
     bot_id = Column(String(256), nullable=False)
     owner_id = Column(String(256), nullable=False)
     action = Column(

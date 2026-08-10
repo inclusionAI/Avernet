@@ -1,5 +1,15 @@
 # Tasks: Public API — Owner-Granted Bot Authorization for Applications
 
+> **Path correction (post-review).** This document originally specified
+> `/openapi/v1/authorized-bots`. That path is **unroutable**: the gateway
+> resolves an upstream from the segment after the version base and forwards
+> only into configured domains, so a top-level path matches no domain and is
+> refused at the edge. The shipped path is `/openapi/v1/bots/authorized`, a
+> literal component under the base alongside `logs`, `sessions` and the rest,
+> registered in the docs' reserved-component list. `test_path_convention.py`
+> enforces the rule.
+
+
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 >
 > Branch: `claude/github-issue-928-investigation-bia0fl`, based on `dev`.
@@ -244,7 +254,7 @@
 - **Done when:**
   - [x] `"POST /openapi/v1/bots/{bot_id}/authorized-apps": {user: required,
         app: required}` is present.
-  - [x] `"/openapi/v1/authorized-bots": {user: required, app: required}` is
+  - [x] `"/openapi/v1/bots/authorized": {user: required, app: required}` is
         present — not method-qualified, since GET is the only method this path
         has and every method it could grow answers the same question.
   - [x] Both comment blocks from `plan.md` are included: why granting needs both
@@ -267,7 +277,7 @@
         `{user: required, app: required}`, beating `/openapi/v1/bots/**`.
   - [x] A test asserts `GET` and `DELETE` on the same path resolve to
         `user: required` only.
-  - [x] A test asserts `GET /openapi/v1/authorized-bots` resolves to
+  - [x] A test asserts `GET /openapi/v1/bots/authorized` resolves to
         `{user: required, app: required}`, beating the `"/**"` default.
   - [x] All load the **real** `src/gateway/configs/application.yaml` via
         `RouteSecurity.from_yaml`, not a fixture table — a typo in the shipped

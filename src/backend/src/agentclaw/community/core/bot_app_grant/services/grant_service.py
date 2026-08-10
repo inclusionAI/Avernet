@@ -115,23 +115,26 @@ class BotAppGrantService:
         It does still have to answer honestly, and a grant outliving its bot
         would make it lie. ``delete_bot`` soft-deletes the ``ac_bots`` row and
         does not touch grants, so without this filter a withdrawn-by-deletion
-        bot would be reported as currently authorized indefinitely. Each grant
-        is checked against a live bot for this owner —
-        ``get_by_id_and_owner`` already excludes soft-deleted rows.
+        bot would be reported as currently authorized indefinitely.
 
-        One lookup per grant, and that is bounded by design: this is the set of
-        bots *one* owner has authorized to *one* app, not a tenant-wide list.
+        **Two queries, not one per grant.** An earlier revision checked each
+        grant with its own ``get_by_id_and_owner`` and justified it as "bounded
+        by design"; that bound was not real — an owner can hold many bots when
+        the ceiling is disabled — and this route is unpaginated and calls a
+        synchronous service, so the round trips would have blocked the event
+        loop in proportion to the grant count. The owner's live bot ids come
+        back in a single id-only query and the filter happens in memory.
 
         This filters the *report*; it does not revoke. Revoking on deletion is
         the fuller fix and belongs with bot lifecycle rather than here — until
         it exists, the row survives and only stops being advertised.
         """
         granted = self._repository.list_for_app(app_id, owner_id)
-        return [
-            record
-            for record in granted
-            if self._bots.get_by_id_and_owner(record.bot_id, owner_id) is not None
-        ]
+        if not granted:
+            # Skip the bot query entirely when there is nothing to filter.
+            return []
+        live = set(self._bots.list_live_bot_ids_by_owner(owner_id))
+        return [record for record in granted if record.bot_id in live]
 
 
 __all__ = ["BotAppGrantService"]

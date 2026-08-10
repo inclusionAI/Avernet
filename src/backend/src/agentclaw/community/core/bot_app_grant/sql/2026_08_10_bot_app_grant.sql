@@ -15,7 +15,9 @@ CREATE TABLE ac_bot_app_grant (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
   app_id BIGINT(20) UNSIGNED NOT NULL
     COMMENT 'gateway avernet_application.id, from the App principal',
-  app_name VARCHAR(256) NOT NULL
+  -- 1024: the gateway's app_name is unconstrained at its own boundary. Free to
+  -- widen because app_name is in no index here, unlike owner_id below.
+  app_name VARCHAR(1024) NOT NULL
     COMMENT 'app display name, snapshotted at consent time',
   bot_id VARCHAR(256) NOT NULL COMMENT 'the authorized bot',
   owner_id VARCHAR(256) NOT NULL COMMENT 'bot owner, resolved server-side',
@@ -44,7 +46,7 @@ CREATE TABLE ac_bot_app_grant (
 CREATE TABLE ac_bot_app_grant_log (
   id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
   app_id BIGINT(20) UNSIGNED NOT NULL,
-  app_name VARCHAR(256) NOT NULL,
+  app_name VARCHAR(1024) NOT NULL,
   bot_id VARCHAR(256) NOT NULL,
   owner_id VARCHAR(256) NOT NULL,
   action VARCHAR(32) NOT NULL COMMENT 'granted | revoked',

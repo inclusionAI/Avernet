@@ -77,25 +77,36 @@ def repo(db):
 
 
 class _LiveBots:
-    """A bot repository double: every bot is live unless explicitly deleted.
+    """A bot repository double tracking which bots this owner still has.
 
-    Mirrors ``get_by_id_and_owner``, which filters ``is_delete == 0`` — so
-    "deleted" here means the same thing it means in production: the lookup
-    stops returning the row.
+    Mirrors ``list_live_bot_ids_by_owner``, which excludes soft-deleted rows —
+    so ``delete`` here means what it means in production: the id stops coming
+    back. ``queries`` counts calls, which is how the batching test proves the
+    filter costs one query rather than one per grant.
     """
 
     def __init__(self):
-        self.deleted: set[tuple[str, str]] = set()
+        self.live: dict[str, set[str]] = {}
+        self.queries = 0
 
-    def get_by_id_and_owner(self, bot_id: str, owner_id: str):
-        if (bot_id, owner_id) in self.deleted:
-            return None
-        return {"bot_id": bot_id, "owner_id": owner_id}
+    def add(self, owner_id: str, *bot_ids: str) -> None:
+        self.live.setdefault(owner_id, set()).update(bot_ids)
+
+    def delete(self, owner_id: str, bot_id: str) -> None:
+        self.live.get(owner_id, set()).discard(bot_id)
+
+    def list_live_bot_ids_by_owner(self, owner_id: str) -> list[str]:
+        self.queries += 1
+        return sorted(self.live.get(owner_id, set()))
 
 
 @pytest.fixture
 def bots():
-    return _LiveBots()
+    """Seeded with every bot the tests grant, so the default is "all live"."""
+    doubles = _LiveBots()
+    for owner in ("u-1", "u-2"):
+        doubles.add(owner, "b-1", "b-2")
+    return doubles
 
 
 @pytest.fixture
@@ -272,9 +283,34 @@ def test_list_for_app_excludes_a_deleted_bot(service, bots):
     service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
     service.grant(bot_id="b-2", owner_id="u-1", app_id=42, app_name="partner")
 
-    bots.deleted.add(("b-1", "u-1"))
+    bots.delete("u-1", "b-1")
 
     assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-2"]
+
+
+def test_list_for_app_filters_in_one_query_not_one_per_grant(service, bots):
+    """The filter must not scale its round trips with the grant count.
+
+    An earlier revision called ``get_by_id_and_owner`` per grant and justified
+    it as bounded; the bound was not real, and this route is unpaginated and
+    synchronous. Counting queries is the only way to keep the fix from
+    regressing into the shape it replaced.
+    """
+    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
+    service.grant(bot_id="b-2", owner_id="u-1", app_id=42, app_name="partner")
+    bots.queries = 0
+
+    service.list_for_app(app_id=42, owner_id="u-1")
+
+    assert bots.queries == 1
+
+
+def test_list_for_app_makes_no_bot_query_when_there_are_no_grants(service, bots):
+    """Nothing to filter, so nothing to ask the bot repository."""
+    bots.queries = 0
+
+    assert service.list_for_app(app_id=42, owner_id="u-1") == []
+    assert bots.queries == 0
 
 
 def test_list_for_app_is_scoped_to_the_calling_owner(service):

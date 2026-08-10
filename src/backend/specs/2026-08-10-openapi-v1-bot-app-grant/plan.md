@@ -1,10 +1,20 @@
 # Plan: Public API — Owner-Granted Bot Authorization for Applications
 
+> **Path correction (post-review).** This document originally specified
+> `/openapi/v1/authorized-bots`. That path is **unroutable**: the gateway
+> resolves an upstream from the segment after the version base and forwards
+> only into configured domains, so a top-level path matches no domain and is
+> refused at the edge. The shipped path is `/openapi/v1/bots/authorized`, a
+> literal component under the base alongside `logs`, `sessions` and the rest,
+> registered in the docs' reserved-component list. `test_path_convention.py`
+> enforces the rule.
+
+
 ## Approach
 
 One new persisted record (`ac_bot_app_grant`) read from both ends: a bot-scoped
 group (`/openapi/v1/bots/{bot_id}/authorized-apps`, three operations) and an
-app-scoped read (`/openapi/v1/authorized-bots`, one operation). Nothing in the
+app-scoped read (`/openapi/v1/bots/authorized`, one operation). Nothing in the
 admission path moves: the verifier still refuses every identity set that names
 no end user, `UserIdDep` still requires the request's `user_id` to be the
 verified caller, and no existing route changes who may call it.
@@ -70,28 +80,31 @@ gets a table with no unique key at all. This is the shape
 `ac_bot_collaborator` / `ac_bot_collab_log` already uses in this codebase.
 
 ```python
-# src/backend/src/agentclaw/community/core/bot_app_grant/models.py (new)
+# src/backend/src/agentclaw/community/core/bot_app_grant/models.py
+# (as shipped — see the path/schema corrections noted at the top)
 class BotAppGrantModel(Base):
     """Live grants only — a row exists iff the app may reach the bot right now."""
     __tablename__ = "ac_bot_app_grant"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
-
-    app_id   = Column(AutoIncrementBigInteger, nullable=False, comment="gateway avernet_application.id, from the AppPrincipal")
-    app_name = Column(String(256), nullable=False, comment="app display name, snapshotted at consent time")
-    bot_id   = Column(String(256), nullable=False, comment="the authorized bot")
-    owner_id = Column(String(256), nullable=False, comment="bot owner, resolved server-side")
-    tenant   = Column(String(128), nullable=False, comment="tenant, cross-checked on write")
+    id       = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
+    app_id   = Column(AutoIncrementBigInteger, nullable=False)
+    app_name = Column(String(1024), nullable=False)   # 1024: in no index, so free to widen
+    bot_id   = Column(String(256), nullable=False)
+    owner_id = Column(String(256), nullable=False)    # 256: IS in the unique key (see below)
     env      = Column(String(20), nullable=False, default=get_current_env)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
 
-    gmt_create = Column(DateTime, default=func.now(), nullable=False)
-    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    gmt_create   = Column(DateTime, nullable=False, server_default=func.now())
+    gmt_modified = Column(DateTime, nullable=False, server_default=func.now(),
+                          onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint("app_id", "bot_id", "owner_id", "env",
-                         name="uk_app_bot_owner_env"),
-        # the app's view: which of this owner's bots may this app reach
-        Index("idx_app_owner_env", "app_id", "owner_id", "env"),
+        UniqueConstraint("avernet_tenant", "app_id", "bot_id", "owner_id", "env",
+                         name="uk_bot_app_grant_scope"),
+        Index("idx_bot_app_grant_app_owner",                 # the app's view
+              "avernet_tenant", "app_id", "owner_id", "env"),
+        Index("idx_bot_app_grant_bot_owner",                 # the owner's view
+              "avernet_tenant", "bot_id", "owner_id", "env"),
     )
 
 
@@ -99,23 +112,51 @@ class BotAppGrantLogModel(Base):
     """Append-only. One row per grant and per withdrawal; never updated."""
     __tablename__ = "ac_bot_app_grant_log"
 
-    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
-
+    id       = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True)
     app_id   = Column(AutoIncrementBigInteger, nullable=False)
-    app_name = Column(String(256), nullable=False)
+    app_name = Column(String(1024), nullable=False)
     bot_id   = Column(String(256), nullable=False)
     owner_id = Column(String(256), nullable=False)
-    tenant   = Column(String(128), nullable=False)
+    action   = Column(String(32), nullable=False)     # granted | revoked
     env      = Column(String(20), nullable=False, default=get_current_env)
-    action   = Column(String(32), nullable=False, comment="granted | revoked")
-
-    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    avernet_tenant = Column(String(64), nullable=False, server_default="teamclaw")
+    gmt_create = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
-        # reconstruct a bot's authorization history in order
-        Index("idx_log_bot_owner_env", "bot_id", "owner_id", "env", "gmt_create"),
+        Index("idx_bot_app_grant_log_bot",
+              "avernet_tenant", "bot_id", "owner_id", "env", "gmt_create"),
     )
+
+
+register_avernet_tenant_guard(BotAppGrantModel)
+register_avernet_tenant_guard(BotAppGrantLogModel)
 ```
+
+**Three corrections this block carries versus the plan's first draft**, each from
+a review round and each with its reason:
+
+- **Tenant is `avernet_tenant`, not a hand-rolled `tenant`.** It follows the
+  platform's `register_avernet_tenant_guard` convention, which stamps the tenant
+  on insert and *refuses* a row naming another — so the cross-tenant guarantee
+  is the platform's rather than code of ours that could be forgotten. It leads
+  the unique key for the reason `ac_user_mcp_config` documents: `owner_id` is a
+  user identifier and only means anything within a tenant.
+- **`app_name` is 1024, `owner_id` stays 256.** Not inconsistency for its own
+  sake: `app_name` is in no index so widening it toward the gateway's
+  unconstrained boundary is free, while `owner_id` is *in* the unique key and
+  widening it would push that key from 2392 to 5464 bytes, past InnoDB's
+  3072-byte cap.
+- **Both reading ends are indexed.** The first draft argued the owner's view
+  needed no index of its own. That was wrong — both other indexes lead with
+  `app_id` after the tenant, and a B-tree cannot reach past it without an
+  `app_id` predicate, so that listing degraded into a tenant-wide scan.
+
+**A deployable `.sql` ships alongside**, at
+`core/bot_app_grant/sql/2026_08_10_bot_app_grant.sql`. The first draft claimed
+no migration was needed; that was true only of the local SQLite profile, which
+is the one that calls `create_all`. `CommunityDatabase` never does, so without
+checked-in DDL every route would have failed on a missing table in any
+persistent deployment.
 
 Notes on the shape:
 
@@ -227,7 +268,7 @@ async def list_authorized_bots(
 //   403 — user_id names someone other than the verified caller (UserIdDep, unchanged)
 //   401 — POST without an app identity, refused at the gateway before this runs
 
-// GET /openapi/v1/authorized-bots?user_id=… → 200
+// GET /openapi/v1/bots/authorized?user_id=… → 200
 //   the app's view: this owner's bots that the CALLING app may reach
 { "data": { "items": [ { "bot_id": "…", "granted_at": "2026-08-10T00:00:00Z" } ],
             "total": 1 }, "request_id": "…" }
@@ -277,7 +318,7 @@ No existing signature changes. This is additive to the published description.
 +    #
 +    # Not method-qualified: GET is the only method this path has, and every
 +    # method it could grow answers the same "what may I reach" question.
-+    "/openapi/v1/authorized-bots":
++    "/openapi/v1/bots/authorized":
 +      user: required
 +      app: required
 ```
