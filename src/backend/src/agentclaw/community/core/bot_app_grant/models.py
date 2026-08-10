@@ -37,6 +37,21 @@ from agentclaw.community.utils.avernet_tenant_guard import register_avernet_tena
 from agentclaw.community.utils.env_utils import get_current_env
 
 
+#: How much of an application's display name a grant row keeps.
+#:
+#: The gateway's ``app_name`` is unconstrained at its own boundary, so *any*
+#: finite column here has an input that exceeds it — moving the number is not a
+#: fix, it only relocates the cliff. The value is therefore truncated
+#: deliberately at write time rather than left to the database, which would
+#: either reject the grant (strict mode) or truncate it silently (permissive).
+#:
+#: Truncating is safe **because this column is not identity**. ``app_id`` is what
+#: the record is keyed and resolved by; ``app_name`` exists so a human scanning a
+#: listing recognises the application, and 1024 characters is past the point of
+#: recognition. An authorization must not fail because a display name is long.
+APP_NAME_MAX_LENGTH = 1024
+
+
 class GrantAction(StrEnum):
     """What a log row records. The live table needs no such enum — existence
     is its only state — so this belongs to the history alone."""

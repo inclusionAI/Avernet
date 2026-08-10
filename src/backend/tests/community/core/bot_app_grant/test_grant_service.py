@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
 from agentclaw.community.core.bot_app_grant.models import (
+    APP_NAME_MAX_LENGTH,
     BotAppGrantLogModel,
     BotAppGrantModel,
     GrantAction,
@@ -270,6 +271,28 @@ def test_list_for_app_is_scoped_to_the_calling_app(service):
 
     assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-1"]
     assert [r.bot_id for r in service.list_for_app(app_id=99, owner_id="u-1")] == ["b-2"]
+
+
+def test_grant_truncates_an_over_long_app_name_instead_of_failing(service, sessions):
+    """An authorization must not fail because a display name is long.
+
+    The gateway does not bound ``app_name``, so some valid name exceeds any
+    width this table could pick. Truncating in code makes the outcome the same
+    on every engine and SQL mode — rather than a rejected grant under strict
+    settings and a silent truncation under permissive ones — and costs nothing
+    that matters, because identity is ``app_id``, not the name.
+    """
+    long_name = "n" * (APP_NAME_MAX_LENGTH + 500)
+
+    record = service.grant(
+        bot_id="b-1", owner_id="u-1", app_id=42, app_name=long_name
+    )
+
+    assert len(record.app_name) == APP_NAME_MAX_LENGTH
+    assert record.app_id == 42, "identity is unaffected by the truncation"
+    with sessions() as session:
+        logged = session.query(BotAppGrantLogModel).one()
+        assert len(logged.app_name) == APP_NAME_MAX_LENGTH
 
 
 def test_list_for_app_excludes_a_deleted_bot(service, bots):

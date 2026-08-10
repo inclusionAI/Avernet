@@ -26,7 +26,10 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
-from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
+from agentclaw.community.core.bot_app_grant.models import (
+    APP_NAME_MAX_LENGTH,
+    BotAppGrantRecord,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
     BotRepository,
@@ -66,11 +69,19 @@ class BotAppGrantService:
         Repeating a live grant returns it unchanged rather than failing: the
         caller asked for a state that already holds, and a partner retrying a
         timed-out request should not get an error for a request that succeeded.
+
+        ``app_name`` is truncated to :data:`APP_NAME_MAX_LENGTH` here rather
+        than at the column. The gateway does not bound it, so some valid name
+        exceeds any width this table could pick; deciding it in code makes the
+        outcome identical on every engine and in every SQL mode, instead of a
+        rejected grant under strict settings and a silent truncation under
+        permissive ones. The authorization is what matters, and it does not
+        depend on the display name — see the note on the constant.
         """
         return self._repository.grant(
             {
                 "app_id": app_id,
-                "app_name": app_name,
+                "app_name": app_name[:APP_NAME_MAX_LENGTH],
                 "bot_id": bot_id,
                 "owner_id": owner_id,
             }
