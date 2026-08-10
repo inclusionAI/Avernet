@@ -59,3 +59,8 @@ coverage/E2E。
 - 不为 Provider-downlink Bot 改写普通 Chat 的初始化语义：Driver 保持
   `chat.send`，其他参与者保持 `chat.inject`。这保留用户期待的可见 send
   结果以及现有 BCS 默认行为。
+- BaaS SQLite bootstrap 使用 SPI `Base.metadata` 的 `baas_api_key` 表插入
+  本地 Provider 内部上下文身份，不从 database plugin 层导入 Core 私有 ORM
+  模块；这保留相同的 seed 结果并满足分层与私有导入门禁。受影响的 BaaS
+  router、分层、私有导入和数据库插件用例 `13 passed`，且四个本分支文件的
+  Ruff check/format 均通过。

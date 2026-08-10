@@ -109,7 +109,9 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
   internal Bot chat context after the bridge has authenticated the request;
   it is not a replacement for either the bridge-to-BaaS bearer credential or
   BCS's Provider credential.  Missing this record must fail with a diagnostic
-  error rather than looking like a Claude model timeout.
+  error rather than looking like a Claude model timeout. The database plugin
+  seeds it through the SPI metadata table, without importing a Core ORM
+  implementation into the plugin layer.
 - Per user direction, BCS Bot WebSocket and token-store diagnostic behavior is
   unchanged from the base implementation.
 - Claude relay diagnostics similarly report whether model-provider credentials

@@ -72,9 +72,7 @@ class TestSqliteOrmPlugin(DataSourcePluginContract):
             tenant = session.query(TenantModel).filter_by(name="team_claw").first()
             assert tenant is not None, "seed should insert the team_claw tenant"
             bcn_key = (
-                session.query(APIKeyModel)
-                .filter_by(api_key_prefix="9acXMLaU")
-                .first()
+                session.query(APIKeyModel).filter_by(api_key_prefix="9acXMLaU").first()
             )
             assert bcn_key is not None, "seed should insert the local BCN identity"
 

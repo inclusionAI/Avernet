@@ -10,6 +10,7 @@ import json
 from datetime import datetime
 from hashlib import sha256
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 _SEED_TENANT = {
@@ -222,12 +223,12 @@ def seed_sqlite(session: Session) -> None:
     create_all() so that the in-memory SQLite backend is usable
     out of the box.
     """
-    from secbaas.community.core.repository.api_gateway._orm_model import APIKeyModel
     from secbaas.community.core.repository.device_template import (
         DeviceTemplateModel,
     )
     from secbaas.community.core.repository.tenant import TenantModel
     from secbaas.community.logger import get_logger
+    from secbaas.community.spi.database import Base
 
     logger = get_logger("bootstrap")
 
@@ -238,13 +239,14 @@ def seed_sqlite(session: Session) -> None:
         session.add(TenantModel(**_SEED_TENANT))
         logger.info("inserted seed tenant (team_claw)")
 
-    existing_bcn_key = (
-        session.query(APIKeyModel)
-        .filter_by(api_key_prefix=_SEED_BCN_API_KEY["api_key_prefix"])
-        .first()
-    )
+    api_key_table = Base.metadata.tables["baas_api_key"]
+    existing_bcn_key = session.execute(
+        select(api_key_table.c.api_key_prefix).where(
+            api_key_table.c.api_key_prefix == _SEED_BCN_API_KEY["api_key_prefix"]
+        )
+    ).first()
     if existing_bcn_key is None:
-        session.add(APIKeyModel(**_SEED_BCN_API_KEY))
+        session.execute(api_key_table.insert().values(**_SEED_BCN_API_KEY))
         logger.info("inserted local BCS Provider downlink context")
 
     for idx, seed in enumerate(

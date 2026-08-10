@@ -120,6 +120,7 @@ async def test_stream_dispatch_error_yields_error_sse():
 def test_bcn_downlink_env_credential_overrides_empty_local_secret_store(monkeypatch):
     monkeypatch.setenv("BCS_BAAS_DOWNLINK_TOKEN", "bridge-token")
 
-    assert validate_bcn_token("Bearer bridge-token", _MissingSecretStore()) == "bridge-token"
+    validator = validate_bcn_token.__wrapped__
+    assert validator("Bearer bridge-token", _MissingSecretStore()) == "bridge-token"
     with pytest.raises(BcnUnauthorizedError):
-        validate_bcn_token("Bearer wrong-token", _MissingSecretStore())
+        validator("Bearer wrong-token", _MissingSecretStore())

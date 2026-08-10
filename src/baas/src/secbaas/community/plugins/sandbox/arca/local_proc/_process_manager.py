@@ -901,10 +901,7 @@ class LocalProcessManager:
                 "Spawning engine adapter: engine=%s port=%s, relay_url_set=%s, log=%s",
                 engine,
                 adapter_port,
-                bool(
-                    env.get("AICODING_RELAY_URL")
-                    or env.get("CLAUDE_CODE_RELAY_URL")
-                ),
+                bool(env.get("AICODING_RELAY_URL") or env.get("CLAUDE_CODE_RELAY_URL")),
                 log_path,
             )
 
