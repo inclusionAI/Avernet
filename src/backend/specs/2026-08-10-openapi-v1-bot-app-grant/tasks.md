@@ -173,18 +173,18 @@
         transport-agnostic).
 - **Depends on:** Task 3
 
-## Task 5: DI binding  `[ ]`
+## Task 5: DI binding  `[x]`
 
 - **Goal:** The service and repository resolve through the container.
 - **Files:** `…/di/modules/bot_app_grant_module.py` (new), the container that
   installs the module list
 - **Done when:**
-  - [ ] The module binds `BotAppGrantRepositoryProtocol` →
+  - [x] The module binds `BotAppGrantRepositoryProtocol` →
         `BotAppGrantRepository` and provides `BotAppGrantService`, modelled on
         `di/modules/bot_collaborator_module.py:52`.
-  - [ ] The module is installed in the container alongside the other domain
+  - [x] The module is installed in the container alongside the other domain
         modules.
-  - [ ] The app boots and the service resolves — verified by an existing
+  - [x] The app boots and the service resolves — verified by an existing
         container/bootstrap test, not by inspection.
 - **Depends on:** Task 4
 
