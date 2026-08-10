@@ -289,7 +289,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def build_local_chat_session_key(
         self, ctx: BotProvisioningContext, *, user_id: str
     ) -> str:
-        """Build the relay-owned local chat session key for coding engines."""
+        """Build the relay-owned local chat session key for coding engines.
+
+        Contract:
+        ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
+        ``claude_code`` keeps the normalCC legacy form while ``aicoding`` uses
+        the service-bot form parsed by teamclaw-aicoding-relay.
+        """
         if self._engine_type == CLAUDE_CODE_ENGINE_TYPE:
             return f"session:{uuid.uuid4()}:user:{user_id}"
         return f"user:{user_id}:session:{uuid.uuid4()}:agent:{ctx.bot_id}"

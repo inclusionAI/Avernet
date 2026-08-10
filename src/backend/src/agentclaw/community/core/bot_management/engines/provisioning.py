@@ -99,6 +99,8 @@ class EngineProvisioningStrategy(ABC):
         Only strategies with ``uses_adapter_chat_session_lifecycle(ctx) == False``
         should be asked to construct this key. The concrete engine strategy owns
         the wire format instead of ExpertChat branching on engine literals.
+        Versioned service-bot formats are documented in
+        ``src/backend/specs/2026-08-10-expert-chat-service-bot-session-keys/spec.md``.
         """
 
     @abstractmethod
