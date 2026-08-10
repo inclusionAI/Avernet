@@ -155,7 +155,7 @@ pub async fn handle_client_connection(
                         info!(
                             client_id = client_id,
                             close_code = ?close_frame.as_ref().map(|f| f.code),
-                            close_reason = ?close_frame.as_ref().map(|f| f.reason.to_string()),
+                            close_reason_len = close_frame.as_ref().map_or(0, |f| f.reason.len()),
                             "WebSocket close frame received"
                         );
                         break;
@@ -254,6 +254,16 @@ fn is_ping_frame(text: &str) -> bool {
         serde_json::from_str::<PingFrame>(text).is_ok()
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn handler_does_not_log_raw_client_controlled_content() {
+        let source = include_str!("handler.rs");
+        assert!(!source.contains(concat!("text", " = %text")));
+        assert!(!source.contains(concat!("f.reason", ".to_string()")));
     }
 }
 

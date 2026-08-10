@@ -291,7 +291,11 @@ fn parse_fusion_response(text: &str) -> ServiceResult<ContextFusionResponse> {
     match serde_json::from_str::<ContextFusionResponse>(&json_text) {
         Ok(response) => Ok(response),
         Err(e) => {
-            debug!(error = %e, text = %text, "Failed to parse fusion response as JSON");
+            debug!(
+                error = %e,
+                response_len = text.len(),
+                "Failed to parse fusion response as JSON"
+            );
             // Return a basic response with the raw text
             Ok(ContextFusionResponse {
                 perspectives: vec![],
@@ -548,6 +552,12 @@ emoji: "🧑‍💻"
             result.recommendation,
             Some("This is not JSON at all".to_string())
         );
+    }
+
+    #[test]
+    fn fusion_parser_does_not_log_raw_model_content() {
+        let source = include_str!("local.rs");
+        assert!(!source.contains(concat!("text", " = %text")));
     }
 
     #[test]

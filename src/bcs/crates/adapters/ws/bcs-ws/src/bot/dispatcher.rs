@@ -1333,26 +1333,19 @@ fn log_bot_event(bot_id: &str, event: &EventFrame) {
                     .and_then(|t| t.as_str())
                     .unwrap_or("");
 
-                // Truncate text for readability (use chars() to handle UTF-8 properly)
-                let truncated_text = if text.chars().count() > 100 {
-                    format!("{}...", text.chars().take(100).collect::<String>())
-                } else {
-                    text.to_string()
-                };
-
                 info!(
                     bot_id = %bot_id,
                     run_id = %run_id,
                     bcs_group_id = %bcs_group_id,
                     stream = ?stream,
-                    text = %truncated_text,
+                    text_len = text.len(),
                     "📥 [BCS] 收到 Bot 事件"
                 );
             } else {
                 info!(
                     bot_id = %bot_id,
                     event = %event.event,
-                    payload = ?event.payload,
+                    payload_present = event.payload.is_some(),
                     "📥 [BCS] 收到 Bot 事件 (解析失败)"
                 );
             }
@@ -1371,7 +1364,7 @@ fn log_bot_event(bot_id: &str, event: &EventFrame) {
                 info!(
                     bot_id = %bot_id,
                     event = %event.event,
-                    payload = ?event.payload,
+                    payload_present = event.payload.is_some(),
                     "📥 [BCS] 收到 Bot 事件 (解析失败)"
                 );
             }
@@ -1380,7 +1373,7 @@ fn log_bot_event(bot_id: &str, event: &EventFrame) {
             info!(
                 bot_id = %bot_id,
                 event = %event.event,
-                payload = ?event.payload,
+                payload_present = event.payload.is_some(),
                 "📥 [BCS] 收到 Bot 事件 (未知类型)"
             );
         }
@@ -2033,6 +2026,13 @@ mod tests {
     use tracing_subscriber::prelude::*;
 
     use super::*;
+
+    #[test]
+    fn dispatcher_does_not_log_raw_event_payload_or_text() {
+        let source = include_str!("dispatcher.rs");
+        assert!(!source.contains(concat!("payload", " = ?event.payload")));
+        assert!(!source.contains(concat!("text", " = %truncated_text")));
+    }
 
     fn participant(id: &str, name: &str, role: ParticipantRole) -> Participant {
         let mut participant = Participant::bot(id, role);

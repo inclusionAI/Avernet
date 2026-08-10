@@ -2967,7 +2967,7 @@ impl CollaborationRuntimeService for CollaborationRuntime {
             session_id = %run.session_id,
             definition_id = %run.definition_id,
             definition_version = run.definition_version,
-            reason = ?reason,
+            reason_len = reason.as_ref().map_or(0, String::len),
             session_complete_result = %session_complete_result,
             "state_machine: run aborted"
         );
@@ -4509,7 +4509,6 @@ fn log_state_machine_node_dispatch(
         bot_id = %assignee_bot_id,
         assignee_bot_id = %assignee_bot_id,
         delivery_request_id = %delivery_request_id,
-        content = %content.content,
         content_length = content.content_length,
         content_truncated = content.content_truncated,
         content_truncated_bytes = content.content_truncated_bytes,
@@ -4609,7 +4608,6 @@ fn log_state_machine_bot_event(
         chat_event_type = %cmd.event_type,
         chat_event_state = chat_event_state_slug(&cmd.state),
         text_len = text_len,
-        content = %content.content,
         content_length = content.content_length,
         content_truncated = content.content_truncated,
         content_truncated_bytes = content.content_truncated_bytes,
@@ -5032,6 +5030,12 @@ fn elapsed_ms(started_at: Instant) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_does_not_log_raw_abort_reason() {
+        let source = include_str!("runtime.rs");
+        assert!(!source.contains(concat!("reason", " = ?reason")));
+    }
 
     #[test]
     fn default_judge_timeout_is_ninety_seconds() {

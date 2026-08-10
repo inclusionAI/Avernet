@@ -48,8 +48,21 @@ where
             ErrorResponse::unauthenticated(request_id.0).into_response()
         }
         Err(PrincipalVerificationError::Invalid(reason)) => {
-            warn!(request_id = %request_id.0, %reason, "Gateway Principal verification failed");
+            warn!(
+                request_id = %request_id.0,
+                reason_len = reason.len(),
+                "Gateway Principal verification failed"
+            );
             ErrorResponse::unauthenticated(request_id.0).into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn principal_middleware_does_not_log_verifier_reason() {
+        let source = include_str!("principal.rs");
+        assert!(!source.contains(concat!("%", "reason")));
     }
 }

@@ -134,7 +134,7 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                         group_id = %group.id,
                         requested_view_bot = ?cmd.view_bot_id,
                         selected_source_bot = %source_bot,
-                        fallback_reason = %reason,
+                        fallback_reason_len = reason.len(),
                         "group_history: falling back to next history source"
                     );
                 }
@@ -254,7 +254,7 @@ impl GroupMessageHistoryService for BcsGroupMessageHistory {
                         group_id = %cmd.group_id,
                         requested_view_bot = ?cmd.view_bot_id,
                         selected_source_bot = %source_bot,
-                        fallback_reason = %reason,
+                        fallback_reason_len = reason.len(),
                         "session_history: falling back to next history source"
                     );
                 }
@@ -1234,6 +1234,12 @@ fn handle_queued_message(content: &str) -> Vec<(String, Option<String>, Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_fallback_does_not_log_raw_error_reason() {
+        let source = include_str!("group_history.rs");
+        assert!(!source.contains(concat!("fallback_reason", " = %reason")));
+    }
 
     #[test]
     fn test_handle_queued_message_standard_bundle_with_dropped() {

@@ -98,7 +98,6 @@ impl MessageLogStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MessageLogContent {
-    pub content: String,
     pub content_length: usize,
     pub content_truncated: bool,
     pub content_truncated_bytes: usize,
@@ -110,10 +109,9 @@ impl MessageLogContent {
     }
 
     pub fn from_text_with_max_bytes(text: &str, max_bytes: usize) -> Self {
-        let (content, content_truncated, content_truncated_bytes) =
+        let (_, content_truncated, content_truncated_bytes) =
             truncate_utf8_to_bytes(text, max_bytes);
         Self {
-            content: content.to_string(),
             content_length: text.len(),
             content_truncated,
             content_truncated_bytes,
@@ -179,7 +177,6 @@ mod tests {
     fn content_under_limit_is_not_truncated() {
         let content = MessageLogContent::from_text_with_max_bytes("hello", 10);
 
-        assert_eq!(content.content, "hello");
         assert_eq!(content.content_length, 5);
         assert!(!content.content_truncated);
         assert_eq!(content.content_truncated_bytes, 0);
@@ -189,7 +186,6 @@ mod tests {
     fn content_truncation_is_utf8_safe() {
         let content = MessageLogContent::from_text_with_max_bytes("abc你好", 5);
 
-        assert_eq!(content.content, "abc");
         assert_eq!(content.content_length, "abc你好".len());
         assert!(content.content_truncated);
         assert_eq!(content.content_truncated_bytes, "你好".len());
@@ -199,10 +195,19 @@ mod tests {
     fn content_can_truncate_to_empty_string() {
         let content = MessageLogContent::from_text_with_max_bytes("你", 1);
 
-        assert_eq!(content.content, "");
         assert_eq!(content.content_length, "你".len());
         assert!(content.content_truncated);
         assert_eq!(content.content_truncated_bytes, "你".len());
+    }
+
+    #[test]
+    fn serialized_content_metrics_never_include_message_text() {
+        let content = MessageLogContent::from_text("highly-sensitive-agent-output");
+        let json = message_log_json(&content);
+
+        assert!(!json.contains("highly-sensitive-agent-output"));
+        assert!(!json.contains("\"content\""));
+        assert!(json.contains("\"content_length\""));
     }
 
     #[test]

@@ -86,7 +86,10 @@ impl SecurityInterceptor {
             }
             SecurityVerdict::Deny { code, message } => self.handle_block(code, message),
             SecurityVerdict::Unavailable { reason } => {
-                warn!(reason = %reason, "Security check unavailable, degrading");
+                warn!(
+                    reason_len = reason.len(),
+                    "Security check unavailable, degrading"
+                );
                 SecurityCheckResult::Degraded { reason }
             }
         }
@@ -97,7 +100,7 @@ impl SecurityInterceptor {
         if self.dry_run {
             warn!(
                 error_code = %error_code,
-                message = %message,
+                message_len = message.len(),
                 dry_run = true,
                 "Security check blocked (dry-run, continuing)"
             );
@@ -110,7 +113,7 @@ impl SecurityInterceptor {
         } else {
             warn!(
                 error_code = %error_code,
-                message = %message,
+                message_len = message.len(),
                 dry_run = false,
                 "Security check blocked (blocking message)"
             );
@@ -147,7 +150,10 @@ impl MessageInterceptor for SecurityInterceptor {
                 }
             }
             SecurityCheckResult::Degraded { reason } => {
-                warn!(reason = %reason, "Security interceptor degraded; continuing outbound delivery");
+                warn!(
+                    reason_len = reason.len(),
+                    "Security interceptor degraded; continuing outbound delivery"
+                );
                 InterceptorDecision::Pass
             }
             SecurityCheckResult::Block { error_code, message } => {
@@ -202,6 +208,13 @@ mod tests {
         assert!(!degraded.is_pass());
         assert!(!degraded.should_block());
         assert_eq!(degraded.task_id(), None);
+    }
+
+    #[test]
+    fn interceptor_does_not_log_gateway_controlled_text() {
+        let source = include_str!("interceptor.rs");
+        assert!(!source.contains(concat!("message", " = %message")));
+        assert!(!source.contains(concat!("reason", " = %reason")));
     }
 
     #[tokio::test]

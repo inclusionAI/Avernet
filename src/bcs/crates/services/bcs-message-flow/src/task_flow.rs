@@ -1139,7 +1139,6 @@ fn log_task_dispatch_created(
         bot_id = %worker_bot_id,
         manager_bot_id = %manager_bot_id,
         worker_bot_id = %worker_bot_id,
-        content = %content.content,
         content_length = content.content_length,
         content_truncated = content.content_truncated,
         content_truncated_bytes = content.content_truncated_bytes,

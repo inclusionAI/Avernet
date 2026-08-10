@@ -254,7 +254,7 @@ pub async fn post_bot_event(
         seq = ?req.seq,
         state = ?effective_state,
         event = ?req.event,
-        message_text = %req.message.text,
+        message_len = req.message.text.len(),
         "provider callback: received bot event"
     );
     let credential = match credential_from_headers(&state, &headers, &provider_id).await {
