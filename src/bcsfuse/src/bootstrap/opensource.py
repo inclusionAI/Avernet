@@ -349,6 +349,11 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
         or config.get("llm.auth_token")
         or ""
     )
+    llm_api_type = (
+        os.getenv("LLM_API_TYPE")
+        or config.get("llm.api_type")
+        or "anthropic"
+    ).lower()
     if llm_base_url and llm_auth_token:
         llm_settings = LLMSettings(
             base_url=llm_base_url,
@@ -356,7 +361,13 @@ def _build_dev_providers(registry: "ProviderRegistry", config: "YamlEnvConfigPro
             fast_model=config.get("llm.fast_model", "claude-3-sonnet"),
             reasoning_model=config.get("llm.reasoning_model", "claude-3-opus"),
         )
-        llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
+        if llm_api_type in ("openai", "openai-completions"):
+            from src.infra.public.llm.openai_compatible_provider import OpenAICompatibleProvider
+            llm_provider = OpenAICompatibleProvider(settings=llm_settings)
+            logger.info(f"[OSS LLM] Using OpenAI-compatible provider: {llm_base_url}")
+        else:
+            llm_provider = AnthropicCompatibleProvider(settings=llm_settings)
+            logger.info(f"[OSS LLM] Using Anthropic-compatible provider: {llm_base_url}")
         registry.register("llm_provider", llm_provider)
     else:
         logger.warning(

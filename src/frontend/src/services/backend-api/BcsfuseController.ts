@@ -64,8 +64,8 @@ export interface FuseResponse {
   question?: string;
   /** 发起 bot ID */
   driver_bot_id?: string;
-  /** 推荐结果 */
-  recommendation: FuseRecommendation;
+  /** 推荐结果（后端 parity 路由当前返回 JSON 字符串，这里兼容两种形态） */
+  recommendation: FuseRecommendation | string;
   /** 是否部分成功 */
   partial_success?: boolean;
   /** 警告信息 */
@@ -99,7 +99,7 @@ export async function postFuse(
 ) {
   // 后端已兼容 session_id，前端内外保持同一请求体，避免同步时产生差异。
   const { group_id, ...body } = params;
-  return request<FuseResponse>(`/bcnfuse/api/v1/groups/${group_id}/fuse`, {
+  const response = await request<FuseResponse>(`/bcnfuse/api/v1/groups/${group_id}/fuse`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -108,6 +108,17 @@ export async function postFuse(
     skipErrorHandler: true,
     ...(options || {}),
   });
+
+  // 兼容后端 parity 路由把 Recommendation 对象序列化成 JSON 字符串的情况。
+  if (typeof response.recommendation === 'string') {
+    try {
+      response.recommendation = JSON.parse(response.recommendation) as FuseRecommendation;
+    } catch (e) {
+      console.error('[Bcsfuse] Failed to parse recommendation string:', e);
+    }
+  }
+
+  return response;
 }
 
 // === Worker Config 接口 ===

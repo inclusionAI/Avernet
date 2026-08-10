@@ -1207,7 +1207,7 @@ async def get_worker_config(worker_id: str, request: Request):
         )
 
 
-@admin_router.put(
+@mgmt_router.put(
     "/workers/{worker_id}/config",
     summary="Update worker config",
     description="Update worker configuration.",

@@ -433,6 +433,84 @@ singlebox_model_config_write_mock() {
     chmod 600 "$output_file"
 }
 
+singlebox_model_config_export_llm_env() {
+    # Export bcsfuse LLM env vars from the openclaw home config.
+    # This lets bcsfuse reuse the same model/key that singlebox bots use in
+    # home mode, without manually duplicating them in .env.local.
+    local source_file primary provider_id model_name base_url api_key api_type
+    source_file="$(singlebox_model_config_home_source)"
+
+    if [ ! -f "$source_file" ]; then
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        log_warn "jq not found; cannot export LLM env from ${source_file}"
+        return 0
+    fi
+
+    primary="$(jq -r '.agents.defaults.model.primary // empty' "$source_file")"
+    if [ -z "$primary" ]; then
+        return 0
+    fi
+
+    provider_id="${primary%%/*}"
+    model_name="${primary#*/}"
+
+    base_url="$(jq -r --arg p "$provider_id" '.models.providers[$p].baseUrl // empty' "$source_file")"
+    api_key="$(jq -r --arg p "$provider_id" '.models.providers[$p].apiKey // empty' "$source_file")"
+    api_type="$(jq -r --arg p "$provider_id" '.models.providers[$p].api // "anthropic"' "$source_file")"
+
+    if [ -z "$base_url" ] || [ -z "$api_key" ]; then
+        return 0
+    fi
+
+    case "$api_type" in
+        openai-completions|openai)
+            api_type="openai"
+            ;;
+        *)
+            api_type="anthropic"
+            ;;
+    esac
+
+    # Pick a fallback reasoning model: prefer a faster non-primary model from the
+    # same provider (e.g. GLM-5.1 for antchat) so local fusion answers finish
+    # before the antchat 90s gateway window. Respect explicit LLM_*_MODEL env vars.
+    local preferred_model="$model_name"
+    if [ -z "${LLM_REASONING_MODEL:-}" ]; then
+        local models fast_candidate
+        models="$(jq -r --arg p "$provider_id" --arg primary "$model_name" '
+            .models.providers[$p].models[]? | select(.id != $primary) | .id
+        ' "$source_file" 2>/dev/null || true)"
+        fast_candidate="$(printf '%s\n' $models | awk '$0=="GLM-5.1"{print; exit}')"
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | awk '$0=="Qwen3.5-397B-A17B"{print; exit}')"
+        fi
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | awk '$0=="claude-3-5-sonnet"{print; exit}')"
+        fi
+        if [ -z "$fast_candidate" ]; then
+            fast_candidate="$(printf '%s\n' $models | head -1 || true)"
+        fi
+        if [ -n "$fast_candidate" ]; then
+            preferred_model="$fast_candidate"
+        fi
+    fi
+
+    export LLM_BASE_URL="${LLM_BASE_URL:-$base_url}"
+    export LLM_AUTH_TOKEN="${LLM_AUTH_TOKEN:-$api_key}"
+    export LLM_API_TYPE="${LLM_API_TYPE:-$api_type}"
+    export LLM_FAST_MODEL="${LLM_FAST_MODEL:-$preferred_model}"
+    export LLM_BALANCED_MODEL="${LLM_BALANCED_MODEL:-$preferred_model}"
+    export LLM_REASONING_MODEL="${LLM_REASONING_MODEL:-$preferred_model}"
+    export LLM_LONG_CONTEXT_MODEL="${LLM_LONG_CONTEXT_MODEL:-$preferred_model}"
+    export LLM_EXTRACTION_MODEL="${LLM_EXTRACTION_MODEL:-$preferred_model}"
+    export LLM_DEFAULT_TIMEOUT_MS="${LLM_DEFAULT_TIMEOUT_MS:-120000}"
+    export LLM_REASONING_TIMEOUT_MS="${LLM_REASONING_TIMEOUT_MS:-600000}"
+
+    log_info "Exported bcsfuse LLM config from ${source_file} (provider=${provider_id}, api_type=${api_type}, model=${model_name})"
+}
+
 singlebox_model_config_prepare() {
     local mode output_file output_dir
     if [ "${SINGLEBOX_MODEL_CONFIG_PREPARED:-}" = "1" ]; then
@@ -451,6 +529,7 @@ singlebox_model_config_prepare() {
             ;;
         home)
             singlebox_model_config_write_home "$output_file" || return 1
+            singlebox_model_config_export_llm_env || true
             ;;
         mock)
             singlebox_model_config_write_mock "$output_file" || return 1
