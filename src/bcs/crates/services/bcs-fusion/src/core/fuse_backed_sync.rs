@@ -1,7 +1,7 @@
 //! Worker sync logic: build requests and retry helpers.
 
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bcs_config_api::BcsFuseConfig;
 use bcs_fuse_client::{FuseClient, SkillSet, SyncProfileData, SyncWorkerRequest};
@@ -9,8 +9,14 @@ use bcs_service_api::{ContextBotSummary, Skill};
 
 use super::fuse_backed::build_participant_id;
 
-/// Maximum number of sync retry attempts.
-const MAX_SYNC_RETRIES: u32 = 3;
+/// Maximum wall-clock time to keep retrying a bcsfuse sync before giving up.
+///
+/// Sync is fire-and-forget; allowing a longer retry window helps local singlebox
+/// deployments where bcsfuse may still be starting when bots first onboard.
+const MAX_SYNC_DURATION: Duration = Duration::from_secs(60);
+
+/// Maximum backoff between sync retries.
+const MAX_SYNC_BACKOFF: Duration = Duration::from_secs(8);
 
 /// Build a `SyncWorkerRequest` from onboard data and bot context.
 pub fn build_sync_request(
@@ -70,7 +76,8 @@ pub fn build_sync_request(
     }
 }
 
-/// Sync worker with inline retry (3 attempts, exponential backoff).
+/// Sync worker with deadline-based retry (capped exponential backoff, up to
+/// `MAX_SYNC_DURATION`).
 ///
 /// Designed to be called inside `tokio::spawn` — never panics, only logs.
 pub async fn sync_worker_with_retry(
@@ -78,7 +85,10 @@ pub async fn sync_worker_with_retry(
     bot_id: &str,
     sync_req: &SyncWorkerRequest,
 ) {
-    for attempt in 0..MAX_SYNC_RETRIES {
+    let start = Instant::now();
+    let mut attempt: u32 = 0;
+
+    loop {
         match client.sync_worker(bot_id, sync_req.clone()).await {
             Ok(resp) => {
                 if !resp.profile_activated {
@@ -98,21 +108,32 @@ pub async fn sync_worker_with_retry(
                 return;
             }
             Err(e) => {
+                let elapsed = start.elapsed();
+                let backoff = Duration::from_secs(2u64.pow(attempt.min(5))).min(MAX_SYNC_BACKOFF);
+
+                if elapsed + backoff > MAX_SYNC_DURATION {
+                    tracing::error!(
+                        bot_id = %bot_id,
+                        elapsed_ms = elapsed.as_millis() as u64,
+                        error = %e,
+                        "Worker sync exhausted max retry duration, will retry on next onboard/reconnect"
+                    );
+                    return;
+                }
+
                 tracing::warn!(
                     bot_id = %bot_id,
                     attempt = attempt + 1,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    backoff_ms = backoff.as_millis() as u64,
                     error = %e,
                     "Worker sync failed, retrying"
                 );
-                tokio::time::sleep(Duration::from_secs(2u64.pow(attempt))).await;
+                tokio::time::sleep(backoff).await;
+                attempt += 1;
             }
         }
     }
-    tracing::error!(
-        bot_id = %bot_id,
-        retries = MAX_SYNC_RETRIES,
-        "Worker sync exhausted retries, will retry on next onboard/reconnect"
-    );
 }
 
 /// Build bcsfuse `contents` map from bot context files.

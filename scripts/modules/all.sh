@@ -11,7 +11,7 @@ _ALL_SH_LOADED=1
 # backend-created developer bot, then frontend exposes the workbench. BCN
 # onboarding remains an explicit product action.
 SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
-START_ORDER=(baas backend bcs bcsfuse bots demo_bot frontend)
+START_ORDER=(baas backend bcsfuse bcs bots demo_bot frontend)
 STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
 
 all_setup() {
