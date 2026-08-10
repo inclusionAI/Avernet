@@ -1,0 +1,394 @@
+# Plan: Public API — Owner-Granted Bot Authorization for Applications
+
+## Approach
+
+One new persisted record (`ac_bot_app_grant`) and one new router group
+(`/openapi/v1/bots/{bot_id}/authorized-apps`) with three operations. Nothing in
+the admission path moves: the verifier still refuses every identity set that
+names no end user, `UserIdDep` still requires the request's `user_id` to be the
+verified caller, and no existing route changes who may call it.
+
+The consent shape is enforced by two mechanisms that **already exist and are
+already proven in production code**, so this feature adds no auth machinery:
+
+- the gateway's `route_security` table, which already expresses
+  `{user: required, app: required}` for `/openapi/v1/bots/logs/**`;
+- the backend's `require_user_and_app_principal`
+  (`adapters/http/openapi_v1/dependencies.py:194`), already used by
+  `bot_logs/router.py:27` and pinned by `test_bot_logs_routes_require_user_and_app_principal`.
+
+Grant reads its application identity off the verified `AppPrincipal`; there is
+no `app_id` parameter, so a request cannot point a grant at any application but
+the caller. Withdraw and list need only the owner, and therefore name `app_id`
+in the path.
+
+## Affected Components
+
+- `src/backend/src/agentclaw/community/core/bot_app_grant/` — **new** domain
+  module: ORM model, records, service. Sibling in shape to `core/bot_collaborator/`.
+- `src/backend/src/agentclaw/community/core/repository/protocols/bot/app_grant.py`
+  — **new** repository contract, in the `bot` domain (which per
+  `core/repository/README.md` already serves `bot_collaborator`).
+- `src/backend/src/agentclaw/community/core/repository/implementations/bot/app_grant.py`
+  — **new** ORM body.
+- `src/backend/src/agentclaw/community/adapters/http/openapi_v1/authorized_apps/`
+  — **new** router group (3 routes).
+- `src/backend/src/agentclaw/community/adapters/http/openapi_v1/__init__.py:100-165`
+  — register the group **before** the `{bot_id}` wildcard `bots` router.
+- `src/backend/src/agentclaw/community/di/modules/` — **new** DI module binding
+  the protocol to the implementation, modelled on `bot_collaborator_module.py:52`.
+- `src/gateway/configs/application.yaml:111` — one `route_security` entry.
+- `src/gateway/configs/schemas/bots.openapi.json` — regenerated build output.
+
+## Data Model Changes
+
+```python
+# src/backend/src/agentclaw/community/core/bot_app_grant/models.py (new)
+class BotAppGrantModel(Base):
+    """SQLAlchemy ORM model for ac_bot_app_grant table."""
+    __tablename__ = "ac_bot_app_grant"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+
+    app_id   = Column(BigInteger, nullable=False, comment="网关 avernet_application.id，来自 AppPrincipal")
+    app_name = Column(String(256), nullable=False, comment="授权时快照的应用名（见下方 Deviation）")
+    bot_id   = Column(String(256), nullable=False, comment="Bot ID")
+    owner_id = Column(String(256), nullable=False, comment="Bot 拥有者，服务端解析所得")
+    tenant   = Column(String(128), nullable=False, comment="租户，写入时校验")
+    env      = Column(String(20), nullable=False, default=get_current_env, comment="环境标识")
+    status   = Column(String(32), nullable=False, default=GrantStatus.ACTIVE, comment="active/revoked")
+
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+    gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    revoked_at = Column(DateTime, nullable=True, comment="撤销时间；active 记录为空")
+
+    __table_args__ = (
+        UniqueConstraint("app_id", "bot_id", "owner_id", "env", "status",
+                         name="uk_app_bot_owner_env_status"),
+        Index("idx_bot_owner_env_status", "bot_id", "owner_id", "env", "status"),
+        Index("idx_app_env_status", "app_id", "env", "status"),
+    )
+```
+
+Notes on the shape, each already argued through:
+
+- **`env` is in the unique key**, matching `ac_bot_collaborator`'s
+  `uk_bot_pk_user_env` (`core/bot_collaborator/models.py:139`). The natural key
+  is `(app_id, bot_id, owner_id)` *within an environment*; omitting `env` would
+  make one row collide across environments sharing a database.
+- **`status` is in the unique key** so a bot can be granted → withdrawn →
+  granted again. Without it the second grant would collide with the withdrawn
+  row. This is what makes "revive vs new row" (below) decidable.
+- **No `bot_pk`.** `bot_id` alone is not unique across owners
+  (`core/engine_runtime/gate.py:87`), but `bot_id` + `owner_id` carries the same
+  uniqueness without putting a surrogate key into a public-facing record.
+- **No `granted_by` / `revoked_by`.** Under owner-only authority both equal
+  `owner_id` by construction — a column that can only restate another.
+- `revoked_at` is `nullable=True` and that is an intentional contract state, not
+  a widened type: an active grant has no revocation time. Per `CLAUDE.md`, this
+  is the case where `| None` is correct.
+
+No migration file: the backend creates tables through `DataSourcePlugin`
+`create_all()` the same way `ac_bot_collaborator` does.
+
+### Deviation to accept or strike: `app_name`
+
+**Not in the column list the user settled — proposed here, flagged for a
+one-word decision.** `spec.md`'s user story *"an authorization I no longer
+recognize is visible to me"* is not served by a bare numeric `app_id`. The
+application's human-facing name is **already on the credential** at grant time
+(`GatewayApp.app_name`, `core/gateway_principal/models.py:62`), so snapshotting
+it costs one column, no lookup and no cross-module dependency. The backend
+cannot resolve it any other way — the gateway's `avernet_application` registry
+is not readable from here, and `RegisteredApp.to_record()` deliberately keeps
+non-core columns gateway-side (`gateway/core/app/_orm.py:47`).
+
+Snapshot, not a live join: it records what the owner consented to, which is the
+right thing for an audit even if the app is later renamed.
+
+**To strike it:** drop the column and the field from the list response. Nothing
+else in this plan depends on it.
+
+## API / Interface Changes
+
+```python
+# src/backend/.../adapters/http/openapi_v1/authorized_apps/router.py (new)
+router = APIRouter(prefix="/bots/{bot_id}/authorized-apps", tags=["Authorized Apps"])
+
+# Both identities. The APP half is checked here; the USER half is guaranteed
+# upstream by verify_principal_token::_require_user_principal.
+UserAndAppDep = Annotated[Principal, Depends(require_user_and_app_principal)]
+
+@router.post("", response_model=Envelope[AuthorizedApp], responses=USER_SCOPED_403)
+@envelope_errors
+async def grant_authorized_app(
+    bot_id: str, request: Request, owner_id: UserIdDep, principal: UserAndAppDep,
+) -> Envelope[AuthorizedApp]: ...
+
+@router.get("", response_model=Envelope[Page[AuthorizedApp]], responses=USER_SCOPED_403)
+@envelope_errors
+async def list_authorized_apps(
+    bot_id: str, request: Request, owner_id: UserIdDep, principal: PrincipalDep,
+) -> Envelope[Page[AuthorizedApp]]: ...
+
+@router.delete("/{app_id}", response_model=Envelope[Deleted], responses=USER_SCOPED_403)
+@envelope_errors
+async def revoke_authorized_app(
+    bot_id: str, app_id: int, request: Request, owner_id: UserIdDep,
+    principal: PrincipalDep,
+) -> Envelope[Deleted]: ...
+```
+
+```jsonc
+// POST /openapi/v1/bots/{bot_id}/authorized-apps?user_id=… → 201
+{ "data": { "app_id": 42, "app_name": "partner-platform", "bot_id": "…",
+            "granted_at": "2026-08-10T00:00:00Z" }, "request_id": "…" }
+
+// GET  …/authorized-apps?user_id=…      → 200, live grants only
+// DELETE …/authorized-apps/42?user_id=… → 200 {"deleted": true}
+//   404 — no such live grant (distinct from a successful withdraw)
+//   404 — bot absent OR caller is not the owner (byte-identical, deliberately)
+//   403 — user_id names someone other than the verified caller (UserIdDep, unchanged)
+//   401 — POST without an app identity, refused at the gateway before this runs
+```
+
+No existing signature changes. This is additive to the published description.
+
+## Key Files & Functions
+
+```yaml
+# src/gateway/configs/application.yaml:111 — route_security
+   route_security:
+     "/**":
+       user: required
+ 
+     "/openapi/v1/bots/**":
+       user: required
+ 
++    # Granting an application access to a bot is a CONSENT moment, and consent
++    # requires both parties on the wire: the owner's identity and the
++    # application's own credential. The application is never named as a
++    # parameter — the handler reads it off the App principal — so this rule is
++    # what makes "you cannot grant to someone else" true rather than checked.
++    #
++    # METHOD-QUALIFIED, and that is load-bearing. GET (list) and DELETE
++    # (withdraw) on the same prefix deliberately do NOT require an App: an owner
++    # must be able to withdraw after the application's credential is lost or
++    # rotated, and asking "which apps can reach my bot?" must not depend on
++    # holding any one application's key. They inherit `user: required` from
++    # "/openapi/v1/bots/**" above, which is the correct requirement for them —
++    # left to inherit rather than restated, because a second copy is a second
++    # thing to keep in step.
++    "POST /openapi/v1/bots/{bot_id}/authorized-apps":
++      user: required
++      app: required
+```
+
+Resolution is already correct with no grammar change, verified against
+`gateway/core/paths/_pattern.py`:
+- `_is_param` (`:45`) accepts `{bot_id}` as a one-segment wildcard.
+- `specificity` (`:66`) is `(0 if has_glob else 1, literals, params)`, so the
+  glob-free new rule `(1, 4, 1)` beats `/openapi/v1/bots/**` `(0, 3, 0)` on the
+  first term.
+- `_split_key` (`core/authn/_route_security.py:74`) already parses the
+  `"METHOD /path"` form.
+
+```python
+# src/backend/.../core/bot_app_grant/services/grant_service.py (new) — domain policy lives here
+class BotAppGrantService:
+    def grant(self, *, bot_id: str, owner_id: str, app_id: int,
+              app_name: str, tenant: str) -> BotAppGrantRecord: ...
+    def list_for_bot(self, *, bot_id: str, owner_id: str) -> list[BotAppGrantRecord]: ...
+    def revoke(self, *, bot_id: str, owner_id: str, app_id: int) -> None:
+        """Raises GrantNotFoundError when no live grant matches."""
+```
+
+```python
+# src/backend/.../core/repository/protocols/bot/app_grant.py (new)
+class BotAppGrantRepositoryProtocol(Protocol):
+    @abstractmethod
+    def upsert_active(self, data: Dict[str, Any]) -> BotAppGrantRecord: ...
+    @abstractmethod
+    def list_active_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]: ...
+    @abstractmethod
+    def find_active(self, bot_id: str, owner_id: str, app_id: int) -> Optional[BotAppGrantRecord]: ...
+    @abstractmethod
+    def mark_revoked(self, grant_id: int) -> bool: ...
+```
+
+Every member `@abstractmethod` and the implementation declares the Protocol as a
+base — the enforceable-contract rule from `core/repository/README.md`, held by
+`tests/community/architecture/test_repository_contracts.py`.
+
+```diff
+# src/backend/.../adapters/http/openapi_v1/__init__.py:155 — mount order
+ _SUBGROUPS = [
++    authorized_apps_router,
+     identity_router,
+     resources_router,
+     routines_router,
+     skills_router,
+ ]
+```
+
+Must be in `_SUBGROUPS` (or another literal list) rather than after `bots`: the
+`bots` router owns `/{bot_id}` and is mounted last precisely so literal
+sub-groups are not shadowed by it. `authorized-apps` sits *under* `{bot_id}`, so
+it is not shadowed by path shape — but registering it with the literals keeps it
+under the same `USER_SCOPED_ERROR_RESPONSES` table the rest of the surface uses.
+
+### Ownership, tenancy and the masked refusal
+
+The owner check needs no new code. Only the owner may call, so `owner_id` **is**
+the verified caller (`UserIdDep` already refuses a `user_id` naming anyone else,
+`principal.py:174`). The existing owner-scoped read is the check:
+
+```python
+# resolves under (bot_id, owner_id) and raises BotNotFoundError otherwise —
+# the same masked answer core/engine_runtime/gate.py:114 gives a non-operator
+bot = bot_service.get_bot(bot_id, owner_id)
+```
+
+This gives owner-only authority for free and is *deliberately narrower* than the
+MEMBER+ operator bar in `core/engine_runtime/gate.py:78` — a collaborator who may
+operate a bot may not manage its authorizations.
+
+**The tenant guard is already enforced, and lands on the right answer.**
+`AvernetTenantMiddleware` binds the request tenant from the verified principal
+before any handler runs, and a `user + app` identity set resolves to the *app's*
+tenant (user principals assert none — `core/gateway_principal/models.py:104`).
+Every service read is tenant-scoped by that guard
+(`adapters/http/openapi_v1/bots/router.py:6`), so a bot in another tenant is not
+found — a cross-tenant grant attempt is refused, and refused with exactly the
+masked 404 we want. The plan still **stores** `tenant` on the row and asserts
+this behavior in a test rather than trusting it: it is the §11 anchor the later
+machine-caller work reads, and an untested inherited guard is a guard that can
+be removed by someone who does not know it is load-bearing.
+
+### Re-granting (resolves spec Open Question 2)
+
+- **Re-granting a live grant is idempotent and does NOT move `gmt_create`.** The
+  record answers "this application could reach this bot from T1"; refreshing T1
+  on a duplicate call would make the audit lie about when access began.
+- **Re-granting a previously withdrawn one inserts a NEW row.** The withdrawn
+  row is the closed interval `[gmt_create, revoked_at]`; reviving it would
+  destroy that interval and make the two access periods indistinguishable. This
+  is why `status` is in the unique key.
+
+## Dependencies
+
+None. No new packages, no version bumps, no new internal service calls.
+
+## Risks & Mitigations
+
+- **Risk:** the gateway rule is method-qualified, so a typo in the method or a
+  future path rename silently drops it back to `/openapi/v1/bots/**` — the
+  endpoint would then accept a user *without* an app, and grant would read an
+  application identity that is not there.
+  **Mitigation:** two independent nets. A gateway resolution test asserts the
+  POST rule wins and GET/DELETE resolve to user-only; and the backend's
+  `require_user_and_app_principal` refuses independently, so the config is
+  defense-in-depth rather than the only check. Belt and braces is warranted —
+  this is the one rule the whole consent story rests on.
+- **Risk:** `authorized-apps` sits under the `{bot_id}` wildcard, so mount order
+  or a future route could shadow it.
+  **Mitigation:** register with the literal sub-groups (before `bots`), and
+  assert the three routes resolve in a router test.
+- **Risk:** the record is written now and read by a *later* feature; a shape
+  mistake is expensive to correct once rows exist.
+  **Mitigation:** the row answers "whose bot, in which tenant" on its own
+  (`owner_id` + `tenant` resolved at write time), which is exactly what the
+  later path needs so it never trusts the wire.
+- **Risk:** `app_id` is a gateway-owned identifier with no foreign key here;
+  a deleted application leaves an orphan grant.
+  **Mitigation:** accepted and out of scope. An orphan grant is inert — the
+  later read path resolves on `(app_id, bot_id)` and an application that no
+  longer authenticates produces no principal to match it. Noted so it is a
+  decision rather than an oversight.
+
+## Alternatives Considered
+
+- **Reuse BaaS `APIKeyPolicy.allowed_bots`** — rejected during investigation.
+  Different credential registry (BaaS `APIKeyRecord` vs gateway
+  `avernet_application`), different bot-id namespace (`real_bot_id:entity_id` vs
+  plain `bot_id`), and a different definition of owner (BaaS
+  `check_bot_permission` string-parses `entity_id` out of the id; the backend has
+  a real owner column plus a collaborator table). Reusing it means a BaaS lookup
+  on the backend hot path and reconciling two ownership models. BaaS
+  `allowed_bots` stays where it is, governing the BaaS chat surface only.
+- **Symmetric revoke (require both identities)** — rejected. An owner could then
+  never withdraw after the application's key was lost or rotated, which makes
+  the revoke worthless exactly when it is needed.
+- **`app_id` as a POST body/query parameter** — rejected. It would let a request
+  point a grant at an application other than the caller, which is the single
+  property that makes this a consent moment.
+- **Hard delete on withdraw** — rejected. The spec requires "could reach this bot
+  between T1 and T2" to stay answerable.
+- **A separate `ac_bot_app_grant_log` table** (mirroring `ac_bot_collab_log`) —
+  rejected as redundant here. Under owner-only authority the operator is always
+  the owner, so a log row would carry nothing the soft-deleted grant row does not.
+
+## Rollout
+
+No migration ordering, no feature flag, no backwards-compatibility concern: the
+table is new, the routes are new, and no existing behavior changes.
+
+```bash
+# regenerate the published description after the routes land
+python src/backend/scripts/dump_openapi.py
+# copies to the gateway's single-box artifact:
+#   src/gateway/configs/schemas/bots.openapi.json
+```
+
+Do **not** regenerate `src/gateway/tests/fixtures/bots.openapi.json` — it is a
+frozen test fixture, not a build output (established by
+`src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/tasks.md:212`).
+
+Ordering: the gateway config entry and the backend routes should land together.
+The config alone is inert (no route to protect); the routes alone would accept a
+user without an app at the gateway, and `require_user_and_app_principal` would
+answer 401 — safe, but it advertises an endpoint no one can use.
+
+## Test Strategy
+
+```python
+# src/backend/tests/community/adapters/http/openapi_v1/test_principal_seam.py
+def test_authorized_apps_post_requires_user_and_app_principal(): ...
+    # mirrors test_bot_logs_routes_require_user_and_app_principal:361
+def test_authorized_apps_get_and_delete_require_only_principal(): ...
+```
+
+```python
+# src/backend/tests/community/adapters/http/openapi_v1/authorized_apps/test_router.py (new)
+def test_grant_reads_app_from_principal_not_from_request(): ...
+def test_grant_is_idempotent_and_does_not_move_granted_at(): ...
+def test_regrant_after_revoke_creates_a_new_period(): ...
+def test_list_excludes_revoked_grants(): ...
+def test_revoke_absent_grant_is_404_distinct_from_successful_revoke(): ...
+def test_non_owner_answer_is_byte_identical_to_absent_bot(): ...
+def test_collaborator_may_operate_but_may_not_grant(): ...
+def test_cross_tenant_bot_is_not_grantable(): ...
+```
+
+```python
+# src/backend/tests/community/core/bot_app_grant/test_grant_service.py (new)
+def test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request(): ...
+def test_revoked_row_retains_its_interval(): ...
+```
+
+```python
+# src/gateway/tests/unit/core/authn/test_route_security.py
+def test_post_authorized_apps_requires_user_and_app(): ...
+def test_get_and_delete_authorized_apps_require_user_only(): ...
+    # both assert against the real configs/application.yaml, not a fixture table,
+    # so a typo in the shipped config fails the suite
+```
+
+Coverage/CI: `src/backend/` changes select the Backend gate — SAST, unit tests,
+changed-line coverage, and singlebox coverage (`AGENTS.md` → Pre-push Module
+Selection). `src/gateway/` has no standalone lint step and runs nothing in
+lint-only mode, so the gateway test above must be run explicitly. The new
+`core/bot_app_grant` module needs its Core/Router denominators declared in
+`scripts/ci/singlebox_coverage_modules.yaml` if the backend module's manifest
+enumerates paths rather than globbing — **verify before implementing**; if it
+does, add meaningful acceptance coverage rather than excluding the paths.
