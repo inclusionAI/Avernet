@@ -7,6 +7,15 @@
 # token, and the harness has no minter — so a case could assert nothing but a
 # 401. #651 covers the minter and the backfill for the whole surface.
 #
+# 2026-08-10: four bot-authorization endpoints added
+# (/openapi/v1/bots/{bot_id}/authorized-apps and /openapi/v1/bots/authorized).
+# They land here for exactly the reason above and no other: the case runner
+# authenticates with x-user-id, these four require a gateway-signed principal,
+# and two of them require an App identity on top -- which the harness cannot
+# mint at all. A case could assert nothing but a 401. #651 covers the minter
+# and the backfill for these too. Hand edited rather than regenerated, to keep
+# these notes.
+#
 # Comments survive hand edits; `python -m tests.community.framework.coverage_gate
 # --regen` rewrites the file and drops them.
 #
@@ -33,6 +42,7 @@ DELETE /openapi/v1/bots/resources/{resource_id}: missing [happy, error]
 DELETE /openapi/v1/bots/routines/{routine_id}: missing [happy, error]
 DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}/messages: missing [happy, error]
 DELETE /openapi/v1/bots/sessions/{bot_id}/{session_id}: missing [happy, error]
+DELETE /openapi/v1/bots/{bot_id}/authorized-apps/{app_id}: missing [happy, error]
 DELETE /openapi/v1/bots/{bot_id}: missing [happy, error]
 GET /api/aicoding/workflows: missing [happy, error]
 GET /api/aicoding/{entity_type}/{entity_id}/bot/{bot_id}/aicoding.bindings.json: missing [happy, error]
@@ -155,6 +165,7 @@ GET /api/v1/skill-center/batch-sync/status/{task_id}: missing [happy, error]
 GET /api/v1/skill-center/batch-sync: missing [happy, error]
 GET /api/v1/skill-center/sync-categories: missing [happy, error]
 GET /api/v1/skill-center/verify-symlinks: missing [happy, error]
+GET /openapi/v1/bots/authorized: missing [happy, error]
 GET /openapi/v1/bots/ceiling: missing [happy, error]
 GET /openapi/v1/bots/check-name: missing [happy, error]
 GET /openapi/v1/bots/identity/{bot_id}/{file_type}: missing [happy, error]
@@ -176,6 +187,7 @@ GET /openapi/v1/bots/skills/{skill_id}: missing [happy, error]
 GET /openapi/v1/bots/skills: missing [happy, error]
 GET /openapi/v1/bots/approvals/{bot_id}/mode: missing [happy, error]
 GET /openapi/v1/bots/approvals/{bot_id}/modes: missing [happy, error]
+GET /openapi/v1/bots/{bot_id}/authorized-apps: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/auth-status: missing [happy, error]
 GET /openapi/v1/bots/connection/{bot_id}: missing [happy, error]
 GET /openapi/v1/bots/{bot_id}/engine-config: missing [happy, error]
@@ -335,6 +347,7 @@ POST /openapi/v1/bots/resources/upload: missing [happy, error]
 POST /openapi/v1/bots/resources: missing [happy, error]
 POST /openapi/v1/bots/routines/{routine_id}/run: missing [happy, error]
 POST /openapi/v1/bots/routines: missing [happy, error]
+POST /openapi/v1/bots/{bot_id}/authorized-apps: missing [happy, error]
 POST /openapi/v1/bots/{bot_id}/restart: missing [happy, error]
 POST /openapi/v1/bots/sessions/{bot_id}: missing [happy, error]
 POST /openapi/v1/bots: missing [happy, error]

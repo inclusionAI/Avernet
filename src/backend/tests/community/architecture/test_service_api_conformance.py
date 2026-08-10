@@ -42,6 +42,9 @@ from agentclaw.community.api.engine_config_service import EngineConfigServicePro
 from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
+from agentclaw.community.api.bot_app_grant_service import (
+    BotAppGrantServiceProtocol,
+)
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.local_skill_query_service import (
     LocalSkillQueryServiceProtocol,
@@ -67,6 +70,7 @@ from agentclaw.community.core.skill_center.services.local_skill_upload_service i
 from agentclaw.community.core.skill_center.services.local_skill_state_service import (
     LocalSkillStateService,
 )
+from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.skill_center.services.local_skill_delete_service import (
     LocalSkillDeleteService,
 )
@@ -74,6 +78,7 @@ from agentclaw.community.core.skill_center.services.local_skill_delete_service i
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (BotAppGrantServiceProtocol, BotAppGrantService),
     (EngineConfigServiceProtocol, EngineConfigService),
     (EngineRuntimeRelayProtocol, EngineRuntimeRelay),
     (EngineConnectionServiceProtocol, EngineConnectionService),

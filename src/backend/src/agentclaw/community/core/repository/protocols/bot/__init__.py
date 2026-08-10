@@ -7,6 +7,9 @@ contract, so the split is a file-layout detail, not an API change.
 """
 from __future__ import annotations
 
+from agentclaw.community.core.repository.protocols.bot.app_grant import (
+    BotAppGrantRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.bot import (
     BotRepository,
     BotRestartLockRepositoryProtocol,
@@ -26,6 +29,7 @@ from agentclaw.community.core.repository.protocols.bot.mcp import (
 )
 
 __all__ = [
+    "BotAppGrantRepositoryProtocol",
     "BotCollabLockRepositoryProtocol",
     "BotCollabLogRepositoryProtocol",
     "BotFriendRepositoryProtocol",

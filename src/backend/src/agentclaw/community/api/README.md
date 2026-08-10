@@ -52,6 +52,7 @@ consumes:
   - "A small number of core dataclass / schema types used to type Protocol method signatures (see internal_dependencies)"
 internal_dependencies:
   - agentclaw.community.core.access.models            # UserInfoRecord — typed in user_service.py
+  - agentclaw.community.core.bot_app_grant.models    # BotAppGrantRecord — typed in bot_app_grant_service.py (real signatures, so the conformance gate can compare them)
   - agentclaw.community.core.bot_chat.schemas        # ConversationDetail, HealthCheckData — typed in bot_chat_service.py
   - agentclaw.community.core.caller_identity.contracts  # Caller identity API DTOs and stable errors
   - agentclaw.community.core.caller_identity.credential  # CallerToken — typed in caller_credential.py

@@ -99,6 +99,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
+from .authorized_apps import app_view_router as authorized_bots_router
+from .authorized_apps import router as authorized_apps_router
 from .bots import router as bots_router
 from .contracts import (
     ENGINE_RUNTIME_ERROR_RESPONSES,
@@ -157,6 +159,13 @@ _MIXED_GROUPS = [
 # literals across three lists is about which *response table* each gets; it does
 # not change that they all precede `bots`.
 _SUBGROUPS = [
+    # Both authorization groups precede `bots` below. `authorized_apps_router`
+    # sits *under* `{bot_id}` so path shape already keeps it distinct, but
+    # `authorized_bots_router` is a top-level literal and genuinely depends on
+    # this order: nothing else stops a future `/openapi/v1/{something}` from
+    # claiming it.
+    authorized_apps_router,
+    authorized_bots_router,
     identity_router,
     resources_router,
     routines_router,
