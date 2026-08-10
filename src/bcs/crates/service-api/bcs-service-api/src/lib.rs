@@ -181,7 +181,7 @@ pub use port::{
     SessionCallbackDispatchPort, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
     SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineResultPublishCommand,
     StateMachineResultPublisherPort, StateMachineRunRepoPort, StateMachineTerminalEvent,
-    StateMachineTerminalStatus, UserIdentity, UserIdentityRepoPort,
+    StateMachineTerminalStatus, UserCredential, UserCredentialRepoPort, UserIdentity, UserIdentityRepoPort,
     CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     CollaborationDefinitionRecord, CollaborationEventRecord, CollaborationEventRepoPort,
     WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,

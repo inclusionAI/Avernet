@@ -12,6 +12,7 @@ pub mod relation;
 pub mod session;
 pub mod session_file;
 pub mod user_identity;
+pub mod user_credential;
 
 pub use bot::BotRepoPort;
 pub use bot_control_plane::*;
@@ -43,3 +44,4 @@ pub use relation::RelationRepoPort;
 pub use session::{NewSessionParams, SessionRepoPort};
 pub use session_file::{NewSessionFileParams, SessionFileListPage, SessionFileListParams, SessionFileRepoPort};
 pub use user_identity::{UserIdentity, UserIdentityRepoPort};
+pub use user_credential::{UserCredential, UserCredentialRepoPort};

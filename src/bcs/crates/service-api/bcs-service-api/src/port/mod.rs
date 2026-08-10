@@ -66,7 +66,8 @@ pub use repo::{
     HumanInputEnqueueDisposition, HumanInputRequestRepoPort, NewSessionParams,
     ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
     ProviderBotDiscoverySelector, ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort,
-    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UserIdentity,
+    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UserCredential,
+    UserCredentialRepoPort, UserIdentity,
     UserIdentityRepoPort, UpsertOrganizationMemberRecord,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
