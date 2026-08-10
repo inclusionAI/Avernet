@@ -22,6 +22,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from agentclaw.community.adapters.http.openapi_v1.authorized_apps.gating import (
+    CANDIDATE_CAP,
+)
 from agentclaw.community.adapters.http.openapi_v1.authorized_apps.router import (
     app_view_router,
     router,
@@ -73,6 +76,14 @@ OTHER_OWNER = "u-3"
 #: Collaborates on **both** ``default`` bots at member level, so ``bot_id``
 #: alone genuinely cannot say which one they mean.
 DOUBLE_COLLAB = "u-4"
+#: Reaches many same-named bots but may operate exactly one. Deliberately more
+#: than a small bound would fetch and fewer than the cap, so the resolve has to
+#: weigh all of them to find the answer.
+CROWDED_COLLAB = "u-5"
+#: Reaches more than the resolve is willing to weigh at all.
+OVERFLOW_COLLAB = "u-6"
+#: Padding for ``CROWDED_COLLAB`` — comfortably past any small fetch limit.
+CROWD_SIZE = 12
 BOT = "b-1"
 #: A legacy ``default``-style id shared by several live bots, which the
 #: owner-blind resolve must fail closed on rather than pick a row for.
@@ -206,13 +217,20 @@ def bots():
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
             return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
 
-        def list_bots_reachable_by_id(self, bot_id: str, caller_id: str):
+        def list_bots_reachable_by_id(
+            self, bot_id: str, caller_id: str, limit: int
+        ):
             """The caller's own candidates — what breaks the ambiguity above.
 
             Reachability is ownership **or** collaboration at any level, which
             is deliberately below the operator bar: the caller filters what
             comes back. ``DOUBLE_COLLAB`` reaches both ``default`` bots, which
             is the case that stays refused.
+
+            ``limit`` is honoured, and unordered truncation is modelled the way
+            the real query behaves: the extras are prepended, so a caller that
+            trimmed and then answered would lose the operable bot rather than
+            one of the padding rows.
             """
             everything = [
                 {"id": BOT_PK, "bot_id": BOT, "owner_id": OWNER},
@@ -228,11 +246,26 @@ def bots():
                 COLLAB: {BOT_PK, OTHER_AMBIGUOUS_PK},
                 DOUBLE_COLLAB: {AMBIGUOUS_PK, OTHER_AMBIGUOUS_PK},
             }.get(caller_id, set())
-            return [
+            matches = [
                 bot
                 for bot in everything
                 if bot["bot_id"] == bot_id and bot["id"] in reachable
             ]
+            crowd = {CROWDED_COLLAB: CROWD_SIZE, OVERFLOW_COLLAB: CANDIDATE_CAP + 4}
+            if caller_id in crowd and bot_id == AMBIGUOUS_BOT:
+                # Reachable-but-not-operable padding, with the one operable bot
+                # **last** — so any truncation drops precisely the answer.
+                matches = [
+                    {"id": 1000 + n, "bot_id": AMBIGUOUS_BOT, "owner_id": f"o-{n}"}
+                    for n in range(crowd[caller_id])
+                ] + [
+                    {
+                        "id": OTHER_AMBIGUOUS_PK,
+                        "bot_id": AMBIGUOUS_BOT,
+                        "owner_id": OTHER_OWNER,
+                    }
+                ]
+            return matches[:limit]
 
     return _Bots()
 
@@ -261,6 +294,14 @@ def collaborators():
                 OTHER_AMBIGUOUS_PK,
             ):
                 return PermissionLevel.MEMBER
+            # Member on exactly one of the crowd. The rest come back from the
+            # reachability query but adjudicate to NONE — the gap between
+            # "reachable" and "operable" the design turns on, and the reason
+            # the filter cannot be replaced by the query.
+            if user_id in (CROWDED_COLLAB, OVERFLOW_COLLAB):
+                if bot_pk == OTHER_AMBIGUOUS_PK:
+                    return PermissionLevel.MEMBER
+                return PermissionLevel.NONE
             return PermissionLevel.NONE
 
     return _Collaborators()
@@ -574,6 +615,55 @@ def test_an_ambiguous_bot_id_is_still_refused_when_the_caller_reaches_none(
     resp = stranger_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
 
     assert resp.status_code == 404, resp.json()
+
+
+def test_a_crowded_bot_id_still_finds_the_one_operable_bot(
+    grants, bots, collaborators, sessions
+):
+    """A fetch bound must not decide the answer.
+
+    The candidate rows come back unordered and the operator filter runs
+    *after* them, so a bound small enough to trim a realistic set picks the
+    outcome by whichever rows the database happened to return — and the one
+    operable bot is as likely to be trimmed as any other. Here it is
+    deliberately last among thirteen, so any truncation loses it and the caller
+    is refused a delegation they may plainly make, for reasons no one can see.
+
+    That is the same silent 404 this resolve was written to remove, which is
+    why the bound is generous and every candidate under it is weighed.
+    """
+    client = user_scoped_client(
+        _build(grants, bots, collaborators, _caller(user_id=CROWDED_COLLAB)),
+        CROWDED_COLLAB,
+    )
+
+    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
+
+    assert resp.status_code == 201, resp.json()
+    with sessions() as session:
+        row = session.query(BotAppGrantModel).one()
+        assert (row.user_id, row.owner_id) == (CROWDED_COLLAB, OTHER_OWNER)
+
+
+def test_past_the_cap_the_resolve_refuses_instead_of_guessing(
+    grants, bots, collaborators, sessions
+):
+    """Over the cap, refuse — do not answer from an arbitrary subset.
+
+    Refusing on the *count*, before weighing any candidate, is what keeps the
+    outcome from depending on row order. A caller past this is reaching more
+    same-named bots than a bare ``bot_id`` can address at all.
+    """
+    client = user_scoped_client(
+        _build(grants, bots, collaborators, _caller(user_id=OVERFLOW_COLLAB)),
+        OVERFLOW_COLLAB,
+    )
+
+    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
+
+    assert resp.status_code == 404, resp.json()
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 0
 
 
 def test_an_ambiguous_bot_id_is_refused_when_the_caller_can_operate_both(

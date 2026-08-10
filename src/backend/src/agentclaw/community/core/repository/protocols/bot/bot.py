@@ -168,9 +168,12 @@ class BotRepository(Protocol):
         adjudicate what comes back. This only narrows *which bots* are in
         question, never *whether* the caller may act on one.
 
-        ``limit`` bounds the work rather than the meaning. Callers need to
-        distinguish none, one, and more-than-one; any limit above two serves
-        that, and a small one keeps a pathological id from reading a large set.
+        ``limit`` bounds the work, and the caller is responsible for keeping it
+        from bounding the *meaning*. The rows are unordered and the operability
+        filter runs afterwards, so a truncated result can omit the only bot the
+        caller may operate — turning "you can grant this" into a masked 404 for
+        reasons no one can see. Ask for one more than you can use and refuse on
+        the overflow; do not answer from a full result.
 
         Scoped by current env AND tenant, like its siblings, and excludes
         soft-deleted rows.

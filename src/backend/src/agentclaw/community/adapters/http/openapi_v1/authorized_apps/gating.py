@@ -43,6 +43,20 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+#: How many same-named reachable bots :func:`_resolve_within_reach` will weigh.
+#:
+#: Generous rather than tight, because it is not a performance dial: every
+#: candidate under it is adjudicated, and the only thing it bounds is how absurd
+#: a collision has to be before the surface gives up. A person collaborating on
+#: fifty distinct bots that all share one ``bot_id`` is past what a bare
+#: ``bot_id`` can address at all.
+#:
+#: Small values are actively wrong here. The candidate rows are unordered, so a
+#: cap that trims a realistic set decides the outcome by whichever rows the
+#: database happened to return — and the caller's only operable bot is as likely
+#: to be trimmed as any other.
+CANDIDATE_CAP = 50
+
 
 def resolve_delegable_bot(
     bots: Any,
@@ -156,12 +170,36 @@ def _resolve_within_reach(
     one ``default`` and a member on another is not ambiguous; there is one
     answer and this finds it.
 
-    Both refusals are :class:`BotNotFoundError`, matching every other refusal
-    here: a caller who reaches none of the duplicates must not be able to tell
-    that any of them exist, and one who reaches several must not learn how many
-    from the shape of the error.
+    Every reachable candidate is weighed, up to :data:`CANDIDATE_CAP`, and
+    going over it refuses rather than deciding from the ones that came back.
+    The rows are unordered, so trimming them chooses arbitrarily — and the row
+    trimmed can be the only operable one, which turns this function back into
+    the silent 404 it was written to remove.
+
+    All three refusals are :class:`BotNotFoundError`, matching every other
+    refusal here: a caller who reaches none of the duplicates must not be able
+    to tell that any of them exist, and one who reaches several must not learn
+    how many from the shape of the error.
     """
-    candidates = bots.list_bots_reachable_by_id(bot_id, caller_id)
+    candidates = bots.list_bots_reachable_by_id(
+        bot_id, caller_id, CANDIDATE_CAP + 1
+    )
+    if len(candidates) > CANDIDATE_CAP:
+        # More same-named bots than this is willing to adjudicate. Refused on
+        # the *count*, before looking at any of them, because the rows come back
+        # unordered: answering from them would mean deciding from an arbitrary
+        # subset, and the row dropped could be the only one the caller can
+        # operate. That failure is invisible — a masked 404 for someone who
+        # really may delegate — and it is the failure this whole function was
+        # added to remove, so reintroducing it through the bound would be worse
+        # than refusing.
+        logger.warning(
+            "[authorized_apps] more than %d reachable bots share this id; "
+            "refusing rather than deciding from a truncated set: %s",
+            CANDIDATE_CAP,
+            for_log(bot_id),
+        )
+        raise BotNotFoundError("Bot not found") from None
     operable = [
         bot
         for bot in candidates

@@ -90,9 +90,18 @@ class BotReachabilityQueries:
         )
 
     def list_reachable_by_bot_id(
-        self, bot_id: str, caller_id: str, limit: int = 8
+        self, bot_id: str, caller_id: str, limit: int
     ) -> List[Dict[str, Any]]:
-        """Live bots with this id that ``caller_id`` owns or collaborates on."""
+        """Live bots with this id that ``caller_id`` owns or collaborates on.
+
+        Returns at most ``limit`` rows, **unordered**, so a full result means
+        "at least this many" and not "these are the ones that matter". The
+        caller asks for one more than it can use and refuses on the overflow —
+        see :func:`~...authorized_apps.gating._resolve_within_reach`. Silently
+        answering from a truncated set is the bug this signature exists to make
+        hard: the rows dropped are arbitrary, and the one dropped may be the
+        only one the caller can operate.
+        """
         with self._db.orm_session() as db:
             bots = (
                 self._reachable_by(db, caller_id)

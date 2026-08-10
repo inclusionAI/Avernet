@@ -1972,7 +1972,7 @@ class BotService:
         return bot
 
     def list_bots_reachable_by_id(
-        self, bot_id: str, caller_id: str
+        self, bot_id: str, caller_id: str, limit: int
     ) -> List[Dict[str, Any]]:
         """Live bots with this id the caller owns or collaborates on.
 
@@ -1986,8 +1986,14 @@ class BotService:
         collaboration at any level, which is below the operator bar, so a caller
         must still adjudicate every candidate this returns. It narrows the
         field; it does not confer anything.
+
+        ``limit`` is required rather than defaulted: the rows are unordered and
+        the adjudication happens after, so a caller that truncates and then
+        answers can drop the one bot it was looking for. Making the bound an
+        explicit decision at the call site is what keeps that from being an
+        accident.
         """
-        return self._repository.list_reachable_by_bot_id(bot_id, caller_id)
+        return self._repository.list_reachable_by_bot_id(bot_id, caller_id, limit)
 
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
