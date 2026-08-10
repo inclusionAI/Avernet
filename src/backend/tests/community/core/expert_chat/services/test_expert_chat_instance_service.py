@@ -255,6 +255,8 @@ class TestCreateContainer:
         call_kwargs = binding_repo.insert_binding.call_args[1]
         assert call_kwargs["entity_id"] == OWNER_ID
         assert call_kwargs["device_id"] == BOT_UUID
+        assert call_kwargs["device_provider"] == "baas"
+        assert call_kwargs["device_props"] == {"bolt_id": BOT_ID}
 
     @pytest.mark.asyncio
     async def test_release_async_called_with_correct_params(self):
