@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Standard codes = HTTP status (3 digits) + business subcode (3 digits).
 CODE_OK = 200000
@@ -39,10 +39,12 @@ class Envelope[T](BaseModel):
 class ErrorEnvelope(BaseModel):
     """The envelope returned on every documented failure.
 
-    Shape-identical to :class:`Envelope` with ``data`` pinned to null, which is
-    what the error paths actually emit. Declared as its own model so generated
-    clients get a named error type instead of a synthesized ``Envelope[None]``.
+    Shape-identical to the success envelope with `data` pinned to null, which is
+    what the error paths actually emit.
     """
+
+    # Declared as its own model, rather than reusing Envelope, so generated
+    # clients get a named error type instead of a synthesized `Envelope[None]`.
 
     code: int = Field(
         description="6-digit code: HTTP status (3) + business subcode (3), "
@@ -133,14 +135,29 @@ class Page[T](BaseModel):
 class Deleted(BaseModel):
     """Payload returned by delete operations."""
 
-    deleted: bool = True
+    model_config = ConfigDict(json_schema_extra={"example": {"deleted": True}})
+
+    deleted: bool = Field(
+        default=True, description="Always true; the delete is complete once this "
+        "response is returned."
+    )
 
 
 class NameCheck(BaseModel):
     """Payload returned by name-availability checks."""
 
-    name: str
-    exists: bool
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"name": "Quarterly reporter", "exists": False}}
+    )
+
+    name: str = Field(
+        description="The name that was checked, in the trimmed form actually "
+        "compared."
+    )
+    exists: bool = Field(
+        description="True when the name is already taken, so creating with it "
+        "would be refused."
+    )
 
 
 class PageParams:

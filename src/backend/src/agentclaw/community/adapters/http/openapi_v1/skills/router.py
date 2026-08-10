@@ -146,7 +146,13 @@ async def upload_skill(
     actor_id: UserIdDep,
     request: Request,
     response: Response,
-    package: bytes = Body(..., media_type="application/zip"),
+    package: bytes = Body(
+        ...,
+        media_type="application/zip",
+        description="The skill package's raw ZIP bytes, sent as the whole "
+        "request body. This is not a multipart form upload — send the bytes "
+        "unwrapped, with Content-Type: application/zip.",
+    ),
     bot_id: str = Query(..., description="Ready Bot that owns the Local Skill."),
     owner_entity_id: str | None = Query(
         default=None, description="Verified Bot owner locator."
@@ -155,7 +161,13 @@ async def upload_skill(
         LocalSkillUploadServiceProtocol
     ),
 ) -> Envelope[SkillUpload]:
-    """Create one inactive Local Skill from a complete raw ZIP package."""
+    """Upload a skill package.
+
+    The body is the ZIP itself, not a form: send the bytes with
+    `Content-Type: application/zip`. The skill is created **inactive** —
+    activate it separately. A package whose name matches an existing skill
+    replaces it and answers 200 instead of 201.
+    """
     if (
         request.headers.get("content-type", "").split(";", 1)[0].lower()
         != "application/zip"

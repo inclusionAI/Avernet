@@ -170,14 +170,14 @@ async def check_resource_name(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[NameCheck]:
-    """Check whether a resource name is available.
+    """Check whether a resource name is available within the bot.
 
-    ``user_id`` is the request's own required parameter, forwarded to the
-    service — the wiring the older note here said was still pending.
-    ``parent_path`` and ``exclude_id`` from the legacy signature remain
-    unexposed on this contract and are passed as None: resources are bot-scoped,
-    so there is no parent path to qualify the name with.
+    Names are unique per bot and per type, so pass the `type` you intend to
+    create; omitting it checks a file name.
     """
+    # parent_path / exclude_id from the service signature stay off this contract
+    # and are passed as None: resources are bot-scoped, so there is no parent
+    # path to qualify the name with.
     effective_bot_id = bot_id
     service = factory.create(bot_id=effective_bot_id)
     # Map openapi ResourceType → legacy ResourceType enum the slim service
@@ -207,11 +207,11 @@ async def create_resource(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Create a resource (file placeholder, link, or folder).
+    """Create a link resource.
 
-    Phase 1: only LINK supported. FILE → use POST /upload (Phase 3);
-    FOLDER → create_directory (Phase 3, device_fs branch). Duplicate name
-    surfaces as ValueError from the service → 409 Conflict (legacy parity).
+    Only `link` resources are created here, and `url` is required for them. Send
+    a file's bytes to the upload endpoint instead (400); folders are not
+    creatable yet (501). A name already used within the bot is refused (409).
     """
     del user_id  # not-yet-enforced ownership — see list_resources
     if body.type == ResourceType.FILE:
@@ -250,7 +250,15 @@ async def create_resource(
 async def upload_resource(
     owner_id: UserIdDep,
     name: str,
-    content: Annotated[bytes, Body(media_type="application/octet-stream")],
+    content: Annotated[
+        bytes,
+        Body(
+            media_type="application/octet-stream",
+            description="The file's raw bytes, sent as the whole request body. "
+            "This is not a multipart form upload — send the bytes unwrapped, "
+            "with Content-Type: application/octet-stream.",
+        ),
+    ],
     request: Request,
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
@@ -261,10 +269,9 @@ async def upload_resource(
 ) -> Envelope[Resource]:
     """Upload a file's raw bytes as a new resource.
 
-    device_fs is resolved per-bot; upload_file is async and raises
-    DuplicateResourceError on duplicate name → 409 (via @envelope_errors).
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed — mirroring the bots router.
+    The body is the file itself, not a form: send the bytes with
+    `Content-Type: application/octet-stream` and name the resource with the
+    `name` query parameter. A name already used within the bot is refused (409).
     """
     effective_bot_id = bot_id
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
@@ -321,11 +328,10 @@ async def update_resource(
     bot_id: str = Query(..., description="Bot ID this resource belongs to."),
     factory: ResourceServiceFactoryProtocol = Injected(ResourceServiceFactoryProtocol),
 ) -> Envelope[Resource]:
-    """Update a resource (link rename / url change).
+    """Rename a link resource or change its target URL.
 
-    Phase 3a: link only; ``link_type`` is intentionally not exposed on the
-    openapi contract. ValueError from the service (not found / url clash)
-    → 409 Conflict, per legacy + create parity.
+    Link resources only. A name or URL already used within the bot is refused
+    (409).
     """
     del user_id  # not-yet-enforced ownership — see list_resources
     effective_bot_id = bot_id
@@ -354,14 +360,11 @@ async def delete_resource(
         DeviceFilesystemDispatcher
     ),
 ) -> Envelope[Deleted]:
-    """Delete a resource (file → device FS, link/folder → DB soft-delete).
+    """Delete a resource.
 
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed. device_fs is resolved per-bot ONLY for FILE resources — a
-    link/folder soft-delete never touches device_fs, so it must not fail on an
-    unbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no
-    binding). The injected deps (factory, resolver, device_fs_dispatcher) stay
-    out of the served OpenAPI schema — see test_public_namespace.py.
+    Deleting a file removes its bytes from the bot's device; deleting a link or
+    folder removes the record. The bot must have a device bound either way (409
+    otherwise).
     """
     effective_bot_id = bot_id
     # Follow-up (#4): device_fs resolution is unconditional — a link/folder
@@ -396,13 +399,11 @@ async def download_resource(
         DeviceFilesystemDispatcher
     ),
 ) -> Response:
-    """Download a resource's bytes (raw, not enveloped).
+    """Download a file resource's bytes.
 
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed — mirroring the bots router. device_fs is resolved per-bot
-    (unconditional today; see #4 follow-up — only a file has bytes, but the
-    handler can't tell the type before the service reads the row). Service
-    returns ``(bytes, mime)`` or ``None`` → 404.
+    The response is the raw bytes with the resource's own media type — this is
+    the one endpoint on this surface that does not wrap its answer in the
+    standard envelope. A resource with no bytes to serve answers 404.
     """
     effective_bot_id = bot_id
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)
@@ -430,13 +431,10 @@ async def preview_resource(
         DeviceFilesystemDispatcher
     ),
 ) -> Envelope[Preview]:
-    """Get a resource preview (text-ified content, enveloped).
+    """Get a readable preview of a resource's content.
 
-    owner_id comes from the request's ``user_id`` parameter (``UserIdDep``),
-    fail-closed — mirroring the bots router. device_fs is resolved per-bot
-    (unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)
-    → 413 via @envelope_errors; a None result is not-found / not-a-file /
-    read-failure → 404.
+    Content over 1 MB is refused (413) rather than truncated. A resource that
+    cannot be previewed answers 404.
     """
     effective_bot_id = bot_id
     ctx = resolver.resolve_for_bot(effective_bot_id, owner_id)

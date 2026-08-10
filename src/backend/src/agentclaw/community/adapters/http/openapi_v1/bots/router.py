@@ -13,9 +13,9 @@ internal router does.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Body, Depends, Request
 from fastapi.responses import JSONResponse
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -229,12 +229,19 @@ async def create_bot(
         SkillSetServiceFactoryProtocol
     ),
 ):
-    """Create a bot (201), or return 202 + a Passport iframe when authorization is needed.
+    """Create a bot.
 
-    Engine-specific inputs belong in ``BotCreateSpec.extra_properties``, but
-    nothing downstream reads that bag yet, so the request model does not expose
-    an ``engine_options`` field for it — see :class:`BotCreate`.
+    Answers 201 with the created bot, or 202 with an authorization page to open
+    when the bot needs the user to authorize it first — poll the auth-status
+    endpoint after that to complete creation.
+
+    Engine options are not accepted here; configure them through the
+    engine-config endpoints once the bot exists.
     """
+    # No `engine_options` field on BotCreate: engine-specific inputs belong in
+    # BotCreateSpec.extra_properties, but nothing downstream reads that bag yet,
+    # so declaring the field would publish a contract slot the server rejects on
+    # every non-empty value.
     # Validate the engine against the configured registry FIRST: the cluster rule
     # below treats every non-teclaw value as ACRA, so an unknown engine would
     # otherwise sail through, allocate an id, apply for a Passport, and only fail
@@ -320,14 +327,13 @@ async def check_bot_name(
 ) -> Envelope[NameCheck]:
     """Check whether a bot name is available (within the caller's tenant).
 
-    Applies the same rule create and update do, because "available" has to mean
-    "you could create this". ``check_bot_name_exists`` only does a repository
-    lookup — it answers ``False`` for a blank or ``@``-bearing name, which would
-    report a name as free that the very next request would reject (400).
-    Rejecting here instead keeps one answer across the three endpoints.
+    Applies the same name rule create and update do, because "available" has to
+    mean "you could create this": a blank name, or one containing `@`, is
+    refused here (400) rather than reported as free and then rejected by the
+    very next request.
 
-    The echoed ``name`` is the trimmed form actually checked, so a caller that
-    sends ``" Foo "`` sees which string the availability applies to.
+    The echoed `name` is the trimmed form actually checked, so a caller that
+    sends `" Foo "` sees which string the answer applies to.
     """
     # No ``user_id``: this operation has no user dimension to scope by. Name
     # uniqueness is checked across the whole tenant — ``check_bot_name_exists``
@@ -350,12 +356,14 @@ async def get_bots_ceiling(
 ) -> Envelope[Ceiling]:
     """Get the caller's bot-creation quota ceiling.
 
-    Resolved through the same method creation enforces, not
-    ``PolicyService.get_bots_ceiling`` directly: that one falls back to its own
-    hardcoded default of 5, while creation falls back to the configured
-    ``max_devices_per_entity``. Reading it directly would advertise 5 to a caller
-    whose deployment allows (or rejects at) a different number.
+    The number creation actually enforces, so a caller that is at the ceiling
+    can tell that from this endpoint rather than from a failed create.
     """
+    # Resolved through the same method creation enforces, not
+    # PolicyService.get_bots_ceiling directly: that one falls back to its own
+    # hardcoded default of 5, while creation falls back to the configured
+    # max_devices_per_entity. Reading it directly would advertise 5 to a caller
+    # whose deployment allows (or rejects at) a different number.
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 
@@ -383,11 +391,12 @@ async def update_bot(
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
 ) -> Envelope[Bot]:
-    """Update a bot's name/description (engine is fixed at creation).
+    """Update a bot's name and description.
 
-    ``cluster_name`` is engine-derived and the engine is immutable, so it is not
-    updatable here; ``engine_options`` is managed via the engine-config
-    endpoints. Neither is accepted — see :class:`BotUpdate`.
+    Those are the only two attributes this operation changes. The engine is
+    fixed at creation and the cluster is derived from it, so neither is
+    updatable; engine options are managed through the engine-config endpoints.
+    Sending any of them is refused (422).
     """
     # Same name rule as create and the internal update route — otherwise this
     # surface could persist names the rest of the lifecycle rejects.
@@ -491,20 +500,17 @@ async def get_bot_auth_status(
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
 ) -> Envelope[BotAuthStatus]:
-    """Poll Passport authorization; complete creation when ISSUED.
+    """Poll a pending authorization, and finish creating the bot once it is issued.
 
-    On the async-create flow the bot is only actually created here (on ISSUED),
-    so the caller must re-supply the attributes it created with — passed as
-    optional query params and forwarded to completion. Without them the bot
-    would be created with defaults (e.g. engine ``openclaw``) that contradict the
-    Passport applied for at ``POST`` time, so callers on the 202 flow should
-    always echo back ``engine``/``cluster_name``/``bot_name``/… here.
+    On the authorization flow the bot record is created **here**, not at create
+    time, so echo back the attributes you asked to create it with — `engine`,
+    `cluster_name`, `bot_name`, `bot_desc`, `bot_type` — as query parameters.
+    Omitting them creates the bot with defaults that may contradict what the
+    authorization was granted for.
 
-    Because this is where the record is actually inserted, every restriction
-    ``POST`` enforces is re-applied to the echoed-back values: the same engine
-    registry check, the same engine/cluster bijection, and the same
-    personal|service restriction on ``bot_type``. Otherwise the completion path
-    would be a way to create exactly the bots ``POST`` rejects.
+    Every restriction the create endpoint applies is re-applied to the values
+    echoed here, so this path cannot be used to create a bot create itself would
+    refuse.
     """
     # Validate against the engine completion will actually use, not against the
     # query param: omitting ``engine`` does not mean "no engine", it means the
@@ -604,6 +610,19 @@ async def get_bot_passport(
     return envelope(Passport(bot_id=bot_id, passport_id=passport_id), request)
 
 
+# The one body on this surface with no model behind it, and the reason is the
+# contract rather than an omission: the keys belong to the bot's engine, so this
+# API cannot name them without publishing one engine's vocabulary as everyone's.
+# What it *can* do is stop the body arriving at a caller as a bare "object" with
+# no shape at all — the description says where the keys come from and the example
+# gives a console something to render.
+_ENGINE_CONFIG_BODY: dict[str, Any] = {
+    "description": "Engine configuration object. Keys are defined by the bot's "
+    "engine; read the current configuration to see the shape it uses.",
+    "examples": [{"model": "openai/gpt-5.3", "permission_mode": "on-miss"}],
+}
+
+
 def _engine_config_target(bot: dict[str, Any]) -> tuple[str, str, str]:
     """Resolve (entity_id, entity_type, engine) for an engine-config call."""
     entity_id = bot.get("entity_id")
@@ -629,7 +648,12 @@ async def get_bot_engine_config(
         EngineConfigServiceProtocol
     ),
 ) -> Envelope[dict[str, Any]]:
-    """Read a bot's engine configuration (free-form JSON)."""
+    """Read a bot's engine configuration.
+
+    The configuration is a free-form JSON object whose keys are defined by the
+    bot's engine, not by this API — read it before writing to see the shape the
+    bot's engine uses. An unconfigured bot answers with an empty object.
+    """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, entity_type, engine = _engine_config_target(bot)
     data = await engine_config_service.read_bot_config(
@@ -647,7 +671,7 @@ async def get_bot_engine_config(
 @envelope_errors
 async def update_bot_engine_config(
     bot_id: str,
-    body: dict[str, Any],
+    body: Annotated[dict[str, Any], Body(**_ENGINE_CONFIG_BODY)],
     request: Request,
     owner_id: UserIdDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
@@ -655,7 +679,14 @@ async def update_bot_engine_config(
         EngineConfigServiceProtocol
     ),
 ) -> Envelope[dict[str, Any]]:
-    """Write a bot's engine configuration (free-form JSON)."""
+    """Replace a bot's engine configuration.
+
+    The body is a free-form JSON object whose keys are defined by the bot's
+    engine, not by this API — which is why no schema is published for it. It
+    **replaces** the stored configuration rather than merging into it, so read
+    the current configuration first and send it back with your changes applied.
+    The stored configuration is echoed back on success.
+    """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, entity_type, engine = _engine_config_target(bot)
     await engine_config_service.write_bot_config(

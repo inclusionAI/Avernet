@@ -160,7 +160,7 @@ async def list_mcp_servers(
     keyword: str | None = None,
     market_service: MCPMarketServiceProtocol = Injected(MCPMarketServiceProtocol),
 ) -> Envelope[Page[McpServer]]:
-    """List marketplace MCP servers (filter by ``keyword``, paginate)."""
+    """List marketplace MCP servers."""
     # No ``user_id``: this operation has no user dimension to scope by. The
     # marketplace catalogue is identical for every caller in the tenant.
     # An authenticated caller is still required — ``_PUBLIC_AUTH`` in
@@ -240,19 +240,13 @@ async def check_mcp_permission(
 ) -> Envelope[McpPermission]:
     """Report the caller's own permission for an MCP server.
 
-    Always the caller's own permission. The identity is the request's required
-    ``user_id``, and it is refused unless it names the verified caller — so this
-    still cannot be pointed at someone else to probe their grants, which is the
-    property the internal route's free-form ``user_id`` query param does not
-    have. The parameter states whose permission is being asked about; it does
-    not widen whose it may be.
+    Always the caller's own: naming another user in `user_id` is refused, so
+    this cannot be used to probe someone else's grants.
 
-    **Fail-open, by decision (spec Open Question 1).** When the marketplace
-    lookup errors, ``check_mcp_permission_detail`` reports the caller *as
-    permitted*. This surface preserves that rather than failing closed: the
-    endpoint is advisory — the MCP server itself is the enforcement point — so a
-    wrong "yes" during an upstream outage costs one failed call, whereas failing
-    closed would make a marketplace outage look like a permission revocation.
+    The answer is **advisory** — the MCP server itself is the enforcement point.
+    While the marketplace is unreachable this reports access as permitted rather
+    than denied, so an upstream outage costs one failed call instead of looking
+    like a revoked permission.
     """
     result = auth_service.check_mcp_permission_detail(owner_id, server_code)
     return envelope(
@@ -280,10 +274,11 @@ async def get_mcp_config(
     owner_id: UserIdDep,
     config_service: MCPConfigServiceProtocol = Injected(MCPConfigServiceProtocol),
 ) -> Envelope[McpConfig]:
-    """Read the caller's unified config for an MCP server (``api_key`` masked).
+    """Read the caller's configuration for an MCP server.
 
-    A server the caller has never configured is not an error — it returns
-    ``has_config: false`` with defaults.
+    The stored API key is always returned masked, never in full. A server the
+    caller has never configured is not an error — it answers with defaults and
+    `has_config: false`.
     """
     cfg = read_unified_config(
         user_id=owner_id, server_code=server_code, config_service=config_service

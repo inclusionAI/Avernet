@@ -512,22 +512,26 @@ async def _validation_error_handler(
     existing clients are unaffected.
     """
     from agentclaw.community.adapters.http.openapi_v1 import PUBLIC_API_PREFIX
-    from agentclaw.community.adapters.http.openapi_v1.responses import error_response
+    from agentclaw.community.adapters.http.openapi_v1.responses import (
+        error_response,
+        validation_message,
+    )
 
     if request.url.path.startswith(PUBLIC_API_PREFIX):
-        # "Invalid request" is all the caller gets, so which field failed is
-        # only knowable from here. ``loc``/``type``/``msg`` only — the ``input``
-        # each error carries is the caller's raw value, which is exactly the
-        # payload this surface must not copy into a log file.
+        # ``loc``/``type``/``msg`` only — the ``input`` each error carries is the
+        # caller's raw value, which is exactly the payload this surface must not
+        # copy into a log file. The same filtered triple is what the caller is
+        # answered with, so the log and the response agree on what went wrong
+        # instead of the log being the only place it is knowable.
+        safe = [
+            {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
+            for e in exc.errors()
+        ]
         logger.warning(
             "[Public 422] validation failed on %s %s: %s",
-            request.method, request.url.path,
-            [
-                {"loc": e.get("loc"), "type": e.get("type"), "msg": e.get("msg")}
-                for e in exc.errors()
-            ],
+            request.method, request.url.path, safe,
         )
-        return error_response(422, "Invalid request", request)
+        return error_response(422, validation_message(safe, request), request)
     return await request_validation_exception_handler(request, exc)
 
 

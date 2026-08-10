@@ -377,6 +377,93 @@ def error_response(http_status: int, message: str, request: Request) -> JSONResp
     return _error_response(http_status, message, request)
 
 
+# ── validation failures ───────────────────────────────────────────────────────
+#
+# A 422 answered "Invalid request" and nothing else. The detail existed — the
+# app-level handler already built the safe ``loc``/``type``/``msg`` triple to log
+# — it just never reached the party who could act on it, so diagnosing a rejected
+# call meant reading the server's log. That is not a workable contract for an
+# external caller, and it is the same failure the missing schema examples caused:
+# the server knows what it wanted and does not say.
+#
+# What is echoed is deliberately narrow. ``loc`` is a path through *our* schema,
+# ``type`` is a validation-error code, and ``msg`` is generated from the schema —
+# none carry caller input, which is what keeps this from becoming a reflection of
+# whatever was sent. The ``input`` field, which does carry it, stays dropped.
+# (Public request models declare no custom validators; a validator whose message
+# interpolates the value would put caller input into ``msg``, so add one only
+# with that in mind.)
+
+#: Errors named in the message. Past this a caller is fixing their request
+#: structurally, not field by field, and the envelope should not grow unbounded.
+_MAX_REPORTED_ERRORS = 10
+
+#: Ceiling on the rendered detail, independent of the count above: `msg` length
+#: is pydantic's to decide, not ours.
+_MAX_MESSAGE_CHARS = 800
+
+#: Whole-body failures that mean "this was not JSON we could read", as opposed to
+#: a field inside a valid object being wrong.
+_UNREADABLE_BODY_TYPES: frozenset[str] = frozenset(
+    {"model_attributes_type", "json_invalid", "dict_type", "list_type"}
+)
+
+
+def _is_json_content_type(request: Request) -> bool:
+    """Whether the request declared a JSON body."""
+    raw = request.headers.get("content-type", "")
+    subtype = raw.split(";", 1)[0].strip().lower()
+    return subtype == "application/json" or subtype.endswith("+json")
+
+
+def _error_location(loc: object) -> str:
+    """A validation error's ``loc`` tuple as a caller-readable path."""
+    if not isinstance(loc, (list, tuple)) or not loc:
+        return "request"
+    return ".".join(str(part) for part in loc)
+
+
+def validation_message(errors: list[dict[str, object]], request: Request) -> str:
+    """Render validation failures into the envelope's ``message``.
+
+    Duplicates are collapsed. They are not hypothetical: ``user_id`` is resolved
+    both directly and through the dependency that defaults ``owner_id`` to it, so
+    a request omitting it failed twice and the caller saw the same line twice
+    with nothing to distinguish them.
+    """
+    seen: set[tuple[str, str]] = set()
+    parts: list[str] = []
+    unreadable_body = False
+    for error in errors:
+        loc = _error_location(error.get("loc"))
+        kind = str(error.get("type") or "")
+        if (loc, kind) in seen:
+            continue
+        seen.add((loc, kind))
+        if loc == "body" and kind in _UNREADABLE_BODY_TYPES:
+            unreadable_body = True
+        if len(parts) < _MAX_REPORTED_ERRORS:
+            parts.append(f"{loc}: {error.get('msg') or kind or 'invalid'}")
+
+    detail = "; ".join(parts)
+    if len(detail) > _MAX_MESSAGE_CHARS:
+        detail = detail[:_MAX_MESSAGE_CHARS].rstrip() + "…"
+    remaining = len(seen) - len(parts)
+    if remaining > 0:
+        detail = f"{detail} (and {remaining} more)"
+
+    # The one failure whose cause is not in the error itself. A body sent as
+    # form-encoded bytes is handed to the model unparsed, and the resulting
+    # "Input should be a valid dictionary" says nothing about the header that
+    # actually caused it.
+    if unreadable_body and not _is_json_content_type(request):
+        detail = (
+            f"{detail}. Send the body as JSON with the "
+            "Content-Type: application/json header"
+        )
+    return f"Invalid request: {detail}" if detail else "Invalid request"
+
+
 # Headers that describe *this* response's body. JSONResponse computes them from
 # the envelope it is about to serialize, so forwarding an exception's copies
 # would describe the body we discarded — a wrong Content-Length is a broken

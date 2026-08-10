@@ -50,7 +50,15 @@ class ApprovalModeInfo(BaseModel):
 class ApprovalModeSet(BaseModel):
     """Set-the-mode request body."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "session_key": "session:2d20edc1:user:165137",
+                "mode": "on-miss",
+            }
+        },
+    )
 
     session_key: str = Field(description="Session to change the mode for.")
     mode: ApprovalMode = Field(description="The mode to set.")

@@ -52,8 +52,8 @@ async def list_bot_identity_files(
 ) -> Envelope[IdentityFileList]:
     """List a bot's identity files and whether each exists.
 
-    I2: entity_type/entity_id/operator_id come from the authenticated
-    request's ``user_id`` parameter (personal bot owner = the named user).
+    Every possible file is listed, including the ones the bot does not have yet
+    — read `exists` to tell them apart.
     """
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
@@ -88,12 +88,8 @@ async def get_bot_identity_file(
 ) -> Envelope[IdentityFile]:
     """Read one identity file of a bot.
 
-    I2: entity params come from the authenticated principal via
-    ``UserIdDep`` (personal bot owner = the named user). I3: ``publish_id`` is
-    not exposed — only draft-device reads (``get_bot_file`` default branch).
-    The service's ``validate_file_type`` requires the physical ``<type>.md``
-    form (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is
-    re-suffixed before forwarding.
+    Name the file by its type — `RULES`, not `RULES.md`. A file the bot does not
+    have yet reads as empty content rather than a 404.
     """
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id
@@ -133,9 +129,9 @@ async def update_bot_identity_file(
 ) -> Envelope[IdentityFileRef]:
     """Overwrite one identity file of a bot.
 
-    I2: entity params come from the authenticated principal via
-    ``UserIdDep`` as above; ``validate_file_type`` requires the
-    ``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).
+    The body replaces the file's whole content; there is no append. Name the
+    file by its type — `RULES`, not `RULES.md`. Writing a file the bot does not
+    have creates it. The content is not echoed back.
     """
     entity_type = "staff"  # personal bot owner is a staff entity
     entity_id = owner_id

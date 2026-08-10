@@ -107,13 +107,25 @@ class Session(BaseModel):
 
 
 class SessionCreate(BaseModel):
-    """Create-a-session request body."""
+    """Create-a-session request body. Both fields are optional, but the body itself
+    is required — send `{}` to create a session with the bot's defaults."""
 
     # No user_id / engine fields: the caller is the authenticated principal and
     # the engine is the bot's active one. extra="forbid" turns an attempt to
     # supply either into a 422 rather than a silent drop.
+    #
+    # The example is what makes the body discoverable. Every field being optional
+    # does NOT make the body optional — FastAPI still requires it — so a caller
+    # reading a schema with no example had nothing to send and got
+    # `{'loc': ('body',), 'type': 'missing'}` back. The docstring says so and the
+    # example shows one.
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"title": "Quarterly report", "model": "openai/gpt-5.3"}
+        },
+    )
 
     # Only fields every engine on this surface actually persists — the same
     # ruling `cwd` got on SessionUpdate, for the same reason. An agent was
@@ -135,7 +147,10 @@ class SessionCreate(BaseModel):
 class SessionUpdate(BaseModel):
     """Partial update. Omitted fields are left unchanged."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": {"title": "Quarterly report (final)"}},
+    )
 
     # Only fields every engine on this surface actually applies. A working
     # directory was offered here and withdrawn: one of the two bundled engines

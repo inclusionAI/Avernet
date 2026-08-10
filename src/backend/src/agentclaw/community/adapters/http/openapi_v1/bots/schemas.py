@@ -13,7 +13,14 @@ from agentclaw.community.adapters.http.openapi_v1.clusters import ClusterName
 # is silently dropped and the caller gets a 200 believing it was applied. With
 # ``forbid`` the request fails validation instead — and the public validation
 # handler renders that as the standard Envelope.
-_STRICT = ConfigDict(extra="forbid")
+#
+# The example is not decoration either: it is what an API console renders into
+# the request pane, and a body model without one arrives at the caller as an
+# empty editor. The two belong together on every request model, which is why
+# they are produced by one helper rather than declared separately.
+def _request_body(example: dict[str, object]) -> ConfigDict:
+    """Config for a request-body model: strict, and carrying its example."""
+    return ConfigDict(extra="forbid", json_schema_extra={"example": example})
 
 # The only two types this creation flow can carry to completion. "desktop" bots
 # are inserted and then deliberately skipped by create_bot's device allocation,
@@ -30,29 +37,71 @@ _CLUSTER_DESC = (
 )
 
 
+_ENGINE_DESC = (
+    "Runtime engine that powers the bot. The accepted names are deployment "
+    "configuration rather than a fixed set, so an unknown name is refused (400) "
+    "instead of being published as an enum here."
+)
+
+_BOT_TYPE_DESC = (
+    "'personal' for a bot only its owner operates, 'service' for one that can be "
+    "published to verify/online runtimes. No other value is accepted."
+)
+
+
 class Bot(BaseModel):
     """An agent (bot) record."""
 
-    bot_id: str
-    bot_name: str
-    bot_desc: str
-    engine: str
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "bot_id": "20260810_q5o4c89g",
+                "bot_name": "Quarterly reporter",
+                "bot_desc": "Drafts the quarterly report from the team's notes.",
+                "engine": "openclaw",
+                "cluster_name": "ACRA",
+                "bot_type": "personal",
+                "status": "ACTIVE",
+                "owner_entity_id": "511488",
+            }
+        }
+    )
+
+    bot_id: str = Field(
+        description="Identifier of the bot. Use this value in the path of the "
+        "bot-scoped endpoints."
+    )
+    bot_name: str = Field(description="Human-readable bot name.")
+    bot_desc: str = Field(description="What the bot is for; may be empty.")
+    engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    bot_type: str
+    bot_type: str = Field(description=_BOT_TYPE_DESC)
     status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
-    owner_entity_id: str
+    owner_entity_id: str = Field(description="The user this bot belongs to.")
 
 
 class BotCreate(BaseModel):
     """Create-a-bot request body."""
 
-    model_config = _STRICT
+    model_config = _request_body(
+        {
+            "bot_name": "Quarterly reporter",
+            "bot_desc": "Drafts the quarterly report from the team's notes.",
+            "engine": "openclaw",
+            "cluster_name": "ACRA",
+            "bot_type": "personal",
+        }
+    )
 
-    bot_name: str
-    bot_desc: str
-    engine: str
+    bot_name: str = Field(
+        description="Name for the new bot. Must be unique within your tenant — "
+        "check it first with the name-availability endpoint."
+    )
+    bot_desc: str = Field(description="What the bot is for. Send an empty string "
+        "to leave it blank.")
+    engine: str = Field(description=_ENGINE_DESC)
     cluster_name: ClusterName = Field(description=_CLUSTER_DESC)
-    bot_type: BotType
+    bot_type: BotType = Field(description=_BOT_TYPE_DESC)
     # ``engine_options`` is deliberately absent. Nothing downstream consumes
     # ``BotCreateSpec.extra_properties`` yet, so declaring the field would
     # publish a contract slot the server rejects on every non-empty value —
@@ -63,18 +112,19 @@ class BotCreate(BaseModel):
 
 
 class BotUpdate(BaseModel):
-    """Partial update — only the fields this operation can actually apply.
+    """Partial update. Omit a field to leave it unchanged.
 
-    ``engine``, ``cluster_name`` and ``engine_options`` are all deliberately
-    absent *and* rejected by ``extra="forbid"``. Declaring them for symmetry
-    would mean answering 200 to a request that changed nothing: the engine is
-    fixed at creation, ``cluster_name`` is derived from it, and engine options
-    are managed through the engine-config endpoints. A caller that sends one now
-    gets a validation error naming the field instead of a success they have to
-    verify by re-reading the bot.
+    Only the name and description can be changed. A bot's engine is fixed at
+    creation, its cluster is derived from the engine, and engine options are
+    managed through the engine-config endpoints — sending any of those here is
+    refused (422) rather than silently ignored.
     """
 
-    model_config = _STRICT
+    # Rejecting them is the point, and the alternative was worse: declaring the
+    # immutable fields for symmetry would mean answering 200 to a request that
+    # changed nothing, which the caller could only detect by re-reading the bot.
+
+    model_config = _request_body({"bot_name": "Quarterly reporter"})
 
     # Declared ``str`` with a ``None`` default on purpose. Omitting a field means
     # "leave it alone" — that is what the default encodes, and defaults are not
@@ -93,42 +143,63 @@ class BotUpdate(BaseModel):
 
 
 class BotAuthPending(BaseModel):
-    """Returned (202) when bot creation needs user authorization (Passport).
+    """Returned (202) when bot creation needs the user to authorize it first.
 
-    Passport may hand back either handle, so both are surfaced: a caller that
-    only receives ``redirect_url`` would otherwise have no way to complete
-    authorization. Each is empty when Passport did not supply it.
+    Open either handle to complete authorization, then poll the auth-status
+    endpoint. Both are surfaced because the issuer supplies one or the other;
+    each is empty when it was not supplied.
     """
 
-    bot_id: str
-    iframe_url: str = ""
-    redirect_url: str = ""
+    bot_id: str = Field(description="Identifier the bot will be created with.")
+    iframe_url: str = Field(
+        default="", description="Authorization page to embed; empty if none."
+    )
+    redirect_url: str = Field(
+        default="", description="Authorization page to redirect to; empty if none."
+    )
 
 
 class BotAuthStatus(BaseModel):
-    """Passport authorization status; ``bot`` is present once ISSUED."""
+    """Authorization status of a pending bot creation."""
 
-    status: str
-    message: str | None = None
-    bot: Bot | None = None
+    status: str = Field(
+        description="Authorization state reported by the issuer. The bot is "
+        "created once it reads ISSUED."
+    )
+    message: str | None = Field(
+        default=None, description="Why authorization is not complete; null when "
+        "there is nothing to report."
+    )
+    bot: Bot | None = Field(
+        default=None, description="The created bot, present only once the "
+        "authorization has been issued."
+    )
 
 
 class BotStatus(BaseModel):
-    """Runtime / device readiness of a bot."""
+    """Runtime readiness of a bot."""
 
-    status: str
-    is_ready: bool
-    device_id: str | None = None
+    status: str = Field(description="Lifecycle status: PENDING | ACTIVE | FAILED.")
+    is_ready: bool = Field(
+        description="True when the bot has a bound device and can take work."
+    )
+    device_id: str | None = Field(
+        default=None, description="Device currently bound to the bot; null when "
+        "none is bound yet."
+    )
 
 
 class Ceiling(BaseModel):
-    """Per-caller bot creation quota ceiling."""
+    """How many bots the caller may create."""
 
-    ceiling: int
+    ceiling: int = Field(
+        description="Maximum number of bots this caller may own. Creating beyond "
+        "it is refused."
+    )
 
 
 class Passport(BaseModel):
-    """Agent Passport (identity credential) summary."""
+    """A bot's identity credential."""
 
-    bot_id: str
-    passport_id: str
+    bot_id: str = Field(description="Bot the credential belongs to.")
+    passport_id: str = Field(description="Identifier of the issued credential.")

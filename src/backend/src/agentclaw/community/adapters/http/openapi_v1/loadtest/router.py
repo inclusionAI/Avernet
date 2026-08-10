@@ -64,7 +64,7 @@ _AUTH = [Depends(require_principal)]
 @router.get("/hello", response_model=Envelope[HelloWorld], dependencies=_AUTH)
 @envelope_errors
 async def hello_world(request: Request) -> Envelope[HelloWorld]:
-    """Answer the constant ``hello world``.
+    """Answer the constant "hello world".
 
     Reads nothing and calls nothing, so the response time is the path's, not the
     handler's.
