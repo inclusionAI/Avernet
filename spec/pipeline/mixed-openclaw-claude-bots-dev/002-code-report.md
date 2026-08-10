@@ -49,3 +49,12 @@ created: 2026-08-08T18:30:00+08:00
 - 回归：新增 shell 场景以会失败的假 `npm` 验证运行时绝不调用 npm，且仍完成
   plugin link。同步移除已撤回 BCS 行为与 BCS 日志改造的静态 guard，保持 BCS 源码和诊断
   与用户指定的基线一致。
+
+## 迭代 5：Claude Chat 的 SOCKS 代理错误
+
+- 根因：BaaS 的 `websockets.connect` 会自行发现 SOCKS 代理，不复用 HTTP 客户端
+  的 `NO_PROXY` 规则。向本地 Engine adapter 发送 `chat.inject` 时因此要求
+  未安装的 `python-socks`，三个 Claude bot 都无法接收上下文。
+- 修复：仅当目标 URI 解析为 `localhost`、IPv4 loopback 或 IPv6 loopback 时传入
+  `proxy=None`；外部 Engine URL 继续使用库的默认代理策略。诊断只记录“直连环回”
+  状态，不记录 URI、头、消息或凭据。

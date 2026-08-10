@@ -83,6 +83,10 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
     `dist/esm/index.js`, runtime startup uses that artifact even if source files
     are newer. It records a metadata-only rebuild hint; an absent artifact fails
     fast and directs the operator to the explicit BCS setup step.
+14. BaaS-to-Engine WebSocket connections to `localhost` or a loopback IP must
+    bypass a configured SOCKS proxy. External Engine URLs retain the default
+    proxy behavior. The local bypass diagnostic must not record a URI, headers,
+    message text, or credentials.
 
 ## Implemented safety and protocol decisions
 
@@ -113,6 +117,11 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
   reverted Provider-downlink SessionContext override. Those are outside the
   two retained BCS business changes, so the guard checks lifecycle behavior
   without creating a failing requirement against the unchanged base code.
+- The BaaS WebSocket client explicitly passes `proxy=None` only for parsed
+  loopback adapter targets. `websockets` otherwise discovers SOCKS proxy
+  configuration independently of the HTTP client's `NO_PROXY` handling; the
+  explicit loopback bypass prevents local `chat.send` and `chat.inject` from
+  failing when the optional SOCKS Python dependency is absent.
 - BaaS's local SQLite bootstrap supplies the configured internal BCN API-key
   identity.  The downlink service uses that record solely to construct an
   internal Bot chat context after the bridge has authenticated the request;

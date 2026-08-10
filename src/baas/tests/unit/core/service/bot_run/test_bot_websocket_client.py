@@ -21,6 +21,7 @@ import pytest
 from secbaas.community.core.service.bot_run._bot_websocket_client import (
     BotWebSocketClient,
     ChatRequestError,
+    _is_loopback_websocket_uri,
 )
 
 # ==================== Fixtures ====================
@@ -135,6 +136,28 @@ class TestInit:
         assert client.uri == "wss://test.example.com/ws"
 
 
+class TestLoopbackWebSocketUri:
+    """Loopback adapters must never inherit a workstation SOCKS proxy."""
+
+    @pytest.mark.parametrize(
+        "uri",
+        [
+            "ws://localhost:20017/api/openclaw/ws",
+            "ws://127.0.0.1:20017/api/openclaw/ws",
+            "ws://[::1]:20017/api/openclaw/ws",
+        ],
+    )
+    def test_recognizes_loopback_targets(self, uri):
+        assert _is_loopback_websocket_uri(uri) is True
+
+    @pytest.mark.parametrize(
+        "uri",
+        ["wss://adapter.example.com/ws", "ws://192.0.2.1:20017/ws", "not a uri"],
+    )
+    def test_keeps_proxy_policy_for_non_loopback_targets(self, uri):
+        assert _is_loopback_websocket_uri(uri) is False
+
+
 # ==================== Tests: _next_request_id ====================
 
 
@@ -209,7 +232,7 @@ class TestConnect:
             patch(
                 "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
                 side_effect=mock_connect,
-            ),
+            ) as connect,
             patch(
                 "secbaas.community.core.service.bot_run._bot_websocket_client.is_dev",
                 return_value=False,
@@ -223,7 +246,46 @@ class TestConnect:
         assert client.connected is True
         assert client.server_info == {"version": "2.5"}
         assert client.features == {"chat": True}
+        assert "proxy" not in connect.call_args.kwargs
 
+        await client.close()
+
+    async def test_connect_bypasses_proxy_for_loopback_adapter(self):
+        """Loopback Engine WebSockets must not require python-socks."""
+        client = BotWebSocketClient(uri="ws://127.0.0.1:20017/api/openclaw/ws")
+        mock_ws = AsyncMock()
+
+        async def mock_send(data):
+            request_id = json.loads(data)["id"]
+            future = client._pending_requests.get(request_id)
+            if future is not None and not future.done():
+                future.set_result(
+                    {
+                        "type": "res",
+                        "id": request_id,
+                        "ok": True,
+                        "payload": {"server": {}, "features": {}},
+                    }
+                )
+
+        mock_ws.send = mock_send
+        mock_ws.close = AsyncMock()
+        mock_ws.__aiter__ = AsyncMock(return_value=iter([]))
+
+        with (
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.websockets.connect",
+                new_callable=AsyncMock,
+                return_value=mock_ws,
+            ) as connect,
+            patch(
+                "secbaas.community.core.service.bot_run._bot_websocket_client.is_dev",
+                return_value=False,
+            ),
+        ):
+            await client.connect(timeout=2.0)
+
+        assert connect.call_args.kwargs["proxy"] is None
         await client.close()
 
     # [单测用例]测试场景：重复连接抛出异常

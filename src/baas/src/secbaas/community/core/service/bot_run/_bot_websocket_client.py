@@ -10,12 +10,14 @@ OpenClaw WebSocket 客户端（纯异步版本）
 """
 
 import asyncio
+import ipaddress
 import json
 import os
 import ssl
 import uuid
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 import websockets
 from websockets.asyncio.client import ClientConnection
@@ -27,6 +29,19 @@ logger = get_logger("core-bot-run")
 
 # 事件处理器类型：同步或异步均可，不关心返回值
 EventHandler = Callable[..., Any]
+
+
+def _is_loopback_websocket_uri(uri: str) -> bool:
+    """Return whether a WebSocket URI targets a local adapter endpoint."""
+    hostname = urlsplit(uri).hostname
+    if not hostname:
+        return False
+    if hostname.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class ChatRequestError(Exception):
@@ -145,14 +160,20 @@ class BotWebSocketClient:
         # 会导致 keepalive ping timeout 断连。
         # 连接存活性由服务端应用层 tick 事件（每 30s）保证。
         additional_headers = websockets.Headers(headers)
+        connect_kwargs: dict[str, Any] = {
+            "additional_headers": additional_headers,
+            "ssl": ssl_context,
+            "open_timeout": open_timeout,
+            "ping_interval": None,
+        }
+        if _is_loopback_websocket_uri(self.uri):
+            # websockets discovers SOCKS proxy settings independently from
+            # HTTP client's NO_PROXY handling. Engine adapters are loopback
+            # only, so they must connect directly without exposing URI data.
+            connect_kwargs["proxy"] = None
+            logger.debug("WebSocket connection uses direct loopback transport")
         self._ws = await asyncio.wait_for(
-            websockets.connect(
-                self.uri,
-                additional_headers=additional_headers,
-                ssl=ssl_context,
-                open_timeout=open_timeout,
-                ping_interval=None,
-            ),
+            websockets.connect(self.uri, **connect_kwargs),
             timeout=timeout,
         )
         self._connected = True
