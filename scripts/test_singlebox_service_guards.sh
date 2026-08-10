@@ -63,6 +63,21 @@ test_all_start_rolls_back_started_services_on_failure() {
     "all_start rollback order"
 }
 
+test_mixed_all_preflight_rejects_external_port_before_restart() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/all.sh"
+
+  claude_bots_enabled() { return 0; }
+  lsof() { printf '%s\n' '4242'; }
+  process_cwd() { printf '%s\n' '/tmp/another-checkout'; }
+  path_is_under_dir() { return 1; }
+
+  if all_mixed_port_ownership_preflight; then
+    fail "mixed preflight must reject a listener owned by another checkout"
+  fi
+)
+
 test_backend_health_failure_stops_backend() {
   setup_env
   # shellcheck source=/dev/null
@@ -184,13 +199,52 @@ test_frontend_install_includes_dev_dependencies() (
   esac
 )
 
+test_frontend_stdin_keeper_survives_singlebox_exit() {
+  local source
+  source="${ROOT}/scripts/modules/frontend.sh"
+
+  grep -F "nohup bash -c 'tail -f /dev/null | npm run \"\$1\"' bash \"\$frontend_script\"" "$source" >/dev/null || \
+    fail "frontend stdin keeper and npm must share the nohup process group"
+  if grep -F 'tail -f /dev/null | BCS_PORT=' "$source" >/dev/null; then
+    fail "frontend must not leave the stdin keeper outside nohup"
+  fi
+}
+
+test_frontend_human_sender_uses_workbench_bot_id() {
+  local provider_hook group_chat_page user_collab_tab use_group_chat
+  provider_hook="${ROOT}/src/frontend/src/pages/GroupChat/hooks/useGroupChatProviders.ts"
+  group_chat_page="${ROOT}/src/frontend/src/pages/GroupChat/components/GroupChatPage.tsx"
+  user_collab_tab="${ROOT}/src/frontend/src/pages/GroupChat/components/BottomPanel/UserCollabTab.tsx"
+  use_group_chat="${ROOT}/src/frontend/src/pages/GroupChat/hooks/useGroupChat.ts"
+
+  grep -F 'frame.params.bot_id = frame.params.sender_id;' "$provider_hook" >/dev/null || \
+    fail "frontend BCS transport must map the authenticated human sender to bot_id"
+  grep -F 'sendMessage(msg, mentions, undefined, activeSession?.sessionId, senderId);' "$group_chat_page" >/dev/null || \
+    fail "group chat must not reuse a human sender as the bot_uuid argument"
+  grep -F 'userId ? `human_${userId}` : undefined,' "$user_collab_tab" >/dev/null || \
+    fail "user collaboration sender must retain the authenticated human identity"
+  grep -F "console.debug('[useGroupChat] Sending message'" "$use_group_chat" >/dev/null || \
+    fail "frontend send diagnostics must be metadata-only"
+  if grep -F "console.log('[useGroupChat] Sending message with params:', params);" "$use_group_chat" >/dev/null; then
+    fail "frontend send diagnostics must not log chat params containing user content"
+  fi
+}
+
+test_bcsfuse_status_loads_runtime_before_pid_lookup() {
+  local module
+  module="${ROOT}/scripts/modules/bcsfuse.sh"
+  grep -A8 '^bcsfuse_status()' "$module" | grep -F 'bcsfuse_load_env' >/dev/null || \
+    fail "bcsfuse status must resolve standalone runtime paths before reading its pid file"
+}
+
 test_service_modules_use_ownership_aware_stop_helpers() {
   local offenders
   offenders="$(
     grep -nE 'kill_port_process|kill_process_by_path' \
       "${ROOT}/scripts/modules/backend.sh" \
       "${ROOT}/scripts/modules/baas.sh" \
-      "${ROOT}/scripts/modules/engine.sh" || true
+      "${ROOT}/scripts/modules/engine.sh" \
+      "${ROOT}/scripts/modules/bcsfuse.sh" || true
   )"
   [ -z "$offenders" ] || fail "service modules still use unsafe kill helpers: ${offenders}"
 }
@@ -202,6 +256,8 @@ test_service_starts_fail_when_ports_remain_occupied() {
     fail "baas_start should fail if port 8890 remains occupied after owned cleanup"
   grep -F 'require_port_available_after_owned_stop 20003 "engine"' "${ROOT}/scripts/modules/engine.sh" >/dev/null || \
     fail "engine_start should fail if port 20003 remains occupied after owned cleanup"
+  grep -F 'require_port_available_after_owned_stop "${BCSFUSE_PORT}" "bcsfuse"' "${ROOT}/scripts/modules/bcsfuse.sh" >/dev/null || \
+    fail "bcsfuse_start should fail if its port remains occupied after owned cleanup"
 }
 
 test_baas_stop_does_not_delegate_to_app_stop() {
@@ -217,6 +273,19 @@ test_baas_stop_does_not_delegate_to_app_stop() {
   grep -F 'stop_port_processes_if_owned "$port"' <<<"$stop_body" >/dev/null || \
     fail "baas_stop should clean the BAAS port with ownership verification"
 }
+
+test_baas_ready_requires_its_health_endpoint() (
+  setup_env
+  # shellcheck source=/dev/null
+  source "${ROOT}/scripts/modules/baas.sh"
+
+  curl() { return 0; }
+  baas_ready || fail "baas_ready should pass when the local BAAS health endpoint responds"
+  curl() { return 1; }
+  if baas_ready; then
+    fail "baas_ready must fail when the local BAAS health endpoint is unavailable"
+  fi
+)
 
 test_baas_bot_cleanup_preserves_bcs_sessions() {
   setup_env
@@ -513,6 +582,15 @@ test_ready_banner_describes_full_stack() {
     fail "ready banner should include backend services"
   grep -F '5BOTS DEMO FRONTEND' "${ROOT}/scripts/utils.sh" >/dev/null || \
     fail "ready banner should include demo bot and frontend"
+  grep -F '5 OPENCLAW + 3 CLAUDE CODE' "${ROOT}/scripts/utils.sh" >/dev/null || \
+    fail "mixed ready banner should identify the complete eight-bot topology"
+}
+
+test_frontend_only_banner_does_not_claim_full_stack_ready() {
+  grep -F 'FRONTEND SERVICE READY' "${ROOT}/scripts/utils.sh" >/dev/null || \
+    fail "frontend-only banner must identify itself as a service readiness hint"
+  grep -F 'not verified by this service-only command' "${ROOT}/scripts/utils.sh" >/dev/null || \
+    fail "frontend-only banner must not imply backend or BCS readiness"
 }
 
 test_backend_separates_profile_env_and_workspace_folder() {
@@ -539,15 +617,123 @@ test_backend_separates_profile_env_and_workspace_folder() {
   fi
 }
 
+test_restart_all_preflights_before_stopping() {
+  local restart_body all_restart_body preflight_line stop_line
+  restart_body="$(sed -n '/^        restart)/,/^        clean)/p' "${ROOT}/scripts/singlebox.sh")"
+  all_restart_body="$(sed -n '/^all_restart()/,/^all_clean()/p' "${ROOT}/scripts/modules/all.sh")"
+  preflight_line="$(grep -n 'all_preflight restart' <<<"$all_restart_body" | head -1 | cut -d: -f1)"
+  stop_line="$(grep -n '^    all_stop$' <<<"$all_restart_body" | head -1 | cut -d: -f1)"
+  [ -n "$preflight_line" ] && [ -n "$stop_line" ] && [ "$preflight_line" -lt "$stop_line" ] || \
+    fail "all_restart must preflight before stopping the current stack"
+  grep -F 'restart_service "$svc" || exit 1' <<<"$restart_body" >/dev/null || \
+    fail "restart all must dispatch through the all-group lifecycle"
+  if grep -F 'stop_service "$svc"' <<<"$restart_body" >/dev/null; then
+    fail "top-level restart must not decompose all into individual service stops"
+  fi
+}
+
+test_bcs_baas_provider_uses_h2c_and_owned_lifecycle() {
+  local module stop_body
+  module="${ROOT}/scripts/modules/bcs_baas_provider.sh"
+  grep -F 'bcs_baas_provider_bridge.mjs' "$module" >/dev/null || \
+    fail "Provider bridge module must launch the h2c bridge"
+  grep -F 'cd "$PROJECT_ROOT"' "$module" >/dev/null || \
+    fail "Provider bridge must start from the current checkout for owned PID cleanup"
+  grep -F 'X-Mock-User-Id: ${bcs_owner_id}' "$module" >/dev/null || \
+    fail "Provider registration must use the active BCS mock user"
+  grep -F 'provider_ref="${bot_id}:${backend_entity_id}"' "$module" >/dev/null || \
+    fail "Provider ref must retain the Backend bot owner for BaaS binding lookup"
+  grep -F -- '--arg owner "$bcs_owner_id"' "$module" >/dev/null || \
+    fail "Provider bot owner must be the active BCS user"
+  grep -F '/bots/${bot_uuid}/visibility' "$module" >/dev/null || \
+    fail "Provider bot registration must publish its local BCS bot"
+  stop_body="$(sed -n '/^bcs_baas_provider_stop()/,/^bcs_baas_provider_ready()/p' "$module")"
+  grep -F 'port_is_listening "$BCS_BAAS_PROVIDER_PORT"' <<<"$stop_body" >/dev/null || \
+    fail "Provider bridge stop must retain state when a non-owned port listener remains"
+  grep -F 'createServer' "${ROOT}/scripts/bcs_baas_provider_bridge.mjs" >/dev/null || \
+    fail "Provider bridge must use a native HTTP/2 server"
+  if grep -F 'provider_tokens' "${ROOT}/scripts/bcs_baas_provider_bridge.mjs" >/dev/null; then
+    fail "Provider bridge must not accept unbound legacy provider tokens"
+  fi
+}
+
+test_bcs_sse_diagnostics_do_not_log_raw_chat_payloads() {
+  local source
+  source="${ROOT}/src/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs"
+  if grep -F 'sse_data =' "$source" >/dev/null; then
+    fail "BCS SSE diagnostics must not log raw SSE data"
+  fi
+  if grep -F '?other, "unexpected agent data' "$source" >/dev/null; then
+    fail "BCS SSE diagnostics must not debug-log opaque agent data"
+  fi
+  if grep -F 'webhook_url = %webhook_url,' "$source" >/dev/null; then
+    fail "BCS Provider diagnostics must redact webhook URL credentials and query values"
+  fi
+}
+
+test_bcs_bot_diagnostics_do_not_log_raw_frames_or_tokens() {
+  local ws_handler bot_core bot_store memory_store
+  ws_handler="${ROOT}/src/bcs/crates/adapters/ws/bcs-ws/src/bot/handler.rs"
+  bot_core="${ROOT}/src/bcs/crates/services/bcs-bot/src/core/bot_core.rs"
+  bot_store="${ROOT}/src/bcs/crates/services/bcs-bot-store/src/lib.rs"
+  memory_store="${ROOT}/src/bcs/crates/services/bcs-bot-store/src/memory.rs"
+
+  if grep -F 'text = %text' "$ws_handler" >/dev/null; then
+    fail "BCS bot WebSocket diagnostics must not log raw client frames"
+  fi
+  if grep -E 'token(_preview)? = %' "$bot_core" "$bot_store" "$memory_store" >/dev/null; then
+    fail "BCS bot diagnostics must not log token values or previews"
+  fi
+}
+
+test_claude_relay_diagnostics_do_not_log_token_previews() {
+  local router
+  router="${ROOT}/src/engine/src/engine/community/claude_code_gateway/src/claude-code-router.ts"
+  if grep -E 'ANTHROPIC_AUTH_TOKEN.*substring|token.*substring' "$router" >/dev/null; then
+    fail "Claude relay diagnostics must not log token previews"
+  fi
+}
+
+test_provider_session_context_is_silent_by_default() {
+  local source test_source
+  source="${ROOT}/src/bcs/crates/services/bcs-system-message/src/producers/session_context.rs"
+  test_source="${ROOT}/src/bcs/crates/services/bcs-system-message/src/producers/session_context_test.rs"
+
+  grep -F 'else if has_provider_downlink_bot' "$source" >/dev/null || \
+    fail "Provider groups must detect downlink participants during SessionContext delivery"
+  grep -F 'DeliveryType::Inject' "$source" >/dev/null || \
+    fail "Provider groups must inject SessionContext instead of starting a hidden driver turn"
+  grep -F 'provider_downlink_group_initializes_driver_with_inject' "$test_source" >/dev/null || \
+    fail "Provider SessionContext delivery must retain its Rust regression test"
+}
+
+test_local_frontend_hides_stale_claude_roles() {
+  local network groups
+  network="${ROOT}/src/frontend/src/pages/GroupChat/hooks/useBotNetwork.ts"
+  groups="${ROOT}/src/frontend/src/pages/GroupChat/hooks/useGroups.ts"
+
+  grep -F 'filterStaleLocalClaudeRoles' "$network" >/dev/null || \
+    fail "Bot tabs must filter stale local Claude roles"
+  grep -F 'filterStaleLocalClaudeRoles' "$groups" >/dev/null || \
+    fail "Bot picker must filter stale local Claude roles"
+  grep -F 'Claude (Planner|Developer|Reviewer)' "$network" >/dev/null || \
+    fail "Bot tab filtering must be scoped to the three local Claude roles"
+}
+
 test_all_start_rolls_back_started_services_on_failure
+test_mixed_all_preflight_rejects_external_port_before_restart
 test_backend_health_failure_stops_backend
 test_backend_wait_fails_when_started_process_exits
 test_frontend_start_prepares_dependencies_before_launch
 test_frontend_deps_require_dev_commands
 test_frontend_install_includes_dev_dependencies
+test_frontend_stdin_keeper_survives_singlebox_exit
+test_frontend_human_sender_uses_workbench_bot_id
+test_bcsfuse_status_loads_runtime_before_pid_lookup
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop
+test_baas_ready_requires_its_health_endpoint
 test_baas_bot_cleanup_preserves_bcs_sessions
 test_baas_session_backup_normalizes_trailing_slashes
 test_baas_session_restore_normalizes_trailing_slashes
@@ -560,6 +746,14 @@ test_baas_start_aborts_when_bcn_plugin_setup_fails
 test_5bot_openclaw_config_is_written_private
 test_local_bcs_launchers_supply_required_signing_keys
 test_ready_banner_describes_full_stack
+test_frontend_only_banner_does_not_claim_full_stack_ready
 test_backend_separates_profile_env_and_workspace_folder
+test_restart_all_preflights_before_stopping
+test_bcs_baas_provider_uses_h2c_and_owned_lifecycle
+test_bcs_sse_diagnostics_do_not_log_raw_chat_payloads
+test_bcs_bot_diagnostics_do_not_log_raw_frames_or_tokens
+test_claude_relay_diagnostics_do_not_log_token_previews
+test_provider_session_context_is_silent_by_default
+test_local_frontend_hides_stale_claude_roles
 
 printf 'PASS: singlebox service guard tests\n'

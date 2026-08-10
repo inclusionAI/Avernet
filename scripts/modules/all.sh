@@ -10,11 +10,76 @@ _ALL_SH_LOADED=1
 # collaboration, bots starts the 5 local profiles, demo_bot starts the
 # backend-created developer bot, then frontend exposes the workbench. BCN
 # onboarding remains an explicit product action.
-SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
-START_ORDER=(baas backend bcs bcsfuse bots demo_bot frontend)
-STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
+DEFAULT_SETUP_ORDER=(baas backend bcs bcsfuse bots frontend)
+DEFAULT_START_ORDER=(baas backend bcs bcsfuse bots demo_bot frontend)
+DEFAULT_STOP_ORDER=(frontend demo_bot bots bcsfuse bcs backend baas)
+MIXED_SETUP_ORDER=(claude_relays baas backend bcs bcsfuse bots claude_bots bcs_baas_provider frontend)
+MIXED_START_ORDER=(claude_relays baas backend bcs bcsfuse bots claude_bots bcs_baas_provider frontend)
+MIXED_STOP_ORDER=(frontend bcs_baas_provider claude_bots bots bcsfuse bcs backend baas claude_relays)
+SETUP_ORDER=("${DEFAULT_SETUP_ORDER[@]}")
+START_ORDER=("${DEFAULT_START_ORDER[@]}")
+STOP_ORDER=("${DEFAULT_STOP_ORDER[@]}")
+
+all_select_topology() {
+    if type -t claude_bots_enabled &>/dev/null && claude_bots_enabled; then
+        SETUP_ORDER=("${MIXED_SETUP_ORDER[@]}")
+        START_ORDER=("${MIXED_START_ORDER[@]}")
+        STOP_ORDER=("${MIXED_STOP_ORDER[@]}")
+        return 0
+    fi
+    SETUP_ORDER=("${DEFAULT_SETUP_ORDER[@]}")
+    START_ORDER=("${DEFAULT_START_ORDER[@]}")
+    STOP_ORDER=("${DEFAULT_STOP_ORDER[@]}")
+}
+
+# A mixed stack owns the complete local collaboration topology.  Do not let a
+# restart tear down its owned processes only to fail later because another
+# checkout already owns one of the required ports.
+all_mixed_port_is_available_or_owned() {
+    local port="$1"
+    local service_name="$2"
+    local pids pid cwd
+
+    pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+    [ -z "$pids" ] && return 0
+
+    for pid in $pids; do
+        cwd="$(process_cwd "$pid")"
+        if [ -z "$cwd" ] || ! path_is_under_dir "$cwd" "$PROJECT_ROOT"; then
+            log_error "Mixed stack preflight blocked: ${service_name} port ${port} is owned outside this checkout (PID ${pid}, cwd=${cwd:-unknown})."
+            log_error "Stop the external stack before retrying; no services from this checkout were stopped."
+            return 1
+        fi
+    done
+}
+
+all_mixed_port_ownership_preflight() {
+    if ! type -t claude_bots_enabled &>/dev/null || ! claude_bots_enabled; then
+        return 0
+    fi
+
+    # Relay ports are fixed by the strict mixed-config schema.  The remaining
+    # ports are the listeners managed by this all topology.
+    all_mixed_port_is_available_or_owned 18910 "Claude planner relay" || return 1
+    all_mixed_port_is_available_or_owned 18911 "Claude developer relay" || return 1
+    all_mixed_port_is_available_or_owned 18912 "Claude reviewer relay" || return 1
+    all_mixed_port_is_available_or_owned 20003 "engine adapter" || return 1
+    all_mixed_port_is_available_or_owned 8890 "BAAS" || return 1
+    all_mixed_port_is_available_or_owned 8888 "Backend" || return 1
+    all_mixed_port_is_available_or_owned "${BCS_PORT}" "BCS" || return 1
+    all_mixed_port_is_available_or_owned "${BCSFUSE_PORT}" "BCSFuse" || return 1
+    all_mixed_port_is_available_or_owned "${BCS_BAAS_PROVIDER_PORT}" "BCS Provider bridge" || return 1
+    all_mixed_port_is_available_or_owned "${FRONTEND_PORT}" "Frontend" || return 1
+}
+
+all_preflight() {
+    all_select_topology
+    SINGLEBOX_COMMAND="${1:-start}" check_prereqs_for_services "${START_ORDER[@]}" || return 1
+    all_mixed_port_ownership_preflight
+}
 
 all_setup() {
+    all_select_topology
     for svc in "${SETUP_ORDER[@]}"; do
         if type -t "${svc}_setup" &>/dev/null; then
             log_info ">>> Setting up ${svc}..."
@@ -29,7 +94,8 @@ all_setup() {
 }
 
 all_start() {
-    SINGLEBOX_COMMAND=start check_prereqs_for_services ${START_ORDER[*]} || return 1
+    all_select_topology
+    all_preflight start || return 1
     mkdir -p "${LOG_DIR}"
     local started_services=()
     local svc
@@ -86,6 +152,7 @@ all_rollback_started_services() {
 }
 
 all_stop() {
+    all_select_topology
     # Stop services in reverse start order
     for svc in "${STOP_ORDER[@]}"; do
         if type -t "${svc}_stop" &>/dev/null; then
@@ -95,12 +162,37 @@ all_stop() {
 }
 
 all_restart() {
+    all_select_topology
+    # Never stop a usable local stack before confirming the replacement can
+    # start. This is especially important for a mixed worktree sharing the
+    # default ports with another checkout.
+    all_preflight restart || return 1
     all_stop
+
+    # Keep the all-group restart atomic. The top-level dispatcher must not
+    # reproduce this lifecycle service-by-service, otherwise a partial
+    # dispatch can leave only the frontend listener running and still print
+    # its module-local ready banner.
+    local mock_started_by_command=0
+    if type -t singlebox_mock_model_stop_required_for_services &>/dev/null \
+        && singlebox_mock_model_stop_required_for_services all; then
+        singlebox_mock_model_stop || return 1
+    fi
     sleep 2
-    all_start
+    if type -t singlebox_mock_model_start &>/dev/null; then
+        singlebox_mock_model_start || return 1
+        mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
+    fi
+    if ! all_start; then
+        if [ "$mock_started_by_command" = "1" ]; then
+            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
+        fi
+        return 1
+    fi
 }
 
 all_clean() {
+    all_select_topology
     for svc in "${STOP_ORDER[@]}"; do
         if type -t "${svc}_clean" &>/dev/null; then
             log_info ">>> Cleaning ${svc}..."
@@ -112,10 +204,15 @@ all_clean() {
 }
 
 all_status() {
+    all_select_topology
     echo ""
     echo "Service Status:"
     echo "==============="
     echo ""
+    if type -t claude_bots_enabled &>/dev/null && claude_bots_enabled; then
+        echo "Topology: 5 OpenClaw bots + 3 Claude Code Provider bots"
+        echo ""
+    fi
 
     for svc in "${START_ORDER[@]}"; do
         if type -t "${svc}_status" &>/dev/null; then
@@ -146,5 +243,6 @@ all_status() {
 }
 
 all_help() {
-    echo "all - BAAS + Backend + BCS + BCSFuse + 5 local bots + demo bot + frontend stack"
+    echo "all - default: BAAS + Backend + BCS + BCSFuse + 5 local bots + demo bot + frontend"
+    echo "      --claude-bots-config: 5 OpenClaw bots + 3 Claude Code Provider bots + frontend"
 }

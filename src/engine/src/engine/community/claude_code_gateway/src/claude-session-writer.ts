@@ -22,6 +22,8 @@ const log = createLogger('server');
 const DEFAULT_PROJECTS_DIR = join(homedir(), '.claude', 'projects');
 
 function getProjectsDir(): string {
+  const configDir = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim() || process.env.CLAUDE_CONFIG_DIR?.trim();
+  if (configDir) return join(configDir, 'projects');
   return process.env.CLAUDE_PROJECTS_DIR || DEFAULT_PROJECTS_DIR;
 }
 
@@ -156,13 +158,23 @@ export function appendToClaudeSessionFile(opts: {
     parentUuid,
     isSidechain: false,
     type: 'user',
-    message: { role: 'user', content: message },
+    // The native Claude SDK persists user turns as text content blocks. A bare
+    // string makes the JSONL look populated but is ignored by resume's
+    // transcript parser, so a later chat.send cannot see an injected turn.
+    message: { role: 'user', content: [{ type: 'text', text: message }] },
     uuid,
     timestamp,
     sessionId: sdkSessionId,
     cwd,
     userType: 'external',
-    syntheticInject: true,
+    // Keep the same required envelope fields as the SDK's native user record.
+    // They are metadata, not credentials, and make the injected entry eligible
+    // for the SDK's normal transcript loader on resume.
+    version: '2.1.80',
+    gitBranch: 'HEAD',
+    entrypoint: 'sdk-ts',
+    permissionMode: 'default',
+    promptId: randomUUID(),
   };
 
   appendFileSync(filePath, JSON.stringify(entry) + '\n', 'utf-8');

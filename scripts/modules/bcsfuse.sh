@@ -177,10 +177,12 @@ bcsfuse_start() {
     local mode="${BCSFUSE_PROVIDER_MODE:-dev}"
     mkdir -p "${LOG_DIR}"
 
-    # Kill old processes — use broad port kill + precise path match to avoid
-    # clobbering unrelated Python processes (e.g. other `main.py` instances).
-    kill_port_process "${BCSFUSE_PORT}"
-    pkill -f "python.*${BCSFUSE_DIR}/main.py" 2>/dev/null || true
+    # Only refresh a bcsfuse process owned by this checkout.  A singlebox
+    # worktree must never terminate another worktree's listener on the shared
+    # default port.
+    stop_port_processes_if_owned "${BCSFUSE_PORT}" "${PROJECT_ROOT}" "existing bcsfuse" || true
+    stop_matching_processes_if_owned "${BCSFUSE_DIR}/main.py" "${PROJECT_ROOT}" "existing bcsfuse process" || true
+    require_port_available_after_owned_stop "${BCSFUSE_PORT}" "bcsfuse" "set BCSFUSE_PORT=<free-port>" || return 1
 
     # Runtime mode: MySQL must be reachable
     if [ "$mode" = "runtime" ]; then
@@ -267,33 +269,13 @@ bcsfuse_stop() {
     if [ -f "${BCSFUSE_PID_FILE}" ]; then
         local pid
         pid=$(cat "${BCSFUSE_PID_FILE}" 2>/dev/null || echo "")
-        if [ -n "$pid" ] && ps -p "$pid" >/dev/null 2>&1; then
-            log_info "Sending SIGTERM to bcsfuse (PID: $pid)..."
-            kill -TERM "$pid" 2>/dev/null || true
-
-            # Wait up to 10 seconds for graceful shutdown
-            local waited=0
-            while [ $waited -lt 10 ]; do
-                if ! ps -p "$pid" >/dev/null 2>&1; then
-                    log_info "bcsfuse stopped gracefully"
-                    break
-                fi
-                sleep 1
-                waited=$((waited + 1))
-            done
-
-            # Force kill if still alive
-            if ps -p "$pid" >/dev/null 2>&1; then
-                log_warn "bcsfuse: Graceful shutdown timeout, force killing..."
-                kill -KILL "$pid" 2>/dev/null || true
-            fi
-        fi
+        stop_process_if_owned "$pid" "${PROJECT_ROOT}" "bcsfuse pidfile process" || true
         rm -f "${BCSFUSE_PID_FILE}"
     fi
 
-    # Fallback: kill by port and precise process path
-    kill_port_process "${BCSFUSE_PORT}"
-    pkill -f "python.*${BCSFUSE_DIR}/main.py" 2>/dev/null || true
+    # Fallback cleanup remains checkout-scoped for stale PID files.
+    stop_port_processes_if_owned "${BCSFUSE_PORT}" "${PROJECT_ROOT}" "bcsfuse" || true
+    stop_matching_processes_if_owned "${BCSFUSE_DIR}/main.py" "${PROJECT_ROOT}" "bcsfuse process" || true
 
     log_info "bcsfuse stopped"
 }
@@ -365,6 +347,10 @@ bcsfuse_clean() {
 # ============ Status ============
 
 bcsfuse_status() {
+    # Status may be invoked without a preceding bcsfuse start in this shell.
+    # Resolve the standalone runtime path before reading its PID file.
+    bcsfuse_load_env
+
     local pid=""
     if [ -f "${BCSFUSE_PID_FILE}" ]; then
         pid=$(cat "${BCSFUSE_PID_FILE}" 2>/dev/null || echo "")

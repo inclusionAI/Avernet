@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "entity_id": "mock-user",
+  "entity_type": "staff",
+  "bots": [
+    {
+      "role": "planner",
+      "name": "Claude Planner",
+      "description": "Local Claude Code planning bot",
+      "relay_port": 18910,
+      "claude_config_dir": "~/.claude-planner",
+      "workspace": "~/.teamclaw/claude-workspaces/planner",
+      "model": ""
+    },
+    {
+      "role": "developer",
+      "name": "Claude Developer",
+      "description": "Local Claude Code implementation bot",
+      "relay_port": 18911,
+      "claude_config_dir": "~/.claude-developer",
+      "workspace": "~/.teamclaw/claude-workspaces/developer",
+      "model": ""
+    },
+    {
+      "role": "reviewer",
+      "name": "Claude Reviewer",
+      "description": "Local Claude Code review bot",
+      "relay_port": 18912,
+      "claude_config_dir": "~/.claude-reviewer",
+      "workspace": "~/.teamclaw/claude-workspaces/reviewer",
+      "model": ""
+    }
+  ]
+}

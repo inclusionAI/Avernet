@@ -145,7 +145,7 @@ const UserCollabTab: React.FC<UserCollabTabProps> = ({
     onSendMessage(
       msg,
       mentions && mentions.length > 0 ? mentions : undefined,
-      userId ? `human_${userId}` : driverBot?.bot_uuid,
+      userId ? `human_${userId}` : undefined,
     );
   };
 

@@ -141,6 +141,17 @@ export function useGroupChatProviders(): UseGroupChatProvidersResult {
               if (frame.method === 'chat.send') {
                 frame.params.session_id = sessionId;
                 frame.params.sessionKey = sessionId;
+                // The SDK serializes its sender as `sender_id`, while the
+                // Workbench WebSocket authorizes the authenticated human via
+                // `bot_id`. Keep `bot_uuid` unset so BCS can choose the
+                // Driver (or explicit mentions) as the recipient.
+                if (typeof frame.params.sender_id === 'string') {
+                  frame.params.bot_id = frame.params.sender_id;
+                  console.debug(
+                    '[useGroupChatProviders] Applied human sender to BCS bot_id',
+                    { sessionId, hasSenderId: true },
+                  );
+                }
               }
             }
             return originalSend(frame);

@@ -743,7 +743,12 @@ const GroupChatPage: React.FC<GroupChatPageProps> = ({
         );
         return;
       }
-      sendMessage(msg, mentions, senderId, activeSession?.sessionId);
+      console.debug('[GroupChatPage] Forwarding user message to BCS', {
+        explicitMentionCount: mentions?.length ?? 0,
+        targetMode: mentions?.length ? 'mention' : 'group_driver',
+        hasHumanSender: Boolean(senderId),
+      });
+      sendMessage(msg, mentions, undefined, activeSession?.sessionId, senderId);
     },
     [
       sendMessage,

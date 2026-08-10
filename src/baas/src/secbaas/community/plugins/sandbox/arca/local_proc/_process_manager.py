@@ -412,6 +412,7 @@ class LocalProcessManager:
         agent_code: str | None = None,
         engine: str = "openclaw",
         admins: list[str] | None = None,
+        adapter_envs: dict[str, str] | None = None,
     ) -> ProcessEntry:
         """Spawn an adapter (+ optional openclaw/hermes) process pair and register them.
 
@@ -451,7 +452,7 @@ class LocalProcessManager:
         logger.info(
             "start() called: device_id=%s bot_id=%s adapter_port=%s engine_port=%s "
             "engine=%s config_dir=%s workspace_dir=%s entity_id=%s "
-            "symbol_json=%s agent_code=%s admins=%s",
+            "symbol_json=%s agent_code=%s admins=%s adapter_env_keys=%s",
             device_id,
             bot_id,
             adapter_port,
@@ -463,6 +464,7 @@ class LocalProcessManager:
             bool(symbol_json),
             agent_code,
             admins,
+            sorted((adapter_envs or {}).keys()),
         )
 
         openclaw_process = None
@@ -524,6 +526,7 @@ class LocalProcessManager:
                 config_dir=config_dir,
                 workspace_dir=workspace_dir,
                 engine=engine,
+                adapter_envs=adapter_envs,
             )
 
             # Step 4: Register
@@ -796,6 +799,7 @@ class LocalProcessManager:
         config_dir: Path,
         workspace_dir: Path,
         engine: str = "openclaw",
+        adapter_envs: dict[str, str] | None = None,
     ) -> subprocess.Popen:
         """Spawn an engine adapter (FastAPI/uvicorn) wired to the selected backend.
 
@@ -806,6 +810,12 @@ class LocalProcessManager:
         log_path = config_dir / "adapter.log"
 
         env = {**os.environ}
+        # Deployment extra envs are per bot.  Apply them after the process-wide
+        # base environment and never log values: model/routing data is useful
+        # for diagnostics only by key, while future fields may be sensitive.
+        for key, value in (adapter_envs or {}).items():
+            if isinstance(key, str) and isinstance(value, str) and key:
+                env[key] = value
         env["SERVER_PORT"] = str(adapter_port)
         env["SERVER_HOST"] = "127.0.0.1"
         env["CHAT_ENGINE"] = engine
@@ -858,8 +868,10 @@ class LocalProcessManager:
             # fall back to the relay's default port 18900.
             env.setdefault("CLAUDE_CODE_RELAY_URL", "ws://127.0.0.1:18900")
             logger.info(
-                "Claude Code engine env: CLAUDE_CODE_RELAY_URL=%s",
-                env["CLAUDE_CODE_RELAY_URL"],
+                "Claude Code engine env configured: relay_url_set=%s role=%s workspace_set=%s",
+                bool(env.get("CLAUDE_CODE_RELAY_URL")),
+                env.get("CLAUDE_CODE_ROLE", ""),
+                bool(env.get("CLAUDE_CODE_WORKSPACE")),
             )
 
         extra_skills_dir = workspace_dir / ".extra-skills"
@@ -885,14 +897,14 @@ class LocalProcessManager:
                 log_path,
             )
         else:
-            relay_url = env.get("AICODING_RELAY_URL") or env.get(
-                "CLAUDE_CODE_RELAY_URL", ""
-            )
             logger.info(
-                "Spawning engine adapter: engine=%s port=%s, relay_url=%s, log=%s",
+                "Spawning engine adapter: engine=%s port=%s, relay_url_set=%s, log=%s",
                 engine,
                 adapter_port,
-                relay_url,
+                bool(
+                    env.get("AICODING_RELAY_URL")
+                    or env.get("CLAUDE_CODE_RELAY_URL")
+                ),
                 log_path,
             )
 

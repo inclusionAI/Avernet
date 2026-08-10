@@ -532,6 +532,75 @@ async fn driver_delivery_defaults_to_send_for_driver() {
 }
 
 #[tokio::test]
+async fn provider_downlink_group_initializes_driver_with_inject() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut provider_peer = Participant::bot("bot-provider", ParticipantRole::Consultant);
+    provider_peer.bot_name = Some("Provider peer".to_string());
+    let mut group = Group::new(
+        "group-provider-downlink",
+        "bot-driver",
+        vec![driver, provider_peer],
+    );
+    group.group_strategy = GroupStrategy::Chat;
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+        driver_delivery: None,
+    };
+    let registry = NamedRegistry::new(&[]).with_http_provider("bot-provider");
+
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &group.participants)
+        .await;
+
+    assert!(messages
+        .iter()
+        .all(|message| message.delivery_type == DeliveryType::Inject));
+    let driver_message = messages
+        .iter()
+        .find(|message| message.recipients == vec!["bot-driver".to_string()])
+        .expect("driver receives context");
+    assert!(driver_message.message.contains("静默观察"));
+}
+
+#[tokio::test]
+async fn provider_downlink_respects_explicit_send_driver_override() {
+    let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
+    driver.bot_name = Some("Driver".to_string());
+    let mut provider_peer = Participant::bot("bot-provider", ParticipantRole::Consultant);
+    provider_peer.bot_name = Some("Provider peer".to_string());
+    let mut group = Group::new(
+        "group-provider-explicit-send",
+        "bot-driver",
+        vec![driver, provider_peer],
+    );
+    group.group_strategy = GroupStrategy::Chat;
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: format!("{}:7c18e4be", group.id),
+        reason: "普通协作".to_string(),
+        session_input: None,
+        task_ledger: None,
+        driver_delivery: Some(DeliveryType::Send),
+    };
+    let registry = NamedRegistry::new(&[]).with_http_provider("bot-provider");
+
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &group.participants)
+        .await;
+
+    let driver_message = messages
+        .iter()
+        .find(|message| message.recipients == vec!["bot-driver".to_string()])
+        .expect("driver receives context");
+    assert_eq!(driver_message.delivery_type, DeliveryType::Send);
+}
+
+#[tokio::test]
 async fn driver_delivery_override_injects_to_driver_in_chat_group() {
     let mut driver = Participant::bot("bot-driver", ParticipantRole::Driver);
     driver.bot_name = Some("Driver".to_string());
@@ -589,8 +658,9 @@ async fn manager_worker_ignores_driver_delivery_override() {
         task_ledger: None,
         driver_delivery: Some(DeliveryType::Inject),
     };
+    let registry = NamedRegistry::new(&[]).with_http_provider(worker_id);
     let (messages, _) = SessionContextMessageProducer
-        .produce(&event, &group, &NamedRegistry::new(&[]), &group.participants)
+        .produce(&event, &group, &registry, &group.participants)
         .await;
 
     let manager_message = messages

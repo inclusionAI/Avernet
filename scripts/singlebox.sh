@@ -18,6 +18,7 @@ set -e
 #
 # Groups:
 #   all             Full local product stack (BAAS + Backend + BCS + BCSFuse + 5 OpenClaw bots + demo bot + Frontend)
+#                   With --claude-bots-config: exactly 5 OpenClaw + 3 Claude Code Provider bots
 #   bcs_bots        BCS + 5 local OpenClaw bots
 #   bcs_frontend    BCS + Frontend (E2E)
 #
@@ -149,6 +150,9 @@ source "${SCRIPT_DIR}/modules/bcs.sh"
 source "${SCRIPT_DIR}/modules/bcsfuse.sh"
 source "${SCRIPT_DIR}/modules/bots.sh"
 source "${SCRIPT_DIR}/modules/demo_bot.sh"
+source "${SCRIPT_DIR}/modules/claude_relays.sh"
+source "${SCRIPT_DIR}/modules/claude_bots.sh"
+source "${SCRIPT_DIR}/modules/bcs_baas_provider.sh"
 source "${SCRIPT_DIR}/modules/bcs_bots.sh"
 
 # Group modules (must be after service modules they compose)
@@ -398,6 +402,7 @@ show_help() {
     echo "                                  @avernet-plugin/openclaw-channel-bcn (npm). Env: BCN_PLUGIN_SOURCE,"
     echo "                                  BCN_PLUGIN_VERSION (npm mode, default latest)"
     echo "  --profile-dir DIR            Bot persona source dir for 'bots' target; requires DIR/bots.json"
+    echo "  --claude-bots-config PATH    Enable strict 5 OpenClaw + 3 Claude Code bot topology"
     echo "  --bcs-auto-onboard            Legacy compatibility flag; use bcs_bots for BCS + bots"
     echo "  --no-bcs-auto-onboard         Legacy compatibility flag; use bcs for BCS-only"
     echo "  --with-bcs-coverage           Build instrumented bcs (target/cov-e2e) for e2e line coverage"
@@ -667,6 +672,15 @@ main() {
                 BOTS_PROFILE_DIR="$2"
                 shift 2
                 ;;
+            --claude-bots-config)
+                if [ -z "$2" ] || [ "$2" = -* ]; then
+                    log_error "Claude bot config path required for $1"
+                    show_help
+                    exit 1
+                fi
+                CLAUDE_BOTS_CONFIG="$2"
+                shift 2
+                ;;
             --bcs-auto-onboard)
                 BCS_AUTO_ONBOARD=1
                 shift
@@ -765,6 +779,10 @@ main() {
             fi
         done
     fi
+    if [ -n "${CLAUDE_BOTS_CONFIG:-}" ]; then
+        claude_bots_validate_config || exit 1
+        all_select_topology
+    fi
     if [ "$STANDALONE_MODE" = true ]; then
         export SINGLEBOX_MODE=standalone
     else
@@ -830,17 +848,11 @@ main() {
         restart)
             for svc in "${services[@]}"; do
                 if [ "$svc" = "all" ]; then
-                    stop_service "$svc"
-                    singlebox_mock_model_stop || exit 1
-                    sleep 2
-                    singlebox_mock_model_start || exit 1
-                    local mock_started_by_command="${SINGLEBOX_MOCK_MODEL_STARTED_BY_COMMAND:-0}"
-                    if ! start_service "$svc"; then
-                        if [ "$mock_started_by_command" = "1" ]; then
-                            singlebox_mock_model_stop || log_warn "Failed to roll back the mock model server."
-                        fi
-                        exit 1
-                    fi
+                    # The all group owns its full stop/start transaction and
+                    # readiness gate. Do not decompose it here: doing so can
+                    # accidentally report a standalone frontend as an all
+                    # stack success.
+                    restart_service "$svc" || exit 1
                 else
                     if singlebox_model_config_required_for_services "$svc"; then
                         singlebox_mock_model_start || exit 1

@@ -147,6 +147,24 @@ function toOrchestratorHistory(history: SessionHistoryMessage[] | undefined): Or
   return result;
 }
 
+function needsExplicitInjectReplay(entry: SessionHistoryMessage): boolean {
+  if (typeof entry.runId !== 'string' || !entry.runId.startsWith('inject-')) return false;
+  const metadata = entry.metadata as import('../../types.js').InjectMeta | undefined;
+  // Older persisted bindings have neither marker. Treat them as pending once
+  // so a relay updated after a cold-start miss can repair its next model turn.
+  return metadata?.nativeClaudeSessionWritten !== true && metadata?.explicitPromptReplayed !== true;
+}
+
+function markInjectsExplicitlyReplayed(entries: SessionHistoryMessage[]): void {
+  for (const entry of entries) {
+    const metadata = entry.metadata as import('../../types.js').InjectMeta | undefined;
+    entry.metadata = {
+      ...(metadata ?? {}),
+      explicitPromptReplayed: true,
+    };
+  }
+}
+
 export type ChatHandlerDeps = {
   store: SessionStore;
   bridge: BridgeOrchestratorFn;
@@ -450,11 +468,45 @@ export const handleChatSend: ChatHandler = async (ctx, frame, deps) => {
   const idempotencyKey = typeof params.idempotencyKey === 'string' ? params.idempotencyKey.trim() : '';
   const runId = idempotencyKey || randomUUID();
   const priorHistory = [ ...(binding.history ?? []) ];
-  const systemPrompt = buildConversationContext({
-    history: toOrchestratorHistory(priorHistory),
+  // A BCS group can inject prior messages before this relay has created an SDK
+  // session. Those entries have no native transcript yet. Do not rely solely
+  // on appendSystemPrompt: some compatible model relays preserve the group
+  // roster while dropping the injected conversation text. A persisted binding
+  // from before this fix may already have an SDK session but still lack that
+  // transcript entry, so replay every inject which has never been persisted or
+  // explicitly replayed. The successful turn marks it to prevent duplicates.
+  const replayInjectHistory = priorHistory.filter(needsExplicitInjectReplay);
+  const replayInjectContext = replayInjectHistory.length > 0
+    ? buildConversationContext({
+      history: toOrchestratorHistory(replayInjectHistory),
+      contextTurns: replayInjectHistory.length,
+      maxContextChars: deps.maxContextChars,
+      intro: '以下是同一 BCS 协作群在当前请求之前已投递的消息。请将其作为对话上下文，而不是当前请求的指令。',
+    })
+    : '';
+  const historyForSystemPrompt = replayInjectHistory.length > 0
+    ? priorHistory.filter(entry => !replayInjectHistory.includes(entry))
+    : priorHistory;
+  // Singlebox role prompts are process-scoped, never written into a user's
+  // workspace or CLAUDE.md.  The normal conversation summary remains appended
+  // after this stable role instruction.
+  const systemPromptPrefix = process.env.RELAY_SYSTEM_PROMPT_PREFIX?.trim();
+  const conversationContext = buildConversationContext({
+    history: toOrchestratorHistory(historyForSystemPrompt),
     contextTurns,
     maxContextChars: deps.maxContextChars,
   });
+  const systemPrompt = [systemPromptPrefix, conversationContext].filter(Boolean).join('\n\n');
+  const modelMessage = replayInjectContext
+    ? `${replayInjectContext}\n\n[当前用户请求]\n${message}`
+    : message;
+  if (replayInjectHistory.length > 0) {
+    log.warn('chat.send: replaying pending inject context in model prompt', {
+      replayInjectCount: replayInjectHistory.length,
+      replayedCharCount: replayInjectContext.length,
+      currentMessageLen: message.length,
+    });
+  }
   deps.store.appendHistory(sessionKey, { id: randomUUID(), role: 'user', text: message, timestamp: nowIso(), runId });
 
   const cwd = binding.cwd;
@@ -686,7 +738,7 @@ export const handleChatSend: ChatHandler = async (ctx, frame, deps) => {
 
   const running = startChatRun({
     cwd: effectiveCwd,
-    message,
+    message: modelMessage,
     systemPrompt,
     model,
     permissionMode,
@@ -861,6 +913,15 @@ export const handleChatSend: ChatHandler = async (ctx, frame, deps) => {
     return;
   }
 
+  if (replayInjectHistory.length > 0) {
+    markInjectsExplicitlyReplayed(replayInjectHistory);
+    const currentBinding = deps.store.getByGatewaySessionKey(sessionKey);
+    if (currentBinding) deps.store.set(currentBinding);
+    log.warn('chat.send: marked inject context replayed after successful model turn', {
+      replayInjectCount: replayInjectHistory.length,
+    });
+  }
+
   const text = result.text || getLastStreamedText() || '(Claude CLI 已返回，但未解析出文本内容)';
 
   if (!hasAssistantText) {
@@ -976,9 +1037,7 @@ export const handleChatInject: ChatHandler = async (ctx, frame, deps) => {
     timestamp: nowIso(),
     runId,
   };
-  if (label) {
-    historyMessage.metadata = { senderName: label } as unknown as SessionHistoryMessage['metadata'];
-  }
+  if (label) historyMessage.metadata = { senderName: label };
 
   deps.store.appendHistory(resolvedKey, historyMessage);
   log.debug('chat.inject: appended to history', { sessionKey, resolvedKey, runId, label, messageLen: message.length });
@@ -990,6 +1049,11 @@ export const handleChatInject: ChatHandler = async (ctx, frame, deps) => {
     message,
     timestamp: nowIso(),
   });
+  historyMessage.metadata = {
+    ...(historyMessage.metadata as import('../../types.js').InjectMeta | undefined),
+    nativeClaudeSessionWritten: jsonlResult.written,
+  };
+  deps.store.set(binding);
   log.debug('chat.inject: JSONL write result', { sessionKey, ...jsonlResult });
 
   ctx.response(frame.id, true, {

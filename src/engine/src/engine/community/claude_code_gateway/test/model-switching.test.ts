@@ -46,11 +46,13 @@ function isolateDefaultModelEnv(): () => void {
     CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
     RELAY_CLAUDE_CONFIG_DIR: process.env.RELAY_CLAUDE_CONFIG_DIR,
     RELAY_CLAUDE_HOME: process.env.RELAY_CLAUDE_HOME,
+    RELAY_MODEL_SETTINGS_SOURCE: process.env.RELAY_MODEL_SETTINGS_SOURCE,
   };
   const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-default-model-iso-'));
   delete process.env.RELAY_DEFAULT_MODEL;
   delete process.env.RELAY_CLAUDE_CONFIG_DIR;
   delete process.env.RELAY_CLAUDE_HOME;
+  delete process.env.RELAY_MODEL_SETTINGS_SOURCE;
   process.env.CLAUDE_CONFIG_DIR = emptyDir;
   return () => {
     for (const [ key, value ] of Object.entries(saved)) {

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createLogger } from './debug.js';
+import { loadRelayModelProviderEnv } from './model-provider-settings.js';
 
 const log = createLogger('cli');
 
@@ -167,8 +168,10 @@ export function startClaudePrompt(
   });
   const claudeHomeOverride = process.env.RELAY_CLAUDE_HOME?.trim();
   const claudeConfigDirOverride = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim();
+  const modelProviderEnv = loadRelayModelProviderEnv();
   const spawnEnv = {
     ...process.env,
+    ...modelProviderEnv,
     ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
     ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
     ...(params.env ?? {}),

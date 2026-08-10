@@ -82,6 +82,127 @@ def test_aicoding_strategy_personal_coding_model_runtime_and_token():
     assert strategy.extract_runtime_token(ctx) == "tok"
 
 
+def test_claude_code_singlebox_config_forwards_only_non_sensitive_runtime_envs():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "singlebox_claude": {
+                "relay_url": "ws://127.0.0.1:18910",
+                "role": "planner",
+                "workspace": "/tmp/planner",
+                "model": "claude-test",
+            }
+        },
+    )
+
+    assert strategy.build_extra_envs(ctx) == {
+        "CLAUDE_CODE_RELAY_URL": "ws://127.0.0.1:18910",
+        "CLAUDE_CODE_ROLE": "planner",
+        "CLAUDE_CODE_WORKSPACE": "/tmp/planner",
+        "RELAY_DEFAULT_MODEL": "claude-test",
+    }
+
+
+def test_claude_code_singlebox_config_allows_missing_or_blank_template_type():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    for template_type in (None, ""):
+        ctx = BotProvisioningContext(
+            active_engine="claude_code",
+            template_type=template_type,
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            template_config={
+                "singlebox_claude": {
+                    "relay_url": "ws://127.0.0.1:18911",
+                    "role": "developer",
+                    "workspace": "/tmp/developer",
+                }
+            },
+        )
+
+        assert strategy.build_extra_envs(ctx) == {
+            "CLAUDE_CODE_RELAY_URL": "ws://127.0.0.1:18911",
+            "CLAUDE_CODE_ROLE": "developer",
+            "CLAUDE_CODE_WORKSPACE": "/tmp/developer",
+        }
+
+
+def test_claude_code_singlebox_config_does_not_apply_to_other_template_types():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    for template_type in ("personalCoding", "generalCC", "architect"):
+        ctx = BotProvisioningContext(
+            active_engine="claude_code",
+            template_type=template_type,
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            template_config={
+                "singlebox_claude": {
+                    "relay_url": "ws://127.0.0.1:18911",
+                    "role": "developer",
+                    "workspace": "/tmp/developer",
+                }
+            },
+        )
+
+        envs = strategy.build_extra_envs(ctx) or {}
+        assert "CLAUDE_CODE_RELAY_URL" not in envs
+        assert "CLAUDE_CODE_ROLE" not in envs
+        assert "CLAUDE_CODE_WORKSPACE" not in envs
+
+
+def test_claude_code_singlebox_config_rejects_non_loopback_relay():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={
+            "singlebox_claude": {
+                "relay_url": "wss://remote.example.com",
+                "role": "planner",
+                "workspace": "/tmp/planner",
+            }
+        },
+    )
+
+    assert strategy.build_extra_envs(ctx) is None
+
+
+def test_claude_code_singlebox_config_rejects_noncanonical_or_cross_role_relay_urls():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    for relay_url in (
+        "ws://127.0.0.1:18910/?token=secret",
+        "ws://token@127.0.0.1:18910",
+        "ws://127.0.0.1:18910@remote.example",
+        "ws://127.0.0.1:18911",
+        "ws://127.0.0.1:18910/other",
+    ):
+        ctx = BotProvisioningContext(
+            active_engine="claude_code",
+            template_type="normalCC",
+            bot_id="b1",
+            owner_id="u1",
+            bot_type="personal",
+            template_config={
+                "singlebox_claude": {
+                    "relay_url": relay_url,
+                    "role": "planner",
+                    "workspace": "/tmp/planner",
+                }
+            },
+        )
+        assert strategy.build_extra_envs(ctx) is None
+
+
 def test_default_strategy_noops_for_non_coding_template():
     ctx = BotProvisioningContext(
         active_engine="openclaw",

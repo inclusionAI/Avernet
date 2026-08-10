@@ -6,7 +6,7 @@ import {
   type ToolUseInfo,
 } from './claude-cli-bridge.js';
 import { type InteractionRequestedRuntimeEvent } from './claude-sdk-bridge.js';
-import type { TodoItem, ToolUseMeta, ToolResultMeta, ThinkingMeta } from './types.js';
+import type { TodoItem, ToolUseMeta, ToolResultMeta, ThinkingMeta, InjectMeta } from './types.js';
 import { createLogger } from './debug.js';
 
 const log = createLogger('orchestrator');
@@ -17,7 +17,7 @@ export type OrchestratorHistoryEntry = {
   role: HistoryRole;
   text: string;
   senderName?: string;
-  metadata?: ToolUseMeta | ToolResultMeta | ThinkingMeta;
+  metadata?: ToolUseMeta | ToolResultMeta | ThinkingMeta | InjectMeta;
 };
 
 export type OrchestratorUsage = {

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from hashlib import sha256
 
 from sqlalchemy.orm import Session
 
@@ -190,6 +191,28 @@ _SEED_TEMPLATE_DOCKER = {
     "type": "Docker",
 }
 
+# This record is an internal local identity, not an HTTP bearer credential.
+# BaaS's BCN downlink service looks it up only to build BotChatContext after
+# the loopback bridge has already authenticated the request. Its prefix must
+# match the singlebox BaaS configuration.
+_SEED_BCN_API_KEY = {
+    "api_key_hash": sha256(b"singlebox-bcn-internal-context").hexdigest(),
+    "api_key_prefix": "9acXMLaU",
+    "key_name": "singlebox-bcn-provider",
+    "app_id": "singlebox-bcn-provider",
+    "app_type": "bcn",
+    "description": "Local BCS Provider downlink context",
+    "rate_limit_rpm": None,
+    "rate_limit_rpd": None,
+    "status": "ACTIVE",
+    "owner": "singlebox",
+    "tenant": "team_claw",
+    "env": "dev",
+    "creator": "singlebox",
+    "modifier": "singlebox",
+    "policy": None,
+}
+
 
 def seed_sqlite(session: Session) -> None:
     """Insert required seed records into the SQLite database.
@@ -199,6 +222,7 @@ def seed_sqlite(session: Session) -> None:
     create_all() so that the in-memory SQLite backend is usable
     out of the box.
     """
+    from secbaas.community.core.repository.api_gateway._orm_model import APIKeyModel
     from secbaas.community.core.repository.device_template import (
         DeviceTemplateModel,
     )
@@ -213,6 +237,15 @@ def seed_sqlite(session: Session) -> None:
     if existing_tenant is None:
         session.add(TenantModel(**_SEED_TENANT))
         logger.info("inserted seed tenant (team_claw)")
+
+    existing_bcn_key = (
+        session.query(APIKeyModel)
+        .filter_by(api_key_prefix=_SEED_BCN_API_KEY["api_key_prefix"])
+        .first()
+    )
+    if existing_bcn_key is None:
+        session.add(APIKeyModel(**_SEED_BCN_API_KEY))
+        logger.info("inserted local BCS Provider downlink context")
 
     for idx, seed in enumerate(
         [

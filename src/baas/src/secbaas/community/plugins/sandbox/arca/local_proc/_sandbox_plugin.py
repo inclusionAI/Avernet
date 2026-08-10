@@ -121,12 +121,12 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
         """
         logger.info(
             "Creating sandbox with all params: "
-            "template_id=%s, ttl_in_minutes=%s, envs=%s, mount_points=%s, "
+            "template_id=%s, ttl_in_minutes=%s, env_keys=%s, mount_points=%s, "
             "resource_spec=%s, metadata=%s, outbound_operation_rule=%s, "
             "storage=%s, timeout_in_millis=%s, ready_timeout_in_seconds=%s",
             template_id,
             ttl_in_minutes,
-            envs,
+            sorted((envs or {}).keys()),
             mount_points,
             resource_spec,
             metadata,
@@ -221,6 +221,7 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
                 agent_code=agent_code,
                 engine=engine,
                 admins=admins,
+                adapter_envs=envs,
             )
         except Exception as e:
             # 进程启动失败，发送 FAILED 回调

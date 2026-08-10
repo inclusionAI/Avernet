@@ -33,6 +33,30 @@ import type { BotTabItem } from '../types';
 /** sessionStorage key — 每个标签页独立，避免多标签页互相覆盖 */
 const SELECTED_BOT_UUID_KEY = 'oc_groupchat_selected_bot_uuid';
 
+const LOCAL_CLAUDE_ROLE_NAME = /^Claude (Planner|Developer|Reviewer)(（当前）)?$/;
+const LOCAL_CURRENT_CLAUDE_ROLE_NAME = /^Claude (Planner|Developer|Reviewer)（当前）$/;
+
+function filterStaleLocalClaudeRoles<T>(
+  bots: T[],
+  getName: (bot: T) => string | null | undefined,
+): T[] {
+  const isLocalSinglebox =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1');
+  const hasCurrentRole = bots.some((bot) =>
+    LOCAL_CURRENT_CLAUDE_ROLE_NAME.test(getName(bot) || ''),
+  );
+
+  if (!isLocalSinglebox && !hasCurrentRole) return bots;
+
+  return bots.filter((bot) => {
+    const name = getName(bot) || '';
+    return !LOCAL_CLAUDE_ROLE_NAME.test(name) ||
+      LOCAL_CURRENT_CLAUDE_ROLE_NAME.test(name);
+  });
+}
+
 // === 统一 Bot 数据合并辅助函数 ===
 
 /** initUnifiedBotTabs 参数 */
@@ -283,14 +307,20 @@ export function useBotNetwork() {
           userId ? getUsersByIds([userId]).catch(() => undefined) : undefined,
         ]);
 
-        const bcnItems: MyBotInfo[] = myBotsRes?.items || [];
+        const bcnItems = filterStaleLocalClaudeRoles(
+          myBotsRes?.items || [],
+          (bot) => bot.capabilities?.name,
+        );
         const humanQueryData = humanQueryRes?.[0];
         const userInfoRes = usersRes?.[0];
 
         // Phase 0.5：如果未传 localBots，从 BCN 数据构造 BotTabItem[]
         // BCN 闭包：GroupChat 不再调 loadBots（/api），initUnifiedBotTabs 完全由
         // /bcnproxy/bots/my 驱动。localBots 为空时用 bcnItems 生成，走同样的合并逻辑。
-        let effectiveLocalBots = localBots;
+        let effectiveLocalBots = filterStaleLocalClaudeRoles(
+          localBots,
+          (bot) => bot.bot_name,
+        );
         if (effectiveLocalBots.length === 0 && bcnItems.length > 0) {
           effectiveLocalBots = convertBcnBotsToTabItems(bcnItems);
         }

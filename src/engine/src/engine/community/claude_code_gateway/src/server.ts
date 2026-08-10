@@ -30,8 +30,15 @@ import { setupFileLogger } from './log-to-file.js';
 const log = createLogger('server');
 
 const PORT = Number(process.env.PORT ?? process.env.WS_PORT ?? 18900);
-const DEFAULT_STORE_PATH = path.join(process.cwd(), '.data', 'sessions.json');
-const DEFAULT_CRON_JOBS_PATH = path.join(process.cwd(), '.data', 'cron-tasks.json');
+// A singlebox mixed topology runs one gateway process per Claude role.  Keep
+// the per-role session/cron state outside the gateway source directory while
+// leaving the process cwd inside the checkout (so lifecycle cleanup can verify
+// ownership before stopping a PID).
+const DATA_DIR = process.env.RELAY_DATA_DIR?.trim()
+  ? path.resolve(process.env.RELAY_DATA_DIR)
+  : path.join(process.cwd(), '.data');
+const DEFAULT_STORE_PATH = path.join(DATA_DIR, 'sessions.json');
+const DEFAULT_CRON_JOBS_PATH = path.join(DATA_DIR, 'cron-tasks.json');
 const DEFAULT_CONTEXT_TURNS = Number(process.env.CONTEXT_TURNS ?? 8);
 const MAX_CONTEXT_CHARS = Number(process.env.MAX_CONTEXT_CHARS ?? 12000);
 const TICK_INTERVAL_MS = Number(process.env.TICK_INTERVAL_MS ?? 30000);

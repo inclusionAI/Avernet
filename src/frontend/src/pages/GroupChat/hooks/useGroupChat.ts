@@ -440,6 +440,7 @@ export interface UseGroupChatResult {
     mentions?: string[],
     botUuid?: string,
     sessionId?: string,
+    senderId?: string,
   ) => void;
   /** 中止当前请求 */
   abort: () => void;
@@ -732,6 +733,7 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       mentions?: string[],
       botUuid?: string,
       targetSessionId?: string,
+      senderId?: string,
     ) => {
       console.log('[useGroupChat] sendMessage called:', {
         hasGroup: !!group,
@@ -763,25 +765,32 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       // 当前用户的 actor uuid
       // SDK useChat.onRequest 用 params.userMessage.extra 作为本地 user 消息的 extra
       // 写入后 getSenderInfo 能正确识别为"当前用户自己"，消息右对齐
-      const senderBotUuid = userId ? `human_${userId}` : undefined;
+      const senderBotUuid = senderId || (userId ? `human_${userId}` : undefined);
 
       const params = {
         query: content.trim(),
         groupId: group.id,
-        senderId: userId || 'anonymous',
+        senderId: senderBotUuid || 'anonymous',
         userMessage: {
           content: content.trim(),
           extra: {
             botUuid: senderBotUuid,
           },
         },
-        botUuid: botUuid,
+        botUuid,
         mentions: mentions && mentions.length > 0 ? mentions : undefined,
         mentionAll: mentions?.includes('ALL'),
         sessionId: effectiveSessionId || undefined,
       };
 
-      console.log('[useGroupChat] Sending message with params:', params);
+      console.debug('[useGroupChat] Sending message', {
+        groupId: group.id,
+        contentLength: params.query.length,
+        mentionCount: params.mentions?.length || 0,
+        hasSenderId: params.senderId !== 'anonymous',
+        hasBotUuid: !!params.botUuid,
+        hasSessionId: !!params.sessionId,
+      });
 
       if (onRequestRef.current) {
         onRequestRef.current(params);

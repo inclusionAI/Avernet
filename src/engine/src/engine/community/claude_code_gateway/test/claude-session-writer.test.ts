@@ -11,7 +11,7 @@ import { strict as assert } from 'node:assert';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
-import { claudeSessionFileExists } from '../src/claude-session-writer.js';
+import { appendToClaudeSessionFile, claudeSessionFileExists } from '../src/claude-session-writer.js';
 
 function makeProjectsDir(): string {
   const dir = path.join(os.tmpdir(), `cc-session-probe-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
@@ -27,15 +27,23 @@ function encodePlain(cwd: string): string {
 describe('claudeSessionFileExists', () => {
   let projectsDir: string;
   const prevEnv = process.env.CLAUDE_PROJECTS_DIR;
+  const prevRelayConfigDir = process.env.RELAY_CLAUDE_CONFIG_DIR;
+  const prevClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
 
   beforeEach(() => {
     projectsDir = makeProjectsDir();
     process.env.CLAUDE_PROJECTS_DIR = projectsDir;
+    delete process.env.RELAY_CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
   });
 
   afterEach(() => {
     if (prevEnv === undefined) delete process.env.CLAUDE_PROJECTS_DIR;
     else process.env.CLAUDE_PROJECTS_DIR = prevEnv;
+    if (prevRelayConfigDir === undefined) delete process.env.RELAY_CLAUDE_CONFIG_DIR;
+    else process.env.RELAY_CLAUDE_CONFIG_DIR = prevRelayConfigDir;
+    if (prevClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevClaudeConfigDir;
     if (fs.existsSync(projectsDir)) fs.rmSync(projectsDir, { recursive: true, force: true });
   });
 
@@ -75,6 +83,43 @@ describe('claudeSessionFileExists', () => {
     const sid = 'c0e796e7-e3eb-4190-9a5c-7b65da200516';
     writeSessionFile(cwd, sid, () => '-home-admin--claude-code-workspace');
     assert.equal(claudeSessionFileExists({ sdkSessionId: sid, cwd }), true);
+  });
+
+  it('writes and probes inject state in the configured role projects directory', () => {
+    const roleConfigDir = path.join(os.tmpdir(), `cc-role-config-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const legacyProjectsDir = path.join(os.tmpdir(), `cc-legacy-projects-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+    const cwd = '/home/user/developer-workspace';
+    const sid = 'bf9ae70b-44a3-4ed2-a35a-8bd81483f899';
+    const marker = 'INJECT-PROBE-role-projects-root';
+    const expectedFile = path.join(roleConfigDir, 'projects', encodePlain(cwd), `${sid}.jsonl`);
+
+    fs.mkdirSync(legacyProjectsDir, { recursive: true });
+    process.env.RELAY_CLAUDE_CONFIG_DIR = roleConfigDir;
+    process.env.CLAUDE_PROJECTS_DIR = legacyProjectsDir;
+    try {
+      const result = appendToClaudeSessionFile({ sdkSessionId: sid, cwd, message: marker, timestamp: '2026-08-09T04:01:21.772Z' });
+
+      assert.equal(result.filePath, expectedFile);
+      assert.equal(fs.existsSync(expectedFile), true);
+      assert.equal(fs.readFileSync(expectedFile, 'utf8').includes(marker), true);
+      const rows = fs.readFileSync(expectedFile, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+      const injectEntry = rows.find((entry) => entry.type === 'user');
+      assert.deepEqual(injectEntry.message, {
+        role: 'user',
+        content: [{ type: 'text', text: marker }],
+      });
+      assert.equal(typeof injectEntry.version, 'string');
+      assert.equal(typeof injectEntry.entrypoint, 'string');
+      assert.equal(typeof injectEntry.gitBranch, 'string');
+      assert.equal(typeof injectEntry.permissionMode, 'string');
+      assert.equal(typeof injectEntry.promptId, 'string');
+      assert.equal('syntheticInject' in injectEntry, false);
+      assert.equal(fs.existsSync(path.join(legacyProjectsDir, encodePlain(cwd), `${sid}.jsonl`)), false);
+      assert.equal(claudeSessionFileExists({ sdkSessionId: sid, cwd }), true);
+    } finally {
+      fs.rmSync(roleConfigDir, { recursive: true, force: true });
+      fs.rmSync(legacyProjectsDir, { recursive: true, force: true });
+    }
   });
 
   it('returns false (does not throw) when path construction fails', () => {

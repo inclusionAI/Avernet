@@ -36,9 +36,10 @@ singlebox_cmd() {
 print_frontend_ready_banner() {
     echo ""
     echo -e "${GREEN}============================================================${NC}"
-    echo -e "${GREEN}  FRONTEND READY${NC}"
+    echo -e "${GREEN}  FRONTEND SERVICE READY${NC}"
     echo -e "${CYAN}  Open the workbench:${NC}"
     echo -e "${CYAN}  http://localhost:${FRONTEND_PORT:-8000}/${NC}"
+    echo -e "${YELLOW}  Backend, BCS, and bots are not verified by this service-only command.${NC}"
     echo -e "${GREEN}============================================================${NC}"
     echo ""
 }
@@ -124,6 +125,11 @@ print_local_stack_ready_banner() {
         stack_label="BCS + FRONTEND"
         status_line_one="BCS FRONTEND"
         status_line_two=""
+    fi
+    if type -t claude_bots_enabled &>/dev/null && claude_bots_enabled; then
+        stack_label="5 OPENCLAW + 3 CLAUDE CODE"
+        status_line_one="BAAS BACKEND BCS BCSFUSE"
+        status_line_two="PROVIDER BRIDGE FRONTEND"
     fi
 
     echo ""

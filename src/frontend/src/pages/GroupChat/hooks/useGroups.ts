@@ -39,6 +39,29 @@ const buildGroupExtra = (
   return Object.keys(extra).length > 0 ? extra : undefined;
 };
 
+const LOCAL_CLAUDE_ROLE_NAME = /^Claude (Planner|Developer|Reviewer)(（当前）)?$/;
+const LOCAL_CURRENT_CLAUDE_ROLE_NAME = /^Claude (Planner|Developer|Reviewer)（当前）$/;
+
+function filterStaleLocalClaudeRoles(bots: ActorBot[]): ActorBot[] {
+  const isLocalSinglebox =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1');
+  const hasCurrentRole = bots.some((bot) =>
+    LOCAL_CURRENT_CLAUDE_ROLE_NAME.test(
+      bot.bot_name || bot.capabilities?.name || '',
+    ),
+  );
+
+  if (!isLocalSinglebox && !hasCurrentRole) return bots;
+
+  return bots.filter((bot) => {
+    const name = bot.bot_name || bot.capabilities?.name || '';
+    return !LOCAL_CLAUDE_ROLE_NAME.test(name) ||
+      LOCAL_CURRENT_CLAUDE_ROLE_NAME.test(name);
+  });
+}
+
 /**
  * 群聊管理 Hook
  * 封装所有群聊相关的业务逻辑和 API 调用
@@ -572,7 +595,7 @@ export function useGroups() {
           pageNo: 1,
           pageSize: BOT_PAGE_SIZE,
         });
-        const responseBots = response.bots || [];
+        const responseBots = filterStaleLocalClaudeRoles(response.bots || []);
         const mapped = responseBots.map(mapBotInfo);
         setAvailableBots(mapped);
         setHasMoreAvailableBots(responseBots.length === BOT_PAGE_SIZE);
@@ -616,7 +639,7 @@ export function useGroups() {
           pageNo,
           pageSize: BOT_PAGE_SIZE,
         });
-        const responseBots = response.bots || [];
+        const responseBots = filterStaleLocalClaudeRoles(response.bots || []);
         setAvailableBots((prev) => [...prev, ...responseBots.map(mapBotInfo)]);
         setHasMoreAvailableBots(responseBots.length === BOT_PAGE_SIZE);
         availableBotsOffsetRef.current += responseBots.length;

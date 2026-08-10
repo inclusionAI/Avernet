@@ -459,10 +459,10 @@ class BotService:
             extra_envs = strategy.build_extra_envs(ctx)
             if extra_envs:
                 logger.info(
-                    "[%s] Setting engine extra_envs for bot %s: %s",
+                    "[%s] Setting engine extra_envs for bot %s: keys=%s",
                     log_context,
                     bot_id,
-                    extra_envs,
+                    sorted(extra_envs),
                 )
             return extra_envs
         except Exception as e:

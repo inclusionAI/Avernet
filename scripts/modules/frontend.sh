@@ -132,8 +132,13 @@ frontend_start() {
     # the same ports the BCS backend actually binds — explicit passing covers the
     # default-assignment case where the vars aren't exported.
     # PORT controls the umi dev server listen port (default 8000, via FRONTEND_PORT).
-    tail -f /dev/null | BCS_PORT="${BCS_PORT}" BCSFUSE_PORT="${BCSFUSE_PORT}" PORT="${FRONTEND_PORT}" \
-        nohup npm run "$frontend_script" >> "${FRONTEND_LOG}" 2>&1 &
+    # Keep both sides of the pipeline below nohup.  Applying nohup only to npm
+    # leaves `tail -f /dev/null` in the invoking shell's process group; it can
+    # receive SIGHUP after singlebox exits, close npm's stdin, and make the
+    # Tailwind watcher terminate after the readiness probe has already passed.
+    BCS_PORT="${BCS_PORT}" BCSFUSE_PORT="${BCSFUSE_PORT}" PORT="${FRONTEND_PORT}" \
+        nohup bash -c 'tail -f /dev/null | npm run "$1"' bash "$frontend_script" \
+        >> "${FRONTEND_LOG}" 2>&1 < /dev/null &
     local frontend_pid=$!
     echo "$frontend_pid" > "${FRONTEND_PID_FILE}"
     log_info "Process started (PID: ${frontend_pid})"

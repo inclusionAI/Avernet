@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict
+from urllib.parse import urlsplit
 
 from agentclaw.community.core.bot_management.capabilities import (
     is_template_factory_config,
@@ -52,6 +53,39 @@ class AicodingBaasEngineBucketResolver:
             active_engine=normalized_engine_type,
             template_type=template_type,
         )
+
+
+SINGLEBOX_CLAUDE_RELAY_PORTS = {
+    "planner": 18910,
+    "developer": 18911,
+    "reviewer": 18912,
+}
+
+
+def singlebox_claude_relay_url(value: Any, role: Any) -> str | None:
+    """Return only a canonical local relay URL for the declared role."""
+    if not isinstance(value, str) or not isinstance(role, str):
+        return None
+    expected_port = SINGLEBOX_CLAUDE_RELAY_PORTS.get(role)
+    if expected_port is None:
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "ws"
+        or parsed.hostname != "127.0.0.1"
+        or port != expected_port
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return value
 
 
 class AicodingProvisioningStrategy(EngineProvisioningStrategy):
@@ -147,6 +181,42 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
     def build_extra_envs(self, ctx: BotProvisioningContext) -> Dict[str, str] | None:
         template_type = ctx.template_type
         template_config = ctx.template_config or {}
+
+        # The standalone mixed topology deliberately stores only non-secret
+        # relay routing data in template_config.  It is an explicit opt-in
+        # shape, rather than treating arbitrary normalCC config as a relay
+        # override.  The BaaS local process manager forwards these values to
+        # the per-bot adapter process.
+        if (
+            self.normalize_engine_type(ctx.active_engine, default="")
+            == CLAUDE_CODE_ENGINE_TYPE
+            and self.normalize_template_type(template_type)
+            in {"", NORMAL_CC_TEMPLATE_TYPE}
+        ):
+            singlebox = template_config.get("singlebox_claude")
+            if isinstance(singlebox, dict):
+                relay_url = singlebox.get("relay_url")
+                role = singlebox.get("role")
+                workspace = singlebox.get("workspace")
+                model = singlebox.get("model")
+                validated_relay_url = singlebox_claude_relay_url(relay_url, role)
+                if (
+                    validated_relay_url is not None
+                    and isinstance(workspace, str)
+                    and workspace.startswith("/")
+                ):
+                    envs = {
+                        "CLAUDE_CODE_RELAY_URL": validated_relay_url,
+                        "CLAUDE_CODE_ROLE": role,
+                        "CLAUDE_CODE_WORKSPACE": workspace,
+                    }
+                    if isinstance(model, str) and model.strip():
+                        envs["RELAY_DEFAULT_MODEL"] = model.strip()
+                    return envs
+                # Diagnostic only: never include the raw config, model, or
+                # workspace in logs because template config is user supplied.
+                return None
+
         if not self.consumes_template_config(
             template_type,
             active_engine=ctx.active_engine,

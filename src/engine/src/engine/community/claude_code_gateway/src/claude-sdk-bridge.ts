@@ -21,6 +21,7 @@ import type {
 } from './claude-cli-bridge.js';
 import { createLogger } from './debug.js';
 import { EXEC_APPROVAL_TIMEOUT_MS } from './interaction/builders.js';
+import { loadRelayModelProviderEnv } from './model-provider-settings.js';
 
 // ---- HITL Suspend/Resume Types ----
 
@@ -541,10 +542,12 @@ export function startClaudePromptSdk(
 
     const claudeHomeOverride = process.env.RELAY_CLAUDE_HOME?.trim();
     const claudeConfigDirOverride = process.env.RELAY_CLAUDE_CONFIG_DIR?.trim();
+    const modelProviderEnv = loadRelayModelProviderEnv();
     const options: Record<string, unknown> = {
       cwd: params.cwd,
       env: {
         ...process.env,
+        ...modelProviderEnv,
         ...(claudeHomeOverride ? { HOME: claudeHomeOverride } : {}),
         ...(claudeConfigDirOverride ? { CLAUDE_CONFIG_DIR: claudeConfigDirOverride } : {}),
         ...(params.env ?? {}),

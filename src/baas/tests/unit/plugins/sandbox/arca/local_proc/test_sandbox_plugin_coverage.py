@@ -122,6 +122,32 @@ class TestCreateSyncSandbox:
         )
         assert sandbox._sandbox_id == "sb-3"
 
+    def test_create_claude_code_forwards_per_bot_adapter_envs(self, plugin):
+        p, mgr = plugin
+        mgr.allocate_ports.return_value = (20020, 0)
+        entry = MagicMock()
+        entry.sandbox_id = "sb-claude"
+        mgr.start.return_value = entry
+        envs = {
+            "AGENTCLAW_ENGINE": "claude_code",
+            "CLAUDE_CODE_RELAY_URL": "ws://127.0.0.1:18910",
+            "CLAUDE_CODE_ROLE": "planner",
+        }
+
+        p.create_sync_sandbox(
+            template_id="normalCC",
+            envs=envs,
+            metadata={
+                "tc_bot_id": "bot-claude",
+                "device_uuid": "dev-claude",
+                "entity_id": "mock-user",
+                "entity_type": "staff",
+            },
+        )
+
+        assert mgr.start.call_args.kwargs["engine"] == "claude_code"
+        assert mgr.start.call_args.kwargs["adapter_envs"] == envs
+
     def test_create_start_failure_sends_callback(self, plugin, monkeypatch):
         monkeypatch.setenv("CHAT_ENGINE", "openclaw")
         p, mgr = plugin

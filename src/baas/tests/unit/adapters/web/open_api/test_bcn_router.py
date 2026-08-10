@@ -7,7 +7,9 @@ from secbaas.community.adapters.web.routers.bcn_downlink.bcn_model import (
 )
 from secbaas.community.adapters.web.routers.bcn_downlink.bcn_router import (
     _dispatch_chat_send_stream,
+    validate_bcn_token,
 )
+from secbaas.community.api.bcn import BcnUnauthorizedError
 from secbaas.community.api.sse import StreamChunk
 from secbaas.community.core.service.sse import DefaultStreamConverter
 
@@ -35,6 +37,11 @@ class _ConverterFactory:
     def create(self, name):
         assert name == "default"
         return DefaultStreamConverter()
+
+
+class _MissingSecretStore:
+    def get_secret(self, _name):
+        raise RuntimeError("not configured")
 
 
 def _chat_send_request() -> ChatSendRequest:
@@ -108,3 +115,11 @@ async def test_stream_dispatch_error_yields_error_sse():
     assert items[0].startswith("id: 1\nevent: chat\n")
     assert "error" in items[1]
     assert "INTERNAL_ERROR" in items[1]
+
+
+def test_bcn_downlink_env_credential_overrides_empty_local_secret_store(monkeypatch):
+    monkeypatch.setenv("BCS_BAAS_DOWNLINK_TOKEN", "bridge-token")
+
+    assert validate_bcn_token("Bearer bridge-token", _MissingSecretStore()) == "bridge-token"
+    with pytest.raises(BcnUnauthorizedError):
+        validate_bcn_token("Bearer wrong-token", _MissingSecretStore())

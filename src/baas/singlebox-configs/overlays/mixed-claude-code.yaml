@@ -1,0 +1,11 @@
+# Opt-in singlebox overlay.  The normal application-dev.yaml stays on the
+# stub adapter path, while --claude-bots-config selects this overlay.
+user_config:
+  plugins:
+    bot_service: "real"
+    engine_adapter: "real"
+  bot_chat_log_relation:
+    # The real BotService plugin uses this base URL to resolve the Backend's
+    # per-bot binding.  It is loopback-only and contains no credential.
+    base_url: "http://127.0.0.1:8888"
+    timeout: 10

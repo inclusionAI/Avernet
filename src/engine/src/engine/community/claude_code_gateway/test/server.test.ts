@@ -47,11 +47,13 @@ function isolateDefaultModelEnv(): () => void {
     CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
     RELAY_CLAUDE_CONFIG_DIR: process.env.RELAY_CLAUDE_CONFIG_DIR,
     RELAY_CLAUDE_HOME: process.env.RELAY_CLAUDE_HOME,
+    RELAY_MODEL_SETTINGS_SOURCE: process.env.RELAY_MODEL_SETTINGS_SOURCE,
   };
   const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'relay-default-model-iso-'));
   delete process.env.RELAY_DEFAULT_MODEL;
   delete process.env.RELAY_CLAUDE_CONFIG_DIR;
   delete process.env.RELAY_CLAUDE_HOME;
+  delete process.env.RELAY_MODEL_SETTINGS_SOURCE;
   process.env.CLAUDE_CONFIG_DIR = emptyDir;
   return () => {
     for (const [ key, value ] of Object.entries(saved)) {
@@ -93,6 +95,113 @@ describe('Gateway server (E2E)', () => {
       await client.close();
     } finally {
       await teardown(server, store, storePath);
+    }
+  });
+
+  it('replays cold chat.inject history in the first model prompt', async () => {
+    const { server, store, storePath, controller } = await bootServer([
+      { kind: 'lifecycle', phase: 'start' },
+      { kind: 'textDelta', text: 'ack' },
+      { kind: 'done', stopReason: 'end_turn' },
+    ]);
+    const sessionKey = 'cold-inject-replay';
+    const firstMarker = 'COLD-INJECT-MARKER-ONE';
+    const secondMarker = 'COLD-INJECT-MARKER-TWO';
+    const currentRequest = 'What did the other bot say?';
+
+    try {
+      const client = await connectedClient(server.port);
+      assert.equal((await client.request('chat.inject', { sessionKey, message: firstMarker })).ok, true);
+      assert.equal((await client.request('chat.inject', { sessionKey, message: secondMarker })).ok, true);
+
+      const accepted = await client.request('chat.send', {
+        sessionKey,
+        message: currentRequest,
+        cwd: process.cwd(),
+      });
+      assert.equal(accepted.ok, true);
+      await client.waitForEvent(event => event.event === 'chat' && (event.payload as { state?: string }).state === 'final');
+
+      const modelInput = controller.runs[0]?.params;
+      assert.ok(modelInput, 'first model run should be created');
+      assert.match(modelInput.message, new RegExp(firstMarker));
+      assert.match(modelInput.message, new RegExp(secondMarker));
+      assert.match(modelInput.message, new RegExp(currentRequest));
+      assert.equal(modelInput.message.endsWith(currentRequest), true, 'current request must remain the final user input');
+      assert.equal(modelInput.systemPrompt?.includes(firstMarker) ?? false, false, 'cold injects must not depend only on system prompt delivery');
+
+      const binding = store.getByGatewaySessionKey(sessionKey);
+      assert.deepEqual(binding?.history?.slice(0, 3).map(entry => entry.text), [firstMarker, secondMarker, currentRequest]);
+      assert.equal((binding?.history?.[0]?.metadata as { explicitPromptReplayed?: boolean } | undefined)?.explicitPromptReplayed, true);
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
+  it('repairs a pre-fix injected history exactly once after the SDK session is bound', async () => {
+    const { server, store, storePath, controller } = await bootServer([
+      { kind: 'lifecycle', phase: 'start' },
+      { kind: 'textDelta', text: 'ack' },
+      { kind: 'done', stopReason: 'end_turn' },
+    ]);
+    const sessionKey = 'pre-fix-inject-replay';
+    const marker = 'PRE-FIX-INJECT-MARKER';
+
+    try {
+      const client = await connectedClient(server.port);
+      assert.equal((await client.request('chat.inject', { sessionKey, message: marker })).ok, true);
+      const seeded = store.getByGatewaySessionKey(sessionKey);
+      assert.ok(seeded, 'inject should create the binding');
+      seeded.sdkSessionId = 'pre-fix-sdk-session';
+      store.set(seeded);
+
+      const first = await client.request('chat.send', { sessionKey, message: 'recover context', cwd: process.cwd() });
+      assert.equal(first.ok, true);
+      await client.waitForEvent(event => event.event === 'chat' && (event.payload as { state?: string }).state === 'final');
+      assert.match(controller.runs[0]?.params.message ?? '', new RegExp(marker));
+
+      const repaired = store.getByGatewaySessionKey(sessionKey);
+      assert.equal((repaired?.history?.[0]?.metadata as { explicitPromptReplayed?: boolean } | undefined)?.explicitPromptReplayed, true);
+
+      const second = await client.request('chat.send', { sessionKey, message: 'do not replay', cwd: process.cwd() });
+      assert.equal(second.ok, true);
+      await client.waitForEvent(event => event.event === 'chat' && (event.payload as { state?: string }).state === 'final');
+      assert.equal(controller.runs[1]?.params.message.includes(marker) ?? false, false);
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
+  it('applies each process-scoped singlebox role prompt without touching the workspace', async () => {
+    const previous = process.env.RELAY_SYSTEM_PROMPT_PREFIX;
+    const prompts = [
+      'You are the planner in a local multi-agent team.',
+      'You are the developer in a local multi-agent team.',
+      'You are the reviewer in a local multi-agent team.',
+    ];
+
+    try {
+      for (const prompt of prompts) {
+        process.env.RELAY_SYSTEM_PROMPT_PREFIX = prompt;
+        const { server, store, storePath, controller } = await bootServer([
+          { kind: 'lifecycle', phase: 'start' },
+          { kind: 'done', stopReason: 'end_turn' },
+        ]);
+        const client = await connectedClient(server.port);
+        try {
+          await client.request('chat.send', { sessionKey: `role-${prompts.indexOf(prompt)}`, message: 'hello', cwd: process.cwd() });
+          await client.waitForEvent(event => event.event === 'chat' && (event.payload as { state?: string }).state === 'final');
+          assert.equal(controller.runs[0]?.params.systemPrompt, prompt);
+        } finally {
+          await client.close();
+          await teardown(server, store, storePath);
+        }
+      }
+    } finally {
+      if (previous === undefined) delete process.env.RELAY_SYSTEM_PROMPT_PREFIX;
+      else process.env.RELAY_SYSTEM_PROMPT_PREFIX = previous;
     }
   });
 

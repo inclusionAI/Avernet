@@ -144,6 +144,15 @@ prepare_bcs_runtime_config() {
         )
         log_info "Enabling local Provider/Judge mock for BCS E2E"
     fi
+    if [ -n "${CLAUDE_BOTS_CONFIG:-}" ]; then
+        # The mixed topology registers one Provider webhook on this machine.
+        # Keep general private-network blocking enabled; only loopback is
+        # needed for the worktree-owned bridge listener.
+        sed_args+=(
+            "-e" "/^\[security.outbound_url\]/,/^\[/{s|^block_private_networks = .*|block_private_networks = true|;s|^allow_loopback = .*|allow_loopback = true|;}"
+        )
+        log_info "Allowing loopback-only BCS Provider callbacks for mixed Claude bots"
+    fi
 
     local config_file tmp_file
     for config_file in "$base_config" "$local_config"; do

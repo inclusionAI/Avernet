@@ -554,6 +554,15 @@ export type ThinkingMeta = {
   text: string;
 };
 
+// Metadata for a message received through chat.inject. The two persistence
+// flags distinguish an inject which was written into an existing Claude
+// transcript from one that must be replayed in the next model prompt.
+export type InjectMeta = {
+  senderName?: string;
+  nativeClaudeSessionWritten?: boolean;
+  explicitPromptReplayed?: boolean;
+};
+
 export type SessionHistoryMessage = {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'thinking';
@@ -561,7 +570,7 @@ export type SessionHistoryMessage = {
   timestamp: string;
   runId?: string;
   content?: HistoryContentBlock[] | null;
-  metadata?: ToolUseMeta | ToolResultMeta | ThinkingMeta;
+  metadata?: ToolUseMeta | ToolResultMeta | ThinkingMeta | InjectMeta;
 };
 
 export type SessionBinding = {

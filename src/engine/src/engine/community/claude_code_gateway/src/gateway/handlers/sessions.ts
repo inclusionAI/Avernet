@@ -6,6 +6,7 @@ import { existsSync, statSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { createLogger } from '../../debug.js';
+import { loadRelayModelProviderEnv } from '../../model-provider-settings.js';
 import type { ConnectionContext } from '../connection-context.js';
 import type { SessionStore } from '../../store.js';
 import type { SessionRuntimeRegistry } from '../../runtime/session-runtime-registry.js';
@@ -46,7 +47,9 @@ function resolveClaudeConfigDir(): string {
  *   1. `RELAY_DEFAULT_MODEL` env var (explicit relay override);
  *   2. `settings.json`'s `env.ANTHROPIC_MODEL` (keeps relay in sync with the
  *      Claude config the SDK / CLI subprocess reads — see `resolveClaudeConfigDir`);
- *   3. the hard-coded fallback `claude-sonnet-4-5`.
+ *   3. `RELAY_MODEL_SETTINGS_SOURCE`'s `env.ANTHROPIC_MODEL` when singlebox
+ *      supplies a model-provider source for an otherwise empty role profile;
+ *   4. the hard-coded fallback `claude-sonnet-4-5`.
  *
  * The model id flows to Claude SDK / CLI via the routing layer
  * (`claude-code-router.ts`), which maps it to provider-specific env vars.
@@ -77,6 +80,13 @@ export function resolveDefaultSessionModel(): string {
     // 排查日志：settings.json 读取/解析失败（文件不存在/损坏/字段缺失/非字符串），回落到 fallback
     const message = err instanceof Error ? err.message : String(err);
     log.debug('default session model: settings.json read failed, falling back', { error: message });
+  }
+
+  const fromModelProviderSource = loadRelayModelProviderEnv().ANTHROPIC_MODEL;
+  if (fromModelProviderSource?.trim()) {
+    const model = fromModelProviderSource.trim();
+    log.debug('default session model resolved', { model, source: 'model-provider-settings-source' });
+    return model;
   }
 
   // 排查日志：默认模型回落到硬编码兜底

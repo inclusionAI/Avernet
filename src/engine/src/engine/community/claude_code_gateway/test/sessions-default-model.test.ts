@@ -5,7 +5,8 @@ import path from 'node:path';
 import { resolveDefaultSessionModel } from '../src/gateway/handlers/sessions.js';
 
 // resolveDefaultSessionModel priority chain:
-//   RELAY_DEFAULT_MODEL (env) > settings.json env.ANTHROPIC_MODEL > 'claude-sonnet-4-5'
+//   RELAY_DEFAULT_MODEL (env) > role settings.json env.ANTHROPIC_MODEL
+//   > RELAY_MODEL_SETTINGS_SOURCE env.ANTHROPIC_MODEL > 'claude-sonnet-4-5'
 // settings.json directory mirrors the SDK / CLI subprocess:
 //   RELAY_CLAUDE_CONFIG_DIR / CLAUDE_CONFIG_DIR, else <RELAY_CLAUDE_HOME|HOME>/.claude.
 describe('resolveDefaultSessionModel', () => {
@@ -17,6 +18,7 @@ describe('resolveDefaultSessionModel', () => {
     delete process.env.RELAY_DEFAULT_MODEL;
     delete process.env.RELAY_CLAUDE_CONFIG_DIR;
     delete process.env.RELAY_CLAUDE_HOME;
+    delete process.env.RELAY_MODEL_SETTINGS_SOURCE;
     process.env.CLAUDE_CONFIG_DIR = tmpDir;
   });
 
@@ -25,6 +27,7 @@ describe('resolveDefaultSessionModel', () => {
     delete process.env.CLAUDE_CONFIG_DIR;
     delete process.env.RELAY_CLAUDE_CONFIG_DIR;
     delete process.env.RELAY_CLAUDE_HOME;
+    delete process.env.RELAY_MODEL_SETTINGS_SOURCE;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -73,5 +76,22 @@ describe('resolveDefaultSessionModel', () => {
     writeSettings(JSON.stringify({ env: { ANTHROPIC_MODEL: 'GLM-X' } }));
     process.env.RELAY_DEFAULT_MODEL = '   ';
     assert.equal(resolveDefaultSessionModel(), 'GLM-X');
+  });
+
+  it('uses the singlebox model-provider source when the role config has no settings file', () => {
+    const sourcePath = path.join(tmpDir, 'model-provider-settings.json');
+    fs.writeFileSync(sourcePath, JSON.stringify({ env: { ANTHROPIC_MODEL: 'local-compatible-model' } }));
+    process.env.RELAY_MODEL_SETTINGS_SOURCE = sourcePath;
+
+    assert.equal(resolveDefaultSessionModel(), 'local-compatible-model');
+  });
+
+  it('prefers a role-specific settings file over the singlebox model-provider source', () => {
+    const sourcePath = path.join(tmpDir, 'model-provider-settings.json');
+    fs.writeFileSync(sourcePath, JSON.stringify({ env: { ANTHROPIC_MODEL: 'source-model' } }));
+    writeSettings(JSON.stringify({ env: { ANTHROPIC_MODEL: 'role-model' } }));
+    process.env.RELAY_MODEL_SETTINGS_SOURCE = sourcePath;
+
+    assert.equal(resolveDefaultSessionModel(), 'role-model');
   });
 });
