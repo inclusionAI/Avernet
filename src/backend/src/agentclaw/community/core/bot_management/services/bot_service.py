@@ -1971,6 +1971,24 @@ class BotService:
             raise BotNotFoundError(f"Bot not found: {bot_id}")
         return bot
 
+    def list_bots_reachable_by_id(
+        self, bot_id: str, caller_id: str
+    ) -> List[Dict[str, Any]]:
+        """Live bots with this id the caller owns or collaborates on.
+
+        The tie-breaker for :meth:`get_bot_by_id`'s fail-closed ambiguity. That
+        method has to refuse a duplicated ``bot_id`` because it has no way to
+        know which one is meant; asking the question inside the caller's own
+        reach usually answers it, because the other owners' same-named bots
+        were never candidates for this caller in the first place.
+
+        **Decides nothing**, exactly like its sibling. Reachability here is
+        collaboration at any level, which is below the operator bar, so a caller
+        must still adjudicate every candidate this returns. It narrows the
+        field; it does not confer anything.
+        """
+        return self._repository.list_reachable_by_bot_id(bot_id, caller_id)
+
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         Get bot by ID.

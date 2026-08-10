@@ -145,6 +145,39 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def list_reachable_by_bot_id(
+        self, bot_id: str, caller_id: str, limit: int = 8
+    ) -> list[dict[str, Any]]:
+        """Live bots with this id that ``caller_id`` owns or collaborates on.
+
+        Exists because ``bot_id`` is not unique across owners and an id-only
+        lookup therefore has to fail closed on a duplicate — which refuses the
+        very caller this surface exists to serve. A member-level collaborator
+        on someone's legacy ``default`` bot cannot be resolved by the
+        owner-scoped read (they are not the owner) and is refused by the
+        owner-blind one (some other owner also has a ``default``), so the bot
+        they can plainly operate becomes unaddressable.
+
+        Narrowing to the caller's own reach is what breaks that tie: the
+        duplicates that make the id ambiguous tenant-wide are almost always
+        other people's, and once they are out of the picture a single candidate
+        usually remains.
+
+        **Not an authorization.** Being reachable is being a collaborator at
+        *any* level, and the operator bar is higher; the caller must still
+        adjudicate what comes back. This only narrows *which bots* are in
+        question, never *whether* the caller may act on one.
+
+        ``limit`` bounds the work rather than the meaning. Callers need to
+        distinguish none, one, and more-than-one; any limit above two serves
+        that, and a small one keeps a pathological id from reading a large set.
+
+        Scoped by current env AND tenant, like its siblings, and excludes
+        soft-deleted rows.
+        """
+        ...
+
+    @abstractmethod
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:

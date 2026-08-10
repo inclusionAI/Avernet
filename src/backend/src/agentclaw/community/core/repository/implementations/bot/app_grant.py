@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional
 from injector import inject
 from sqlalchemy.exc import IntegrityError
 
+from agentclaw.community.core.bot_app_grant.errors import GrantOwnerConflictError
 from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantLogModel,
     BotAppGrantModel,
@@ -114,6 +115,9 @@ class BotAppGrantRepository(
         except IntegrityError:
             existing = self._reread_after_conflict(bot_id, user_id, app_id, env)
             if existing is not None:
+                # The race's version of the same collision: the winner's row may
+                # be for a different owner's same-named bot.
+                self._refuse_owner_conflict(existing.owner_id, owner_id, app_id)
                 return existing
             # The winner's row was revoked before we could read it, so nothing
             # is live and this caller's grant still has not happened. One more
@@ -128,6 +132,43 @@ class BotAppGrantRepository(
             return self._insert_grant(
                 app_id, app_name, bot_id, user_id, owner_id, env
             )
+
+    @staticmethod
+    def _refuse_owner_conflict(
+        existing_owner: str, requested_owner: str, app_id: int
+    ) -> None:
+        """Refuse when the live row for this slot is on a different owner's bot.
+
+        The unique key carries no owner — the byte budget in the schema explains
+        why — so one delegating user holds one slot per ``bot_id`` per
+        application, while ``ac_bots`` lets two owners have that ``bot_id``.
+
+        Returning the other bot's row as an idempotent success is the failure
+        this prevents, and it is silent in both directions: the caller is told
+        their application may act on the bot they named, and the owner
+        comparison at request time then refuses exactly that access. The grant
+        shows as live in every listing while never working, and nothing says
+        why.
+
+        Runs on both routes to an existing row — the ordinary pre-check and the
+        post-conflict re-read — because either can surface the other owner's
+        row, and a guard on one of them is not a guard.
+
+        Neither owner id is named in the message: it reaches a log line verbatim
+        through ``log_public_error``, and both are caller-influenced.
+        """
+        if existing_owner == requested_owner:
+            return
+        logger.warning(
+            "[bot_app_grant] app_id=%s already holds a grant from this user on "
+            "a different owner's bot of the same id; refusing rather than "
+            "reporting success",
+            app_id,
+        )
+        raise GrantOwnerConflictError(
+            "a live authorization for this bot id already covers a different "
+            "owner's bot; withdraw it first"
+        ) from None
 
     def _reread_after_conflict(
         self, bot_id: str, user_id: str, app_id: int, env: str
@@ -171,6 +212,9 @@ class BotAppGrantRepository(
             # lock that deadlocks a concurrent inserter instead.
             existing = self._live_row(db, bot_id, user_id, app_id, env)
             if existing is not None:
+                # Same slot, different bot: refuse rather than call it the same
+                # authorization. See _refuse_owner_conflict.
+                self._refuse_owner_conflict(existing.owner_id, owner_id, app_id)
                 # Idempotent, and deliberately silent in the log: a repeated
                 # grant is the same authorization, not a new period. Returning
                 # the row untouched is what keeps gmt_create meaning "since

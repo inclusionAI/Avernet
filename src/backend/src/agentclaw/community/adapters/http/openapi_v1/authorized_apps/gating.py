@@ -34,7 +34,11 @@ from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousErr
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
-from agentclaw.community.core.engine_runtime.gate import require_bot_operator
+from agentclaw.community.core.engine_runtime.gate import (
+    OPERATOR_LEVEL,
+    require_bot_operator,
+    resolve_operator_level,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -68,8 +72,26 @@ def resolve_delegable_bot(
     exactly as it always did; the owner-blind read is the *fallback*, for the
     shared-bot case it exists to serve.
 
-    A caller who is neither the owner nor a collaborator, and an ambiguous
-    ``bot_id`` with no owner-scoped match, both raise
+    **An ambiguous ``bot_id`` is resolved inside the caller's own reach**
+    rather than refused. Failing closed on the duplicate was refusing the very
+    caller this surface was built for: a member-level collaborator on someone
+    else's legacy ``default`` bot misses the owner-scoped read (they do not own
+    it) and trips the owner-blind one (another owner has a ``default`` too), so
+    the bot they can plainly operate became unaddressable — the feature's whole
+    point, lost to a name collision with a stranger's bot.
+
+    Narrowing to the bots the caller owns or collaborates on breaks the tie,
+    because the duplicates that make the id ambiguous tenant-wide are other
+    people's. It cannot admit anyone: a candidate still has to pass the same
+    operator adjudication, and a caller who reaches nothing sees the set go
+    empty and gets the same masked refusal as before.
+
+    Two operable candidates is the one case that stays refused, and it is a
+    genuine ambiguity rather than a fail-closed default: the caller can operate
+    both bots, ``bot_id`` is the only thing the request says, and it does not
+    say which. Guessing would delegate the wrong bot silently.
+
+    A caller who is neither the owner nor a collaborator raises
     :class:`BotNotFoundError` — the same masked refusal, since anything
     distinguishable tells a stranger that a bot exists.
 
@@ -85,16 +107,18 @@ def resolve_delegable_bot(
         try:
             bot = bots.get_bot_by_id(bot_id)
         except BotLookupAmbiguousError:
-            # Several live bots share this id and none is the caller's. Refusing
-            # as "not found" rather than letting the RuntimeError escape: it is
-            # not in the surface's status map, so it would answer 500 — telling
-            # an unrelated caller that two bots share an id, on a surface whose
-            # whole refusal story is that a stranger learns nothing.
-            logger.warning(
-                "[authorized_apps] ambiguous bot id, refusing as not-found: %s",
-                for_log(bot_id),
+            # Several live bots share this id and none is the caller's own.
+            # Ask again inside the caller's reach — the duplicates are other
+            # people's bots, and dropping them usually leaves exactly one.
+            #
+            # Letting the ambiguity escape is not an option either way: the
+            # error is not in the surface's status map, so it would answer 500,
+            # telling an unrelated caller that two bots share an id on a
+            # surface whose whole refusal story is that a stranger learns
+            # nothing.
+            bot = _resolve_within_reach(
+                bots, collaborators, bot_id=bot_id, caller_id=caller_id
             )
-            raise BotNotFoundError("Bot not found") from None
     resolved_owner = str(bot.get("owner_id") or "")
     bot_pk = int(bot.get("id") or 0)
     require_bot_operator(
@@ -114,6 +138,50 @@ def resolve_delegable_bot(
         )
         raise BotNotFoundError("Bot not found")
     return resolved_owner, bot_pk
+
+
+def _resolve_within_reach(
+    bots: Any,
+    collaborators: Any,
+    *,
+    bot_id: str,
+    caller_id: str,
+) -> dict[str, Any]:
+    """The one bot with this id the caller may operate, or a masked refusal.
+
+    Reachability is not operability — the candidate query admits a collaborator
+    at *any* level, and the operator bar is ``MEMBER``. So the candidates are
+    filtered by the same adjudication the caller would face anyway, and the
+    count that matters is of bots the caller can actually operate. A viewer on
+    one ``default`` and a member on another is not ambiguous; there is one
+    answer and this finds it.
+
+    Both refusals are :class:`BotNotFoundError`, matching every other refusal
+    here: a caller who reaches none of the duplicates must not be able to tell
+    that any of them exist, and one who reaches several must not learn how many
+    from the shape of the error.
+    """
+    candidates = bots.list_bots_reachable_by_id(bot_id, caller_id)
+    operable = [
+        bot
+        for bot in candidates
+        if resolve_operator_level(
+            collaborators,
+            bot_pk=int(bot.get("id") or 0),
+            caller_id=caller_id,
+            owner_id=str(bot.get("owner_id") or ""),
+        )
+        >= OPERATOR_LEVEL
+    ]
+    if len(operable) == 1:
+        return operable[0]
+    logger.warning(
+        "[authorized_apps] ambiguous bot id resolved to %d operable bots for "
+        "the caller, refusing as not-found: %s",
+        len(operable),
+        for_log(bot_id),
+    )
+    raise BotNotFoundError("Bot not found") from None
 
 
 __all__ = ["resolve_delegable_bot"]

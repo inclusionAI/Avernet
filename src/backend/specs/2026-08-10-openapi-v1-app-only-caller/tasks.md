@@ -514,6 +514,34 @@
 
 ---
 
+## Post-review corrections
+
+Two defects review found after the acceptance pass above, both from the same
+root — ``bot_id`` is not unique across owners — and both fixed in-branch with
+regression tests.
+
+1. **A duplicated ``bot_id`` refused the collaborator the feature exists for.**
+   The delegation gate resolved owner-scoped first and fell back to an
+   owner-blind read that fails closed on a duplicate. A member-level
+   collaborator on someone else's legacy `default` bot misses the first (they
+   are not the owner) and trips the second (another owner has a `default`), so
+   the bot they can plainly operate was unaddressable — the headline capability,
+   lost to a name collision with a stranger's bot. The gate now resolves the
+   ambiguity **inside the caller's own reach**, which admits nobody: candidates
+   face the same operator adjudication, and two operable candidates stay refused
+   because `bot_id` genuinely does not say which is meant.
+
+2. **A grant could be reported as succeeding while covering a different bot.**
+   The unique key carries no owner, so one delegating user holds one slot per
+   `(bot_id, application)`. Addressing two same-named bots is not possible in
+   one moment — the resolve is deterministic on `(bot_id, caller)` — but it
+   becomes possible *across* a change in what the caller can reach. The second
+   grant then landed on the first's slot and was returned as an idempotent
+   success, while the owner comparison at request time refused exactly that
+   access: a grant live in every listing that never works, with nothing saying
+   why. Refused now with a distinct 409, whose remedy — withdraw, then grant —
+   is tested.
+
 ## Groups
 
 - **Group A — The record:** Tasks 1, 2

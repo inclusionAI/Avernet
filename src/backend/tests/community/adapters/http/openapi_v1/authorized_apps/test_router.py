@@ -67,6 +67,12 @@ OWNER = "u-1"
 COLLAB = "u-2"
 #: A user with no relationship to ``BOT`` at all.
 STRANGER = "u-9"
+#: Another owner entirely, who also has a bot called ``default``. Their
+#: existence is what makes the id ambiguous tenant-wide.
+OTHER_OWNER = "u-3"
+#: Collaborates on **both** ``default`` bots at member level, so ``bot_id``
+#: alone genuinely cannot say which one they mean.
+DOUBLE_COLLAB = "u-4"
 BOT = "b-1"
 #: A legacy ``default``-style id shared by several live bots, which the
 #: owner-blind resolve must fail closed on rather than pick a row for.
@@ -77,6 +83,9 @@ BOT_PK = 7
 #: ``AMBIGUOUS_BOT``'s primary key under ``OWNER``. Another owner's row with the
 #: same ``bot_id`` would have a different one — which is the whole problem.
 AMBIGUOUS_PK = 8
+#: ``AMBIGUOUS_BOT``'s primary key under ``OTHER_OWNER``: same ``bot_id``,
+#: different bot.
+OTHER_AMBIGUOUS_PK = 9
 APP_ID = 42
 APP_NAME = "partner-platform"
 
@@ -197,6 +206,34 @@ def bots():
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
             return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
 
+        def list_bots_reachable_by_id(self, bot_id: str, caller_id: str):
+            """The caller's own candidates — what breaks the ambiguity above.
+
+            Reachability is ownership **or** collaboration at any level, which
+            is deliberately below the operator bar: the caller filters what
+            comes back. ``DOUBLE_COLLAB`` reaches both ``default`` bots, which
+            is the case that stays refused.
+            """
+            everything = [
+                {"id": BOT_PK, "bot_id": BOT, "owner_id": OWNER},
+                {"id": AMBIGUOUS_PK, "bot_id": AMBIGUOUS_BOT, "owner_id": OWNER},
+                {
+                    "id": OTHER_AMBIGUOUS_PK,
+                    "bot_id": AMBIGUOUS_BOT,
+                    "owner_id": OTHER_OWNER,
+                },
+            ]
+            reachable = {
+                OWNER: {BOT_PK, AMBIGUOUS_PK},
+                COLLAB: {BOT_PK, OTHER_AMBIGUOUS_PK},
+                DOUBLE_COLLAB: {AMBIGUOUS_PK, OTHER_AMBIGUOUS_PK},
+            }.get(caller_id, set())
+            return [
+                bot
+                for bot in everything
+                if bot["bot_id"] == bot_id and bot["id"] in reachable
+            ]
+
     return _Bots()
 
 
@@ -214,6 +251,15 @@ def collaborators():
             if user_id == owner_id:
                 return PermissionLevel.OWNER
             if bot_pk == BOT_PK and user_id == COLLAB:
+                return PermissionLevel.MEMBER
+            # ``COLLAB`` is a member on *another owner's* ``default`` and on
+            # none of ``OWNER``'s — the shape the ambiguous id has to resolve.
+            if bot_pk == OTHER_AMBIGUOUS_PK and user_id == COLLAB:
+                return PermissionLevel.MEMBER
+            if user_id == DOUBLE_COLLAB and bot_pk in (
+                AMBIGUOUS_PK,
+                OTHER_AMBIGUOUS_PK,
+            ):
                 return PermissionLevel.MEMBER
             return PermissionLevel.NONE
 
@@ -489,18 +535,63 @@ def test_collaborator_cannot_withdraw_the_owners_delegation(client, collab_clien
     assert resp.status_code == 404, resp.json()
 
 
-def test_an_ambiguous_bot_id_is_refused_as_not_found_not_as_a_server_error(
-    collab_client,
+def test_an_ambiguous_bot_id_resolves_to_the_one_the_caller_can_operate(
+    collab_client, sessions
 ):
-    """A duplicated ``bot_id`` must not answer 500.
+    """The case the feature exists for, and it used to be refused.
+
+    ``COLLAB`` is a member on ``OTHER_OWNER``'s ``default`` and on none of
+    ``OWNER``'s. The owner-scoped read misses (they own nothing) and the
+    owner-blind one fails closed (two live bots share the id), so the bot they
+    can plainly operate was unaddressable — a member-level collaborator refused
+    by a name collision with a stranger's bot.
+
+    Resolving inside the caller's own reach removes the stranger's bot from the
+    question, and one candidate remains.
+    """
+    resp = collab_client.post(
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={}
+    )
+
+    assert resp.status_code == 201, resp.json()
+    with sessions() as session:
+        row = session.query(BotAppGrantModel).one()
+        # The grant records the bot COLLAB can actually operate, not OWNER's
+        # same-named one.
+        assert (row.user_id, row.owner_id) == (COLLAB, OTHER_OWNER)
+
+
+def test_an_ambiguous_bot_id_is_still_refused_when_the_caller_reaches_none(
+    stranger_client,
+):
+    """A duplicated ``bot_id`` must not answer 500, and must not admit.
 
     ``BotLookupAmbiguousError`` is a bare ``RuntimeError`` and is not in this
     surface's status map, so letting it escape would answer 500 — telling an
     unrelated caller that two live bots share an id, on a surface whose entire
-    refusal story is that a stranger learns nothing. Fail closed, in the shape
-    everything else here fails.
+    refusal story is that a stranger learns nothing.
     """
-    resp = collab_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
+    resp = stranger_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
+
+    assert resp.status_code == 404, resp.json()
+
+
+def test_an_ambiguous_bot_id_is_refused_when_the_caller_can_operate_both(
+    grants, bots, collaborators
+):
+    """The genuine ambiguity, and the one case that must stay refused.
+
+    ``DOUBLE_COLLAB`` is a member on both ``default`` bots. Narrowing to the
+    caller's reach does not help here — they really can operate both, the
+    request says only ``bot_id``, and it does not say which. Picking one would
+    delegate the wrong bot silently, which is worse than refusing.
+    """
+    client = user_scoped_client(
+        _build(grants, bots, collaborators, _caller(user_id=DOUBLE_COLLAB)),
+        DOUBLE_COLLAB,
+    )
+
+    resp = client.post(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={})
 
     assert resp.status_code == 404, resp.json()
 

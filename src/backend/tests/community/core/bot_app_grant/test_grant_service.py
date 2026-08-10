@@ -19,6 +19,7 @@ from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantIdentityTooLongError,
     GrantNotFoundError,
+    GrantOwnerConflictError,
 )
 from agentclaw.community.core.bot_app_grant.models import (
     APP_NAME_MAX_LENGTH,
@@ -739,6 +740,80 @@ def test_grant_ignores_a_caller_supplied_env(repo, sessions):
     assert repo.find("b-1", "u-1", 42) is not None, "must stay findable"
     assert repo.revoke("b-1", "u-1", 42, "u-1") is True, "must stay revocable"
     assert written.env != "pre"
+
+
+def test_regranting_onto_another_owners_same_named_bot_is_refused(service, sessions):
+    """The slot collision, refused loudly instead of reported as success.
+
+    The unique key is ``(tenant, app_id, bot_id, user_id, env)`` — no owner, for
+    the byte budget — so one user has one slot per ``bot_id`` per application,
+    while ``bot_id`` is not unique across owners.
+
+    Reaching this needs the caller's *reach* to change, not two bots addressed
+    at once: the resolve is deterministic on ``(bot_id, caller)``, so a caller
+    cannot name the second bot while the first is still resolvable. Delegate one
+    owner's ``default``, lose that collaboration, gain another owner's, delegate
+    again — and the second grant lands on the first's slot.
+
+    Reported as an idempotent success it would be a lie in the way that matters:
+    the caller is told their application may act on the bot they named, the row
+    says a different bot, and the owner comparison at request time then refuses
+    the access they were told they had — silently, permanently, with the grant
+    showing as live in every listing.
+    """
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="owner-a", app_id=42, app_name="p"
+    )
+
+    with pytest.raises(GrantOwnerConflictError):
+        service.grant(
+            bot_id="default",
+            user_id="u-1",
+            owner_id="owner-b",
+            app_id=42,
+            app_name="p",
+        )
+
+    rows = _rows(sessions, BotAppGrantModel)
+    assert [row.owner_id for row in rows] == ["owner-a"], "the live grant is untouched"
+    assert _log(sessions) == [GrantAction.GRANTED], "no phantom second period"
+
+
+def test_withdrawing_first_lets_the_other_owners_bot_be_delegated(service, sessions):
+    """The remedy the refusal points at actually works.
+
+    A refusal with no way forward would just be the silent failure made loud.
+    Withdrawing frees the slot, and the second bot can then be delegated.
+    """
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="owner-a", app_id=42, app_name="p"
+    )
+    service.revoke(bot_id="default", user_id="u-1", owner_id="owner-a", app_id=42)
+
+    record = service.grant(
+        bot_id="default", user_id="u-1", owner_id="owner-b", app_id=42, app_name="p"
+    )
+
+    assert record.owner_id == "owner-b"
+    assert [row.owner_id for row in _rows(sessions, BotAppGrantModel)] == ["owner-b"]
+
+
+def test_the_same_owners_bot_is_still_idempotent(service, sessions):
+    """The guard must not turn an ordinary repeat into a conflict.
+
+    Same owner, same everything: the caller asked for a state that already
+    holds, and a partner retrying a timed-out request must not get an error for
+    a request that succeeded.
+    """
+    first = service.grant(
+        bot_id="default", user_id="u-1", owner_id="owner-a", app_id=42, app_name="p"
+    )
+    second = service.grant(
+        bot_id="default", user_id="u-1", owner_id="owner-a", app_id=42, app_name="p"
+    )
+
+    assert first.id == second.id
+    assert len(_rows(sessions, BotAppGrantModel)) == 1
 
 
 def test_losing_the_insert_race_returns_the_winners_row(repo, monkeypatch, sessions):

@@ -49,6 +49,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.core.bot_app_grant.errors import (
     GrantIdentityTooLongError,
     GrantNotFoundError,
+    GrantOwnerConflictError,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotInvalidLifecycleStateError,
@@ -199,6 +200,14 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # 400, not 404: the delegation is not missing, it is unrepresentable. The
     # message names no caller-supplied value.
     GrantIdentityTooLongError: (400, "User id is too long to authorize"),
+    # 409: the request is well-formed and the caller is entitled to it, but it
+    # conflicts with a live authorization on another owner's same-named bot.
+    # Retrying is futile and the remedy is a withdrawal, which is what a
+    # conflict says and a 400 would not.
+    GrantOwnerConflictError: (
+        409,
+        "Another authorization for this bot id is already live",
+    ),
     BotPermissionError: (404, "Not found"),
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),

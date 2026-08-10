@@ -44,6 +44,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.repository.implementations.bot.reachability import (
+    BotReachabilityQueries,
+)
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -76,6 +79,7 @@ _JSON_FIELDS = ("share_policy", "ext")
 
 
 class BotRepository(
+    BotReachabilityQueries,
     BotRepositoryProtocol,
 ):
     """Unified ORM ``BotRepository`` implementation."""
@@ -304,56 +308,11 @@ class BotRepository(
             )
             return [row[0] for row in rows]
 
-    def filter_live_bots(
-        self, pairs: List[tuple[str, str]]
-    ) -> set[tuple[str, str]]:
-        """Which of these ``(bot_id, owner_id)`` bots are live, in one query."""
-        if not pairs:
-            # No query at all rather than an ``IN ()``, which MySQL rejects
-            # outright and SQLAlchemy warns about.
-            return set()
-        wanted = set(pairs)
-        with self._db.orm_session() as db:
-            rows = (
-                db.query(self.Model.bot_id, self.Model.owner_id)
-                .filter(
-                    self.Model.bot_id.in_({bot_id for bot_id, _ in wanted}),
-                    self.Model.owner_id.in_({owner for _, owner in wanted}),
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .all()
-            )
-            # The two ``IN`` clauses are a cross product, so a row can match one
-            # column from one pair and the other from a different pair. Only the
-            # pairs actually asked for survive.
-            return {(row[0], row[1]) for row in rows} & wanted
-
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20
     ) -> tuple[int, List[Dict[str, Any]]]:
-        from agentclaw.community.core.bot_collaborator.models import BotCollaboratorModel
-
-        env = get_current_env()
         with self._db.orm_session() as db:
-            query = (
-                db.query(self.Model)
-                .outerjoin(
-                    BotCollaboratorModel,
-                    (BotCollaboratorModel.bot_pk == self.Model.id)
-                    & (BotCollaboratorModel.env == env)
-                    & (BotCollaboratorModel.user_id == owner_id),
-                )
-                .filter(
-                    self.Model.is_delete == 0,
-                    self.Model.env == env,
-                    or_(
-                        self.Model.owner_id == owner_id,
-                        BotCollaboratorModel.id.isnot(None),
-                    ),
-                )
-                .distinct()
-            )
+            query = self._reachable_by(db, owner_id)
             total = query.count()
             bots = (
                 query.order_by(self.Model.gmt_create.desc())

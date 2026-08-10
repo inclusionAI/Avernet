@@ -12247,7 +12247,7 @@
     },
     "/openapi/v1/bots/skills": {
       "get": {
-        "description": "List exact Bot-owned Local Skills from database desired state.",
+        "description": "List exact Bot-owned Local Skills from database desired state.\n\nGrant-checked **here** rather than by the shared dependency, because only\nthis handler knows whose bot it is about to read: ``owner_entity_id`` names\nan owner and defaults to the caller. Checking against the caller instead\nwould be wrong in both directions — it would let a grant on the caller's own\nsame-named bot authorize a read of someone else's, and refuse a legitimate\ngrant on a bot shared with them.",
         "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
@@ -12451,7 +12451,7 @@
     },
     "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Create one inactive Local Skill from a complete raw ZIP package.",
+        "description": "Create one inactive Local Skill from a complete raw ZIP package.\n\nGrant-checked here for the same reason as the listing above: the owner this\nwrites under is ``owner_entity_id or actor_id``, which only the handler\nknows. A write makes the mis-binding worse — it would create a skill on a\nbot the application was never granted.",
         "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
