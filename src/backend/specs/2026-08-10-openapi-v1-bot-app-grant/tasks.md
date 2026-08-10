@@ -30,70 +30,52 @@
         sees what was weighed.
 - **Depends on:** — (resolved at the review gate, not during implementation)
 
-## Task 2: The grant record  `[!]`
+## Task 2: The grant record  `[ ]`
 
-> **BLOCKED — the approved unique key does not survive a second withdrawal.**
->
-> `UniqueConstraint(app_id, bot_id, owner_id, env, status)` breaks on
-> grant → withdraw → grant → **withdraw**: two rows then hold
-> `status='revoked'` for the same `(app_id, bot_id, owner_id, env)`, and
-> `status` is `NOT NULL`, so MySQL/OceanBase reject the second withdrawal with
-> a duplicate-key error. The plan reasoned about the second *grant* colliding
-> with the withdrawn row — that is why `status` is in the key — and did not
-> walk one step further. A second withdrawal is ordinary: authorize, withdraw,
-> re-authorize, withdraw.
->
-> No portable fix exists at this layer. A filtered unique index
-> (`WHERE status='active'`) is the textbook answer, but OceanBase is
-> MySQL-compatible and MySQL has no partial indexes. Moving `revoked_at` into
-> the key inverts the problem: MySQL treats `NULL`s as distinct, so multiple
-> *active* rows would be admitted — losing the one invariant that matters.
->
-> Two ways out, awaiting a decision:
->
-> 1. **Two tables (recommended).** `ac_bot_app_grant` holds live grants only,
->    unique on `(app_id, bot_id, owner_id, env)`, hard-deleted on withdraw;
->    `ac_bot_app_grant_log` is append-only, one row per grant and per withdraw.
->    DB-enforced uniqueness on the live grant, an audit trail that holds
->    unboundedly many periods, and it matches the existing
->    `ac_bot_collaborator` / `ac_bot_collab_log` pair. This **overturns**
->    `plan.md` → Alternatives, which rejected a log table as redundant on the
->    grounds that "a log row would carry nothing the soft-deleted grant row
->    does not" — false, since the soft-deleted row carries exactly one period.
-> 2. **One table, repository-enforced.** Drop `status` from the unique key and
->    enforce "at most one active" in the repository inside a transaction.
->    Smaller diff, keeps soft-delete, but moves the guarantee off the database
->    and into code — on a permission record.
->
-> Groups C–F all depend on this, so the run stopped here rather than running
-> ahead. Nothing schema-shaped has landed.
+> **Unblocked — two tables, decided by the user.** Soft-delete in one table
+> cannot express more than one grant period: with `status` in the unique key
+> the second withdrawal collides, and without it the "one live grant"
+> invariant is unenforceable, since MySQL/OceanBase have no filtered unique
+> index. The live table now carries the invariant and the log carries the
+> history. `plan.md` → Data Model Changes is rewritten accordingly.
 
-- **Goal:** One ORM model and its Pydantic record, with a unique key that makes
-  grant → withdraw → grant expressible.
+- **Goal:** Two ORM models — the live grant, whose unique key is a real
+  database constraint, and the append-only log that outlives it.
 - **Files:**
   `src/backend/src/agentclaw/community/core/bot_app_grant/__init__.py` (new),
   `…/core/bot_app_grant/models.py` (new)
 - **Done when:**
-  - [ ] `BotAppGrantModel` maps `ac_bot_app_grant` with the columns in
-        `plan.md` → Data Model Changes: `app_id`, `bot_id`, `owner_id`,
-        `tenant`, `env`, `status`, `gmt_create`, `gmt_modified`, `revoked_at`
-        (+ `app_name` per Task 1).
+  - [ ] `BotAppGrantModel` maps `ac_bot_app_grant` — live grants **only**, one
+        row iff the app may reach the bot right now: `app_id`, `app_name`,
+        `bot_id`, `owner_id`, `tenant`, `env`, `gmt_create`, `gmt_modified`.
+        No `status`, no `revoked_at` — a grant is live iff its row exists, so
+        there is no second state to model.
+  - [ ] `BotAppGrantLogModel` maps `ac_bot_app_grant_log` — append-only, one
+        row per grant and per withdrawal, with `action` in `granted`/`revoked`.
+        It duplicates `app_name` and `tenant` rather than joining, because it
+        must still read correctly once the live row is gone — which is exactly
+        when it is consulted.
+  - [ ] The log has **no unique constraint**, and the module docstring says why:
+        its job is to accept every event including the fourth `revoked` for one
+        pair, and a constraint there would reintroduce the bug the split fixes.
   - [ ] `env` defaults from `agentclaw.community.utils.env_utils.get_current_env`
-        (`env_utils.py:68`), matching `ac_bot_collaborator`
+        (`env_utils.py:68`) on both, matching `ac_bot_collaborator`
         (`core/bot_collaborator/models.py:130`).
-  - [ ] `UniqueConstraint("app_id", "bot_id", "owner_id", "env", "status")`.
-        Both `env` and `status` are in the key, and the module docstring says
-        why: `env` so one row cannot collide across environments sharing a
-        database, `status` so a withdrawn grant does not block a later re-grant.
-  - [ ] Indexes `idx_bot_owner_env_status` and `idx_app_owner_env_status`
-        exist — the record's two reading ends. The second is not redundant with
-        the unique key: that key's second column is `bot_id`, so it cannot serve
-        an `(app_id, owner_id)` lookup that names no bot.
-  - [ ] `revoked_at` is nullable, and a comment states this is an intentional
-        contract state (an active grant has no revocation time), per `CLAUDE.md`.
-  - [ ] `GrantStatus` is an enum with `ACTIVE` / `REVOKED`, not bare strings.
-  - [ ] `to_record()` returns `BotAppGrantRecord`, mirroring
-        `BotCollaboratorModel.to_record` (`core/bot_collaborator/models.py:146`).
+  - [ ] `UniqueConstraint("app_id", "bot_id", "owner_id", "env")` on the live
+        table, with the docstring noting `env` is in the key so one row cannot
+        collide across environments sharing a database.
+  - [ ] `Index("idx_app_owner_env", "app_id", "owner_id", "env")` — the app's
+        view. Not redundant with the unique key: that key's second column is
+        `bot_id`, so it cannot serve an `(app_id, owner_id)` lookup naming no
+        bot.
+  - [ ] `Index("idx_log_bot_owner_env", "bot_id", "owner_id", "env",
+        "gmt_create")` — reconstructing a bot's history in order.
+  - [ ] `GrantAction` is an enum with `GRANTED` / `REVOKED`, not bare strings.
+  - [ ] `to_record()` on both, mirroring `BotCollaboratorModel.to_record`
+        (`core/bot_collaborator/models.py:146`).
+  - [ ] Bigint columns use `AutoIncrementBigInteger`
+        (`plugin_api/models.py:41`) so they are `BIGINT` on OceanBase and
+        `INTEGER` on SQLite, as `ac_bots` does.
 - **Depends on:** Task 1
 
 ## Task 3: Repository contract and implementation  `[ ]`
@@ -106,21 +88,28 @@
   `…/core/repository/implementations/bot/app_grant.py` (new),
   `…/core/repository/implementations/bot/__init__.py`
 - **Done when:**
-  - [ ] `BotAppGrantRepositoryProtocol` declares `upsert_active`,
-        `list_active_for_bot`, `list_active_for_app`, `find_active`,
-        `mark_revoked` — **every member `@abstractmethod`**, domain imports
-        under `TYPE_CHECKING` only, per `core/repository/README.md`.
-  - [ ] Both `list_active_*` members take `owner_id`, so neither can return a
-        row belonging to anyone but the caller. The scoping is in the contract,
-        not left to each caller to remember.
+  - [ ] `BotAppGrantRepositoryProtocol` declares `grant`, `revoke`,
+        `list_for_bot`, `list_for_app`, `find` — **every member
+        `@abstractmethod`**, domain imports under `TYPE_CHECKING` only, per
+        `core/repository/README.md`.
+  - [ ] `grant` writes the live row **and** appends `granted` to the log in
+        **one transaction**; `revoke` deletes the live row **and** appends
+        `revoked` in one transaction. The log write belongs to the repository,
+        not the service: the two halves must be atomic, and a caller that can
+        forget the second half is a caller that will.
+  - [ ] `revoke` returns `False` when no live row matched, so the adapter can
+        answer 404 distinctly from a successful withdrawal.
+  - [ ] Both `list_*` members take `owner_id`, so neither can return a row
+        belonging to anyone but the caller. The scoping is in the contract, not
+        left to each caller to remember.
   - [ ] The protocol is re-exported from `protocols/bot/__init__.py` so
         importers see one module, as the other `bot` contracts are.
   - [ ] `BotAppGrantRepository` declares the Protocol as a base and takes
         `DatabasePlugin` via `@inject`, modelled on
         `implementations/bot/collaborator.py:34`.
-  - [ ] `upsert_active` is idempotent on a live grant and **does not touch
-        `gmt_create`** — the record must keep answering "could reach this bot
-        from T1" honestly.
+  - [ ] `grant` is idempotent on an existing live row: it returns that row
+        untouched and appends **nothing** to the log. `gmt_create` does not
+        move, and a duplicate call does not invent a period.
   - [ ] `tests/community/architecture/test_repository_contracts.py` passes: every
         member abstract, implementation based, no runtime domain import in
         `protocols/`, contract and body on different paths.
@@ -138,12 +127,15 @@
         writes `owner_id` and `tenant` as **resolved values**, never anything
         the request supplied.
   - [ ] Re-granting a live grant returns the existing record unchanged — same
-        `gmt_create` — and creates no second row.
-  - [ ] Re-granting after a withdraw inserts a **new** row, leaving the
-        withdrawn row's `[gmt_create, revoked_at]` interval intact.
-  - [ ] `revoke` raises `GrantNotFoundError` when no live grant matches, so the
-        adapter can answer 404 distinctly from a successful withdraw.
-  - [ ] `list_for_bot` returns live grants only.
+        `gmt_create` — and creates no second row and no second log event.
+  - [ ] Re-granting after a withdraw inserts a fresh live row and appends a
+        second `granted`. The earlier period is already closed in the log by its
+        `revoked` event, so the two periods stay distinguishable.
+  - [ ] `revoke` raises `GrantNotFoundError` when the repository reports no live
+        row, so the adapter can answer 404 distinctly from a successful
+        withdraw.
+  - [ ] `list_for_bot` returns live grants only — which the live table gives for
+        free, since it holds nothing else.
   - [ ] `list_for_app(app_id, owner_id)` returns the owner's bots this app may
         reach, live only. It performs **no bot-existence check** — deliberately
         asymmetric with the other three, which resolve a named bot and inherit
@@ -280,7 +272,12 @@
         asserted rather than trusted; an untested inherited guard is one a later
         change can remove without noticing.
   - [ ] `test_owner_and_tenant_are_resolved_at_write_time_not_read_from_request`
-  - [ ] `test_revoked_row_retains_its_interval`
+  - [ ] `test_grant_withdraw_grant_withdraw_survives` — the cycle that broke the
+        first schema. Two full periods, four log events, no constraint error.
+  - [ ] `test_log_outlives_the_live_row` — after a withdrawal the live row is
+        gone and the log still names the app and tenant, so the audit reads
+        correctly at exactly the moment it is consulted.
+  - [ ] `test_duplicate_grant_appends_no_log_event` — a re-grant is not a period.
   - [ ] The app's view — `test_list_authorized_bots_is_scoped_to_the_calling_app`
         (two apps granted on one owner's bots see disjoint lists),
         `test_list_authorized_bots_is_scoped_to_the_calling_owner` (one app

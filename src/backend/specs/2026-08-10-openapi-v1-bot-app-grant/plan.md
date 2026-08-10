@@ -56,58 +56,96 @@ in the path.
 
 ## Data Model Changes
 
+**Two tables, and the split is the whole design.** One table cannot hold both
+"exactly one live grant" and "every past grant period", because the invariant
+wants a unique key and the history wants unlimited rows on those same columns.
+Soft-delete looked like it bridged them and does not: putting `status` in the
+unique key survives grant → withdraw → grant, then fails on the *second*
+withdrawal, when two `revoked` rows collide. A filtered unique index
+(`WHERE status='active'`) is the textbook answer and MySQL — therefore
+OceanBase — does not have one.
+
+So the invariant gets a table it can actually be declared on, and the history
+gets a table with no unique key at all. This is the shape
+`ac_bot_collaborator` / `ac_bot_collab_log` already uses in this codebase.
+
 ```python
 # src/backend/src/agentclaw/community/core/bot_app_grant/models.py (new)
 class BotAppGrantModel(Base):
-    """SQLAlchemy ORM model for ac_bot_app_grant table."""
+    """Live grants only — a row exists iff the app may reach the bot right now."""
     __tablename__ = "ac_bot_app_grant"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
 
-    app_id   = Column(BigInteger, nullable=False, comment="网关 avernet_application.id，来自 AppPrincipal")
-    app_name = Column(String(256), nullable=False, comment="授权时快照的应用名（见下方 Deviation）")
-    bot_id   = Column(String(256), nullable=False, comment="Bot ID")
-    owner_id = Column(String(256), nullable=False, comment="Bot 拥有者，服务端解析所得")
-    tenant   = Column(String(128), nullable=False, comment="租户，写入时校验")
-    env      = Column(String(20), nullable=False, default=get_current_env, comment="环境标识")
-    status   = Column(String(32), nullable=False, default=GrantStatus.ACTIVE, comment="active/revoked")
+    app_id   = Column(AutoIncrementBigInteger, nullable=False, comment="gateway avernet_application.id, from the AppPrincipal")
+    app_name = Column(String(256), nullable=False, comment="app display name, snapshotted at consent time")
+    bot_id   = Column(String(256), nullable=False, comment="the authorized bot")
+    owner_id = Column(String(256), nullable=False, comment="bot owner, resolved server-side")
+    tenant   = Column(String(128), nullable=False, comment="tenant, cross-checked on write")
+    env      = Column(String(20), nullable=False, default=get_current_env)
 
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
-    revoked_at = Column(DateTime, nullable=True, comment="撤销时间；active 记录为空")
 
     __table_args__ = (
-        UniqueConstraint("app_id", "bot_id", "owner_id", "env", "status",
-                         name="uk_app_bot_owner_env_status"),
-        # the owner's view: which apps reach this bot
-        Index("idx_bot_owner_env_status", "bot_id", "owner_id", "env", "status"),
+        UniqueConstraint("app_id", "bot_id", "owner_id", "env",
+                         name="uk_app_bot_owner_env"),
         # the app's view: which of this owner's bots may this app reach
-        Index("idx_app_owner_env_status", "app_id", "owner_id", "env", "status"),
+        Index("idx_app_owner_env", "app_id", "owner_id", "env"),
+    )
+
+
+class BotAppGrantLogModel(Base):
+    """Append-only. One row per grant and per withdrawal; never updated."""
+    __tablename__ = "ac_bot_app_grant_log"
+
+    id = Column(AutoIncrementBigInteger, primary_key=True, autoincrement=True, nullable=False)
+
+    app_id   = Column(AutoIncrementBigInteger, nullable=False)
+    app_name = Column(String(256), nullable=False)
+    bot_id   = Column(String(256), nullable=False)
+    owner_id = Column(String(256), nullable=False)
+    tenant   = Column(String(128), nullable=False)
+    env      = Column(String(20), nullable=False, default=get_current_env)
+    action   = Column(String(32), nullable=False, comment="granted | revoked")
+
+    gmt_create = Column(DateTime, default=func.now(), nullable=False)
+
+    __table_args__ = (
+        # reconstruct a bot's authorization history in order
+        Index("idx_log_bot_owner_env", "bot_id", "owner_id", "env", "gmt_create"),
     )
 ```
 
-`idx_app_owner_env_status` is not redundant with the unique key even though both
-lead on `app_id`: the unique key's second column is `bot_id`, so it cannot serve
-an `(app_id, owner_id)` lookup that does not also name a bot — which is exactly
-the app's view.
+Notes on the shape:
 
-Notes on the shape, each already argued through:
-
+- **No unique key on the log, deliberately.** Its job is to accept every event,
+  including the fourth `revoked` for the same pair. A constraint there would
+  reintroduce exactly the bug this split fixes.
+- **The live table needs no `status` and no `revoked_at`.** A grant is live iff
+  its row exists, so there is no second state to model and nothing nullable to
+  reason about. The `revoked_at` column — and the `| None` question it raised —
+  disappears with the soft-delete it belonged to.
 - **`env` is in the unique key**, matching `ac_bot_collaborator`'s
   `uk_bot_pk_user_env` (`core/bot_collaborator/models.py:139`). The natural key
   is `(app_id, bot_id, owner_id)` *within an environment*; omitting `env` would
   make one row collide across environments sharing a database.
-- **`status` is in the unique key** so a bot can be granted → withdrawn →
-  granted again. Without it the second grant would collide with the withdrawn
-  row. This is what makes "revive vs new row" (below) decidable.
 - **No `bot_pk`.** `bot_id` alone is not unique across owners
   (`core/engine_runtime/gate.py:87`), but `bot_id` + `owner_id` carries the same
   uniqueness without putting a surrogate key into a public-facing record.
 - **No `granted_by` / `revoked_by`.** Under owner-only authority both equal
   `owner_id` by construction — a column that can only restate another.
-- `revoked_at` is `nullable=True` and that is an intentional contract state, not
-  a widened type: an active grant has no revocation time. Per `CLAUDE.md`, this
-  is the case where `| None` is correct.
+- **The log duplicates `app_name` and `tenant` rather than joining.** It is an
+  audit record: it must still read correctly after the live row is gone, which
+  is precisely when it is consulted.
+- `idx_app_owner_env` is not redundant with the unique key even though both lead
+  on `app_id`: the key's second column is `bot_id`, so it cannot serve an
+  `(app_id, owner_id)` lookup that names no bot — exactly the app's view. The
+  owner's view (`bot_id`, `owner_id`) needs no index of its own; it is served by
+  scanning few rows and can gain one if it ever matters.
+
+Grant and its log write happen in **one transaction**, so the history cannot
+disagree with the live state.
 
 No migration file: the backend creates tables through `DataSourcePlugin`
 `create_all()` the same way `ac_bot_collaborator` does.
@@ -274,18 +312,34 @@ nothing about anyone else's bots from their own empty list.
 # src/backend/.../core/repository/protocols/bot/app_grant.py (new)
 class BotAppGrantRepositoryProtocol(Protocol):
     @abstractmethod
-    def upsert_active(self, data: Dict[str, Any]) -> BotAppGrantRecord: ...
+    def grant(self, data: Dict[str, Any]) -> BotAppGrantRecord:
+        """Insert the live row and append 'granted' to the log, in one transaction.
+
+        Idempotent: an existing live row is returned untouched, and nothing is
+        logged, so a duplicate call cannot move gmt_create or invent a period.
+        """
     @abstractmethod
-    def list_active_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]: ...
+    def revoke(self, bot_id: str, owner_id: str, app_id: int) -> bool:
+        """Delete the live row and append 'revoked', in one transaction.
+
+        Returns False when no live row matched, so the adapter can answer 404
+        distinctly from a successful withdrawal.
+        """
     @abstractmethod
-    def list_active_for_app(self, app_id: int, owner_id: str) -> List[BotAppGrantRecord]: ...
+    def list_for_bot(self, bot_id: str, owner_id: str) -> List[BotAppGrantRecord]: ...
     @abstractmethod
-    def find_active(self, bot_id: str, owner_id: str, app_id: int) -> Optional[BotAppGrantRecord]: ...
+    def list_for_app(self, app_id: int, owner_id: str) -> List[BotAppGrantRecord]: ...
     @abstractmethod
-    def mark_revoked(self, grant_id: int) -> bool: ...
+    def find(self, bot_id: str, owner_id: str, app_id: int) -> Optional[BotAppGrantRecord]: ...
 ```
 
-The two `list_active_*` members are the record's two reading ends. Both take
+No `_active` suffixes any more: the live table holds nothing else, so "active"
+stopped being a qualifier and became the table's meaning. `grant` and `revoke`
+own their log writes rather than leaving them to the service — the two must be
+one transaction, and a caller that can forget the second half is a caller that
+will.
+
+The two `list_*` members are the record's two reading ends. Both take
 `owner_id`, so neither can return a row belonging to anyone but the caller —
 the scoping is in the contract, not left to each caller to remember.
 
@@ -346,11 +400,16 @@ be removed by someone who does not know it is load-bearing.
 
 - **Re-granting a live grant is idempotent and does NOT move `gmt_create`.** The
   record answers "this application could reach this bot from T1"; refreshing T1
-  on a duplicate call would make the audit lie about when access began.
-- **Re-granting a previously withdrawn one inserts a NEW row.** The withdrawn
-  row is the closed interval `[gmt_create, revoked_at]`; reviving it would
-  destroy that interval and make the two access periods indistinguishable. This
-  is why `status` is in the unique key.
+  on a duplicate call would make the audit lie about when access began. Nothing
+  is appended to the log either — a duplicate call is not a new period.
+- **Re-granting a previously withdrawn one inserts a fresh live row** and
+  appends a second `granted` event. The earlier period is already closed in the
+  log by its `revoked` event, so the two periods stay distinguishable without
+  the live table modelling either of them.
+
+With the two-table split this stops being a constraint puzzle and becomes the
+obvious reading: the live table says what is true now, the log says what
+happened.
 
 ## Dependencies
 
@@ -406,8 +465,18 @@ None. No new packages, no version bumps, no new internal service calls.
 - **`app_id` as a POST body/query parameter** — rejected. It would let a request
   point a grant at an application other than the caller, which is the single
   property that makes this a consent moment.
-- **Hard delete on withdraw** — rejected. The spec requires "could reach this bot
-  between T1 and T2" to stay answerable.
+- **Soft delete in one table** — tried, and **rejected during implementation**.
+  It cannot express more than one grant period: with `status` in the unique key
+  the second withdrawal collides, and without it the "one live grant" invariant
+  is unenforceable, because MySQL/OceanBase have no filtered unique index. An
+  earlier revision of this plan chose it, and rejected the log table below as
+  redundant on the grounds that "a log row would carry nothing the soft-deleted
+  grant row does not". That was the error: the soft-deleted row carries exactly
+  one period, and the requirement is unbounded.
+- **A separate log table** — now the chosen design, for the reason just given.
+  Hard delete on withdraw is safe *because* the log outlives the row, so
+  "could reach this bot between T1 and T2" stays answerable without the live
+  table having to carry history it cannot hold.
 - **An application-only reverse view** (`GET /authorized-bots` with no user) —
   deferred, not dismissed. It is what an integrator's own reconciliation loop
   really wants, since it needs no owner session. But it is an application-only
@@ -417,9 +486,8 @@ None. No new packages, no version bumps, no new internal service calls.
   listing. The user+app view shipped here answers the same question whenever the
   owner is present, which is the same posture the integrator is already in when
   granting.
-- **A separate `ac_bot_app_grant_log` table** (mirroring `ac_bot_collab_log`) —
-  rejected as redundant here. Under owner-only authority the operator is always
-  the owner, so a log row would carry nothing the soft-deleted grant row does not.
+  (The log table this once listed as a rejected alternative is now the design —
+  see the soft-delete entry above for why that call was wrong.)
 
 ## Rollout
 
