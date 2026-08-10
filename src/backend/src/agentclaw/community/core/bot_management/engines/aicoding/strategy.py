@@ -280,6 +280,11 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
         token = (ctx.template_config or {}).get("token")
         return token if isinstance(token, str) and token else None
 
+    def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
+        # AICoding / claude_code chat sessions are created lazily by the relay,
+        # so ExpertChat must not call Adapter /api/sessions create/check/delete.
+        return False
+
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         # Application-only hooks (DIMA workspace/memory/cron) intentionally stay
         # out of the personalCoding path.  Existing call sites can be migrated

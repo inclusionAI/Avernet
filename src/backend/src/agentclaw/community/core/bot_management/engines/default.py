@@ -34,6 +34,9 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     def extract_runtime_token(self, ctx: BotProvisioningContext) -> str | None:
         return None
 
+    def uses_adapter_chat_session_lifecycle(self, ctx: BotProvisioningContext) -> bool:
+        return True
+
     def on_bot_created(self, ctx: BotProvisioningContext) -> None:
         return None
 

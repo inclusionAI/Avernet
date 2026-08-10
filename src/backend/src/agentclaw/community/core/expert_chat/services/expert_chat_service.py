@@ -42,6 +42,10 @@ from agentclaw.community.core.repository.protocols.chat import ExpertChatReposit
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
     ExpertChatInstanceService,
 )
+from agentclaw.community.core.bot_management.engines.registry import (
+    resolve_baas_engine_bucket,
+    resolve_provisioning,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import DeviceAdapterTransport
 
@@ -593,29 +597,41 @@ class ExpertChatService:
         )
 
     def _resolve_chat_engine_type(self, bot: Dict[str, Any], conn: Dict[str, Any]) -> str:
-        """Resolve effective chat engine from business bot metadata.
+        """Resolve effective chat engine from authoritative bot metadata.
 
         ``conn["engine_type"]`` may be a resolver fallback when a historical
         runtime binding cannot reverse-resolve the business bot, for example
         caller-instance BaaS bindings created before ``device_props.bolt_id`` was
-        persisted. ExpertChat already has the authoritative bot row, so use it
-        as the final source and apply the same template normalization as BaaS
-        conn_info building.
+        persisted. ExpertChat already has the authoritative bot row, so prefer it
+        and apply the public BaaS bucket normalization used by runtime routing.
         """
-        from agentclaw.community.core.devices.services.baas_template_resolver import (
-            SystemConfigBaasTemplateResolver,
-        )
-
         template_config = bot.get("template_config") or {}
+        if not isinstance(template_config, dict):
+            template_config = {}
         raw_engine_type = (
             bot.get("active_engine")
             or template_config.get("active_runtime_engine_type")
             or conn.get("engine_type")
             or "openclaw"
         )
-        return SystemConfigBaasTemplateResolver.normalize_engine_for_template(
+        return resolve_baas_engine_bucket(
             engine_type=raw_engine_type,
             template_type=bot.get("template_type") or "",
+        )
+
+    def _resolve_chat_engine_strategy(self, bot: Dict[str, Any], conn: Dict[str, Any]):
+        """Resolve normalized chat engine plus its registered strategy."""
+        engine_type = self._resolve_chat_engine_type(bot, conn)
+        template_config = bot.get("template_config")
+        if not isinstance(template_config, dict):
+            template_config = None
+        return resolve_provisioning(
+            bot_id=str(bot.get("bot_id") or ""),
+            owner_id=str(bot.get("owner_id") or ""),
+            bot_type=str(bot.get("bot_type") or ""),
+            active_engine=engine_type,
+            template_type=bot.get("template_type") or None,
+            template_config=template_config,
         )
 
     async def _create_session(self, bot: Dict[str, Any], user_id: str) -> str:
@@ -629,15 +645,13 @@ class ExpertChatService:
             session_key
         """
         conn = self._get_connection(bot, user_id)
-        engine_type = self._resolve_chat_engine_type(bot, conn)
-        conn["engine_type"] = engine_type
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
 
-        if engine_type == "aicoding":
-            return await self._create_aicoding_session(conn, bot, user_id)
-        elif engine_type == "claude_code":
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
             logger.info(
-                "[ExpertChatService] claude_code session: delegating to aicoding session for bot=%s, user=%s",
-                bot.get("bot_id"), user_id,
+                "[ExpertChatService] Relay-managed chat session: bot=%s, user=%s, engine=%s",
+                bot.get("bot_id"), user_id, ctx.active_engine,
             )
             return await self._create_aicoding_session(conn, bot, user_id)
 
@@ -762,17 +776,13 @@ class ExpertChatService:
         AI Coding 引擎：teamclaw-aicoding-relay 按需创建 session，始终返回 True。
         """
         conn = self._get_connection(bot, user_id)
-        engine_type = self._resolve_chat_engine_type(bot, conn)
-        conn["engine_type"] = engine_type
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
 
-        # AI Coding 引擎：session 由 teamclaw-aicoding-relay 按需创建，无需预检
-        if engine_type == "aicoding":
-            return True
-        # claude_code 引擎：session 按需创建，无需预检
-        if engine_type == "claude_code":
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
             logger.info(
-                "[ExpertChatService] claude_code session check: skipping adapter pre-check for session=%s",
-                session_key,
+                "[ExpertChatService] Relay-managed chat session check: skipping adapter pre-check for session=%s, engine=%s",
+                session_key, ctx.active_engine,
             )
             return True
 
@@ -799,32 +809,24 @@ class ExpertChatService:
         user_id: Optional[str] = None,
     ) -> None:
         """调用 Adapter 删除 session"""
-        # aicoding/claude_code sessions are created on demand by the relay;
-        # no Adapter /api/sessions deletion is required. Resolve from bot first
-        # so historical caller-instance bindings with conn_engine=openclaw do not
-        # accidentally call the OpenClaw adapter endpoint.
-        bot_engine_type = self._resolve_chat_engine_type(bot, {})
-        if bot_engine_type == "aicoding":
-            logger.info(f"[ExpertChatService] Skipping adapter session deletion for aicoding: {session_key}")
-            return
-        if bot_engine_type == "claude_code":
+        # Relay-managed sessions do not require Adapter deletion. Resolve from bot
+        # first so historical caller-instance bindings with conn_engine=openclaw do
+        # not accidentally call the OpenClaw adapter endpoint.
+        bot_ctx, bot_strategy = self._resolve_chat_engine_strategy(bot, {})
+        if not bot_strategy.uses_adapter_chat_session_lifecycle(bot_ctx):
             logger.info(
-                "[ExpertChatService] Skipping adapter session deletion for claude_code: bot=%s, session=%s",
-                bot.get("bot_id"), session_key,
+                "[ExpertChatService] Skipping adapter session deletion for relay-managed engine: bot=%s, session=%s, engine=%s",
+                bot.get("bot_id"), session_key, bot_ctx.active_engine,
             )
             return
 
         conn = self._get_connection(bot, user_id)
-        engine_type = self._resolve_chat_engine_type(bot, conn)
-        conn["engine_type"] = engine_type
-        if engine_type == "aicoding":
-            logger.info(f"[ExpertChatService] Skipping adapter session deletion for aicoding: {session_key}")
-            return
-        if engine_type == "claude_code":
+        ctx, strategy = self._resolve_chat_engine_strategy(bot, conn)
+        conn["engine_type"] = ctx.active_engine
+        if not strategy.uses_adapter_chat_session_lifecycle(ctx):
             logger.info(
-                "[ExpertChatService] Skipping adapter session deletion for claude_code: bot=%s, session=%s",
-                bot.get("bot_id"),
-                session_key,
+                "[ExpertChatService] Skipping adapter session deletion for relay-managed engine: bot=%s, session=%s, engine=%s",
+                bot.get("bot_id"), session_key, ctx.active_engine,
             )
             return
 

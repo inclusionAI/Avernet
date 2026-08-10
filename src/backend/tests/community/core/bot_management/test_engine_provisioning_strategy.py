@@ -9,6 +9,9 @@ from agentclaw.community.core.bot_management.engines import (
 from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AicodingProvisioningStrategy,
 )
+from agentclaw.community.core.bot_management.engines.default import (
+    DefaultProvisioningStrategy,
+)
 from agentclaw.community.core.bot_management.engines.registry import (
     get_engine_provisioning_registry,
 )
@@ -56,6 +59,48 @@ def test_resolve_baas_engine_bucket_keeps_normal_cc_on_claude_code():
         == "claude_code"
     )
 
+
+
+def test_default_strategy_uses_adapter_chat_session_lifecycle():
+    strategy = DefaultProvisioningStrategy("openclaw")
+    ctx = BotProvisioningContext(
+        active_engine="openclaw",
+        template_type=None,
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="service",
+        template_config=None,
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is True
+
+
+def test_aicoding_strategy_skips_adapter_chat_session_lifecycle():
+    strategy = AicodingProvisioningStrategy("aicoding")
+    ctx = BotProvisioningContext(
+        active_engine="aicoding",
+        template_type="personalCoding",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={"template_key": "personalCoding", "template_uid": "uid"},
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is False
+
+
+def test_claude_code_strategy_skips_adapter_chat_session_lifecycle():
+    strategy = AicodingProvisioningStrategy("claude_code")
+    ctx = BotProvisioningContext(
+        active_engine="claude_code",
+        template_type="normalCC",
+        bot_id="b1",
+        owner_id="u1",
+        bot_type="personal",
+        template_config={"template_key": "normalCC", "template_uid": "uid"},
+    )
+
+    assert strategy.uses_adapter_chat_session_lifecycle(ctx) is False
 
 def test_aicoding_strategy_personal_coding_model_runtime_and_token():
     strategy = AicodingProvisioningStrategy("aicoding")
