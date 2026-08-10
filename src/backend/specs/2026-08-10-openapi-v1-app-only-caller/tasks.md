@@ -124,24 +124,23 @@
 
 ---
 
-## Task 4: The owner's visibility and override  `[ ]`
+## Task 4: The owner's visibility and override  `[x]`
 
 - **Goal:** A bot's owner can see and stop any machine access to their bot.
 - **Files:** `authorized_apps/router.py`, `authorized_apps/schemas.py`
 - **Done when:**
-  - [ ] `GET /bots/{bot_id}/authorized-apps` returns **every** live grant on the
-        bot for the owner, and only the caller's own for a non-owner
-        collaborator.
-  - [ ] `AuthorizedApp` gains the delegating user — an **additive** response
-        change, and the only response change in this feature. Without it the
-        owner cannot tell who let an application in.
-  - [ ] `DELETE /bots/{bot_id}/authorized-apps/{app_id}`: for the owner it
-        removes **every** delegation of that application on that bot; for a
-        collaborator, only their own. A comment records why the path needs no new
-        segment: the key is now `(app_id, bot_id, user_id)`, so the operation had
-        to say which delegation it means, and "all of this app's" is what an
-        owner means by revoking an app's access to their bot.
-  - [ ] Tests for both roles on both operations.
+  - [x] `GET /bots/{bot_id}/authorized-apps` returns every live grant on the bot
+        for the owner, and only the caller's own for a non-owner collaborator.
+  - [x] `AuthorizedApp` gains `user_id` — the only response change in this
+        feature, and additive. `AuthorizedBot` deliberately does **not**: there
+        it would only echo the `user_id` the caller sent.
+  - [x] `DELETE …/{app_id}`: the owner removes every delegation of that
+        application on the bot; a collaborator only their own. Both the router
+        and the schema carry the reasoning.
+  - [x] Tests for both roles on both operations, including a collaborator being
+        unable to reach across to the owner's delegation (404, not a silent
+        success).
+
 - **Depends on:** Task 3
 
 ---

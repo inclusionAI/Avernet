@@ -145,6 +145,7 @@ def _calling_app(principal: Principal) -> tuple[int, str]:
 def _to_authorized_app(record: BotAppGrantRecord) -> AuthorizedApp:
     return AuthorizedApp(
         app_id=record.app_id,
+        user_id=record.user_id,
         app_name=record.app_name,
         bot_id=record.bot_id,
         granted_at=record.gmt_create,
@@ -213,12 +214,22 @@ async def list_authorized_apps(
     collaborators: CollaboratorServiceProtocol = Injected(CollaboratorServiceProtocol),
     grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Page[AuthorizedApp]]:
-    """Which applications can reach this bot, and who let each one in."""
+    """Which applications can reach this bot, and who let each one in.
+
+    **The owner sees everything; a collaborator sees only their own.** An owner
+    who could not see a grant a colleague made would have machine access to
+    their own bot that was invisible to them, which is the failure this whole
+    record exists to prevent. A collaborator has no equivalent claim on their
+    colleagues' delegations, so theirs is narrowed — the same reason their
+    withdrawal is.
+    """
     del principal  # authority comes from the adjudicated bot resolve below
     owner_id, _ = resolve_delegable_bot(
         bot_service, collaborators, bot_id=bot_id, caller_id=user_id
     )
     records = grants.list_for_bot(bot_id=bot_id, owner_id=owner_id)
+    if user_id != owner_id:
+        records = [record for record in records if record.user_id == user_id]
     items = [_to_authorized_app(record) for record in records]
     return page(len(items), items, request)
 
@@ -244,12 +255,27 @@ async def revoke_authorized_app(
     is precisely the situation it exists for: a credential lost, rotated, or a
     relationship ended. Withdrawing an authorization that does not exist answers
     404, distinctly from a successful withdrawal (``GrantNotFoundError``).
+
+    **How much this withdraws depends on who asks**, and it has to: since a
+    delegation is keyed on the user who made it, ``{app_id}`` alone no longer
+    names one row.
+
+    - The **owner** withdraws *every* delegation of this application on their
+      bot. That is what an owner means by revoking an app's access to their own
+      bot — a withdrawal that left it reaching them through a colleague's grant
+      would not be a withdrawal — and it is why the path needs no extra segment
+      naming whose grant to remove.
+    - A **collaborator** withdraws only their own. Theirs is the loan they made;
+      a colleague's is not theirs to call in.
     """
     del principal
-    resolve_delegable_bot(
+    owner_id, _ = resolve_delegable_bot(
         bot_service, collaborators, bot_id=bot_id, caller_id=user_id
     )
-    grants.revoke(bot_id=bot_id, user_id=user_id, app_id=app_id)
+    if user_id == owner_id:
+        grants.revoke_app(bot_id=bot_id, owner_id=owner_id, app_id=app_id)
+    else:
+        grants.revoke(bot_id=bot_id, user_id=user_id, app_id=app_id)
     return deleted_envelope(request)
 
 

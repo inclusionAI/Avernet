@@ -327,12 +327,13 @@ def test_collaborator_may_delegate_the_access_they_have(collab_client, sessions)
     The row records both people: the collaborator as the delegator, and the
     bot's real owner as the owner.
     """
-    _ok(
+    data = _ok(
         collab_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}),
         201000,
         201,
     )
 
+    assert data["user_id"] == COLLAB, "the response names who delegated"
     with sessions() as session:
         row = session.query(BotAppGrantModel).one()
         assert (row.user_id, row.owner_id) == (COLLAB, OWNER)
@@ -372,3 +373,86 @@ def test_application_view_excludes_withdrawn(client):
 def _without_request_id(body: dict) -> dict:
     """The response minus its per-request trace id, which is never equal."""
     return {key: value for key, value in body.items() if key != "request_id"}
+
+
+# ── The owner's visibility and override ────────────────────────────────────
+
+
+def _grant_both(client, collab_client):
+    """One application, delegated on one bot by the owner and by a collaborator.
+
+    Two rows, not one: they are two loans of two different authorities.
+    """
+    client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
+    collab_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
+
+
+def test_owner_sees_a_grant_a_collaborator_made(client, collab_client):
+    """Machine access to a bot is never invisible to the person who owns it.
+
+    The owner did not create the collaborator's delegation and cannot be
+    expected to know about it, which is exactly why the listing has to show it —
+    and name who made it, or the owner learns only that *someone* did.
+    """
+    _grant_both(client, collab_client)
+
+    listed = _ok(client.get(f"/openapi/v1/bots/{BOT}/authorized-apps"))
+
+    assert {item["user_id"] for item in listed["items"]} == {OWNER, COLLAB}
+    assert listed["total"] == 2
+
+
+def test_collaborator_sees_only_their_own_delegation(client, collab_client):
+    """A collaborator has no claim on their colleagues' delegations."""
+    _grant_both(client, collab_client)
+
+    listed = _ok(collab_client.get(f"/openapi/v1/bots/{BOT}/authorized-apps"))
+
+    assert [item["user_id"] for item in listed["items"]] == [COLLAB]
+    assert listed["total"] == 1
+
+
+def test_owner_withdrawal_removes_every_delegation_of_that_app(
+    client, collab_client, sessions
+):
+    """"Revoke this app's access to my bot" means all of it.
+
+    Leaving the application still reaching the bot through a colleague's grant
+    would not be a withdrawal, and the owner has no way to name the colleague's
+    delegation separately — the path names only the application.
+    """
+    _grant_both(client, collab_client)
+
+    resp = client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
+
+    assert resp.status_code == 200, resp.json()
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 0
+
+
+def test_collaborator_withdrawal_leaves_the_owners_delegation_alone(
+    client, collab_client, sessions
+):
+    """The narrow half of the same operation."""
+    _grant_both(client, collab_client)
+
+    resp = collab_client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
+
+    assert resp.status_code == 200, resp.json()
+    with sessions() as session:
+        rows = session.query(BotAppGrantModel).all()
+        assert [row.user_id for row in rows] == [OWNER]
+
+
+def test_collaborator_cannot_withdraw_the_owners_delegation(client, collab_client):
+    """With only the owner's grant live, the collaborator has nothing to remove.
+
+    404 rather than a silent success: "there was nothing of mine to withdraw"
+    must not read as "withdrawn", and it must not reach across to a grant that
+    is not theirs.
+    """
+    client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
+
+    resp = collab_client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
+
+    assert resp.status_code == 404, resp.json()
