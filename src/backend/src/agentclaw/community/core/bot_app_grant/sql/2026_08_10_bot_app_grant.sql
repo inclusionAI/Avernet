@@ -32,7 +32,12 @@ CREATE TABLE ac_bot_app_grant (
     (avernet_tenant, app_id, bot_id, owner_id, env) GLOBAL,
   -- the app's view: which of this owner's bots may this app reach
   KEY idx_bot_app_grant_app_owner
-    (avernet_tenant, app_id, owner_id, env) GLOBAL
+    (avernet_tenant, app_id, owner_id, env) GLOBAL,
+  -- the owner's view: which apps can reach this bot. Needs its own index --
+  -- the unique key and the index above both put app_id straight after the
+  -- tenant, and this listing supplies no app_id to reach past it.
+  KEY idx_bot_app_grant_bot_owner
+    (avernet_tenant, bot_id, owner_id, env) GLOBAL
 ) DEFAULT CHARSET = utf8mb4
   COMMENT = 'live bot→app authorizations; a row exists iff access is in force';
 

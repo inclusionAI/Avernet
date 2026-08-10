@@ -125,7 +125,13 @@ def grants(sessions):
         def transactional_orm_session(self):
             return self._session()
 
-    return BotAppGrantService(BotAppGrantRepository(_Db()))
+    class _LiveBots:
+        """Every bot resolves live; deletion is covered in the service tests."""
+
+        def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+            return {"bot_id": bot_id, "owner_id": owner_id}
+
+    return BotAppGrantService(BotAppGrantRepository(_Db()), _LiveBots())
 
 
 @pytest.fixture

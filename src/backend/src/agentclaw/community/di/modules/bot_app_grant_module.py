@@ -24,6 +24,7 @@ from agentclaw.community.core.repository.implementations.bot.app_grant import (
 )
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
+    BotRepository,
 )
 
 
@@ -43,6 +44,7 @@ class BotAppGrantModule(Module):
     def bot_app_grant_service(
         self,
         repository: BotAppGrantRepositoryProtocol,
+        bots: BotRepository,
     ) -> BotAppGrantServiceProtocol:
         """Provide the grant service behind its Service API Protocol.
 
@@ -50,4 +52,4 @@ class BotAppGrantModule(Module):
         contract, so the concrete service stays swappable and separately
         testable.
         """
-        return BotAppGrantService(repository=repository)
+        return BotAppGrantService(repository=repository, bots=bots)

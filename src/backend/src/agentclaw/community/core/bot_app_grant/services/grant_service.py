@@ -29,6 +29,7 @@ from agentclaw.community.core.bot_app_grant.errors import GrantNotFoundError
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
 from agentclaw.community.core.repository.protocols.bot import (
     BotAppGrantRepositoryProtocol,
+    BotRepository,
 )
 from agentclaw.community.log import get_logger
 
@@ -39,8 +40,13 @@ class BotAppGrantService:
     """Grant, withdraw and read bot→app authorizations."""
 
     @inject
-    def __init__(self, repository: BotAppGrantRepositoryProtocol) -> None:
+    def __init__(
+        self,
+        repository: BotAppGrantRepositoryProtocol,
+        bots: BotRepository,
+    ) -> None:
         self._repository = repository
+        self._bots = bots
 
     def grant(
         self,
@@ -101,13 +107,31 @@ class BotAppGrantService:
     def list_for_app(self, *, app_id: int, owner_id: str) -> list[BotAppGrantRecord]:
         """The app's view — which of this owner's bots may this app reach.
 
-        Names no bot, and so performs **no** bot-existence check — deliberately
-        asymmetric with the other three operations, which resolve a named bot
-        and inherit its masked refusal. There is nothing to mask here: the
-        result is the caller's own authorizations over their own bots, and an
-        empty list discloses nothing.
+        Names no bot, so there is nothing to *mask* — the result is the caller's
+        own authorizations over their own bots, and an empty list discloses
+        nothing. That is why this operation, alone among the four, does not
+        inherit the masked refusal from a named-bot resolve.
+
+        It does still have to answer honestly, and a grant outliving its bot
+        would make it lie. ``delete_bot`` soft-deletes the ``ac_bots`` row and
+        does not touch grants, so without this filter a withdrawn-by-deletion
+        bot would be reported as currently authorized indefinitely. Each grant
+        is checked against a live bot for this owner —
+        ``get_by_id_and_owner`` already excludes soft-deleted rows.
+
+        One lookup per grant, and that is bounded by design: this is the set of
+        bots *one* owner has authorized to *one* app, not a tenant-wide list.
+
+        This filters the *report*; it does not revoke. Revoking on deletion is
+        the fuller fix and belongs with bot lifecycle rather than here — until
+        it exists, the row survives and only stops being advertised.
         """
-        return self._repository.list_for_app(app_id, owner_id)
+        granted = self._repository.list_for_app(app_id, owner_id)
+        return [
+            record
+            for record in granted
+            if self._bots.get_by_id_and_owner(record.bot_id, owner_id) is not None
+        ]
 
 
 __all__ = ["BotAppGrantService"]

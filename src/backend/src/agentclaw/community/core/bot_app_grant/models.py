@@ -131,6 +131,19 @@ class BotAppGrantModel(Base):
             "owner_id",
             "env",
         ),
+        # The owner's view — "which apps can reach this bot?". Needs its own
+        # index for the same reason, mirrored: the unique key and the index
+        # above both put ``app_id`` immediately after the tenant, and a B-tree
+        # cannot reach the later columns without an ``app_id`` predicate. This
+        # listing supplies none, so without this it degrades into a
+        # tenant-wide scan as grants accumulate.
+        Index(
+            "idx_bot_app_grant_bot_owner",
+            "avernet_tenant",
+            "bot_id",
+            "owner_id",
+            "env",
+        ),
     )
 
     def to_record(self) -> BotAppGrantRecord:

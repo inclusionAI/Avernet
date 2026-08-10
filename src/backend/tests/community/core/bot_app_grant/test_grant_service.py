@@ -76,9 +76,31 @@ def repo(db):
     return BotAppGrantRepository(db)
 
 
+class _LiveBots:
+    """A bot repository double: every bot is live unless explicitly deleted.
+
+    Mirrors ``get_by_id_and_owner``, which filters ``is_delete == 0`` — so
+    "deleted" here means the same thing it means in production: the lookup
+    stops returning the row.
+    """
+
+    def __init__(self):
+        self.deleted: set[tuple[str, str]] = set()
+
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str):
+        if (bot_id, owner_id) in self.deleted:
+            return None
+        return {"bot_id": bot_id, "owner_id": owner_id}
+
+
 @pytest.fixture
-def service(repo):
-    return BotAppGrantService(repo)
+def bots():
+    return _LiveBots()
+
+
+@pytest.fixture
+def service(repo, bots):
+    return BotAppGrantService(repo, bots)
 
 
 GRANT = {"bot_id": "b-1", "owner_id": "u-1", "app_id": 42, "app_name": "partner"}
@@ -237,6 +259,22 @@ def test_list_for_app_is_scoped_to_the_calling_app(service):
 
     assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-1"]
     assert [r.bot_id for r in service.list_for_app(app_id=99, owner_id="u-1")] == ["b-2"]
+
+
+def test_list_for_app_excludes_a_deleted_bot(service, bots):
+    """A grant outliving its bot must not be reported as live access.
+
+    ``delete_bot`` soft-deletes the bot and leaves grants alone, so without the
+    filter the app's view would advertise a deleted bot as currently authorized
+    indefinitely. The owner's view needs no equivalent test: its route resolves
+    the bot first and 404s.
+    """
+    service.grant(bot_id="b-1", owner_id="u-1", app_id=42, app_name="partner")
+    service.grant(bot_id="b-2", owner_id="u-1", app_id=42, app_name="partner")
+
+    bots.deleted.add(("b-1", "u-1"))
+
+    assert [r.bot_id for r in service.list_for_app(app_id=42, owner_id="u-1")] == ["b-2"]
 
 
 def test_list_for_app_is_scoped_to_the_calling_owner(service):
