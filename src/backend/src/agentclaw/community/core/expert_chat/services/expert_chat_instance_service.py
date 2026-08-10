@@ -471,7 +471,7 @@ class ExpertChatInstanceService:
             device_id=bot_uuid,
             device_provider="baas",
             env=env,
-            device_props={},
+            device_props={"bolt_id": bot_id},
             status=DeviceBindingStatus.PENDING.value,
             apply_reason=f"caller_instance:{bot_id}",
             applied_by=user_id,
