@@ -4039,6 +4039,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_chat_async_returns_invalid_response_on_malformed_202() {
+        // A 202 whose body cannot deserialize into ChatRunSubmitResponse: the
+        // server has accepted (and may have created a run), but the ID is
+        // unreadable. This must classify as InvalidResponse so main.rs maps
+        // it to submit_indeterminate (not submit_failed).
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(
+                ResponseTemplate::new(202)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{not valid json"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let result = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
+            .await;
+        assert!(
+            matches!(result, Err(ChatAsyncError::InvalidResponse(_))),
+            "expected InvalidResponse on malformed 202, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
     async fn test_chat_poll_run_returns_poll_error_on_http_500() {
         use wiremock::{
             Mock, MockServer, ResponseTemplate,

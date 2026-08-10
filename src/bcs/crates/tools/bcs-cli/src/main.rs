@@ -3547,9 +3547,12 @@ pub async fn run() -> Result<()> {
                     run_id: None,
                     session_id: None,
                     bot_uuid: Some(bot_uuid.clone()),
-                    state: "submit_failed".to_string(),
+                    state: "submit_indeterminate".to_string(),
                     response_content: None,
-                    error_message: Some(msg),
+                    error_message: Some(format!(
+                        "chat_async response unreadable: {}; run may have been created server-side, ID unknown",
+                        msg
+                    )),
                     content_truncated: false,
                 },
             };
