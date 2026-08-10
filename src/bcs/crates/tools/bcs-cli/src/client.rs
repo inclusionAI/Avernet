@@ -113,6 +113,55 @@ pub struct BcsClient {
     traceparent: Option<HeaderValue>,
 }
 
+// ============================================================================
+// CLI-internal chat outcome types (NOT bcs-protocol wire DTOs)
+// ============================================================================
+
+/// Structured result of a chat run poll flow, assembled by `bcs-cli` from
+/// existing fields of [`ChatRunSubmitResponse`] / [`ChatRunStatusResponse`].
+/// This is a CLI- internal type; it is NOT a `bcs-protocol` wire DTO and
+/// introduces no new on-wire fields.
+#[derive(Debug, Clone)]
+pub struct ChatRunOutcome {
+    /// Did the run reach a success state?
+    /// sync = `ChatRunState::Completed`; detach = `Running` or `Completed`.
+    pub delivered: bool,
+    /// Was the run created (`chat_async` returned a `run_id`)?
+    /// False only on submit-level failure.
+    pub submitted: bool,
+    /// Run ID. `None` only on submit-level failure (no run was created).
+    pub run_id: Option<String>,
+    /// Session ID. `None` only on submit-level failure.
+    pub session_id: Option<String>,
+    /// Bot UUID. Filled from the submit/status response, or the CLI
+    /// `--bot-uuid` arg on submit-level failure.
+    pub bot_uuid: Option<String>,
+    /// `running|completed|failed|cancelled|timeout|poll_error|
+    ///  submit_failed|submit_indeterminate`
+    pub state: String,
+    /// Response content. Only meaningful for sync terminal runs.
+    pub response_content: Option<String>,
+    /// Error message (from server status, timeout, or poll error).
+    pub error_message: Option<String>,
+    /// Whether the server truncated `response.content`.
+    pub content_truncated: bool,
+}
+
+/// Typed errors for `chat_async` submission. `main.rs` maps each variant to a
+/// distinct [`ChatRunOutcome`] state so stdout is never empty and known IDs
+/// are preserved.
+#[derive(Debug)]
+pub enum ChatAsyncError {
+    /// `.send()` failed (connect refused/reset/client 10s timeout). A run
+    /// MAY have been created server-side; its ID is unknown to the CLI.
+    Transport(String),
+    /// Server responded with a non-2xx status (it explicitly did not accept
+    /// the run). No run was created.
+    NotSuccessful { status: u16, body: String },
+    /// Response body could not be deserialized as `ChatRunSubmitResponse`.
+    InvalidResponse(String),
+}
+
 impl BcsClient {
     ///Create a new BCS client with the given base URL.
     pub fn new(base_url: impl Into<String>) -> Self {
@@ -1175,7 +1224,7 @@ impl BcsClient {
         organization_code: Option<&str>,
         client_wait_timeout_ms: u64,
         detach: bool,
-    ) -> Result<ChatRunSubmitResponse> {
+    ) -> Result<ChatRunSubmitResponse, ChatAsyncError> {
         let url = format!("{}/bots/{}/chat-async", self.base_url, bot_id);
         let payload = Self::chat_async_payload(
             message,
@@ -1197,18 +1246,18 @@ impl BcsClient {
             )
             .send()
             .await
-            .context("Failed to submit chat_async")?;
+            .map_err(|err| ChatAsyncError::Transport(err.to_string()))?;
 
         if !response.status().is_success() {
-            let status = response.status();
+            let status = response.status().as_u16();
             let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("chat_async failed ({}): {}", status, body));
+            return Err(ChatAsyncError::NotSuccessful { status, body });
         }
 
         let submit: ChatRunSubmitResponse = response
             .json()
             .await
-            .context("Invalid chat_async response")?;
+            .map_err(|err| ChatAsyncError::InvalidResponse(err.to_string()))?;
         Ok(submit)
     }
 
@@ -1309,198 +1358,184 @@ impl BcsClient {
             .context("Invalid chat_run_cancel response")
     }
 
-    /// Submit a chat run and poll until it reaches a terminal state. Returns
-    /// a JSON value shaped like the legacy [`Self::chat`] response plus a few
-    /// additive fields (`run_id`, `state`, `session_id`, `error_message`).
+    /// Poll a chat run until it reaches a terminal state (sync mode).
     ///
-    /// `overall_timeout_ms` caps the total wall-clock spent polling. Reaching
-    /// the budget stops only local polling; the server-side run keeps executing.
-    /// `poll_wait_ms` controls each long-poll HTTP hop (default 15 s, capped
-    /// at the server's configured max).
-    pub async fn chat_polling(
-        &self,
-        bot_id: &str,
-        message: &str,
-        from: Option<&str>,
-        session_id: Option<&str>,
-        tags: &[String],
-        response_mode: Option<&str>,
-        overall_timeout_ms: Option<u64>,
-        poll_wait_ms: Option<u64>,
-        organization_code: Option<&str>,
-    ) -> Result<serde_json::Value> {
-        let client_wait_timeout_ms = overall_timeout_ms.unwrap_or(30 * 60 * 1_000);
-        let overall_timeout = Duration::from_millis(client_wait_timeout_ms);
-        let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
-
-        let submit = self
-            .chat_async(
-                bot_id,
-                message,
-                from,
-                session_id,
-                tags,
-                response_mode,
-                organization_code,
-                client_wait_timeout_ms,
-                false,
-            )
-            .await?;
-        let run_id = submit.run_id.clone();
-        let reported_session = submit.session_id.clone();
-        debug!(
-            run_id = %run_id,
-            session_id = %reported_session,
-            "chat_polling: submitted"
-        );
-
-        let deadline = tokio::time::Instant::now() + overall_timeout;
-        let mut since_version: u64 = 0;
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                warn!(run_id = %run_id, "chat_polling: local polling timeout; run left active");
-                return Err(anyhow!(
-                    "chat_polling: local polling timeout after {} ms; run {} is still active",
-                    overall_timeout.as_millis(),
-                    run_id,
-                ));
-            }
-            let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
-            let status = self
-                .chat_run_status(&run_id, Some(since_version), Some(wait_ms))
-                .await?;
-            since_version = status.version;
-            if status.is_terminal() {
-                let delivered = matches!(status.state, ChatRunState::Completed);
-                let state_str = status.state.as_str();
-                if !delivered {
-                    return Err(anyhow!(
-                        "chat_polling: run {} ended in state {}: {}",
-                        run_id,
-                        state_str,
-                        status
-                            .error_message
-                            .as_deref()
-                            .unwrap_or("<no error message>"),
-                    ));
-                }
-                return Ok(serde_json::json!({
-                    "delivered": delivered,
-                    "bot_uuid": status.bot_uuid,
-                    "run_id": status.run_id,
-                    "session_id": status.session_id,
-                    "state": state_str,
-                    "response": {"content": status.response.content},
-                    "error_message": status.error_message,
-                    "content_truncated": status.content_truncated,
-                }));
-            }
-        }
-    }
-
-    /// Submit a chat run and detach once BCS reports it as `running` (or a
-    /// legacy `completed`). Detach is a local waiting policy and is not sent to
-    /// the server or Provider.
+    /// `submit` is the response from a successful `chat_async` call — its
+    /// `run_id` is polled and its `session_id`/`bot_uuid` fill branches where
+    /// no status response is available (local timeout before first status).
+    /// `poll_wait_ms` controls each long-poll HTTP hop.
+    /// `overall_timeout` caps the total wall-clock spent polling; on expiry
+    /// the result carries `state="timeout"` with IDs from `submit` and the
+    /// server-side run keeps executing.
     ///
-    /// `overall_timeout_ms` caps the total wall-clock spent waiting for the
-    /// detach acknowledgement. On overflow the run is left running on the
-    /// server side and an error is returned.
-    /// `poll_wait_ms` controls each long-poll HTTP hop (default 15 s).
-    pub async fn chat_polling_detach(
+    /// Returns `Ok(ChatRunOutcome)` on every path — terminal, timeout, and
+    /// poll errors are all structured outcomes, never bare `Err`.
+    pub async fn chat_poll_run(
         &self,
-        bot_id: &str,
-        message: &str,
-        from: Option<&str>,
-        session_id: Option<&str>,
-        tags: &[String],
-        response_mode: Option<&str>,
-        overall_timeout_ms: Option<u64>,
-        poll_wait_ms: Option<u64>,
-        organization_code: Option<&str>,
-    ) -> Result<serde_json::Value> {
-        let client_wait_timeout_ms = overall_timeout_ms.unwrap_or(30 * 60 * 1_000);
-        let overall_timeout = Duration::from_millis(client_wait_timeout_ms);
-        let poll_wait_ms = poll_wait_ms.unwrap_or(15_000);
-
-        let submit = self
-            .chat_async(
-                bot_id,
-                message,
-                from,
-                session_id,
-                tags,
-                response_mode,
-                organization_code,
-                client_wait_timeout_ms,
-                true,
-            )
-            .await?;
-        let run_id = submit.run_id.clone();
-        let reported_session = submit.session_id.clone();
-        debug!(
-            run_id = %run_id,
-            session_id = %reported_session,
-            "chat_polling_detach: submitted"
-        );
-
+        submit: &ChatRunSubmitResponse,
+        poll_wait_ms: u64,
+        overall_timeout: Duration,
+    ) -> Result<ChatRunOutcome> {
         let deadline = tokio::time::Instant::now() + overall_timeout;
         let mut since_version: u64 = 0;
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 warn!(
-                    run_id = %run_id,
-                    "chat_polling_detach: local timeout before first ack"
+                    run_id = %submit.run_id,
+                    "chat_poll_run: local polling timeout; run left active"
                 );
-                return Err(anyhow!(
-                    "chat_polling_detach: timed out after {} ms waiting for detach ack; run {} is still active",
-                    overall_timeout.as_millis(),
-                    run_id,
-                ));
+                return Ok(Self::timeout_outcome(submit, overall_timeout));
             }
             let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
-            let status = self
-                .chat_run_status(&run_id, Some(since_version), Some(wait_ms))
-                .await?;
-
-            let state_str = status.state.as_str();
-            match status.state {
-                ChatRunState::Completed | ChatRunState::Running => {
-                    return Ok(serde_json::json!({
-                        "submitted": true,
-                        "bot_uuid": status.bot_uuid,
-                        "run_id": status.run_id,
-                        "session_id": status.session_id,
-                        "state": state_str,
-                    }));
-                }
-                ChatRunState::Failed | ChatRunState::Cancelled => {
-                    return Err(anyhow!(
-                        "chat_polling_detach: run {} ended in state {}: {}",
-                        run_id,
-                        state_str,
-                        status
-                            .error_message
-                            .as_deref()
-                            .unwrap_or("<no error message>"),
-                    ));
-                }
-                ChatRunState::Pending | ChatRunState::Submitted | ChatRunState::Unknown => {
+            match self
+                .chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))
+                .await
+            {
+                Ok(status) => {
+                    since_version = status.version;
                     if status.is_terminal() {
-                        return Err(anyhow!(
-                            "chat_polling_detach: run {} ended in state {}: {}",
-                            run_id,
-                            state_str,
-                            status
-                                .error_message
-                                .as_deref()
-                                .unwrap_or("<no error message>"),
-                        ));
+                        return Ok(Self::terminal_outcome(&status));
                     }
                 }
+                Err(err) => {
+                    return Ok(Self::poll_error_outcome(submit, &err.to_string()));
+                }
             }
-            since_version = status.version;
+        }
+    }
+
+    /// Poll a chat run until BCS reports it as `running` (detach mode).
+    /// Accepts `Running` or `Completed` as success — mirrors the legacy
+    /// `chat_polling_detach` that treated `Completed | Running` as detach-ack
+    /// (a run may complete before the first status response arrives).
+    ///
+    /// Same signature contract as [`Self::chat_poll_run`]: `submit` metadata
+    /// fills ID-bearing branches that lack a status response.
+    pub async fn chat_poll_run_until_running(
+        &self,
+        submit: &ChatRunSubmitResponse,
+        poll_wait_ms: u64,
+        overall_timeout: Duration,
+    ) -> Result<ChatRunOutcome> {
+        let deadline = tokio::time::Instant::now() + overall_timeout;
+        let mut since_version: u64 = 0;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                warn!(
+                    run_id = %submit.run_id,
+                    "chat_poll_run_until_running: local timeout before detach ack"
+                );
+                return Ok(Self::timeout_outcome(submit, overall_timeout));
+            }
+            let wait_ms = remaining.as_millis().min(poll_wait_ms as u128) as u64;
+            match self
+                .chat_run_status(&submit.run_id, Some(since_version), Some(wait_ms))
+                .await
+            {
+                Ok(status) => {
+                    match status.state {
+                        ChatRunState::Completed | ChatRunState::Running => {
+                            return Ok(Self::running_outcome(&status));
+                        }
+                        ChatRunState::Failed | ChatRunState::Cancelled => {
+                            return Ok(Self::terminal_outcome(&status));
+                        }
+                        ChatRunState::Pending | ChatRunState::Submitted
+                        | ChatRunState::Unknown => {
+                            if status.is_terminal() {
+                                return Ok(Self::terminal_outcome(&status));
+                            }
+                        }
+                    }
+                    since_version = status.version;
+                }
+                Err(err) => {
+                    return Ok(Self::poll_error_outcome(submit, &err.to_string()));
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Internal helpers for building ChatRunOutcome from known state
+    // ------------------------------------------------------------------
+
+    /// Terminal outcome from a status response. `delivered` is true only for
+    /// `Completed`; `Failed`/`Cancelled`/terminal-`Unknown` yield
+    /// `delivered=false`. IDs come from the status response (the run has
+    /// been created and a terminal status was received).
+    fn terminal_outcome(status: &ChatRunStatusResponse) -> ChatRunOutcome {
+        let delivered = matches!(status.state, ChatRunState::Completed);
+        ChatRunOutcome {
+            delivered,
+            submitted: true,
+            run_id: Some(status.run_id.clone()),
+            session_id: Some(status.session_id.clone()),
+            bot_uuid: Some(status.bot_uuid.clone()),
+            state: status.state.as_str().to_string(),
+            response_content: Some(status.response.content.clone()),
+            error_message: status.error_message.clone(),
+            content_truncated: status.content_truncated,
+        }
+    }
+
+    /// Detach success outcome: `delivered=true`, no response content (detach
+    /// does not wait for completion). State is `running` or `completed`. IDs
+    /// come from the status response (the run has been created and a status
+    /// response was received — unlike timeout/poll_error which use submit).
+    fn running_outcome(status: &ChatRunStatusResponse) -> ChatRunOutcome {
+        ChatRunOutcome {
+            delivered: true,
+            submitted: true,
+            run_id: Some(status.run_id.clone()),
+            session_id: Some(status.session_id.clone()),
+            bot_uuid: Some(status.bot_uuid.clone()),
+            state: status.state.as_str().to_string(),
+            response_content: None,
+            error_message: None,
+            content_truncated: false,
+        }
+    }
+
+    /// Local polling deadline hit. IDs come from the submit response so the
+    /// outcome is non-empty even with a zero-length timeout before any status
+    /// response arrived.
+    fn timeout_outcome(
+        submit: &ChatRunSubmitResponse,
+        overall_timeout: Duration,
+    ) -> ChatRunOutcome {
+        ChatRunOutcome {
+            delivered: false,
+            submitted: true,
+            run_id: Some(submit.run_id.clone()),
+            session_id: Some(submit.session_id.clone()),
+            bot_uuid: Some(submit.bot_uuid.clone()),
+            state: "timeout".to_string(),
+            response_content: None,
+            error_message: Some(format!(
+                "local polling timeout after {} ms; run {} is still active",
+                overall_timeout.as_millis(),
+                submit.run_id
+            )),
+            content_truncated: false,
+        }
+    }
+
+    /// `chat_run_status` error during polling. IDs come from the submit
+    /// response (already known); the error is preserved in `error_message`.
+    fn poll_error_outcome(submit: &ChatRunSubmitResponse, error: &str) -> ChatRunOutcome {
+        ChatRunOutcome {
+            delivered: false,
+            submitted: true,
+            run_id: Some(submit.run_id.clone()),
+            session_id: Some(submit.session_id.clone()),
+            bot_uuid: Some(submit.bot_uuid.clone()),
+            state: "poll_error".to_string(),
+            response_content: None,
+            error_message: Some(format!("chat_run_status failed: {}", error)),
+            content_truncated: false,
         }
     }
 
@@ -3720,7 +3755,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chat_polling_detach_waits_through_submitted_until_running() {
+    async fn test_chat_poll_run_until_running_waits_through_submitted_until_running() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::sync::{
@@ -3817,31 +3852,33 @@ mod tests {
         });
 
         let client = BcsClient::new(format!("http://{}", addr));
-        let result = client
-            .chat_polling_detach(
-                "bot-target",
-                "hello",
-                None,
-                None,
-                &[],
-                None,
-                Some(2_000),
-                Some(10),
-                None,
-            )
-            .await;
+        let submit = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, true)
+            .await
+            .expect("chat_async submit should succeed");
+        let outcome = client
+            .chat_poll_run_until_running(&submit, 10, Duration::from_millis(2_000))
+            .await
+            .expect("poll should return an outcome");
         // Signal the worker to exit whether or not the call succeeded so the
         // join below never waits on the backstop deadline.
         shutdown.store(true, Ordering::SeqCst);
-        let result = result.unwrap();
 
         server.join().unwrap();
-        assert_eq!(get_count.load(Ordering::SeqCst), 2);
-        assert_eq!(result["state"], "running");
+        assert_eq!(
+            get_count.load(Ordering::SeqCst),
+            2,
+            "detach should poll twice: submitted then running"
+        );
+        assert!(outcome.delivered, "running should be delivered");
+        assert_eq!(outcome.state, "running");
+        assert_eq!(outcome.run_id.as_deref(), Some("run-1"));
+        assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
+        assert!(outcome.submitted);
     }
 
     #[tokio::test]
-    async fn test_chat_polling_timeout_leaves_server_run_active() {
+    async fn test_chat_poll_run_times_out_with_ids_from_submit() {
         use wiremock::{
             Mock, MockServer, ResponseTemplate,
             matchers::{method, path},
@@ -3882,55 +3919,261 @@ mod tests {
         client
             .set_traceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
             .unwrap();
-        let error = client
-            .chat_polling(
-                "bot-target",
-                "hello",
-                None,
-                None,
-                &[],
-                None,
-                Some(20),
-                Some(5),
-                None,
-            )
+        let submit = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 20, false)
             .await
-            .expect_err("local polling should time out");
+            .expect("chat_async submit should succeed");
+        let outcome = client
+            .chat_poll_run(&submit, 5, Duration::from_millis(20))
+            .await
+            .expect("poll should return a timeout outcome");
 
-        assert!(error.to_string().contains("local polling timeout"));
-        assert!(error.to_string().contains("run-local-timeout is still active"));
+        assert!(!outcome.delivered, "timeout should not be delivered");
+        assert_eq!(outcome.state, "timeout");
+        assert_eq!(
+            outcome.run_id.as_deref(),
+            Some("run-local-timeout"),
+            "IDs should come from submit response"
+        );
+        assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
+        assert!(outcome.submitted);
         let requests = server.received_requests().await.unwrap();
-        let submit = requests
+        let submit_req = requests
             .iter()
             .find(|request| request.url.path() == "/bots/bot-target/chat-async")
             .expect("chat submit request");
         assert_eq!(
-            submit
+            submit_req
                 .headers
                 .get("traceparent")
                 .and_then(|value| value.to_str().ok()),
             Some("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
         );
         assert_eq!(
-            submit
+            submit_req
                 .headers
                 .get("x-bcs-client-detach")
                 .and_then(|value| value.to_str().ok()),
             Some("false")
         );
         assert_eq!(
-            submit
+            submit_req
                 .headers
                 .get("x-bcs-client-wait-timeout-ms")
                 .and_then(|value| value.to_str().ok()),
             Some("20")
         );
-        let payload: serde_json::Value = serde_json::from_slice(&submit.body).unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&submit_req.body).unwrap();
         assert!(payload.get("timeout_ms").is_none());
         assert!(payload.get("caller_wait_mode").is_none());
         assert!(requests
             .iter()
             .all(|request| request.url.path() != "/chat/runs/run-local-timeout/cancel"));
+    }
+
+    #[tokio::test]
+    async fn test_chat_poll_run_until_running_accepts_completed_as_success() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "run_id": "run-1",
+                "bot_uuid": "bot-target",
+                "session_id": "session-1",
+                "status": "submitted",
+                "expires_at_ms": 9_999_999_u64,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/chat/runs/run-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "run_id": "run-1",
+                "bot_uuid": "bot-target",
+                "from_bot_id": "bot-source",
+                "session_id": "session-1",
+                "state": "completed",
+                "response": {"content": "done"},
+                "created_at_ms": 1_u64,
+                "updated_at_ms": 2_u64,
+                "expires_at_ms": 9_999_999_u64,
+                "version": 2_u64,
+                "content_truncated": false,
+                "is_terminal": true,
+            })))
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let submit = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 60_000, true)
+            .await
+            .expect("chat_async submit should succeed");
+        let outcome = client
+            .chat_poll_run_until_running(&submit, 10, Duration::from_millis(5_000))
+            .await
+            .expect("poll should accept completed as detach success");
+
+        assert!(outcome.delivered, "completed should be detach-delivered");
+        assert_eq!(outcome.state, "completed");
+        assert_eq!(outcome.run_id.as_deref(), Some("run-1"));
+    }
+
+    #[tokio::test]
+    async fn test_chat_async_returns_transport_error_on_non_listening_port() {
+        // Port 1 is unlikely to be listening; connection should fail.
+        let client = BcsClient::new("http://127.0.0.1:1");
+        let result = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
+            .await;
+        assert!(
+            matches!(result, Err(ChatAsyncError::Transport(_))),
+            "expected Transport error on non-listening port, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chat_async_returns_invalid_response_on_malformed_202() {
+        // A 202 whose body cannot deserialize into ChatRunSubmitResponse: the
+        // server has accepted (and may have created a run), but the ID is
+        // unreadable. This must classify as InvalidResponse so main.rs maps
+        // it to submit_indeterminate (not submit_failed).
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(
+                ResponseTemplate::new(202)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{not valid json"),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let result = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 2_000, false)
+            .await;
+        assert!(
+            matches!(result, Err(ChatAsyncError::InvalidResponse(_))),
+            "expected InvalidResponse on malformed 202, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_chat_poll_run_returns_poll_error_on_http_500() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "run_id": "run-1",
+                "bot_uuid": "bot-target",
+                "session_id": "session-1",
+                "status": "submitted",
+                "expires_at_ms": 9_999_999_u64,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/chat/runs/run-1"))
+            .respond_with(
+                ResponseTemplate::new(500)
+                    .set_body_json(serde_json::json!({"error": "internal"})),
+            )
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let submit = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 5_000, false)
+            .await
+            .expect("chat_async submit should succeed");
+        let outcome = client
+            .chat_poll_run(&submit, 10, Duration::from_millis(5_000))
+            .await
+            .expect("poll error should return a structured outcome");
+
+        assert!(!outcome.delivered);
+        assert_eq!(outcome.state, "poll_error");
+        assert_eq!(
+            outcome.run_id.as_deref(),
+            Some("run-1"),
+            "IDs should come from submit response"
+        );
+        assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
+        assert!(outcome.submitted);
+    }
+
+    #[tokio::test]
+    async fn test_chat_poll_run_returns_failed_on_terminal_failed_state() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{method, path},
+        };
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/bots/bot-target/chat-async"))
+            .respond_with(ResponseTemplate::new(202).set_body_json(serde_json::json!({
+                "run_id": "run-1",
+                "bot_uuid": "bot-target",
+                "session_id": "session-1",
+                "status": "submitted",
+                "expires_at_ms": 9_999_999_u64,
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/chat/runs/run-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "run_id": "run-1",
+                "bot_uuid": "bot-target",
+                "from_bot_id": "bot-source",
+                "session_id": "session-1",
+                "state": "failed",
+                "response": {"content": ""},
+                "created_at_ms": 1_u64,
+                "updated_at_ms": 2_u64,
+                "expires_at_ms": 9_999_999_u64,
+                "version": 2_u64,
+                "content_truncated": false,
+                "is_terminal": true,
+                "error_message": "provider returned error: timeout"
+            })))
+            .mount(&server)
+            .await;
+
+        let client = BcsClient::new(server.uri());
+        let submit = client
+            .chat_async("bot-target", "hello", None, None, &[], None, None, 5_000, false)
+            .await
+            .expect("chat_async submit should succeed");
+        let outcome = client
+            .chat_poll_run(&submit, 10, Duration::from_millis(5_000))
+            .await
+            .expect("poll should return a failed terminal outcome");
+
+        assert!(!outcome.delivered);
+        assert_eq!(outcome.state, "failed");
+        assert!(outcome.submitted);
+        assert_eq!(outcome.run_id.as_deref(), Some("run-1"));
+        assert_eq!(outcome.session_id.as_deref(), Some("session-1"));
     }
 
     #[test]
