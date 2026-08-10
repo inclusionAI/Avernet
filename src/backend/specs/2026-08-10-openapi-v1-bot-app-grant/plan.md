@@ -188,8 +188,12 @@ Notes on the shape:
 Grant and its log write happen in **one transaction**, so the history cannot
 disagree with the live state.
 
-No migration file: the backend creates tables through `DataSourcePlugin`
-`create_all()` the same way `ac_bot_collaborator` does.
+**The DDL must be applied before the routes are enabled.** `create_all()`
+provisions these tables only in the local SQLite profile; `CommunityDatabase`
+never calls it. So in any persistent deployment
+`sql/2026_08_10_bot_app_grant.sql` is the only thing that creates them, and
+routes enabled ahead of it answer a missing-table error on every call. See
+**Rollout** for the ordering.
 
 ### Deviation to accept or strike: `app_name`
 
@@ -532,10 +536,24 @@ None. No new packages, no version bumps, no new internal service calls.
 
 ## Rollout
 
-No migration ordering, no feature flag, no backwards-compatibility concern: the
-table is new, the routes are new, and no existing behavior changes.
+**Ordered: DDL first, then the code.** No feature flag and no
+backwards-compatibility concern — the tables are new, the routes are new, and no
+existing behavior changes — but the ordering is *not* free, and an earlier
+revision of this plan wrongly said it was.
+
+`create_all()` runs only in the local SQLite profile. `CommunityDatabase` never
+calls it, so a persistent deployment gets these tables from the checked-in DDL
+and from nothing else. Ship the code first and all four endpoints answer a
+missing-table error until the migration lands.
 
 ```bash
+# 1. Apply the DDL to the target database FIRST. Two CREATE TABLEs, no ALTER,
+#    so it is safe to apply ahead of the code and touches no existing row.
+#    src/backend/src/agentclaw/community/core/bot_app_grant/sql/2026_08_10_bot_app_grant.sql
+
+# 2. Then deploy the backend. Rolling back the code needs no schema rollback —
+#    the tables are unreferenced by anything else and can be left in place.
+
 # regenerate the published description after the routes land
 python src/backend/scripts/dump_openapi.py
 # copies to the gateway's single-box artifact:
