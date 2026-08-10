@@ -40,6 +40,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     Page,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors import (
+    GrantNotResolvableError,
     ClusterMismatchError,
     MissingPrincipalError,
     UnsupportedEngineError,
@@ -181,6 +182,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     InvalidBotLogQueryError: (400, "Invalid log query"),
     SessionNotFoundError: (404, "Not found"),
     BotNotFoundError: (404, "Not found"),
+    # Byte-identical to the line above, deliberately. An application that could
+    # tell "I hold no grant for this bot" from "no such bot" would have an
+    # enumeration oracle for every bot id in the tenant, so the refusal must be
+    # the *same* refusal — same status, same message, same envelope.
+    GrantNotResolvableError: (404, "Not found"),
     # Withdrawing an authorization that is not there. Shares the 404 shape with
     # an absent bot, and that is not a collision worth avoiding: an owner
     # reconciling their records needs "there was nothing to remove" to read

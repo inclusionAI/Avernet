@@ -30,7 +30,6 @@ from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     Principal,
-    require_operating_caller,
     require_principal,
     require_user_and_app_principal,
 )
@@ -170,11 +169,14 @@ def probe_app():
             request,
         )
 
-    @app.get("/openapi/v1/bots/_operable_probe")
+    # An operation that *is* in the admission table, so the shared dependency
+    # admits an application on it. ``GET /openapi/v1/bots/ceiling`` is Mode C in
+    # the real table; the probe borrows its path so the lookup is the production
+    # one rather than a fixture.
+    @app.get("/openapi/v1/bots/ceiling")
     @envelope_errors
-    async def operable_probe(
-        request: Request,
-        principal: Principal = Depends(require_operating_caller),
+    async def admitted_probe(
+        request: Request, principal: Principal = Depends(require_principal)
     ):
         return envelope(
             {"has_user": principal.has_user, "app_id": principal.app_id}, request
@@ -518,12 +520,12 @@ def _body_without_request_id(response) -> dict:
 # ── the admission split: where the end-user guard now lives ──────────────────
 
 
-def test_an_app_only_caller_is_refused_by_the_default_dependency(client):
-    """A route that says nothing still refuses a machine caller.
+def test_an_app_only_caller_is_refused_on_an_operation_not_in_the_table(client):
+    """A path absent from the admission table refuses a machine caller.
 
-    This is the whole reason the guard could move out of the verifier: every
-    public route already declares ``require_principal``, so the refusal is
-    inherited rather than remembered. A route written tomorrow gets it too.
+    ``_probe`` is not a real operation and so has no entry — which is exactly
+    the case a route added tomorrow is in. Refused by *omission*, rather than by
+    someone remembering not to opt in.
     """
     response = client.get(
         "/openapi/v1/bots/_probe",
@@ -550,10 +552,10 @@ def test_an_app_only_refusal_is_identical_to_no_credential(client):
     assert _body_without_request_id(refused) == _body_without_request_id(absent)
 
 
-def test_an_app_only_caller_is_admitted_where_a_route_opts_in(client):
-    """The opt-in half, and it relaxes only the identity *shape*."""
+def test_an_app_only_caller_is_admitted_on_an_operation_in_the_table(client):
+    """Admission is per operation, read from the table, and only about *shape*."""
     response = client.get(
-        "/openapi/v1/bots/_operable_probe",
+        "/openapi/v1/bots/ceiling",
         headers={PRINCIPAL_HEADER: mint(user_id=None)},
     )
 
@@ -561,22 +563,22 @@ def test_an_app_only_caller_is_admitted_where_a_route_opts_in(client):
     assert response.json()["data"] == {"has_user": False, "app_id": 1}
 
 
-def test_the_opt_in_still_refuses_an_unverified_caller(client):
-    """Opting into a machine caller is not opting out of authentication."""
-    assert client.get("/openapi/v1/bots/_operable_probe").status_code == 401
+def test_an_admitting_operation_still_refuses_an_unverified_caller(client):
+    """Admitting a machine caller is not opting out of authentication."""
+    assert client.get("/openapi/v1/bots/ceiling").status_code == 401
     assert (
         client.get(
-            "/openapi/v1/bots/_operable_probe",
+            "/openapi/v1/bots/ceiling",
             headers={PRINCIPAL_HEADER: "not-a-token"},
         ).status_code
         == 401
     )
 
 
-def test_a_user_caller_is_unchanged_on_an_opted_in_route(client):
+def test_a_user_caller_is_unchanged_on_an_admitting_route(client):
     """The relaxation adds a caller shape; it removes nothing."""
     response = client.get(
-        "/openapi/v1/bots/_operable_probe",
+        "/openapi/v1/bots/ceiling",
         headers={PRINCIPAL_HEADER: mint()},
     )
 
@@ -587,11 +589,11 @@ def test_a_user_caller_is_unchanged_on_an_opted_in_route(client):
 def test_an_app_only_caller_still_scopes_to_its_own_tenant(client):
     """A machine caller is tenant-scoped by its app registration.
 
-    Asserted on the opted-in route, because the default one refuses it — the
-    tenant has to be right for the operations that *do* admit it.
+    Asserted on an admitting route, because the others refuse it — the tenant
+    has to be right for the operations that *do* admit it.
     """
     response = client.get(
-        "/openapi/v1/bots/_operable_probe",
+        "/openapi/v1/bots/ceiling",
         headers={PRINCIPAL_HEADER: mint(user_id=None, tenant="other-tenant")},
     )
 

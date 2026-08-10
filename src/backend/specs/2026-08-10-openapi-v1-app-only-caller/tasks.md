@@ -236,7 +236,7 @@
 
 ---
 
-## Task 8: The seam — authorize `user_id`, resolve the owner  `[~]`
+## Task 8: The seam — authorize `user_id`, resolve the owner  `[x]`
 
 - **Files:** `adapters/http/openapi_v1/principal.py`,
   `engine_runtime/params.py`, `errors.py`, `responses.py`, `adapters/http/app.py`
@@ -250,26 +250,31 @@
   > operation absent from the table is refused, so a new route is refused by
   > omission rather than by remembering not to opt in.
 
-  - [ ] `require_operating_caller` removed; `require_principal` admits an
-        app-only caller only when the request's route has an admitting mode in
-        `ADMISSION`, and refuses when the route is absent from the table.
-  - [ ] `require_user_id` keeps its signature and required `user_id`, and gains
-        the app-only branch. Its docstring's promise — "stops comparing the two
-        ids and asks whether the delegation was granted" — is rewritten as
-        delivered.
-  - [ ] The user-bearing path is unchanged: `422` absent, `403` mismatched.
-  - [ ] `resolve_owner_id` gains the app-only branch: default to the **grant's**
-        `owner_id` rather than to `user_id`, and refuse a supplied value that
-        disagrees. A comment marks this as the single point where the app-only
-        path differs from the human path on the 16 A2 operations.
-  - [ ] `GrantCheckedDep` reads `bot_id` from `path_params` then `query_params`
-        (path first, with the reason) and refuses when neither carries one.
-  - [ ] `GrantNotResolvableError` → `(404, "Not found")` **byte-identical** to
-        `BotNotFoundError`, with an `app.py` handler alongside
-        `UserIdMismatchError`, because a dependency-raised error never reaches
-        `@envelope_errors`. A comment records why it is `404` and not `403`.
-  - [ ] The grant probe runs once per request; `_for_log` bounding applies to
-        app-only refusals.
+  - [x] `require_operating_caller` removed; `require_principal` consults
+        `ADMISSION` via the matched route in the connection scope, and refuses
+        when the route is absent from the table.
+  - [x] `require_user_id` keeps its signature and gains the app-only branch.
+        **The branch requires a positively-identified application**, not merely
+        "names no user" — testing the latter alone was fail-open, since every
+        unusable credential also names no user, and the existing suite caught it.
+  - [x] The user-bearing path is unchanged: `422` absent, `403` mismatched,
+        `401` unverifiable.
+  - [x] `caller_names_a_user` / `caller_app_id` mirror `caller_owner_id`'s
+        tolerance for a bare string or mapping, so the surface's existing
+        principal stand-ins keep working rather than all looking app-only.
+  - [x] `resolve_owner_id` takes the addressed owner from the grant record and
+        refuses a request naming a different one, before the resolve.
+  - [x] `GrantCheckedDep` reads `bot_id` path-first then query, and refuses an
+        application when neither carries one.
+  - [x] The grant reader is resolved **lazily**, only for an application. A
+        declared injection would have made the grant service a hard requirement
+        of every route taking the dependency — and of every test app mounting
+        one. Absent reader ⇒ `require_bot` refuses, so it fails closed.
+  - [x] `GrantNotResolvableError` → `(404, "Not found")` in the same map as
+        `BotNotFoundError`, with its own `app.py` handler.
+  - [x] 821 tests pass across the public surface, the principal seam and the
+        architecture gates, with no existing expectation edited.
+
 - **Depends on:** Tasks 2, 6, 7
 
 ---

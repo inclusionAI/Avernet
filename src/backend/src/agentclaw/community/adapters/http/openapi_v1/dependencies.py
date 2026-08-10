@@ -10,9 +10,10 @@ surface was built against, and nothing else changes when they go live:
   route answers ``401`` (a WebSocket handshake is refused with close code
   ``1008`` instead — same rule, and the only shape a handshake can be refused
   in).
-- :func:`require_operating_caller` — the opt-in that additionally admits an
-  **application acting alone**, under a grant. Only operations deliberately
-  placed in an admission group declare it.
+  Whether it admits an **application acting alone** is decided by the
+  operation's entry in ``admission.py``'s table — not by a second dependency a
+  route could declare, because a route-level dependency can add a check and
+  never relax one.
 - :func:`resolve_avernet_tenant` — the data-isolation tenant for the request,
   read by ``AvernetTenantMiddleware`` before any route runs.
 
@@ -52,6 +53,10 @@ from fastapi import Depends, Request, WebSocketException
 from starlette.requests import HTTPConnection
 from starlette.status import WS_1008_POLICY_VIOLATION
 
+from agentclaw.community.adapters.http.openapi_v1.admission import (
+    ADMISSION,
+    ADMITTING_MODES,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.core.gateway_principal import (
     PrincipalType,
@@ -195,8 +200,9 @@ async def require_principal(connection: HTTPConnection) -> Principal:
     inherits the refusal by saying nothing.** Every public route already
     declares this dependency, so a route written tomorrow gets the end-user
     requirement for free, and a route can only become admissible to a machine
-    caller by deliberately naming :func:`require_operating_caller` instead. The
-    guard moved one layer up; it did not become optional.
+    caller by being given an entry in ``admission.py``'s table — which the route
+    inventory test forces someone to write deliberately. The guard moved one
+    layer up; it did not become optional.
 
     One dependency for both planes, because the surface's rule is one rule:
     every public route requires an authenticated caller. Only the *shape* of the
@@ -216,35 +222,42 @@ async def require_principal(connection: HTTPConnection) -> Principal:
     caller = resolve_caller(connection)
     if caller is None:
         _refuse(connection, "no verified caller for this request")
-    elif not caller.has_user:
-        # Verified, but names only an application. Refused here rather than at
-        # the handler's owner lookup: this operation has not opted into
-        # admitting a machine caller, and the answer must be the same ``401``
-        # an unverified caller gets.
+    elif not caller.has_user and not _admits_application(connection):
+        # Verified, but names only an application, on an operation that does not
+        # admit one. Refused here rather than at the handler's owner lookup, and
+        # with the same ``401`` an unverified caller gets.
         _refuse(connection, "this operation requires a caller naming an end user")
     return caller
 
 
-async def require_operating_caller(connection: HTTPConnection) -> Principal:
-    """Return the verified caller, admitting an **application acting alone**.
+def _admits_application(connection: HTTPConnection) -> bool:
+    """Whether the matched operation admits a caller with no end user.
 
-    The opt-in half of the pair above, declared only by operations placed in an
-    admission group. It relaxes exactly one thing — that the identity set name
-    an end user — and nothing else: an unverified caller is still refused with
-    the identical answer, and a caller naming neither a user nor an application
-    never reaches here at all, having been refused during verification.
+    **The fail-closed default lives here.** An operation absent from
+    ``ADMISSION`` — a route added tomorrow, a path renamed without the table
+    following — is not admitted, so a new route refuses a machine caller by
+    *omission* rather than by someone remembering not to opt in. The route
+    inventory test then makes that omission loud rather than silent.
 
-    **Admitting the caller is not authorizing the call.** This says only that
-    the shape is one the operation is prepared to consider. Which bot it may
-    reach, and as whom, is decided downstream against the grant — and for an
-    app-only caller that check is the only thing standing between it and the
-    operation, which is why no route should declare this without also taking the
-    grant-checked dependency for its bot.
+    Reading the matched route from the connection scope is what makes one shared
+    declaration possible at all. The alternative the plan first reached for — a
+    second dependency that admitted routes declare instead of this one — cannot
+    work: ``build_public_router`` applies this dependency to every route through
+    ``_PUBLIC_AUTH``, and FastAPI *merges* router-level dependencies into each
+    route rather than letting one be swapped out. A route can add a check; it
+    can never relax one.
+
+    This lookup is route-aware, and that is fine *here* while it was not fine in
+    ``verify_principal_token``: this module is the HTTP adapter, which is the
+    layer that knows about routes. The verifier stays transport-agnostic
+    (Rule 7), which was the actual constraint.
     """
-    caller = resolve_caller(connection)
-    if caller is None:
-        _refuse(connection, "no verified caller for this request")
-    return caller
+    route = connection.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return False
+    method = connection.scope.get("method") or "WEBSOCKET"
+    return ADMISSION.get((method, path)) in ADMITTING_MODES
 
 
 async def require_user_and_app_principal(
@@ -270,8 +283,7 @@ def resolve_avernet_tenant(request: Request) -> str:
     With no trustworthy caller this falls back to the internal default, which is
     what every non-public path resolves to anyway. That is safe because the
     request cannot get data out: every public route depends on
-    :func:`require_principal` or :func:`require_operating_caller` and therefore
-    answers ``401`` first — a property pinned by
+    :func:`require_principal` and therefore answers ``401`` first — a property pinned by
     ``test_public_routes_require_principal``, not left to inspection.
 
     An **app-only** caller resolves its tenant from its ``AppPrincipal``, which

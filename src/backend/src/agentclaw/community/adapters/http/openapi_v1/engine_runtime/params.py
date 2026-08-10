@@ -15,6 +15,11 @@ call is *for*, not an attribute of any resource.
 
 Defined once and imported by every engine-runtime router, like ``UserIdDep``:
 a second spelling would be a second thing to keep in step.
+
+``owner_id`` is also the one parameter on this surface whose *source* depends on
+the caller. For a human it is the request's, defaulting to themselves; for an
+application it comes from the grant record, and a request that names a different
+owner is refused. See :func:`resolve_owner_id`.
 """
 
 from __future__ import annotations
@@ -26,7 +31,13 @@ from fastapi import Depends, Query
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.errors import (
+    GrantNotResolvableError,
+)
+from agentclaw.community.adapters.http.openapi_v1.principal import (
+    ActingCallerDep,
+    GrantCheckedDep,
+)
 
 #: The query parameter naming the bot owner a request addresses.
 OWNER_ID_QUERY = "owner_id"
@@ -49,7 +60,8 @@ STAGE_DESCRIPTION = (
 
 
 async def resolve_owner_id(
-    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    granted_owner_id: GrantCheckedDep,
     owner_id: Annotated[
         str | None,
         Query(
@@ -79,8 +91,31 @@ async def resolve_owner_id(
     that does not exist. This dependency only decides *which owner is being
     asked about* — exactly as ``require_user_id`` only decides which user the
     request acts for.
+
+    **This is the one place an application caller differs from a human on these
+    sixteen operations.** For an application the addressed owner comes from the
+    **grant record** (``granted_owner_id``), never from the request, and an
+    explicitly supplied value must agree with it. Two reasons it is refused here
+    rather than left to fail downstream:
+
+    - A request naming some other owner would 404 at the resolve anyway, but
+      only *coincidentally* — two independent refusals happening to line up. A
+      boundary that holds by coincidence is not a boundary.
+    - The grant is what says which bot the delegation covers. Letting the
+      request re-nominate the owner would let an application aim a grant it
+      holds at a bot it does not, and rely on the next check to notice.
+
+    A human caller's use of the parameter is untouched: naming another owner
+    still works and is still adjudicated against the collaborator table.
     """
-    return owner_id if owner_id is not None else user_id
+    if caller.is_application:
+        if owner_id is not None and owner_id != granted_owner_id:
+            raise GrantNotResolvableError(
+                f"app {caller.app_id} addressed owner {owner_id!r}, but its "
+                "grant covers a bot owned by someone else"
+            )
+        return granted_owner_id
+    return owner_id if owner_id is not None else caller.user_id
 
 
 #: What an engine-runtime handler declares to receive the addressed owner.

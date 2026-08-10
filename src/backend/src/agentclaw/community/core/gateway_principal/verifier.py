@@ -449,9 +449,9 @@ def _require_admissible_principal(principals: tuple[GatewayPrincipal, ...]) -> N
       public route already declares — now carries the end-user requirement. A
       route that says nothing gets it, so the default is still "refuse a caller
       with no user", including for routes nobody has written yet.
-    - ``openapi_v1/dependencies.py::require_operating_caller`` is the opt-in
-      that admits an application acting alone, and only the operations placed in
-      an admission group declare it.
+    - ``openapi_v1/admission.py`` decides, per operation, whether that same
+      dependency also admits an application acting alone. An operation absent
+      from its table is refused, so the default survives the move.
 
     Why it had to move at all: this component is transport-agnostic (Rule 7) and
     route-blind, and the middleware that drives it runs before routing. Deciding
