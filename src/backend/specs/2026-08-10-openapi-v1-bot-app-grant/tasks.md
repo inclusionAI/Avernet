@@ -98,7 +98,7 @@
         `INTEGER` on SQLite, as `ac_bots` does.
 - **Depends on:** Task 1
 
-## Task 3: Repository contract and implementation  `[ ]`
+## Task 3: Repository contract and implementation  `[x]`
 
 - **Goal:** Persistence behind an enforceable contract, in the consolidated
   `core/repository` package rather than beside the domain module.
@@ -108,31 +108,39 @@
   `…/core/repository/implementations/bot/app_grant.py` (new),
   `…/core/repository/implementations/bot/__init__.py`
 - **Done when:**
-  - [ ] `BotAppGrantRepositoryProtocol` declares `grant`, `revoke`,
+  - [x] `BotAppGrantRepositoryProtocol` declares `grant`, `revoke`,
         `list_for_bot`, `list_for_app`, `find` — **every member
         `@abstractmethod`**, domain imports under `TYPE_CHECKING` only, per
         `core/repository/README.md`.
-  - [ ] `grant` writes the live row **and** appends `granted` to the log in
+  - [x] `grant` writes the live row **and** appends `granted` to the log in
         **one transaction**; `revoke` deletes the live row **and** appends
         `revoked` in one transaction. The log write belongs to the repository,
         not the service: the two halves must be atomic, and a caller that can
         forget the second half is a caller that will.
-  - [ ] `revoke` returns `False` when no live row matched, so the adapter can
+  - [x] `revoke` returns `False` when no live row matched, so the adapter can
         answer 404 distinctly from a successful withdrawal.
-  - [ ] Both `list_*` members take `owner_id`, so neither can return a row
+  - [x] Both `list_*` members take `owner_id`, so neither can return a row
         belonging to anyone but the caller. The scoping is in the contract, not
         left to each caller to remember.
-  - [ ] The protocol is re-exported from `protocols/bot/__init__.py` so
+  - [x] The protocol is re-exported from `protocols/bot/__init__.py` so
         importers see one module, as the other `bot` contracts are.
-  - [ ] `BotAppGrantRepository` declares the Protocol as a base and takes
+  - [x] `BotAppGrantRepository` declares the Protocol as a base and takes
         `DatabasePlugin` via `@inject`, modelled on
         `implementations/bot/collaborator.py:34`.
-  - [ ] `grant` is idempotent on an existing live row: it returns that row
+  - [x] `grant` is idempotent on an existing live row: it returns that row
         untouched and appends **nothing** to the log. `gmt_create` does not
         move, and a duplicate call does not invent a period.
-  - [ ] `tests/community/architecture/test_repository_contracts.py` passes: every
+  - [x] `tests/community/architecture/test_repository_contracts.py` passes: every
         member abstract, implementation based, no runtime domain import in
-        `protocols/`, contract and body on different paths.
+        `protocols/`, contract and body on different paths. Adding the two
+        new names to `core/repository/README.md`'s `provides` index was
+        required by `test_readme_provides_lists_the_real_public_surface` — the
+        gate is derived-checked, so the index cannot rot silently.
+  - [x] Behaviour verified against a live SQLite database: re-grant returns the
+        same row with `gmt_create` unmoved and appends no second log event;
+        `revoke` returns `True` then `False`; a full grant/revoke/grant/revoke
+        leaves four ordered log events; and both list methods return nothing for
+        a different owner.
 - **Depends on:** Task 2
 
 ## Task 4: The grant service (domain policy)  `[ ]`

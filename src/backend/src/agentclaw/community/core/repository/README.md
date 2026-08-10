@@ -81,6 +81,7 @@ provides:
   # Contracts — protocols/<domain>.py. This is the surface domain services
   # import at runtime for DI; a change here is a change to their constructors.
   # bot
+  - BotAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
   - BotCollabLogRepositoryProtocol
   - BotFriendRepositoryProtocol
@@ -140,6 +141,7 @@ provides:
   # Implementations — implementations/<domain>/. Bound by DI, never constructed
   # directly outside di/modules/. Names repeat above where impl and contract share one.
   # bot
+  - BotAppGrantRepository
   - BotCollabLockRepository
   - BotCollabLogRepository
   - BotFriendRepository
