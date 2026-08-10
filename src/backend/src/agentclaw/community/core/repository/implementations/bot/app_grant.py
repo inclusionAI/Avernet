@@ -216,11 +216,25 @@ class BotAppGrantRepository(
             )
             return row.to_record()
 
-    def revoke(self, bot_id: str, user_id: str, app_id: int) -> bool:
-        """Withdraw one user's delegation, appending a ``revoked`` event."""
+    def revoke(
+        self, bot_id: str, user_id: str, app_id: int, owner_id: str
+    ) -> bool:
+        """Withdraw one user's delegation, appending a ``revoked`` event.
+
+        ``owner_id`` is the **resolved** owner of the bot the caller addressed,
+        and it is part of which bot this is rather than a permission check —
+        ``ac_bots`` has no unique key on ``bot_id``. Without it this shares
+        :meth:`find`'s key collision but *not* its consequence: where a
+        colliding read fails safe (the caller keeps the access they had), a
+        colliding delete destroys a live authorization on a different bot, and
+        logs a revocation for it. The caller knows the resolved owner, so there
+        is no reason to guess.
+        """
         env = get_current_env()
         with self._db.transactional_orm_session() as db:
-            row = self._live_row(db, bot_id, user_id, app_id, env, lock=True)
+            row = self._live_row(
+                db, bot_id, user_id, app_id, env, lock=True, owner_id=owner_id
+            )
             if row is None:
                 logger.info(
                     "[bot_app_grant] nothing to revoke: app_id=%s bot_id=%s "
@@ -396,6 +410,7 @@ class BotAppGrantRepository(
         env: str,
         *,
         lock: bool = False,
+        owner_id: Optional[str] = None,
     ) -> Optional[BotAppGrantModel]:
         """The live row for one delegation, inside an open session.
 
@@ -426,6 +441,14 @@ class BotAppGrantRepository(
             self._Grant.user_id == user_id,
             self._Grant.env == env,
         )
+        if owner_id is not None:
+            # Narrows from "the row on this unique key" to "the row for *this*
+            # bot". Only the destructive caller passes it: ``bot_id`` is not
+            # unique across owners, and a delete that resolved to another
+            # owner's same-named bot would revoke an authorization nobody
+            # asked about. Reads leave it off — they already fail safe, and
+            # ``find`` genuinely does not know the owner it is looking for.
+            query = query.filter(self._Grant.owner_id == owner_id)
         if lock:
             query = query.with_for_update()
         return query.first()

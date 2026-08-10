@@ -29,11 +29,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
 from agentclaw.community.core.engine_runtime.gate import require_bot_operator
+from agentclaw.community.log import get_logger
+
+logger = get_logger()
 
 
 def resolve_delegable_bot(
@@ -68,6 +72,12 @@ def resolve_delegable_bot(
     ``bot_id`` with no owner-scoped match, both raise
     :class:`BotNotFoundError` — the same masked refusal, since anything
     distinguishable tells a stranger that a bot exists.
+
+    **The refusals name no caller-supplied value.** Their message is carried
+    into a log line verbatim by ``error_logging.log_public_error``, so a
+    ``bot_id`` containing a percent-encoded newline would forge log lines on
+    every refused request. The id goes to the log through
+    :func:`~...log_safe.for_log` instead — escaped and bounded.
     """
     try:
         bot = bots.get_bot(bot_id, caller_id)
@@ -80,7 +90,11 @@ def resolve_delegable_bot(
             # not in the surface's status map, so it would answer 500 — telling
             # an unrelated caller that two bots share an id, on a surface whose
             # whole refusal story is that a stranger learns nothing.
-            raise BotNotFoundError(f"Bot not found: {bot_id}") from None
+            logger.warning(
+                "[authorized_apps] ambiguous bot id, refusing as not-found: %s",
+                for_log(bot_id),
+            )
+            raise BotNotFoundError("Bot not found") from None
     resolved_owner = str(bot.get("owner_id") or "")
     bot_pk = int(bot.get("id") or 0)
     require_bot_operator(
@@ -94,7 +108,11 @@ def resolve_delegable_bot(
         # Unreachable for a well-formed row, and refused rather than trusted:
         # an empty owner would be written into the grant as the bot's owner and
         # would make the owner-override listing address nobody.
-        raise BotNotFoundError(f"Bot not found: {bot_id}")
+        logger.warning(
+            "[authorized_apps] bot resolved with no owner, refusing: %s",
+            for_log(bot_id),
+        )
+        raise BotNotFoundError("Bot not found")
     return resolved_owner, bot_pk
 
 

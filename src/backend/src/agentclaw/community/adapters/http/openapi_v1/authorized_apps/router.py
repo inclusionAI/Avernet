@@ -277,7 +277,9 @@ async def revoke_authorized_app(
     if user_id == owner_id:
         grants.revoke_app(bot_id=bot_id, owner_id=owner_id, app_id=app_id)
     else:
-        grants.revoke(bot_id=bot_id, user_id=user_id, app_id=app_id)
+        grants.revoke(
+            bot_id=bot_id, user_id=user_id, owner_id=owner_id, app_id=app_id
+        )
     return deleted_envelope(request)
 
 

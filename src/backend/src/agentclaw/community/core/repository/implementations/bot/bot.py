@@ -304,23 +304,30 @@ class BotRepository(
             )
             return [row[0] for row in rows]
 
-    def filter_live_bot_ids(self, bot_ids: List[str]) -> set[str]:
-        """Which of these bot ids are live, in a single id-only query."""
-        if not bot_ids:
+    def filter_live_bots(
+        self, pairs: List[tuple[str, str]]
+    ) -> set[tuple[str, str]]:
+        """Which of these ``(bot_id, owner_id)`` bots are live, in one query."""
+        if not pairs:
             # No query at all rather than an ``IN ()``, which MySQL rejects
             # outright and SQLAlchemy warns about.
             return set()
+        wanted = set(pairs)
         with self._db.orm_session() as db:
             rows = (
-                db.query(self.Model.bot_id)
+                db.query(self.Model.bot_id, self.Model.owner_id)
                 .filter(
-                    self.Model.bot_id.in_(bot_ids),
+                    self.Model.bot_id.in_({bot_id for bot_id, _ in wanted}),
+                    self.Model.owner_id.in_({owner for _, owner in wanted}),
                     self.Model.is_delete == 0,
                     self._env(),
                 )
                 .all()
             )
-            return {row[0] for row in rows}
+            # The two ``IN`` clauses are a cross product, so a row can match one
+            # column from one pair and the other from a different pair. Only the
+            # pairs actually asked for survive.
+            return {(row[0], row[1]) for row in rows} & wanted
 
     def list_by_owner_or_collaborator(
         self, owner_id: str, page: int = 1, page_size: int = 20

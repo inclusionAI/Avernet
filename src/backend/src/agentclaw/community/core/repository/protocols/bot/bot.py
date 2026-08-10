@@ -118,17 +118,26 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
-    def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
-        """Which of these ``bot_id``s are live, in one query.
+    def filter_live_bots(
+        self, pairs: list[tuple[str, str]]
+    ) -> set[tuple[str, str]]:
+        """Which of these ``(bot_id, owner_id)`` bots are live, in one query.
 
-        The owner-blind sibling of :meth:`list_live_bot_ids_by_owner`, and it
-        exists because a caller may hold ids for bots belonging to *several*
-        owners — an application's grants, for instance, which now cover bots the
-        delegating user collaborates on rather than owns. Filtering those
-        against one owner's live ids would silently drop every shared bot.
+        The many-owner sibling of :meth:`list_live_bot_ids_by_owner`, and it
+        exists because a caller may hold bots belonging to *several* owners — an
+        application's grants, for instance, which cover bots the delegating user
+        collaborates on rather than owns. Filtering those against one owner's
+        live ids would silently drop every shared one.
 
-        Returns a set for direct membership testing, and never more ids than it
-        was given. An empty input returns an empty set without querying.
+        **Keyed on the pair, not the bare id.** ``ac_bots`` has no unique key on
+        ``bot_id``: with the legacy ``default`` convention, an id-only query
+        reports a soft-deleted bot as live whenever *any* owner still has a
+        live bot of that id, so a grant whose bot is gone keeps being advertised
+        as reachable. The owner is on every grant record, so there is nothing to
+        discover.
+
+        Returns a set for direct membership testing, and never more pairs than
+        it was given. An empty input returns an empty set without querying.
 
         Scoped by current env AND tenant, like its siblings, and excludes
         soft-deleted rows.

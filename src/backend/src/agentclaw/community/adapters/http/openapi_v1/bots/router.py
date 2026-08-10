@@ -35,6 +35,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import UnsupportedEngin
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
 )
+from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.principal import (
     ActingCallerDep,
     UserIdDep,
@@ -413,7 +414,16 @@ async def get_bots_ceiling(
     """
     granted = caller.granted_bot_ids()
     if granted is not None and not granted:
-        raise BotNotFoundError(f"no authorization from user {owner_id}")
+        # The named user goes to the log bounded and escaped, never into the
+        # exception message: that message reaches a log line verbatim, and
+        # ``user_id`` is declared ``min_length=1`` with no upper bound, so raw
+        # it would let a refused caller forge log lines and choose how many
+        # bytes each refusal costs.
+        logger.warning(
+            "[bots] app holds no delegation from user=%s; refusing the ceiling",
+            for_log(owner_id),
+        )
+        raise BotNotFoundError("no authorization from the named user")
     ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
     return envelope(Ceiling(ceiling=ceiling), request)
 

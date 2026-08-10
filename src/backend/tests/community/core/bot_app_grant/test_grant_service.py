@@ -80,39 +80,42 @@ def repo(db):
 class _LiveBots:
     """A bot repository double tracking which bots still exist.
 
-    Mirrors ``filter_live_bot_ids``, which is **owner-blind** — a bot id is live
-    or it is not. That is the whole point rather than a simplification: a
-    delegating user may hold grants on bots several other people own, so a
-    liveness filter that asked "which of *this user's* bots are live" would drop
-    every shared one, silently and precisely in the case delegation exists for.
+    Mirrors ``filter_live_bots``, which is keyed on ``(bot_id, owner_id)``.
+    Neither half alone identifies a bot: an owner-scoped filter would drop every
+    *shared* bot (the case delegation exists for), and an id-only one would call
+    a deleted bot live whenever another owner still holds one of the same id.
 
     ``queries`` counts calls, which is how the batching test proves the filter
     costs one query rather than one per grant.
     """
 
     def __init__(self):
-        self.live: set[str] = set()
+        self.live: set[tuple[str, str]] = set()
         self.queries = 0
 
-    def add(self, *bot_ids: str) -> None:
-        self.live.update(bot_ids)
+    def add(self, owner_id: str, *bot_ids: str) -> None:
+        self.live.update((bot_id, owner_id) for bot_id in bot_ids)
 
-    def delete(self, bot_id: str) -> None:
-        """Soft-deletion, as the caller sees it: the id stops coming back."""
-        self.live.discard(bot_id)
+    def delete(self, owner_id: str, bot_id: str) -> None:
+        """Soft-deletion, as the caller sees it: the bot stops coming back."""
+        self.live.discard((bot_id, owner_id))
 
-    def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
-        if not bot_ids:
+    def filter_live_bots(self, pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
+        if not pairs:
             return set()
         self.queries += 1
-        return {bot for bot in bot_ids if bot in self.live}
+        return {pair for pair in pairs if pair in self.live}
 
 
 @pytest.fixture
 def bots():
     """Seeded with every bot the tests grant, so the default is "all live"."""
     doubles = _LiveBots()
-    doubles.add("b-1", "b-2")
+    doubles.add("u-1", "b-1", "b-2")
+    # ``u-2`` owns their own bots of the same ids — which is the situation the
+    # pair-keyed filter exists for, not an artefact of the fixture.
+    doubles.add("u-2", "b-1", "b-2")
+    doubles.add("u-1", "b-9")
     return doubles
 
 
@@ -216,9 +219,9 @@ def test_grant_withdraw_grant_withdraw_survives(service, sessions):
     revoked rows share the remaining key columns. Two tables make it ordinary.
     """
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
     with sessions() as session:
         assert session.query(BotAppGrantModel).count() == 0
@@ -241,7 +244,7 @@ def test_regrant_after_revoke_creates_a_new_period(service, sessions):
     the log is where that lives.
     """
     first = service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
     second = service.grant(**GRANT)
 
     assert _log(sessions) == [
@@ -261,7 +264,7 @@ def test_log_outlives_the_live_row(service, sessions):
     joining to a row that no longer exists.
     """
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
     with sessions() as session:
         assert session.query(BotAppGrantModel).count() == 0
@@ -278,20 +281,20 @@ def test_log_outlives_the_live_row(service, sessions):
 def test_revoke_absent_grant_raises_distinctly(service):
     """"Nothing to remove" must not read as "removed"."""
     with pytest.raises(GrantNotFoundError):
-        service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+        service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
 
 def test_revoke_is_not_silently_repeatable(service):
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
     with pytest.raises(GrantNotFoundError):
-        service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+        service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
 
 def test_list_excludes_revoked_grants(service):
     service.grant(**GRANT)
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
     assert service.list_for_bot(bot_id="b-1", owner_id="u-1") == []
     assert service.list_for_app(app_id=42, user_id="u-1") == []
@@ -351,9 +354,32 @@ def test_list_for_app_excludes_a_deleted_bot(service, bots):
         bot_id="b-2", user_id="u-1", owner_id="u-1", app_id=42, app_name="partner"
     )
 
-    bots.delete("b-1")
+    bots.delete("u-1", "b-1")
 
     assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-1")] == ["b-2"]
+
+
+def test_a_deleted_bot_is_not_kept_alive_by_a_same_named_bot(service, bots):
+    """Liveness on the bare id reports a deleted bot as live.
+
+    ``u-1`` delegated an application on ``u-9``'s bot called ``default``, and
+    that bot is then soft-deleted — by a path that bypasses the deletion sweep,
+    which is a gap this codebase carries elsewhere. Another owner still holds a
+    live bot of the same id, so an id-only liveness check finds one and calls
+    the grant reachable: the application keeps being told it may reach a bot
+    that no longer exists.
+
+    The owner is on every grant record, so the pair costs nothing to check.
+    """
+    bots.add("u-9", "default")
+    bots.add("u-3", "default")  # someone else's, still live
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="u-9", app_id=42, app_name="partner"
+    )
+
+    bots.delete("u-9", "default")
+
+    assert service.list_for_app(app_id=42, user_id="u-1") == []
 
 
 def test_list_for_app_filters_in_one_query_not_one_per_grant(service, bots):
@@ -410,7 +436,7 @@ def test_list_for_app_includes_a_bot_the_delegator_does_not_own(service, bots):
     owners could grant — removes exactly the bot the delegation exists to reach,
     and does it without an error.
     """
-    bots.add("b-3")
+    bots.add("u-9", "b-3")
     service.grant(
         bot_id="b-3", user_id="u-2", owner_id="u-9", app_id=42, app_name="partner"
     )
@@ -466,7 +492,7 @@ def test_one_users_withdrawal_leaves_the_others_delegation_working(service):
         bot_id="b-1", user_id="u-2", owner_id="u-1", app_id=42, app_name="partner"
     )
 
-    service.revoke(bot_id="b-1", user_id="u-1", app_id=42)
+    service.revoke(bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42)
 
     assert service.list_for_app(app_id=42, user_id="u-1") == []
     assert [r.bot_id for r in service.list_for_app(app_id=42, user_id="u-2")] == ["b-1"]
@@ -558,6 +584,51 @@ def test_bot_scoped_reads_and_sweeps_do_not_cross_owners(service, sessions):
         assert session.query(BotAppGrantModel).count() == 1
 
 
+def test_withdrawing_one_bot_does_not_destroy_a_same_named_bots_delegation(
+    service, sessions
+):
+    """A delete keyed on ``bot_id`` alone destroys the wrong authorization.
+
+    ``u-1`` collaborates on ``u-9``'s bot called ``default`` and has delegated
+    an application on it. ``u-1`` also owns a bot called ``default``, with no
+    delegation of its own — the unique key is per
+    ``(app, bot_id, delegating user)``, so they could not hold two anyway.
+
+    Withdrawing on their *own* ``default`` matches the surviving row on every
+    column that key holds. Unlike a colliding read, which fails safe by handing
+    back access the caller already had, a colliding delete destroys a live
+    authorization on a bot the caller never addressed and writes a revocation
+    event for it. The resolved owner tells the two apart, and the caller always
+    knows it.
+    """
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="u-9", app_id=42, app_name="theirs"
+    )
+
+    with pytest.raises(GrantNotFoundError):
+        service.revoke(bot_id="default", user_id="u-1", owner_id="u-1", app_id=42)
+
+    with sessions() as session:
+        survivors = session.query(BotAppGrantModel).all()
+    assert [(r.owner_id, r.app_name) for r in survivors] == [("u-9", "theirs")], (
+        "the shared bot's delegation must survive a withdrawal aimed elsewhere"
+    )
+    assert GrantAction.REVOKED not in _log(sessions), "and no revocation logged"
+
+
+def test_withdrawing_the_bot_the_delegation_names_still_works(service, sessions):
+    """The narrowing must not break the ordinary withdrawal it scopes."""
+    service.grant(
+        bot_id="default", user_id="u-1", owner_id="u-9", app_id=42, app_name="theirs"
+    )
+
+    service.revoke(bot_id="default", user_id="u-1", owner_id="u-9", app_id=42)
+
+    with sessions() as session:
+        assert session.query(BotAppGrantModel).count() == 0
+    assert GrantAction.REVOKED in _log(sessions)
+
+
 def test_owner_override_does_not_cross_owners(service):
     """The same identity rule, on the owner's outright revocation."""
     service.grant(
@@ -623,7 +694,7 @@ def test_grant_ignores_a_caller_supplied_env(repo, sessions):
     written = repo.grant({**GRANT, "env": "pre"})
 
     assert repo.find("b-1", "u-1", 42) is not None, "must stay findable"
-    assert repo.revoke("b-1", "u-1", 42) is True, "must stay revocable"
+    assert repo.revoke("b-1", "u-1", 42, "u-1") is True, "must stay revocable"
     assert written.env != "pre"
 
 

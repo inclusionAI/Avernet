@@ -151,8 +151,10 @@ def grants(sessions):
     class _LiveBots:
         """Every bot is live; deletion is covered in the service tests."""
 
-        def filter_live_bot_ids(self, bot_ids: list[str]) -> set[str]:
-            return set(bot_ids)
+        def filter_live_bots(
+            self, pairs: list[tuple[str, str]]
+        ) -> set[tuple[str, str]]:
+            return set(pairs)
 
     return BotAppGrantService(BotAppGrantRepository(_Db()), _LiveBots())
 

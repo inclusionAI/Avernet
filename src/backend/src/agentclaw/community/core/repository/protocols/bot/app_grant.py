@@ -83,7 +83,9 @@ class BotAppGrantRepositoryProtocol(Protocol):
         """
 
     @abstractmethod
-    def revoke(self, bot_id: str, user_id: str, app_id: int) -> bool:
+    def revoke(
+        self, bot_id: str, user_id: str, app_id: int, owner_id: str
+    ) -> bool:
         """Withdraw one user's delegation of one app on one bot.
 
         Deletes the live row and appends a ``revoked`` event in one
@@ -95,6 +97,12 @@ class BotAppGrantRepositoryProtocol(Protocol):
         A collaborator revoking "their" grant must not remove a colleague's
         delegation of the same application on the same bot — those are two
         separate loans of two separate authorities.
+
+        Scoped to ``owner_id`` because that is *which bot* — ``bot_id`` is not
+        unique across owners. Unlike :meth:`find`, this method cannot afford the
+        collision: a read that resolves the wrong same-named bot fails safe,
+        while a delete that does destroys a live authorization on a bot the
+        caller never addressed.
 
         Returns:
             ``False`` when no live row matched, so the adapter can answer 404

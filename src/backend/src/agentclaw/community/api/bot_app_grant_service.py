@@ -45,11 +45,15 @@ class BotAppGrantServiceProtocol(Protocol):
         for one that succeeded.
         """
 
-    def revoke(self, *, bot_id: str, user_id: str, app_id: int) -> None:
+    def revoke(
+        self, *, bot_id: str, user_id: str, owner_id: str, app_id: int
+    ) -> None:
         """Withdraw ``user_id``'s delegation of ``app_id`` on ``bot_id``.
 
         Scoped to one delegating user: a collaborator withdrawing their own
         grant must not remove a colleague's delegation of the same application.
+        Scoped to the resolved ``owner_id`` too, because ``bot_id`` alone does
+        not identify a bot and a mis-resolved delete is destructive.
 
         Raises ``GrantNotFoundError`` when no live authorization matched, so the
         adapter can answer 404 distinctly from a successful withdrawal.

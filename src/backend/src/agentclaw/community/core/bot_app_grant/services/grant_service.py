@@ -98,7 +98,9 @@ class BotAppGrantService:
             }
         )
 
-    def revoke(self, *, bot_id: str, user_id: str, app_id: int) -> None:
+    def revoke(
+        self, *, bot_id: str, user_id: str, owner_id: str, app_id: int
+    ) -> None:
         """Withdraw ``user_id``'s delegation of ``app_id`` on ``bot_id``.
 
         Scoped to one delegating user, because a delegation is theirs to
@@ -107,13 +109,17 @@ class BotAppGrantService:
         are two separate loans. The bot's *owner* has a wider withdrawal, which
         is :meth:`revoke_app` rather than this.
 
+        ``owner_id`` is the resolved owner of the addressed bot — which bot this
+        is, not who may withdraw it. See the repository contract for why a
+        deletion cannot key on ``bot_id`` alone.
+
         Raises:
             GrantNotFoundError: no live authorization matched. Distinct from a
                 successful withdrawal on purpose — someone reconciling their own
                 records needs "there was nothing to remove" to read differently
                 from "removed".
         """
-        if not self._repository.revoke(bot_id, user_id, app_id):
+        if not self._repository.revoke(bot_id, user_id, app_id, owner_id):
             raise GrantNotFoundError(
                 f"no live authorization for app {app_id} on bot {bot_id}"
             )
@@ -210,7 +216,12 @@ class BotAppGrantService:
         matters for a bot deleted by a path that bypassed the sweep, and it
         costs one id-only query.
 
-        **Filtered by bot id, not by owner.** The obvious filter —
+        **Filtered by ``(bot_id, owner_id)``, not by the bare id.** ``bot_id``
+        is not unique across owners, so an id-only liveness check reports a
+        deleted bot as live whenever another owner still holds one of the same
+        id — advertising a grant whose bot is gone. The owner is on the record.
+
+        **And not by the delegator's own bots.** The obvious filter —
         ``list_live_bot_ids_by_owner(user_id)`` — is what this did while a grant
         could only name the delegator's own bot, and it became wrong the moment
         a collaborator could delegate: a granted bot the user does not own is
@@ -228,8 +239,14 @@ class BotAppGrantService:
         if not granted:
             # Skip the bot query entirely when there is nothing to filter.
             return []
-        live = self._bots.filter_live_bot_ids([r.bot_id for r in granted])
-        return [record for record in granted if record.bot_id in live]
+        live = self._bots.filter_live_bots(
+            [(record.bot_id, record.owner_id) for record in granted]
+        )
+        return [
+            record
+            for record in granted
+            if (record.bot_id, record.owner_id) in live
+        ]
 
 
 __all__ = ["BotAppGrantService"]

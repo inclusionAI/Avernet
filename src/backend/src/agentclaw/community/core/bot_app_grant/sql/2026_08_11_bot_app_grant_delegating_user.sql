@@ -7,15 +7,19 @@
 -- "app A may act as user U on bot B, which O owns" -- so it needs both people,
 -- and they are the same person only when the delegator owns the bot.
 --
--- APPLY BEFORE THE FIRST GRANT IS WRITTEN. Both tables are deployed and empty,
--- which is the only reason this is a pure schema change: user_id is NOT NULL
--- with no default and nothing to backfill. Once a row exists, this file is
--- wrong -- the ALTER would be rejected -- and the correct migration adds
+-- SAFE ON AN EMPTY OR A POPULATED TABLE. The tables were reported empty, but
+-- this does not rely on that: add nullable, backfill, then enforce NOT NULL.
 --
---     UPDATE ac_bot_app_grant SET user_id = owner_id WHERE user_id = '';
+-- Relying on it would have been a bad trade. Adding a NOT NULL column with no
+-- default to a table that turned out to have rows fails loudly only in strict
+-- mode; a permissive server fills the column with empty strings instead, and
+-- the rekey below then makes every pre-existing grant unfindable while its
+-- history loses the delegator -- silently, which is the outcome an assumption
+-- like that exists to avoid.
 --
--- which is right for every row the previous revision could produce, since only
--- owners could grant. Check before applying rather than assuming.
+-- The backfill is user_id = owner_id, which is right for every row the previous
+-- revision could produce: only a bot's owner could grant, so the delegating
+-- user and the owner were the same person by construction.
 --
 -- Fresh installs get this shape directly from 2026_08_10_bot_app_grant.sql;
 -- the two files must describe the same table column for column and index for
@@ -39,10 +43,17 @@
 -- below, leaving a table with no user_id under code that writes one -- or, on a
 -- lenient one, silently reassigns the TABLE's comment.
 ALTER TABLE ac_bot_app_grant
-  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL
+  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NULL
     COMMENT 'delegating user, resolved server-side' AFTER bot_id;
 
--- Rekey uniqueness onto the delegating user.
+UPDATE ac_bot_app_grant SET user_id = owner_id WHERE user_id IS NULL;
+
+ALTER TABLE ac_bot_app_grant
+  MODIFY COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL
+    COMMENT 'delegating user, resolved server-side';
+
+-- Rekey uniqueness onto the delegating user. Runs after the backfill above, so
+-- the new key is built over real values rather than over blanks.
 --
 -- user_id REPLACES owner_id in the key rather than joining it, for two
 -- independent reasons.
@@ -83,4 +94,9 @@ ALTER TABLE ac_bot_app_grant
 -- precisely when this table is read. No unique key here by design, so nothing
 -- is constrained by the addition.
 ALTER TABLE ac_bot_app_grant_log
-  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL AFTER bot_id;
+  ADD COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NULL AFTER bot_id;
+
+UPDATE ac_bot_app_grant_log SET user_id = owner_id WHERE user_id IS NULL;
+
+ALTER TABLE ac_bot_app_grant_log
+  MODIFY COLUMN user_id VARCHAR(256) COLLATE utf8mb4_bin NOT NULL;
