@@ -292,6 +292,17 @@ class DistributedLockService:
         委托仓储的 ``try_acquire_lock`` 在单一事务中完成原子加锁：
         SELECT → DELETE expired → INSERT，唯一索引冲突视为并发竞争。
 
+        通过 ``_renew_lock`` 串行化加锁路径与自动续期守护线程的
+        ``update_expire_time``：两者都在同一个仓储单例上调用
+        ``orm_session()``，共享连接下并发的提交/回滚会破坏 SQLAlchemy
+        会话的事务栈，间歇性抛出 “Transaction ... is not on the active
+        transaction list”。该约定由 #441 引入，#460 重写为本方法委托
+        ``try_acquire_lock`` 时被误删，此处恢复。
+
+        ``_renew_lock`` 是独立于 ``_local_lock`` 的专用锁：``_stop_renew_thread``
+        在持有 ``_local_lock`` 时 ``join`` 续期线程，续期线程只竞争
+        ``_renew_lock`` 而不持有 ``_local_lock``，故不会死锁。
+
         Args:
             lock_name: 锁名称
             lock_holder: 锁持有者
@@ -302,11 +313,12 @@ class DistributedLockService:
         """
         try:
             expire_time = datetime.now() + timedelta(seconds=expire_seconds)
-            return self._repository.try_acquire_lock(
-                lock_name=lock_name,
-                lock_holder=lock_holder,
-                expire_time=expire_time,
-            )
+            with self._renew_lock:
+                return self._repository.try_acquire_lock(
+                    lock_name=lock_name,
+                    lock_holder=lock_holder,
+                    expire_time=expire_time,
+                )
         except Exception as e:
             if _is_unique_constraint_violation(e):
                 logger.info(

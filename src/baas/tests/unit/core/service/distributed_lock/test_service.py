@@ -748,6 +748,89 @@ class TestGetLockInfo:
 # ── Helpers ──────────────────────────────────────────────────────
 
 
+# ── Renew/acquire serialization tests ───────────────────────────
+
+
+class TestAcquireRenewSerialization:
+    """Pin the `_renew_lock` contract between acquire and the renew thread.
+
+    #441 serialised the acquire path against the auto-renew daemon thread with
+    `_renew_lock` because both reach `orm_session()` on the same repository
+    singleton and, under a shared connection, concurrent commit/rollback
+    corrupts the SQLAlchemy session. #460 dropped the guard from the acquire
+    path while rewriting it to delegate to `repository.try_acquire_lock`;
+    these tests fail if that regression returns.
+    """
+
+    def test_acquire_lock_holds_renew_lock_during_repo_call(
+        self, lock_service, repository
+    ):
+        """The acquire DB call must run while `_renew_lock` is held."""
+        seen: dict = {}
+
+        def record(*, lock_name, lock_holder, expire_time):
+            seen["renew_lock_held"] = lock_service._renew_lock.locked()
+            return True
+
+        repository.try_acquire_lock.side_effect = record
+
+        ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
+
+        assert ctx.acquired is True
+        assert seen.get("renew_lock_held") is True, (
+            "acquire path ran without holding _renew_lock — the renew thread can "
+            "race it on the shared repository connection"
+        )
+
+    def test_acquire_blocks_while_renew_lock_is_held(self, lock_service, repository):
+        """Acquire must wait for the renew thread to release `_renew_lock`."""
+        repository.try_acquire_lock.return_value = True
+
+        held = threading.Event()
+        release = threading.Event()
+
+        def renew_in_flight() -> None:
+            with lock_service._renew_lock:
+                held.set()
+                release.wait(timeout=5.0)
+
+        renew_thread = threading.Thread(
+            target=renew_in_flight, daemon=True, name="renew-in-flight"
+        )
+        renew_thread.start()
+        assert held.wait(timeout=2.0), "renew thread did not acquire _renew_lock"
+        assert lock_service._renew_lock.locked() is True
+
+        done = threading.Event()
+
+        def acquire() -> None:
+            try:
+                ctx = lock_service.acquire_lock("mylock", lock_holder="h1")
+                _stop_thread(ctx)
+            finally:
+                done.set()
+
+        acquirer = threading.Thread(target=acquire, daemon=True, name="acquire-waiter")
+        acquirer.start()
+
+        # While the renew thread holds `_renew_lock`, acquire must not complete.
+        # `done` is set unconditionally in `finally`, so a DB-call exception or
+        # an early (unserialized) completion both surface here rather than hanging.
+        assert not done.wait(timeout=0.3), (
+            "acquire completed while renew held _renew_lock — serialization broken"
+        )
+
+        release.set()
+        assert done.wait(timeout=2.0), (
+            "acquire did not complete after renew released _renew_lock"
+        )
+        acquirer.join(timeout=2.0)
+        renew_thread.join(timeout=2.0)
+
+
+# ── Helpers ──────────────────────────────────────────────
+
+
 def _stop_thread(ctx: LockContext) -> None:
     """Stop a renew thread and wait for it to finish."""
     ctx.stop_renew.set()
