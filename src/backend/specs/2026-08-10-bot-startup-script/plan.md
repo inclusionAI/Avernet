@@ -94,7 +94,7 @@ class StartupScript(BaseModel):
     size_bytes: int
     updated_by: str
     updated_at: datetime
-    supported: bool        # provider capability, per this bot
+    supported: bool          # see _resolve_support below — NOT provider capability alone
     unsupported_reason: str  # "" when supported
 
 class StartupScriptRun(BaseModel):
@@ -168,12 +168,55 @@ Arca, K8s, Docker, Poolab return `True` and inherit the exec-based default.
 
 ```python
 # src/backend/.../api/bot_startup_script_service.py (new — Service API Protocol)
+# Impl: core/bot_startup_script/services/startup_script_service.py::BotStartupScriptService
 @runtime_checkable
 class BotStartupScriptServiceProtocol(Protocol):
     def get(self, bot_id: str, owner_id: str) -> StartupScriptRecord: ...
     def put(self, bot_id: str, owner_id: str, script: str, modifier: str) -> StartupScriptRecord: ...
     def delete(self, bot_id: str, owner_id: str) -> None: ...
     def list_runs(self, bot_id: str, owner_id: str, limit: int, offset: int) -> list[StartupScriptRun]: ...
+```
+
+The concrete service must **not** inherit the Protocol — that forces a
+`core → api` import the layering rule forbids (`api/README.md:21`). The repo's
+link between the two is a registry that imports both symbols in one file, which
+is also what makes the pair navigable; register there rather than inventing a
+new mechanism, and give the Protocol real signatures (the registry is explicitly
+for Protocols that have them — `*args/**kwargs` makes its signature check
+vacuous).
+
+```diff
+# src/backend/tests/community/architecture/test_service_api_conformance.py:76 — _PAIRS
+  _PAIRS = [
+      (EngineConfigServiceProtocol, EngineConfigService),
++     (BotStartupScriptServiceProtocol, BotStartupScriptService),
+  ]
+```
+
+```python
+# src/baas/tests/architecture/check_protocols/api/paas/check_paas_service.py (extend)
+# BaaS's equivalent: a mypy-checked binding, one file per Protocol.
+# Today it binds Arca only; the new capability methods must be exercised on every
+# implementation, so add a binding per provider rather than widening this one.
+_teclaw: PaasServiceProtocol = TeClawPaasService(...)   # declares False
+_k8s: PaasServiceProtocol = K8sPaasService(...)         # declares True
+```
+
+```python
+# src/backend/.../core/bot_startup_script/services/_support.py (new)
+def _resolve_support(bot: dict) -> tuple[bool, str]:
+    """Two independent reasons a bot cannot run a script — both must clear.
+
+    A personal bot is excluded by its START PIPELINE, not by its provider: its
+    container init runs only on create (BaasCreateInitTaskHandler) and never on
+    restart, so an Arca-backed personal bot would report a capable provider and
+    then never run the script — the exact silent no-op the spec forbids.
+    """
+    if bot["bot_type"] == PERSONAL:
+        return False, "personal bots do not yet re-run provisioning on restart"
+    if not provider_supports_startup_script(bot):     # BaaS capability, cached
+        return False, f"provider {bot['provider_type']} cannot execute scripts"
+    return True, ""
 ```
 
 ```diff
@@ -248,6 +291,11 @@ already in use.
   **Mitigation:** backend pushes the script on create *and* restart; a run row
   records `script_sha256`, so the API can show an instance running a stale script
   rather than hiding it.
+- **Risk:** a personal bot on a capable provider reads as supported and silently
+  never runs, because its exclusion is a pipeline property while the capability is
+  a provider property.
+  **Mitigation:** `_resolve_support` above ANDs both, with bot type checked first;
+  a test asserts an Arca-backed personal bot reads unsupported.
 - **Risk:** secrets leaking into run output.
   **Mitigation:** secrets arrive as env vars resolved at dispatch, never in the
   body; stored stdout/stderr are masked against the resolved values before persist.

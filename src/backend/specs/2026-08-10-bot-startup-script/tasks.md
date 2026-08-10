@@ -14,7 +14,11 @@
   - [ ] `put` stores body, `script_sha256`, `size_bytes`, and the modifier.
   - [ ] A body over the size limit raises a typed error naming the limit.
   - [ ] `delete` is idempotent — deleting an absent script succeeds.
-  - [ ] Service conforms to the Protocol (`test_service_api_conformance`).
+  - [ ] Protocol declares real signatures (not `*args/**kwargs`), and the concrete
+        service does **not** inherit it (`core → api` import is forbidden).
+  - [ ] The `(Protocol, ConcreteService)` pair is registered in `_PAIRS`
+        (`test_service_api_conformance.py:76`) — the repo's link between the two,
+        and what makes them navigable from one file.
 - **Depends on:** —
 
 ## Task 2: Public API — read, replace, clear
@@ -43,6 +47,9 @@
   - [ ] Arca, K8s, Docker/standalone, Poolab declare `True`; TeClaw and Local declare `False`.
   - [ ] `DeployConfig` carries `startup_script`, `startup_script_sha256`,
         `startup_script_timeout_seconds`, `startup_script_secret_envs`.
+  - [ ] `check_protocols/api/paas/check_paas_service.py` gains a mypy-checked binding
+        **per provider** — today it binds Arca only, so the new methods would go
+        unchecked on the other five implementations.
   - [ ] A conformance test fails if any `PaasService` implementation omits the declaration.
 - **Depends on:** —
 
@@ -115,8 +122,12 @@
   - [ ] `GET /openapi/v1/bots/{bot_id}/startup-script/runs` returns one entry per instance.
   - [ ] Each entry carries status, exit code, output, truncation, and timestamps.
   - [ ] A scaled bot whose instances disagree reports both outcomes, not a summary.
-  - [ ] `GET .../startup-script` reports `supported` / `unsupported_reason` from the
-        bot's provider; a TeClaw-backed or personal bot reads as unsupported.
+  - [ ] `GET .../startup-script` reports `supported` / `unsupported_reason` as the
+        AND of provider capability **and** start-pipeline support for the bot type.
+  - [ ] An Arca-backed **personal** bot reads as unsupported — its provider is
+        capable, but its container init only runs on create, so provider capability
+        alone would promise a run that never happens.
+  - [ ] A TeClaw-backed bot reads as unsupported, with the provider named as the reason.
   - [ ] A run whose recorded hash differs from the stored script is still returned
         (stale-instance visibility).
 - **Depends on:** Tasks 2, 4, 7
