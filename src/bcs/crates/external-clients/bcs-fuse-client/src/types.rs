@@ -104,7 +104,8 @@ pub struct FuseResponse {
     pub recommendation: Option<FuseRecommendation>,
     #[serde(default)]
     pub conflicts: Vec<FuseConflict>,
-    #[serde(default)]
+    /// BCSFuse returns this field as `alignments`.
+    #[serde(default, alias = "alignments")]
     pub alignment_points: Vec<serde_json::Value>,
     #[serde(default)]
     pub key_insights: Vec<String>,
@@ -135,6 +136,8 @@ pub struct FusePerspective {
     #[serde(default)]
     pub name: Option<String>,
     pub emoji: Option<String>,
+    /// BCSFuse returns this field as `perspective`.
+    #[serde(alias = "perspective")]
     pub summary: String,
     pub key_points: Option<Vec<String>>,
     pub concerns: Option<Vec<String>>,
