@@ -18,4 +18,6 @@ user_config:
       poolab: stub
     database:
       plugin_database: "SQLITE_ORM"
+      create_schema: true
+      seed_data: true
       database_url: "sqlite:////tmp/secbaas_e2e.db"

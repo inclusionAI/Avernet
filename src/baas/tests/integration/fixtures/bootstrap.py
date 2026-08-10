@@ -25,7 +25,10 @@ TEST_ENV = get_current_env()
 @pytest.fixture(scope="session")
 def bootstrap_init() -> ApplicationContainer:
     old_overlay = os.environ.pop("SOFAPY_CONFIG_OVERLAY", None)
-    os.environ["SOFAPY_CONFIG_OVERLAY"] = "it-sqlite"
+    # Allow running the acceptance/E2E suite against a different backend
+    # (e.g. `TEST_OVERLAY=mariadb` for the MariaDB storage backend). Defaults
+    # to the in-memory SQLite overlay so unit/contract tests stay hermetic.
+    os.environ["SOFAPY_CONFIG_OVERLAY"] = os.environ.get("TEST_OVERLAY", "it-sqlite")
 
     try:
         user_config = load_container_config()

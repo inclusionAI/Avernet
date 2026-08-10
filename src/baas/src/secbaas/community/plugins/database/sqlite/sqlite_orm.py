@@ -161,12 +161,13 @@ class SqliteOrmPlugin(DataSourcePlugin):
     def seed(self, session: Session) -> None:
         """Insert seed data required for the application to function.
 
-        Delegates to :func:`._seed.seed_sqlite` which inserts the default tenant
-        and ARCA device template that E2E tests expect.
+        Delegates to :func:`secbaas.community.plugins.database.seed.seed_database`
+        which inserts the default tenant and ARCA device template that E2E tests
+        expect.  Shared with the MySQL backend so both start with identical data.
         """
-        from ._seed import seed_sqlite
+        from secbaas.community.plugins.database.seed import seed_database
 
-        seed_sqlite(session)
+        seed_database(session)
 
     def init_database(self, config: DatabasePluginConfig) -> None:
         """Configure schema, seed data, and register with the db_manager.
@@ -182,9 +183,18 @@ class SqliteOrmPlugin(DataSourcePlugin):
         )
         logger.info("init_database: database_url=%s", resolved_url)
 
-        self.create_all()
-        with self.orm_session() as session:
-            self.seed(session)
+        if getattr(config, "create_schema", True):
+            self.create_all()
+        else:
+            logger.info(
+                "SqliteOrmPlugin: schema creation disabled (create_schema=false)"
+            )
+
+        if getattr(config, "seed_data", True):
+            with self.orm_session() as session:
+                self.seed(session)
+        else:
+            logger.info("SqliteOrmPlugin: seed disabled (seed_data=false)")
 
         from secbaas.community.core.database import db_manager
 

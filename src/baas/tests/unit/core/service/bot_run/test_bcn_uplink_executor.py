@@ -20,7 +20,7 @@ from secbaas.community.core.repository.bot_run_queue import (
     OrmBotRunQueueRepository,
 )
 from secbaas.community.core.service.bcn.uplink import BcnUplinkCallback
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 
 
 @pytest.fixture(autouse=True)
