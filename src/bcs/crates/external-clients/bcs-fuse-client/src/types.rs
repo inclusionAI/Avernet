@@ -265,6 +265,70 @@ pub struct BatchWorkersResponse {
     pub not_found_ids: Vec<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_alignment_and_perspective_aliases() {
+        let json = r#"
+        {
+            "group_id": "g1",
+            "fusion_mode": "agent",
+            "perspectives": [
+                {
+                    "participant_id": "bot1:default",
+                    "perspective": "This is a perspective summary"
+                }
+            ],
+            "alignments": [
+                {"topic": "security", "stance": "agree"}
+            ]
+        }
+        "#;
+        let resp: FuseResponse = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize failed: {e}"),
+        };
+        assert_eq!(resp.group_id, "g1");
+        assert_eq!(resp.alignment_points.len(), 1);
+        assert_eq!(
+            resp.perspectives[0].summary,
+            "This is a perspective summary"
+        );
+    }
+
+    #[test]
+    fn deserialize_recommendation_object() {
+        let json = r#"
+        {
+            "group_id": "g1",
+            "fusion_mode": "agent",
+            "recommendation": {
+                "summary": "go",
+                "decision": "yes",
+                "next_actions": ["step 1"]
+            }
+        }
+        "#;
+        let resp: FuseResponse = match serde_json::from_str(json) {
+            Ok(v) => v,
+            Err(e) => panic!("deserialize failed: {e}"),
+        };
+        let rec = match resp.recommendation {
+            Some(r) => r,
+            None => panic!("recommendation missing"),
+        };
+        assert_eq!(rec.summary, "go");
+        assert_eq!(rec.decision.as_deref(), Some("yes"));
+        let actions = match rec.next_actions {
+            Some(a) => a,
+            None => panic!("next_actions missing"),
+        };
+        assert_eq!(actions, vec!["step 1"]);
+    }
+}
+
 /// Individual worker info in batch response.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BatchWorkerInfo {

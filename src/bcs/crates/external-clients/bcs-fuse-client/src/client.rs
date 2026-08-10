@@ -205,3 +205,91 @@ impl FuseClient {
         Ok(response)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spawn a one-shot HTTP/1.1 server that accepts one request and returns
+    /// the given body with HTTP 200. Returns the base URL of the mock server.
+    async fn mock_server_once(response_body: String) -> Result<String, Box<dyn std::error::Error>> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+
+        tokio::spawn(async move {
+            let (mut socket, _) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    eprintln!("mock server accept failed: {e}");
+                    return;
+                }
+            };
+            let mut buf = [0u8; 2048];
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Err(e) = socket.read(&mut buf).await {
+                eprintln!("mock server read failed: {e}");
+                return;
+            }
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            if let Err(e) = socket.write_all(response.as_bytes()).await {
+                eprintln!("mock server write failed: {e}");
+            }
+            let _ = socket.shutdown().await;
+        });
+
+        Ok(format!("http://127.0.0.1:{}", port))
+    }
+
+    #[tokio::test]
+    async fn fuse_deserializes_valid_response() -> Result<(), Box<dyn std::error::Error>> {
+        let body = r#"{"group_id":"g1","fusion_mode":"agent","perspectives":[],"alignment_points":[],"conflicts":[],"key_insights":[],"critical_issues":[],"recommendations":[],"go_live_conditions":[]}"#;
+        let url = mock_server_once(body.to_string()).await?;
+        let client = FuseClient::for_test_with_url(url)?;
+
+        let resp = client
+            .fuse(
+                "g1",
+                FuseRequest {
+                    question: "q".to_string(),
+                    participants: vec![],
+                    driver_bot_id: None,
+                    fusion_mode: None,
+                },
+            )
+            .await?;
+
+        assert_eq!(resp.group_id, "g1");
+        assert_eq!(resp.fusion_mode, "agent");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn fuse_reports_deserialization_error_with_body() -> Result<(), Box<dyn std::error::Error>> {
+        let url = mock_server_once("not-json".to_string()).await?;
+        let client = FuseClient::for_test_with_url(url)?;
+
+        let err = match client
+            .fuse(
+                "g1",
+                FuseRequest {
+                    question: "q".to_string(),
+                    participants: vec![],
+                    driver_bot_id: None,
+                    fusion_mode: None,
+                },
+            )
+            .await
+        {
+            Ok(_) => panic!("fuse should have failed"),
+            Err(e) => e,
+        };
+
+        let msg = format!("{err}");
+        assert!(msg.contains("not-json"), "error message should include raw body: {msg}");
+        Ok(())
+    }
+}
