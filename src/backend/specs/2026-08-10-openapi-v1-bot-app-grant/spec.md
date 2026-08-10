@@ -161,18 +161,27 @@ on the call*.
 - The separate BaaS chat surface's own allowed-bots list, which stays as it is
   and governs only that surface.
 
-## Open Questions
+## Resolved Questions
 
-- **How recognizable is a listed authorization?** The user story asks that an
-  authorization the owner no longer recognizes be *visible* to them, but the
-  authorization identifies the application by its identifier, and the
-  application's human-facing name lives in a registry this surface does not
-  read. Options: list identifiers only (smallest change, weakest
-  recognizability); or snapshot the application's name onto the record when it
-  is written, which costs one field and no extra lookup because the name is
-  already on the credential presented at grant time. Non-blocking — the field is
-  additive, so the plan proceeds with identifiers and this can be folded in
-  either now or later.
-- **Should re-granting an existing authorization refresh its creation time, or
-  leave the original?** Affects only what an audit reads back. Non-blocking; the
-  plan will pick the one that keeps "could reach it from T1" honest.
+Both questions this spec opened are now settled. Kept rather than deleted, so a
+later reader sees what was weighed.
+
+- **How recognizable is a listed authorization?** — *Snapshot the name.* An
+  authorization records the application's human-facing name as it stood when the
+  owner consented, alongside its identifier. A bare identifier does not serve the
+  "an authorization I no longer recognize is visible to me" story, and the name
+  is already on the credential presented at grant time, so recording it costs
+  nothing extra to obtain.
+
+  It is a snapshot, not a live lookup, and that is the point: it records what the
+  owner actually consented to. If the application is later renamed, the
+  authorization still reads as what was agreed.
+
+- **Should re-granting refresh the creation time?** — *No.* Re-granting a live
+  authorization is idempotent and leaves the original time intact; the record
+  must keep answering "could reach this bot from T1" honestly, and refreshing T1
+  on a duplicate call would make it lie.
+
+  Re-granting after a withdrawal is a *new* authorization period rather than a
+  revival of the old one, so the withdrawn record keeps its closed interval and
+  the two periods stay distinguishable.

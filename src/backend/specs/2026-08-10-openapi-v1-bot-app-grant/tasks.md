@@ -13,22 +13,22 @@
 > come out of this feature **unchanged**; a diff touching either is a scope
 > escape, not a fix.
 
-## Task 1: Settle the `app_name` deviation  `[ ]`
+## Task 1: Settle the `app_name` deviation  `[x]`
 
 - **Goal:** Decide, before any schema lands, whether the grant row snapshots the
   application's display name.
 - **Files:** `specs/2026-08-10-openapi-v1-bot-app-grant/plan.md` (the
   "Deviation to accept or strike" section)
 - **Done when:**
-  - [ ] The user has said keep or strike. This is the one item in the plan that
-        departs from the column list they settled, and it is cheapest to strike
-        now — after Task 2 it costs a schema change and a response-shape change.
-  - [ ] If struck: `app_name` is removed from the ORM model, the record, the
-        service signature and the list response in Tasks 2, 4 and 6, and
-        `spec.md` Open Question 1 is closed with "identifiers only".
-  - [ ] If kept: `spec.md` Open Question 1 is closed with the snapshot decision
-        and its reasoning.
-- **Depends on:** — (resolve at the review gate, not during implementation)
+  - [x] The user has said keep or strike. **KEPT** — approved at the review gate.
+  - [x] `app_name` stays in the ORM model, the record, the service signature and
+        the list response.
+  - [x] `spec.md` Open Question 1 closed with the snapshot decision and its
+        reasoning; Open Question 2 closed too (idempotent re-grant does not move
+        `gmt_create`; re-grant after withdraw is a new period). The section is
+        now `Resolved Questions`, kept rather than deleted so a later reader
+        sees what was weighed.
+- **Depends on:** — (resolved at the review gate, not during implementation)
 
 ## Task 2: The grant record  `[ ]`
 
