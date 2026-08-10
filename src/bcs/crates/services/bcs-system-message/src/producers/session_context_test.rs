@@ -57,11 +57,6 @@ impl NamedRegistry {
         self.surfaces.insert(bot_id.to_string(), surface);
         self
     }
-
-    fn with_http_provider(mut self, bot_id: &str) -> Self {
-        self.http_providers.insert(bot_id.to_string());
-        self
-    }
 }
 
 #[async_trait]

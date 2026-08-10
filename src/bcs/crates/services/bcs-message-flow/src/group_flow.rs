@@ -2525,7 +2525,7 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
         _ => "assistant",
     };
     let from_name = preferred_sender_display_name(flow, cmd).await;
-    let event = serde_json::json!({
+    let mut event = serde_json::json!({
         "run_id": run_id,
         "session_key": session_key,
         "bcs_session_id": cmd.session_id.as_deref(),
@@ -2539,6 +2539,9 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
             "mentions": cmd.mentions,
         },
     });
+    if let Some(attachments) = echo_event_attachments(cmd.attachments.as_deref()) {
+        event["message"]["attachments"] = attachments;
+    }
     let frame = serde_json::json!({
         "type": "event",
         "event": "chat",
@@ -2548,6 +2551,16 @@ async fn build_workbench_user_event(flow: &BcsMessageFlow, cmd: &WebSendCommand)
         "bot_name": from_name,
     });
     serde_json::to_string(&frame).unwrap_or_default()
+}
+
+/// Echo the inbound attachments verbatim (including the client-provided
+/// `url`/`expires_at`, which stays in **milliseconds**) so other frontends can
+/// render images without waiting for a history refresh. Returns `None` when
+/// there are no attachments, so the event omits the `attachments` key entirely
+/// (older frontends unaffected).
+fn echo_event_attachments(attachments: Option<&[Attachment]>) -> Option<Value> {
+    let attachments = attachments.filter(|items| !items.is_empty())?;
+    serde_json::to_value(attachments).ok()
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
