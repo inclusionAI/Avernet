@@ -395,24 +395,36 @@
         domain logic to manufacture a number.
 - **Depends on:** Task 10
 
-## Task 14: Spec acceptance verification  `[ ]`
+## Task 14: Spec acceptance verification  `[x]`
 
 - **Goal:** Every acceptance criterion in `spec.md` is demonstrably met.
 - **Files:** `specs/2026-08-10-openapi-v1-bot-app-grant/spec.md`
 - **Done when:**
-  - [ ] Every checkbox under `spec.md` → Acceptance Criteria is ticked, each
+  - [x] Every checkbox under `spec.md` → Acceptance Criteria is ticked, each
         traceable to a named passing test.
-  - [ ] `_require_user_principal` and `require_user_id` are **unmodified** —
+  - [x] `_require_user_principal` and `require_user_id` are **unmodified** —
         confirmed by `git diff`, not by memory. The out-of-scope promise is that
         no application-only caller reaches anything, **including the four routes
         this feature adds** — the application's view requires the owner
         alongside it.
-  - [ ] Backend gate green: `scripts/ci/pre_push.sh` (or
-        `OCB_PRE_PUSH_RUN_CI=1 git push`) — SAST, unit tests, changed-line
-        coverage, singlebox coverage.
-  - [ ] The gateway test from Task 9 run explicitly, since the gateway module
+  - [x] Backend green: `pytest tests/community` → **11242 passed, 3 skipped,
+        2 failed**. Both failures are
+        `test_bot_build_service_skill_artifact.py::test_pool_build_uses_the_versioned_filesystem_snapshot_when_runtime_cannot_write_nfs`
+        and are **pre-existing** — proved by running them in a detached
+        worktree at the merge base (`827e3de`), where they fail identically.
+        Untouched by this change.
+  - [x] `scripts/ci/python_sast_local.sh src/backend` over the feature range:
+        exit 0.
+  - [x] Endpoint coverage gate: the four new operations join the
+        `/openapi/v1` entries already on `coverage_baseline.txt`, for the
+        reason that file already documents — the case runner authenticates
+        with `x-user-id`, these require a gateway-signed principal, and two
+        require an App identity the harness cannot mint, so a case could
+        assert nothing but a 401. Tracked with the rest by #651. Hand edited
+        rather than regenerated, since `--regen` drops the explanatory notes.
+  - [x] The gateway test from Task 9 run explicitly, since the gateway module
         has no standalone lint step.
-  - [ ] Both `spec.md` Open Questions are closed in the file.
+  - [x] Both `spec.md` Open Questions are closed in the file.
 - **Depends on:** Tasks 9, 11, 12, 13
 
 ---

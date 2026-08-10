@@ -64,23 +64,23 @@ populated, reviewed permission model rather than inventing one under pressure.
 
 ### Granting
 
-- [ ] Granting requires **both** the bot owner's identity and the application's
+- [x] Granting requires **both** the bot owner's identity and the application's
       own credential on the same request. A request carrying only one of them is
       refused before it reaches the operation.
-- [ ] The request names **only the bot**. The application is read from the
+- [x] The request names **only the bot**. The application is read from the
       credential presented, never from a parameter — so a request cannot point a
       grant at any application other than the one making the call.
-- [ ] Granting a bot that is already granted to that same application succeeds
+- [x] Granting a bot that is already granted to that same application succeeds
       and leaves one authorization, not two.
-- [ ] A grant that would cross a tenant boundary — the application and the bot
+- [x] A grant that would cross a tenant boundary — the application and the bot
       belong to different tenants — is refused.
 
 ### Withdrawing
 
-- [ ] Withdrawing requires only the bot owner. It does not require the
+- [x] Withdrawing requires only the bot owner. It does not require the
       application's credential, so an owner can withdraw after that credential
       is lost, rotated, or the relationship ends.
-- [ ] Withdrawing an authorization that does not exist is distinguishable from
+- [x] Withdrawing an authorization that does not exist is distinguishable from
       withdrawing one that does.
 
 ### The two views
@@ -88,17 +88,17 @@ populated, reviewed permission model rather than inventing one under pressure.
 The record is read from both ends, and the two reads answer different questions
 for different readers.
 
-- [ ] **The owner's view — "which applications can reach my bot?"** — requires
+- [x] **The owner's view — "which applications can reach my bot?"** — requires
       only the bot owner, so it never depends on holding any one application's
       credential. It is scoped to one named bot.
-- [ ] **The application's view — "which of this owner's bots may I reach?"** —
+- [x] **The application's view — "which of this owner's bots may I reach?"** —
       requires **both** the owner's identity and the application's own
       credential, the same both-parties posture as granting. It spans the
       owner's bots rather than naming one.
-- [ ] The application's view is scoped to the **calling** application, read from
+- [x] The application's view is scoped to the **calling** application, read from
       its credential. There is no parameter naming an application, so it cannot
       be used to ask what some *other* application may reach.
-- [ ] Both views return only live authorizations; withdrawn ones do not appear.
+- [x] Both views return only live authorizations; withdrawn ones do not appear.
 
 ### Authority
 
@@ -106,34 +106,34 @@ Two separate questions, and conflating them is what this section exists to
 prevent: *whose data is in scope* is not the same as *which identities must be
 on the call*.
 
-- [ ] **Whose data:** every operation is scoped to the bot **owner**, who must
+- [x] **Whose data:** every operation is scoped to the bot **owner**, who must
       be the verified caller. A collaborator who may operate the bot may not
       manage its authorizations, and no operation here ever reaches another
       person's bots.
-- [ ] **Which identities:** granting and the application's view need both
+- [x] **Which identities:** granting and the application's view need both
       parties present; the owner's view and withdrawing need only the owner.
       Requiring the application on a call is never what authorizes it — the
       owner's identity is.
-- [ ] A caller who is not the owner receives the same answer as a caller naming
+- [x] A caller who is not the owner receives the same answer as a caller naming
       a bot that does not exist — the surface must not confirm a bot exists to
       someone who may not manage it.
 
 ### The record
 
-- [ ] An authorization covers exactly one bot. Authorizing one bot conveys
+- [x] An authorization covers exactly one bot. Authorizing one bot conveys
       nothing about any other bot the owner holds.
-- [ ] An authorization survives the application rotating its credential.
-- [ ] A withdrawn authorization leaves a trace, so "this application could reach
+- [x] An authorization survives the application rotating its credential.
+- [x] A withdrawn authorization leaves a trace, so "this application could reach
       this bot between T1 and T2" remains answerable rather than vanishing.
-- [ ] The record states whose bot it is and which tenant it belongs to, resolved
+- [x] The record states whose bot it is and which tenant it belongs to, resolved
       when it is written rather than read from a later request.
 
 ### Everything else unchanged
 
-- [ ] No existing operation changes who may call it. A caller presenting only an
+- [x] No existing operation changes who may call it. A caller presenting only an
       application credential still reaches nothing — including the application's
       own view, which requires the owner alongside it.
-- [ ] The published API description documents the four new operations and
+- [x] The published API description documents the four new operations and
       nothing else moves in it.
 
 ## In Scope
