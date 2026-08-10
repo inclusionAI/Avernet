@@ -35,5 +35,17 @@ created: 2026-08-08T18:30:00+08:00
   与 ManagerWorker 的 Manager `chat.send` 语义保持不变。
 - 前端：本地页面的 Bot tab 与新群候选列表只隐藏精确匹配的旧 Claude 三角色名，
   保留带 `（当前）` 的受管卡片；既有群成员不被自动改写。
-- 验收：新建双 Claude 群后，初始化阶段仅有 inject；Planner 与 Developer 都在
-  同一 BCS 会话完成无副作用 final，页面没有并发超时或 JavaScript error。
+- 验收：当前基线已恢复普通 Chat 群的默认语义：Driver 收到 `chat.send`，其余
+  成员收到 `chat.inject`；不再保留 Provider-downlink 专用的初始化改写。
+
+## 迭代 4：五个 OpenClaw Bot 启动阻塞
+
+- 根因：`start_bcs_bots.sh` 将“TypeScript 源文件比 `dist` 新”误判为运行时
+  必须重建，并在启动路径同步执行 `npm install && npm run build`。依赖解析没有
+  超时，五个 gateway 尚未启动时，顶层界面只会停在 `Starting 5 local OpenClaw bots`。
+- 修复：运行时只验证 `dist/esm/index.js` 是否存在；存在即复用，并在源码较新时
+  给出不含依赖 URL、凭据或消息正文的重建提示。缺少产物则快速失败，要求显式
+  执行 `singlebox setup bcs` 进行安装和重建。
+- 回归：新增 shell 场景以会失败的假 `npm` 验证运行时绝不调用 npm，且仍完成
+  plugin link。同步移除已撤回 BCS 行为与 BCS 日志改造的静态 guard，保持 BCS 源码和诊断
+  与用户指定的基线一致。

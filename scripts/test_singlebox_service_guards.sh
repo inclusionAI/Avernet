@@ -657,54 +657,12 @@ test_bcs_baas_provider_uses_h2c_and_owned_lifecycle() {
   fi
 }
 
-test_bcs_sse_diagnostics_do_not_log_raw_chat_payloads() {
-  local source
-  source="${ROOT}/src/bcs/crates/adapters/http/bcs-provider-http/src/lib.rs"
-  if grep -F 'sse_data =' "$source" >/dev/null; then
-    fail "BCS SSE diagnostics must not log raw SSE data"
-  fi
-  if grep -F '?other, "unexpected agent data' "$source" >/dev/null; then
-    fail "BCS SSE diagnostics must not debug-log opaque agent data"
-  fi
-  if grep -F 'webhook_url = %webhook_url,' "$source" >/dev/null; then
-    fail "BCS Provider diagnostics must redact webhook URL credentials and query values"
-  fi
-}
-
-test_bcs_bot_diagnostics_do_not_log_raw_frames_or_tokens() {
-  local ws_handler bot_core bot_store memory_store
-  ws_handler="${ROOT}/src/bcs/crates/adapters/ws/bcs-ws/src/bot/handler.rs"
-  bot_core="${ROOT}/src/bcs/crates/services/bcs-bot/src/core/bot_core.rs"
-  bot_store="${ROOT}/src/bcs/crates/services/bcs-bot-store/src/lib.rs"
-  memory_store="${ROOT}/src/bcs/crates/services/bcs-bot-store/src/memory.rs"
-
-  if grep -F 'text = %text' "$ws_handler" >/dev/null; then
-    fail "BCS bot WebSocket diagnostics must not log raw client frames"
-  fi
-  if grep -E 'token(_preview)? = %' "$bot_core" "$bot_store" "$memory_store" >/dev/null; then
-    fail "BCS bot diagnostics must not log token values or previews"
-  fi
-}
-
 test_claude_relay_diagnostics_do_not_log_token_previews() {
   local router
   router="${ROOT}/src/engine/src/engine/community/claude_code_gateway/src/claude-code-router.ts"
   if grep -E 'ANTHROPIC_AUTH_TOKEN.*substring|token.*substring' "$router" >/dev/null; then
     fail "Claude relay diagnostics must not log token previews"
   fi
-}
-
-test_provider_session_context_is_silent_by_default() {
-  local source test_source
-  source="${ROOT}/src/bcs/crates/services/bcs-system-message/src/producers/session_context.rs"
-  test_source="${ROOT}/src/bcs/crates/services/bcs-system-message/src/producers/session_context_test.rs"
-
-  grep -F 'else if has_provider_downlink_bot' "$source" >/dev/null || \
-    fail "Provider groups must detect downlink participants during SessionContext delivery"
-  grep -F 'DeliveryType::Inject' "$source" >/dev/null || \
-    fail "Provider groups must inject SessionContext instead of starting a hidden driver turn"
-  grep -F 'provider_downlink_group_initializes_driver_with_inject' "$test_source" >/dev/null || \
-    fail "Provider SessionContext delivery must retain its Rust regression test"
 }
 
 test_local_frontend_hides_stale_claude_roles() {
@@ -750,10 +708,7 @@ test_frontend_only_banner_does_not_claim_full_stack_ready
 test_backend_separates_profile_env_and_workspace_folder
 test_restart_all_preflights_before_stopping
 test_bcs_baas_provider_uses_h2c_and_owned_lifecycle
-test_bcs_sse_diagnostics_do_not_log_raw_chat_payloads
-test_bcs_bot_diagnostics_do_not_log_raw_frames_or_tokens
 test_claude_relay_diagnostics_do_not_log_token_previews
-test_provider_session_context_is_silent_by_default
 test_local_frontend_hides_stale_claude_roles
 
 printf 'PASS: singlebox service guard tests\n'

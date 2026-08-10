@@ -78,6 +78,11 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
     from tabs and the collaboration picker whenever their `（当前）` counterparts
     are present. Existing groups are not mutated; users create a fresh group
     to replace members that belong to retired Provider registrations.
+13. `restart all` must not perform an unbounded BCN plugin dependency install
+    while starting the five OpenClaw bots. When the source plugin has a usable
+    `dist/esm/index.js`, runtime startup uses that artifact even if source files
+    are newer. It records a metadata-only rebuild hint; an absent artifact fails
+    fast and directs the operator to the explicit BCS setup step.
 
 ## Implemented safety and protocol decisions
 
@@ -104,6 +109,10 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
   from the base implementation. The new loopback bridge's own diagnostics do
   not emit request bodies, bridge credentials, sensitive webhook URL
   components, or chat text.
+- The singlebox guard suite must not assert a BCS logging change or the
+  reverted Provider-downlink SessionContext override. Those are outside the
+  two retained BCS business changes, so the guard checks lifecycle behavior
+  without creating a failing requirement against the unchanged base code.
 - BaaS's local SQLite bootstrap supplies the configured internal BCN API-key
   identity.  The downlink service uses that record solely to construct an
   internal Bot chat context after the bridge has authenticated the request;
@@ -154,6 +163,9 @@ starts exactly five existing OpenClaw profiles and three BaaS-managed Claude Cod
 - `scripts/test_singlebox_service_guards.sh`: verifies a mixed stack rejects an
   external listener during preflight, before its restart path can stop a
   service, and checks BaaS readiness against its loopback health endpoint.
+- `scripts/test_bcn_plugin_source.sh`: verifies the five-bot runtime start
+  reuses a present BCN `dist` artifact without invoking npm, including when a
+  source TypeScript file is newer than that artifact.
 - `scripts/test_claude_relays.sh`: all three isolated gateway processes reach
   health and do not create a workspace `CLAUDE.md`.
 - `scripts/test_bcs_baas_provider_bridge.mjs`: real h2c streaming and HTTP/1

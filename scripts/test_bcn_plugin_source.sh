@@ -226,6 +226,52 @@ test_stack_script_has_npm_branch() {
   assert_contains "$src" '[ "$BCN_PLUGIN_SOURCE" != "npm" ]'
 }
 
+test_stack_start_reuses_dist_without_npm_install() {
+  local tmp; tmp="$(mktemp -d)"
+  local plugin="${tmp}/plugin"
+  local ext="${tmp}/extensions"
+  local bindir="${tmp}/bin"
+  local funcs="${tmp}/plugin-runtime-functions.sh"
+  local npm_marker="${tmp}/npm-invoked"
+  mkdir -p "${plugin}/dist/esm" "${plugin}/src" "$ext" "$bindir"
+  : > "${plugin}/dist/esm/index.js"
+  sleep 1
+  : > "${plugin}/src/channel.ts"
+  printf '%s\n' '{}' > "${plugin}/openclaw.plugin.json"
+  printf '%s\n' '{"name":"test-bcn-plugin","private":true}' > "${plugin}/package.json"
+  cat > "${bindir}/npm" <<STUB
+#!/usr/bin/env bash
+touch "${npm_marker}"
+exit 99
+STUB
+  chmod +x "${bindir}/npm"
+
+  awk '
+    /^bcn_plugin_needs_build\(\)/ { emit=1 }
+    /^check_prerequisites\(\)/ { emit=0 }
+    emit { print }
+  ' "${PROJECT_ROOT}/src/bcs/scripts/start_bcs_bots.sh" > "$funcs"
+
+  (
+    BCN_PLUGIN_SOURCE=source
+    BCN_PLUGIN_SRC_DIR="$plugin"
+    BCN_PLUGIN_LOAD_DIR="$plugin"
+    OPENCLAW_EXTENSIONS_ROOT="$ext"
+    OPENCLAW_EXTENSIONS_REPLACE_LINKS=0
+    PATH="${bindir}:$PATH"
+    info() { :; }
+    pass() { :; }
+    warn() { :; }
+    fail() { :; }
+    . "$funcs"
+    link_bcn_plugin
+  ) || fail "runtime start should reuse an existing BCN dist artifact"
+
+  [ ! -e "$npm_marker" ] || fail "runtime start must not invoke npm install for a present dist artifact"
+  [ -L "${ext}/openclaw-channel-bcn" ] || fail "runtime start should still link the BCN plugin"
+  rm -rf "$tmp"
+}
+
 test_session_bot_uuid_requires_usable_session() {
   local tmp; tmp="$(mktemp -d)"
   local funcs="${tmp}/stack-session-functions.sh"
@@ -426,6 +472,7 @@ test_load_dir_source_mode
 test_load_dir_npm_mode
 test_stack_script_forwards_mode
 test_stack_script_has_npm_branch
+test_stack_start_reuses_dist_without_npm_install
 test_session_bot_uuid_requires_usable_session
 test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path

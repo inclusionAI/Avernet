@@ -1442,20 +1442,17 @@ bcn_plugin_needs_build() {
     local plugin_load_dir="$1"
     local dist_file="$plugin_load_dir/dist/esm/index.js"
 
-    if [ ! -f "$dist_file" ]; then
-        return 0
-    fi
-    if [ ! -d "$plugin_load_dir/node_modules" ] && [ ! -d "$BCN_PLUGIN_SRC_DIR/node_modules" ]; then
-        return 0
-    fi
-    if [ -d "$BCN_PLUGIN_SRC_DIR/src" ]; then
-        local newer_source
-        newer_source=$(find "$BCN_PLUGIN_SRC_DIR/src" -type f -name '*.ts' -newer "$dist_file" -print -quit)
-        if [ -n "$newer_source" ]; then
-            return 0
-        fi
-    fi
-    return 1
+    [ ! -f "$dist_file" ]
+}
+
+bcn_plugin_source_is_newer_than_dist() {
+    local plugin_load_dir="$1"
+    local dist_file="$plugin_load_dir/dist/esm/index.js"
+    local newer_source=""
+
+    [ -d "$BCN_PLUGIN_SRC_DIR/src" ] || return 1
+    newer_source=$(find "$BCN_PLUGIN_SRC_DIR/src" -type f -name '*.ts' -newer "$dist_file" -print -quit)
+    [ -n "$newer_source" ]
 }
 
 link_bcn_plugin() {
@@ -1482,20 +1479,17 @@ PKGJSON
         pass "Created package.json at plugin root"
     fi
 
-    # Build BCN plugin when outputs are missing or TypeScript sources are newer.
+    # Runtime start must use the already-built artifact. Installing the full
+    # TypeScript toolchain here makes `restart all` network-bound and can block
+    # all five bot gateways indefinitely. Rebuild through the explicit BCS
+    # setup path instead.
     if [ "$BCN_PLUGIN_SOURCE" != "npm" ] && [ -d "$BCN_PLUGIN_SRC_DIR" ]; then
         if bcn_plugin_needs_build "$project_bcn_path"; then
-            info "Building BCN plugin..."
-            local npm_cmd="npm"
-            command -v "$npm_cmd" >/dev/null 2>&1 || fail "npm was not found; install Node.js with npm before building the BCN plugin"
-            if (cd "$BCN_PLUGIN_SRC_DIR" && "$npm_cmd" install && "$npm_cmd" run build); then
-                # Touch dist so its mtime is newer than all source files,
-                # preventing repeated rebuilds when output content is unchanged.
-                touch "$project_bcn_path/dist/esm/index.js" 2>/dev/null || true
-                pass "BCN plugin built"
-            else
-                fail "Failed to build BCN plugin"
-            fi
+            fail "BCN plugin build output is missing: $project_bcn_path/dist/esm/index.js"
+            fail "Run ./scripts/singlebox.sh --standalone setup bcs before starting local bots."
+            return 1
+        elif bcn_plugin_source_is_newer_than_dist "$project_bcn_path"; then
+            warn "BCN plugin source is newer than its built artifact; runtime start uses existing dist without npm install. Run singlebox setup bcs to rebuild."
         else
             pass "BCN plugin already built, skipping"
         fi
