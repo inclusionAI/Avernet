@@ -236,18 +236,18 @@
         by the caller's user).
 - **Depends on:** Task 6
 
-## Task 8: The gateway route-security rule  `[ ]`
+## Task 8: The gateway route-security rule  `[x]`
 
 - **Goal:** The gateway refuses a grant request that does not carry both
   identities, before it ever reaches the backend.
 - **Files:** `src/gateway/configs/application.yaml:111`
 - **Done when:**
-  - [ ] `"POST /openapi/v1/bots/{bot_id}/authorized-apps": {user: required,
+  - [x] `"POST /openapi/v1/bots/{bot_id}/authorized-apps": {user: required,
         app: required}` is present.
-  - [ ] `"/openapi/v1/authorized-bots": {user: required, app: required}` is
+  - [x] `"/openapi/v1/authorized-bots": {user: required, app: required}` is
         present — not method-qualified, since GET is the only method this path
         has and every method it could grow answers the same question.
-  - [ ] Both comment blocks from `plan.md` are included: why granting needs both
+  - [x] Both comment blocks from `plan.md` are included: why granting needs both
         parties; why GET/DELETE deliberately inherit `user: required` from
         `/openapi/v1/bots/**` rather than restating it; and why the app's view
         declares `app` — the runner resolves only declared identities
@@ -255,24 +255,24 @@
         query would have nothing to scope by. Written in the style of the
         existing `WEBSOCKET` rule commentary in that file, which is the
         precedent for explaining a non-obvious rule in place.
-  - [ ] No other rule in the table changes.
+  - [x] No other rule in the table changes.
 - **Depends on:** — (independent of the backend tasks; ships with them)
 
-## Task 9: Gateway resolution tests  `[ ]`
+## Task 9: Gateway resolution tests  `[x]`
 
 - **Goal:** Prove the new rule actually wins, against the config that ships.
 - **Files:** `src/gateway/tests/unit/core/authn/test_route_security.py`
 - **Done when:**
-  - [ ] A test asserts `POST /openapi/v1/bots/{any}/authorized-apps` resolves to
+  - [x] A test asserts `POST /openapi/v1/bots/{any}/authorized-apps` resolves to
         `{user: required, app: required}`, beating `/openapi/v1/bots/**`.
-  - [ ] A test asserts `GET` and `DELETE` on the same path resolve to
+  - [x] A test asserts `GET` and `DELETE` on the same path resolve to
         `user: required` only.
-  - [ ] A test asserts `GET /openapi/v1/authorized-bots` resolves to
+  - [x] A test asserts `GET /openapi/v1/authorized-bots` resolves to
         `{user: required, app: required}`, beating the `"/**"` default.
-  - [ ] All load the **real** `src/gateway/configs/application.yaml` via
+  - [x] All load the **real** `src/gateway/configs/application.yaml` via
         `RouteSecurity.from_yaml`, not a fixture table — a typo in the shipped
         config must fail the suite.
-  - [ ] `pytest src/gateway/tests/unit/core/authn/test_route_security.py` passes.
+  - [x] `pytest src/gateway/tests/unit/core/authn/test_route_security.py` passes.
         Note: `src/gateway` runs nothing in the default lint-only pre-push mode
         (`AGENTS.md` → Pre-push Module Selection), so this must be run
         explicitly.
@@ -335,18 +335,20 @@
         `require_principal` still passes with the new group mounted.
 - **Depends on:** Task 7
 
-## Task 12: Regenerate the published description  `[ ]`
+## Task 12: Regenerate the published description  `[x]`
 
 - **Goal:** The gateway's served OpenAPI document includes the four new
   operations and nothing else moves.
 - **Files:** `src/gateway/configs/schemas/bots.openapi.json` (regenerated output)
 - **Done when:**
-  - [ ] `python src/backend/scripts/dump_openapi.py` has been run and the
+  - [x] `python src/backend/scripts/dump_openapi.py` has been run and the
         artifact regenerated.
-  - [ ] The diff adds exactly the four operations — no unrelated churn. A
-        noisy diff means the dump is non-deterministic and must be investigated,
-        not committed.
-  - [ ] `src/gateway/tests/fixtures/bots.openapi.json` is **NOT** regenerated —
+  - [x] The diff adds exactly the four operations — no unrelated churn.
+        Verified structurally rather than by eyeballing the 800-line textual
+        diff: 3 paths added (POST and GET share one), 7 schemas added, **zero**
+        paths removed and **zero** shared paths changed. The apparent deletions
+        are re-indentation from inserting keys into sorted JSON.
+  - [x] `src/gateway/tests/fixtures/bots.openapi.json` is **NOT** regenerated —
         it is a frozen test fixture, per
         `src/gateway/specs/2026-08-03-gateway-path-specific-domain-routing/tasks.md:212`.
 - **Depends on:** Task 7

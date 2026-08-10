@@ -124,6 +124,42 @@ user_config:
       user: required
       app: required
 
+    # Granting an application access to a bot is a CONSENT moment, and consent
+    # requires both parties on the wire: the bot owner's identity and the
+    # application's own credential. The application is never named as a
+    # parameter — the handler reads it off the App principal — so this rule is
+    # what makes "you cannot grant to an application other than yourself" true
+    # by construction rather than by a check.
+    #
+    # METHOD-QUALIFIED, and that is load-bearing. GET (list) and DELETE
+    # (withdraw) on the same prefix deliberately do NOT require an App: an owner
+    # must be able to withdraw after the application's credential is lost or
+    # rotated, and asking "which apps can reach my bot?" must not depend on
+    # holding any one application's key. Those two inherit `user: required` from
+    # "/openapi/v1/bots/**" above, which is the correct requirement for them —
+    # left to inherit rather than restated, because a second copy is a second
+    # thing to keep in step.
+    "POST /openapi/v1/bots/{bot_id}/authorized-apps":
+      user: required
+      app: required
+
+    # The application's view — "which of this owner's bots may I reach?". Both
+    # parties again, and here the App is not merely required, it is what the
+    # answer is SCOPED BY: the handler reads app_id off this principal.
+    #
+    # Declaring the identity is what makes that scoping possible at all. The
+    # runner resolves only the identities a route declares (core/authn/_runner.py),
+    # so on a user-only rule the App would never reach the signed principal and
+    # the query would have nothing to filter on. There is no middle option here
+    # — either the route declares `app` and the App is mandatory, or the App is
+    # invisible to the upstream.
+    #
+    # Not method-qualified: GET is the only method this path has, and any method
+    # it could grow answers the same "what may I reach" question.
+    "/openapi/v1/authorized-bots":
+      user: required
+      app: required
+
     "/openapi/v1/collaboration/**":
       user: required
       app: required
