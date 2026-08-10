@@ -1,14 +1,14 @@
 # bcs-cli chat 透出 run_id / session_id 设计
 
 - 日期：2026-08-10
-- 状态：设计已确认，待实现（v2：据 Codex PR #927 review 修订）
+- 状态：设计已确认，待实现（v3：据 Codex PR #927 第二轮 review 修订——detach 接受 `completed`）
 - 范围：`crates/tools/bcs-cli`（`main.rs` + `client.rs`），仅 CLI 侧输出契约
 
 ## 背景
 
 `bcs-cli chat` 走 `POST /bots/{id}/chat-async` 提交 + 长轮询 `GET /chat/runs/{run_id}` 的流程，分两种模式：
 
-- `--detach`：run 进入 `running` 即返回（`chat_polling_detach`）。
+- `--detach`：run 进入 `running`（或 legacy 直接 `completed`，见 §6）即返回（`chat_polling_detach`）。
 - 同步默认：阻塞到 run 终态（`chat_polling`）。
 
 两类问题经核对属真实：
@@ -79,7 +79,7 @@ run_id + session_id 必须在两处出现：早 ack（提交后立刻）与最�
 
 ```rust
 struct ChatRunOutcome {
-    delivered: bool,          // 成败：Completed（sync）/ 进入 Running（detach）
+    delivered: bool,          // 成败：sync=Completed；detach=Running 或 Completed（含 legacy 直接 completed）
     submitted: bool,          // run 是否被创建（chat_async 返回了 run_id）；仅提交级失败为 false
     run_id: Option<String>,   // 仅提交失败时为 None
     session_id: Option<String>,
@@ -92,7 +92,7 @@ struct ChatRunOutcome {
 ```
 
 - 提交成功后轮询方法返回 `Ok(ChatRunOutcome)`；`delivered=false` 表示未交付。
-- `submitted` 仅表示「run 是否被创建」，**不**用于表达成败；退出码由 `state` 推导（成功 = `completed`（sync）或 `running`（detach）；其余 = 失败）。
+- `submitted` 仅表示「run 是否被创建」，**不**用于表达成败；退出码由 `state` 推导（成功 = sync 下 `completed`，或 detach 下 `running`/`completed`——含 run 在首次状态响应前已完成，对齐现有 `chat_polling_detach` 接受 `Completed|Running` `client.rs:1469`；其余 = 失败）。
 - 错误映射（`main.rs` 统一做，确保 stdout 在「run 已创建」时绝不空）：
   - 提交级 HTTP 错误（非 2xx / 反序列化失败） → `submit_failed`（`submitted=false`、`run_id/session_id=null`）。
   - 轮询期 `chat_run_status` 错误（传输 / 非 2xx / 反序列化，发生在 run 已创建后） → `poll_error`（`submitted=true`、IDs 取自提交响应，见 §7）。
@@ -100,7 +100,7 @@ struct ChatRunOutcome {
 
 ### 6. 最终 stdout JSON 显式字段
 
-run_id 与 session_id 始终为顶层字段；仅提交失败（服务器未创建 run）时为 `null`。sync 与 detach **均以 `delivered` 表成败**（detach：`delivered`↔`state=running`）。`submitted` 仅表示 run 是否被创建（`chat_async` 返回了 `run_id`），仅在提交级失败时为 false——**不**用于表达成败，退出码由 `state` 推导。sync 因等待到完成携带 `response` / `content_truncated`；detach 因不等到完成故省略 `response` / `content_truncated`。两者均始终包含 `run_id` 与 `session_id`。
+run_id 与 session_id 始终为顶层字段；仅提交失败（服务器未创建 run）时为 `null`。sync 与 detach **均以 `delivered` 表成败**（sync：`delivered`↔`state=completed`；detach：`delivered`↔`state∈{running, completed}`，含 run 在首次状态响应前已完成的快/legacy 情况）。`submitted` 仅表示 run 是否被创建（`chat_async` 返回了 `run_id`），仅在提交级失败时为 false——**不**用于表达成败，退出码由 `state` 推导。sync 因等待到完成携带 `response` / `content_truncated`；detach 因不等到完成故省略 `response` / `content_truncated`。两者均始终包含 `run_id` 与 `session_id`。
 
 sync json 成功（exit 0）：
 ```json
@@ -137,9 +137,10 @@ sync json 失败（exit 1）：
 detach json 成功（exit 0）/ 失败（exit 1）：
 ```json
 { "delivered": true, "submitted": true, "bot_uuid": "…", "run_id": "…", "session_id": "…", "state": "running", "error_message": null }
+{ "delivered": true, "submitted": true, "bot_uuid": "…", "run_id": "…", "session_id": "…", "state": "completed", "error_message": null }
 { "delivered": false, "submitted": true, "bot_uuid": "…", "run_id": "…", "session_id": "…", "state": "failed", "error_message": "…" }
 ```
-注意 detach 失败时 `submitted=true`（run 已被创建，只是后来 failed/cancelled），区别于提交级失败的 `submitted:false`（见下方）。
+注意：detach 下 `state=completed` 同样算成功（`delivered:true`、exit 0）—— run 可能在首次状态响应前已完成（快 run 或 legacy server 跳过 `running`），对齐现有 `chat_polling_detach` 接受 `Completed|Running`（`client.rs:1469`）。detach 失败时 `submitted=true`（run 已被创建，只是后来 failed/cancelled），区别于提交级失败的 `submitted:false`（见下方）。
 
 提交本身失败（如 404 bot 不存在，未创建 run）（exit 1）：
 ```json
@@ -188,7 +189,7 @@ detach json 成功（exit 0）/ 失败（exit 1）：
 - 同步 non-json 成功时，stdout 出现 `Run:`（修复问题 1 的 run_id）。
 - 同步与 detach 在提交后立刻输出带时间戳的纯文本 ack，行内含 `run_id` 与 `session_id`；non-json 走 stdout 且在 `Response from` 块之前，json 走 stderr。
 - 同步失败（run failed / local timeout / 轮询请求错误）时，stdout（json：单 JSON 对象；non-json：`Run/Session/State/Error` 行）包含 run_id 与 session_id，且 exit 1。
-- detach 成功与失败均输出 run_id 与 session_id；失败时 `submitted=true`、`state=failed/cancelled`、exit 1。
+- detach 成功与失败均输出 run_id 与 session_id；成功接受 `state=running` **或** `state=completed`（run 在首次状态前已完成的快/legacy 情况），均 `delivered:true`、exit 0；失败时 `submitted=true`、`state=failed/cancelled`、exit 1。
 - 提交级失败（如 404）输出结构化失败（json：单对象，`run_id/session_id=null`、`submitted=false`；non-json：`Error:` 行），exit 1，无 panic。
 - 轮询期 `chat_run_status` 错误映射为 `state="poll_error"` 的结构化结果（含来自提交的 run_id+session_id），exit 1，stdout 非空。
 - `--json` 模式下，stdout 成功与失败均为且仅为一个 JSON 对象，`jq '.'` 可解析。
@@ -202,6 +203,7 @@ detach json 成功（exit 0）/ 失败（exit 1）：
 - 新增：同步 json 失败在 stdout 打印单个失败 JSON 对象且 exit 1（问题 2）。
 - 新增：提交后立刻在正确通道（non-json→stdout，json→stderr）输出带时间戳的纯文本 ack（含 run_id+session_id），覆盖 sync 与 detach。
 - 新增：detach 失败在 stdout 输出 `submitted=true`、`state=failed`、run_id 与 session_id 且 exit 1。
+- 新增：detach 首个状态为 `completed`（快/legacy run）→ `delivered=true`、`state=completed`、exit 0（兼容回归，对齐 `chat_polling_detach` 的 `Completed` 接受）。
 - 新增：提交级失败（404）输出结构化失败、`submitted=false`、ID=null、exit 1、无 panic。
 - 新增：轮询期 `chat_run_status` 返回 500 → `state="poll_error"` 结构化结果，含 run_id+session_id（取自提交响应），exit 1，stdout 非空。
 
