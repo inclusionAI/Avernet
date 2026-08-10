@@ -44,13 +44,28 @@ marketplace catalogue identical for every caller in the tenant. They still
 require an authenticated caller — that is ``require_principal``'s job, not this
 parameter's.
 
-Today the request's id and the credential's must still agree:
-:func:`require_user_id` refuses a parameter that names anyone but the verified
-caller, so **nothing about who may call what changes** — a request with no
-verified principal is still refused, and a caller still reaches only its own
-data. That equality check is the one line delegation will relax (auth design
-§15); until then it is what keeps the parameter from being a way to read someone
-else's bots.
+How the parameter is *authorized*, and why it splits
+----------------------------------------------------
+
+The parameter is acquired the same way for everyone; what differs is what it is
+checked against, and that follows from whether the credential names a person:
+
+- **A caller naming an end user** must name *itself*. :func:`require_user_id`
+  refuses anything else with a ``403``. Unchanged, and it is the whole of the
+  "nothing else changes" promise for human callers.
+- **An application acting alone** names no end user, so there is nothing to
+  compare with. Its ``user_id`` is authorized against the **grant** instead —
+  "has this person delegated to this application, for this bot?" — which happens
+  in :data:`GrantCheckedDep` below, because only there is the bot known.
+
+This is the split :func:`require_user_id`'s own docstring predicted: acquisition
+here, adjudication one step later. It is why the parameter had to exist before
+the caller did — an operation whose contract never mentioned a user has nowhere
+to put one when the identity set stops carrying it.
+
+The parameter is **never trusted on its own**. An application naming a user who
+granted it nothing is refused exactly as one naming a bot that does not exist,
+so guessing a ``user_id`` buys nothing.
 
 The owner id scopes reads/writes to the caller's own bots *within* the tenant
 (the tenant guard confines data to the tenant; this confines it to the caller).
@@ -164,13 +179,27 @@ async def require_user_id(
       validation failure, enveloped by the app-level handler;
     - a parameter naming someone other than the caller → ``403``.
 
-    The last one is the whole of the "nothing else changes" promise. A request
-    can only ever be scoped to the caller, exactly as when the id was read off
-    the principal; the parameter states that scope instead of leaving it implied.
-    When an App may act for a user (auth design §15), this function stops
-    comparing the two ids and asks whether the delegation was granted — and no
-    handler, schema or path changes, because none of them ever named the user.
+    The third is the whole of the "nothing else changes" promise for a caller
+    that names a person: such a request can only ever be scoped to itself,
+    exactly as when the id was read off the principal.
+
+    **The branch this docstring used to promise is now here.** For a caller
+    naming no end user — an application acting alone — there is no second id to
+    compare with, so the comparison is skipped and the parameter is authorized
+    against the delegation instead. That check needs the bot, which this
+    dependency does not have, so it happens one step later in
+    :data:`GrantCheckedDep`. Nothing else moved: no handler, schema or path
+    changed, because none of them ever named the user.
+
+    Skipping the comparison is not skipping a check. An application that reaches
+    an operation without also taking the grant-checked dependency would be
+    unauthorized, which is exactly what the route inventory test refuses to
+    allow — see ``admission.py``.
     """
+    if not principal.has_user:
+        # An application acting alone. It names the user it acts for; whether it
+        # may is the grant's answer, not this function's.
+        return user_id
     caller = caller_owner_id(principal)
     if user_id != caller:
         # Both ids are logged because the response cannot carry them: it is a

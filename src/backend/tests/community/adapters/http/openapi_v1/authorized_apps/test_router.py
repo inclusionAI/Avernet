@@ -42,6 +42,7 @@ from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantModel,
 )
 from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -67,9 +68,15 @@ COLLAB = "u-2"
 #: A user with no relationship to ``BOT`` at all.
 STRANGER = "u-9"
 BOT = "b-1"
+#: A legacy ``default``-style id shared by several live bots, which the
+#: owner-blind resolve must fail closed on rather than pick a row for.
+AMBIGUOUS_BOT = "default"
 #: ``BOT``'s primary key. The collaborator table is keyed on it rather than on
 #: ``bot_id``, which is not unique across owners.
 BOT_PK = 7
+#: ``AMBIGUOUS_BOT``'s primary key under ``OWNER``. Another owner's row with the
+#: same ``bot_id`` would have a different one — which is the whole problem.
+AMBIGUOUS_PK = 8
 APP_ID = 42
 APP_NAME = "partner-platform"
 
@@ -161,7 +168,29 @@ def bots():
     """
 
     class _Bots:
+        def get_bot(self, bot_id: str, user_id: str):
+            """Owner-scoped, as production is: only the caller's own bot.
+
+            ``OWNER`` holds both ``BOT`` and a legacy ``AMBIGUOUS_BOT``. This
+            read resolves the second correctly *because* it is owner-scoped —
+            which is exactly what the owner-blind read below cannot do.
+            """
+            if user_id != OWNER:
+                raise BotNotFoundError(f"Bot not found: {bot_id}")
+            if bot_id == BOT:
+                return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
+            if bot_id == AMBIGUOUS_BOT:
+                return {"id": AMBIGUOUS_PK, "bot_id": bot_id, "owner_id": OWNER}
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+
         def get_bot_by_id(self, bot_id: str):
+            """Owner-blind, and fails closed when the id is ambiguous.
+
+            ``AMBIGUOUS_BOT`` stands for a legacy ``default`` bot: several live
+            rows share the id, so no single owner can be resolved from it alone.
+            """
+            if bot_id == AMBIGUOUS_BOT:
+                raise BotLookupAmbiguousError(bot_id)
             if bot_id != BOT:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
             return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
@@ -456,3 +485,39 @@ def test_collaborator_cannot_withdraw_the_owners_delegation(client, collab_clien
     resp = collab_client.delete(f"/openapi/v1/bots/{BOT}/authorized-apps/{APP_ID}")
 
     assert resp.status_code == 404, resp.json()
+
+
+def test_an_ambiguous_bot_id_is_refused_as_not_found_not_as_a_server_error(
+    collab_client,
+):
+    """A duplicated ``bot_id`` must not answer 500.
+
+    ``BotLookupAmbiguousError`` is a bare ``RuntimeError`` and is not in this
+    surface's status map, so letting it escape would answer 500 — telling an
+    unrelated caller that two live bots share an id, on a surface whose entire
+    refusal story is that a stranger learns nothing. Fail closed, in the shape
+    everything else here fails.
+    """
+    resp = collab_client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
+
+    assert resp.status_code == 404, resp.json()
+
+
+def test_the_owner_of_an_ambiguous_bot_id_still_works(client):
+    """The owner-scoped read resolves a duplicated id correctly, as it always did.
+
+    This is why the owner path is tried first rather than second. Reaching for
+    the owner-blind read would turn three operations that work today into
+    refusals for every owner of a legacy ``default`` bot — a functional
+    regression, delivered quietly, to callers who did nothing.
+    """
+    granted = client.post(
+        f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps", json={}
+    )
+    listed = client.get(f"/openapi/v1/bots/{AMBIGUOUS_BOT}/authorized-apps")
+
+    assert granted.status_code == 201, granted.json()
+    assert listed.status_code == 200, listed.json()
+    assert [item["bot_id"] for item in listed.json()["data"]["items"]] == [
+        AMBIGUOUS_BOT
+    ]

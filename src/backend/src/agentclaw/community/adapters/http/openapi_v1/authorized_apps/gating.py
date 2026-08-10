@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
@@ -54,12 +55,32 @@ def resolve_delegable_bot(
     so the surface never confirms a bot exists to someone with no business
     knowing.
 
-    ``bots.get_bot_by_id`` decides nothing on its own — it answers "which bot,
-    and whose". The adjudication below is what turns that into an answer about
-    *this* caller, and running it here means no operation in this group can
-    forget to.
+    **The owner is resolved owner-scoped first**, and that is not an
+    optimisation. ``bot_id`` is not unique across owners — the legacy
+    ``default`` convention gave many owners a bot of that id — so the owner-blind
+    read fails closed on a duplicate rather than picking a row. Reaching for it
+    first would turn three operations that work today into refusals for every
+    owner of such a bot. Asking "is this the caller's own bot?" first answers
+    exactly as it always did; the owner-blind read is the *fallback*, for the
+    shared-bot case it exists to serve.
+
+    A caller who is neither the owner nor a collaborator, and an ambiguous
+    ``bot_id`` with no owner-scoped match, both raise
+    :class:`BotNotFoundError` — the same masked refusal, since anything
+    distinguishable tells a stranger that a bot exists.
     """
-    bot = bots.get_bot_by_id(bot_id)
+    try:
+        bot = bots.get_bot(bot_id, caller_id)
+    except BotNotFoundError:
+        try:
+            bot = bots.get_bot_by_id(bot_id)
+        except BotLookupAmbiguousError:
+            # Several live bots share this id and none is the caller's. Refusing
+            # as "not found" rather than letting the RuntimeError escape: it is
+            # not in the surface's status map, so it would answer 500 — telling
+            # an unrelated caller that two bots share an id, on a surface whose
+            # whole refusal story is that a stranger learns nothing.
+            raise BotNotFoundError(f"Bot not found: {bot_id}") from None
     resolved_owner = str(bot.get("owner_id") or "")
     bot_pk = int(bot.get("id") or 0)
     require_bot_operator(
