@@ -19,6 +19,25 @@ class GrantNotFoundError(Exception):
     """No live authorization matched the scope named."""
 
 
+class GrantBotNotLiveError(Exception):
+    """The bot was resolved, but is no longer live at the moment of the write.
+
+    Authorization and insertion are separate steps with a request's own latency
+    between them, so a bot that existed when the caller was adjudicated can be
+    deleted before the row is written. Nothing earlier in the request can catch
+    that: the delegation gate resolved a bot that really was live when it
+    looked.
+
+    Rechecking here narrows the gap to the width of this one call rather than
+    the whole request, and it is **not** serialization: a deletion committing
+    between this check and the insert still slips through. Closing that
+    completely would mean locking the bot row across the grant write, which is
+    a cost on every grant to prevent a row that grants nothing — every read
+    filters bots by liveness and every request re-adjudicates. The deletion
+    sweeps clean up what remains.
+    """
+
+
 class GrantOwnerConflictError(Exception):
     """A live grant for this scope covers a *different* owner's bot.
 

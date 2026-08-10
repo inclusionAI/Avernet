@@ -552,7 +552,27 @@ regression tests.
    gone, and an orphan row grants nothing, since every read filters by
    liveness and every request re-adjudicates.
 
-Two further defects were introduced *by* these fixes and caught in the same
+4. **The deletion race was narrowed, not closed, and the first attempt claimed
+   otherwise.** The second sweep above was justified with "once the soft delete
+   commits, no further grant can be created" — which is false. The delegation
+   gate resolves the bot early in the request and the row is written later, so a
+   request that already passed resolution can insert behind the sweep. The gate
+   is at resolve time, not at write time. `grant()` now rechecks liveness at the
+   write, which narrows the window to that one call and refuses a grant on a bot
+   deleted since it was resolved. It is still **not** serialization, and the
+   docstrings say so: closing it completely means locking the bot row across
+   every grant write, to prevent a row that grants nothing. The residue is
+   documented rather than claimed away.
+
+5. **The second sweep swallowed a failed write.** Made best-effort on the
+   reasoning that the bot is already deleted, so raising misreports a success.
+   `AGENTS.md` is explicit that persistence write failures propagate, and a
+   sweep that cannot commit is a failed write; returning success while the
+   authorization table still holds rows for the bot makes the two disagree
+   silently. It propagates now, and the awkward retry — "no such bot" — is the
+   accepted cost.
+
+Three further defects were introduced *by* these fixes and caught in the same
 review rounds — a candidate bound that decided the answer it was meant only to
 bound, and a grant provider typed against a concrete class. Both are fixed;
 both are worth remembering as evidence that a fix in this area needs its own

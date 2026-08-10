@@ -47,6 +47,7 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.core.bot_app_grant.errors import (
+    GrantBotNotLiveError,
     GrantIdentityTooLongError,
     GrantNotFoundError,
     GrantOwnerConflictError,
@@ -197,6 +198,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # differently from "removed", which the status already gives them. Which of
     # the two 404s they hit is answerable from the bot's own endpoints.
     GrantNotFoundError: (404, "Not found"),
+    # The bot went away between being resolved and the row being written.
+    # Byte-identical to an absent bot, which is what it now is.
+    GrantBotNotLiveError: (404, "Not found"),
     # 400, not 404: the delegation is not missing, it is unrepresentable. The
     # message names no caller-supplied value.
     GrantIdentityTooLongError: (400, "User id is too long to authorize"),

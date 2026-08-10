@@ -3560,30 +3560,26 @@ class BotService:
         Sweeping once more after that commit therefore catches everything the
         window could have admitted, and nothing can arrive behind it.
 
-        **Best-effort, unlike the first sweep.** The bot is already deleted by
-        the time this runs, so raising would report a failure for an operation
-        that succeeded, and a retry would fail on the now-missing bot. What a
-        failure leaves behind is a row for a bot that no longer exists — which
-        grants nothing: every read filters bots by liveness, and every request
-        re-adjudicates against a bot that cannot be resolved. Hygiene, not the
-        boundary. The boundary is that nothing is trusted from the row.
+        **Failures propagate, like the first sweep.** An earlier revision made
+        this best-effort, reasoning that the bot is already deleted so raising
+        reports a failure for an operation that succeeded. That reasoning is
+        real but it loses: `AGENTS.md` is explicit that persistence write
+        failures are propagated and never swallowed into a success, and a sweep
+        that could not commit is exactly a failed write. Reporting success
+        while the authorization table still holds rows for this bot makes the
+        two disagree with no signal that they do.
+
+        The cost is worth naming rather than hiding: the deletion really has
+        happened by then, so a caller who retries is answered "no such bot".
+        That is a confusing sequence, but it is an honest one — where silent
+        success is a wrong answer that no one can later discover.
 
         A non-zero count here means the race actually happened, which is worth
         seeing in the log rather than inferring later from an orphan row.
         """
-        try:
-            raced = self._bot_app_grant_provider().revoke_all_for_bot(
-                bot_id=bot_id, owner_id=user_id
-            )
-        except Exception as exc:  # noqa: BLE001 — see the docstring
-            logger.warning(
-                "[bot_service.delete_bot] post-deletion grant sweep failed for "
-                "bot %s; any authorization created during the deletion is now "
-                "orphaned, and grants nothing: %s",
-                bot_id,
-                exc,
-            )
-            return
+        raced = self._bot_app_grant_provider().revoke_all_for_bot(
+            bot_id=bot_id, owner_id=user_id
+        )
         if raced:
             logger.warning(
                 "[bot_service.delete_bot] withdrew %s app authorization(s) "

@@ -27,6 +27,7 @@ from __future__ import annotations
 from injector import inject
 
 from agentclaw.community.core.bot_app_grant.errors import (
+    GrantBotNotLiveError,
     GrantIdentityTooLongError,
     GrantNotFoundError,
 )
@@ -101,6 +102,24 @@ class BotAppGrantService:
                     f"{label} exceeds {IDENTITY_MAX_LENGTH} characters, which a "
                     "grant cannot store or later resolve"
                 )
+        if not self._bots.filter_live_bots([(bot_id, owner_id)]):
+            # Resolved earlier in the request, deleted since. The caller's
+            # adjudication was correct when it ran, so this is the only place
+            # the change can be noticed before a row is written for a bot that
+            # no longer exists.
+            #
+            # Refused as "not found", matching every other refusal on this
+            # surface: the alternative distinguishes "deleted just now" from
+            # "never yours", which is exactly the disclosure the masked refusal
+            # exists to prevent.
+            logger.warning(
+                "[bot_app_grant] refusing a grant on a bot that is no longer "
+                "live; app_id=%s",
+                app_id,
+            )
+            raise GrantBotNotLiveError(
+                "the bot is no longer live; its authorization cannot be granted"
+            )
         return self._repository.grant(
             {
                 "app_id": app_id,

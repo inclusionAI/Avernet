@@ -473,13 +473,20 @@ class TestDeleteBot:
 
         assert grants.revoke_all_for_bot.call_count == 2, "the second sweep ran"
 
-    def test_a_failed_post_deletion_sweep_does_not_fail_the_deletion(self):
-        """Best-effort, unlike the first sweep — and deliberately so.
+    def test_a_failed_post_deletion_sweep_is_surfaced_not_swallowed(self):
+        """A sweep that could not commit is a failed write, and says so.
 
-        The bot is already gone by then, so raising would report failure for an
-        operation that succeeded, and a retry would fail on the missing bot.
-        What a failure leaves is a row for a bot that cannot be resolved, which
-        grants nothing.
+        An earlier revision made this best-effort, reasoning that the bot is
+        already deleted so raising reports failure for something that
+        succeeded. That reasoning is real but it loses: `AGENTS.md` requires
+        persistence write failures to propagate rather than be swallowed into a
+        success, and reporting success while the authorization table still
+        holds rows for this bot makes the two disagree with no signal that they
+        do.
+
+        The confusing retry — "no such bot", because the deletion really did
+        happen — is the accepted cost of not returning a wrong answer that
+        nobody can discover later.
         """
         svc = _make_service()
         grants = MagicMock()
@@ -488,7 +495,12 @@ class TestDeleteBot:
         svc._repository.get_by_id_and_owner.return_value = _make_bot(binding_id=None)
         svc._repository.soft_delete_by_owner.return_value = True
 
-        assert svc.delete_bot("bot001", "user001") is True
+        with pytest.raises(BotServiceError):
+            svc.delete_bot("bot001", "user001")
+
+        # The deletion itself did happen — that is precisely why the sequence
+        # is awkward, and why it is worth pinning rather than glossing.
+        svc._repository.soft_delete_by_owner.assert_called_once()
 
     def test_a_failed_withdrawal_aborts_the_deletion(self):
         """Never a deleted bot with live authorizations against it.

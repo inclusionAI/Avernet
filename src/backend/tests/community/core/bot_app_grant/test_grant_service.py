@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_app_grant.errors import (
+    GrantBotNotLiveError,
     GrantIdentityTooLongError,
     GrantNotFoundError,
     GrantOwnerConflictError,
@@ -121,6 +122,10 @@ def bots():
     # pair-keyed filter exists for, not an artefact of the fixture.
     doubles.add("u-2", "b-1", "b-2")
     doubles.add("u-1", "b-9")
+    # The same-named ``default`` bots the cross-owner tests turn on: several
+    # owners each hold one, which is the collision the pair key exists for.
+    for owner in ("u-1", "u-2", "u-9", "owner-a", "owner-b"):
+        doubles.add(owner, "default")
     return doubles
 
 
@@ -740,6 +745,31 @@ def test_grant_ignores_a_caller_supplied_env(repo, sessions):
     assert repo.find("b-1", "u-1", 42) is not None, "must stay findable"
     assert repo.revoke("b-1", "u-1", 42, "u-1") is True, "must stay revocable"
     assert written.env != "pre"
+
+
+def test_granting_a_bot_deleted_since_it_was_resolved_is_refused(
+    service, bots, sessions
+):
+    """The gap between adjudication and the write.
+
+    The delegation gate resolves the bot early in the request and the row is
+    written later, so a deletion in between leaves the caller correctly
+    authorized for a bot that no longer exists. Nothing earlier can catch it —
+    the gate looked when the bot really was live.
+
+    Rechecking at the write narrows the window to this one call. It is not
+    serialization: a deletion committing between the check and the insert still
+    slips through, and the deletion sweeps exist for that remainder.
+    """
+    bots.delete("u-1", "b-1")
+
+    with pytest.raises(GrantBotNotLiveError):
+        service.grant(
+            bot_id="b-1", user_id="u-1", owner_id="u-1", app_id=42, app_name="p"
+        )
+
+    assert _rows(sessions, BotAppGrantModel) == [], "no row for a deleted bot"
+    assert _log(sessions) == [], "and no history claiming one was made"
 
 
 def test_regranting_onto_another_owners_same_named_bot_is_refused(service, sessions):
