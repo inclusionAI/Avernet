@@ -53,6 +53,10 @@
       "ApprovalModeSet": {
         "additionalProperties": false,
         "description": "Set-the-mode request body.",
+        "example": {
+          "mode": "on-miss",
+          "session_key": "session:2d20edc1:user:165137"
+        },
         "properties": {
           "mode": {
             "$ref": "#/components/schemas/ApprovalMode",
@@ -98,20 +102,34 @@
       },
       "Bot": {
         "description": "An agent (bot) record.",
+        "example": {
+          "bot_desc": "Drafts the quarterly report from the team's notes.",
+          "bot_id": "20260810_q5o4c89g",
+          "bot_name": "Quarterly reporter",
+          "bot_type": "personal",
+          "cluster_name": "ACRA",
+          "engine": "openclaw",
+          "owner_entity_id": "511488",
+          "status": "ACTIVE"
+        },
         "properties": {
           "bot_desc": {
+            "description": "What the bot is for; may be empty.",
             "title": "Bot Desc",
             "type": "string"
           },
           "bot_id": {
+            "description": "Identifier of the bot. Use this value in the path of the bot-scoped endpoints.",
             "title": "Bot Id",
             "type": "string"
           },
           "bot_name": {
+            "description": "Human-readable bot name.",
             "title": "Bot Name",
             "type": "string"
           },
           "bot_type": {
+            "description": "'personal' for a bot only its owner operates, 'service' for one that can be published to verify/online runtimes. Other values — 'desktop' in particular — belong to bots created through a different flow, which this API can read but not create or manage. Empty when the record carries no type.",
             "title": "Bot Type",
             "type": "string"
           },
@@ -125,10 +143,12 @@
             "type": "string"
           },
           "engine": {
+            "description": "Runtime engine that powers the bot. The accepted names are deployment configuration rather than a fixed set, so an unknown name is refused (400) instead of being published as an enum here.",
             "title": "Engine",
             "type": "string"
           },
           "owner_entity_id": {
+            "description": "The user this bot belongs to.",
             "title": "Owner Entity Id",
             "type": "string"
           },
@@ -152,19 +172,22 @@
         "type": "object"
       },
       "BotAuthPending": {
-        "description": "Returned (202) when bot creation needs user authorization (Passport).\n\nPassport may hand back either handle, so both are surfaced: a caller that\nonly receives ``redirect_url`` would otherwise have no way to complete\nauthorization. Each is empty when Passport did not supply it.",
+        "description": "Returned (202) when bot creation needs the user to authorize it first.\n\nOpen either handle to complete authorization, then poll the auth-status\nendpoint. Both are surfaced because the issuer supplies one or the other;\neach is empty when it was not supplied.",
         "properties": {
           "bot_id": {
+            "description": "Identifier the bot will be created with.",
             "title": "Bot Id",
             "type": "string"
           },
           "iframe_url": {
             "default": "",
+            "description": "Authorization page to embed; empty if none.",
             "title": "Iframe Url",
             "type": "string"
           },
           "redirect_url": {
             "default": "",
+            "description": "Authorization page to redirect to; empty if none.",
             "title": "Redirect Url",
             "type": "string"
           }
@@ -176,7 +199,7 @@
         "type": "object"
       },
       "BotAuthStatus": {
-        "description": "Passport authorization status; ``bot`` is present once ISSUED.",
+        "description": "Authorization status of a pending bot creation.",
         "properties": {
           "bot": {
             "anyOf": [
@@ -186,7 +209,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The created bot, present only once the authorization has been issued."
           },
           "message": {
             "anyOf": [
@@ -197,9 +221,11 @@
                 "type": "null"
               }
             ],
+            "description": "Why authorization is not complete; null when there is nothing to report.",
             "title": "Message"
           },
           "status": {
+            "description": "Authorization state reported by the issuer. The bot is created once it reads ISSUED.",
             "title": "Status",
             "type": "string"
           }
@@ -213,16 +239,26 @@
       "BotCreate": {
         "additionalProperties": false,
         "description": "Create-a-bot request body.",
+        "example": {
+          "bot_desc": "Drafts the quarterly report from the team's notes.",
+          "bot_name": "Quarterly reporter",
+          "bot_type": "personal",
+          "cluster_name": "ACRA",
+          "engine": "openclaw"
+        },
         "properties": {
           "bot_desc": {
+            "description": "What the bot is for. Send an empty string to leave it blank.",
             "title": "Bot Desc",
             "type": "string"
           },
           "bot_name": {
+            "description": "Name for the new bot. Must be unique within your tenant — check it first with the name-availability endpoint.",
             "title": "Bot Name",
             "type": "string"
           },
           "bot_type": {
+            "description": "'personal' for a bot only its owner operates, 'service' for one that can be published to verify/online runtimes. No other value is accepted.",
             "enum": [
               "personal",
               "service"
@@ -240,6 +276,7 @@
             "type": "string"
           },
           "engine": {
+            "description": "Runtime engine that powers the bot. The accepted names are deployment configuration rather than a fixed set, so an unknown name is refused (400) instead of being published as an enum here.",
             "title": "Engine",
             "type": "string"
           }
@@ -255,7 +292,7 @@
         "type": "object"
       },
       "BotStatus": {
-        "description": "Runtime / device readiness of a bot.",
+        "description": "Runtime readiness of a bot.",
         "properties": {
           "device_id": {
             "anyOf": [
@@ -266,13 +303,16 @@
                 "type": "null"
               }
             ],
+            "description": "Device currently bound to the bot; null when none is bound yet.",
             "title": "Device Id"
           },
           "is_ready": {
+            "description": "True when the bot has a bound device and can take work.",
             "title": "Is Ready",
             "type": "boolean"
           },
           "status": {
+            "description": "Lifecycle status: PENDING | ACTIVE | FAILED.",
             "title": "Status",
             "type": "string"
           }
@@ -286,7 +326,10 @@
       },
       "BotUpdate": {
         "additionalProperties": false,
-        "description": "Partial update — only the fields this operation can actually apply.\n\n``engine``, ``cluster_name`` and ``engine_options`` are all deliberately\nabsent *and* rejected by ``extra=\"forbid\"``. Declaring them for symmetry\nwould mean answering 200 to a request that changed nothing: the engine is\nfixed at creation, ``cluster_name`` is derived from it, and engine options\nare managed through the engine-config endpoints. A caller that sends one now\ngets a validation error naming the field instead of a success they have to\nverify by re-reading the bot.",
+        "description": "Partial update. Omit a field to leave it unchanged.\n\nOnly the name and description can be changed. A bot's engine is fixed at\ncreation, its cluster is derived from the engine, and engine options are\nmanaged through the engine-config endpoints — sending any of those here is\nrefused (422) rather than silently ignored.",
+        "example": {
+          "bot_name": "Quarterly reporter"
+        },
         "properties": {
           "bot_desc": {
             "description": "New description; omit to keep.",
@@ -303,9 +346,10 @@
         "type": "object"
       },
       "Ceiling": {
-        "description": "Per-caller bot creation quota ceiling.",
+        "description": "How many bots the caller may create.",
         "properties": {
           "ceiling": {
+            "description": "Maximum number of bots this caller may own. Creating beyond it is refused.",
             "title": "Ceiling",
             "type": "integer"
           }
@@ -839,9 +883,13 @@
       },
       "Deleted": {
         "description": "Payload returned by delete operations.",
+        "example": {
+          "deleted": true
+        },
         "properties": {
           "deleted": {
             "default": true,
+            "description": "Always true; the delete is complete once this response is returned.",
             "title": "Deleted",
             "type": "boolean"
           }
@@ -2611,7 +2659,7 @@
         "type": "object"
       },
       "ErrorEnvelope": {
-        "description": "The envelope returned on every documented failure.\n\nShape-identical to :class:`Envelope` with ``data`` pinned to null, which is\nwhat the error paths actually emit. Declared as its own model so generated\nclients get a named error type instead of a synthesized ``Envelope[None]``.",
+        "description": "The envelope returned on every documented failure.\n\nShape-identical to the success envelope with `data` pinned to null, which is\nwhat the error paths actually emit.",
         "properties": {
           "code": {
             "description": "6-digit code: HTTP status (3) + business subcode (3), e.g. 404000 for a not-found failure.",
@@ -2661,19 +2709,23 @@
         "description": "A single identity file's content.",
         "properties": {
           "bot_id": {
+            "description": "Bot this file belongs to.",
             "title": "Bot Id",
             "type": "string"
           },
           "content": {
+            "description": "The file's full markdown content; empty when the file does not exist yet.",
             "title": "Content",
             "type": "string"
           },
           "file_path": {
+            "description": "Path of the file within the bot's workspace. Read-only — it is derived from the type, not chosen by the caller.",
             "title": "File Path",
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/IdentityFileType"
+            "$ref": "#/components/schemas/IdentityFileType",
+            "description": "Which identity file this is; the file is stored as `<TYPE>.md`."
           }
         },
         "required": [
@@ -2686,18 +2738,21 @@
         "type": "object"
       },
       "IdentityFileInfo": {
-        "description": "One identity file's presence within a bot.",
+        "description": "One identity file, and whether the bot has it.",
         "properties": {
           "exists": {
+            "description": "False when the bot has no such file yet. Writing one creates it.",
             "title": "Exists",
             "type": "boolean"
           },
           "file_path": {
+            "description": "Path of the file within the bot's workspace. Read-only — it is derived from the type, not chosen by the caller.",
             "title": "File Path",
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/IdentityFileType"
+            "$ref": "#/components/schemas/IdentityFileType",
+            "description": "Which identity file this is; the file is stored as `<TYPE>.md`."
           }
         },
         "required": [
@@ -2709,13 +2764,30 @@
         "type": "object"
       },
       "IdentityFileList": {
-        "description": "All possible identity files for a bot and whether each exists.",
+        "description": "Every identity file a bot can have, and whether each exists.",
+        "example": {
+          "bot_id": "20260810_q5o4c89g",
+          "files": [
+            {
+              "exists": true,
+              "file_path": "identity/RULES.md",
+              "type": "RULES"
+            },
+            {
+              "exists": false,
+              "file_path": "identity/OKR.md",
+              "type": "OKR"
+            }
+          ]
+        },
         "properties": {
           "bot_id": {
+            "description": "Bot these files belong to.",
             "title": "Bot Id",
             "type": "string"
           },
           "files": {
+            "description": "One entry per possible identity file, present whether or not the file exists.",
             "items": {
               "$ref": "#/components/schemas/IdentityFileInfo"
             },
@@ -2731,18 +2803,21 @@
         "type": "object"
       },
       "IdentityFileRef": {
-        "description": "Reference to an identity file (returned after a write).",
+        "description": "Reference to an identity file, returned after a write.",
         "properties": {
           "bot_id": {
+            "description": "Bot this file belongs to.",
             "title": "Bot Id",
             "type": "string"
           },
           "file_path": {
+            "description": "Path of the file within the bot's workspace. Read-only — it is derived from the type, not chosen by the caller.",
             "title": "File Path",
             "type": "string"
           },
           "type": {
-            "$ref": "#/components/schemas/IdentityFileType"
+            "$ref": "#/components/schemas/IdentityFileType",
+            "description": "Which identity file this is; the file is stored as `<TYPE>.md`."
           }
         },
         "required": [
@@ -2754,7 +2829,7 @@
         "type": "object"
       },
       "IdentityFileType": {
-        "description": "Whitelisted identity-file types (physical file is ``<type>.md``).",
+        "description": "Which identity file an operation addresses.\n\nEach member names one markdown file in the bot's identity directory, stored\nas `<TYPE>.md`. The set is fixed — a type not listed here is refused.",
         "enum": [
           "RULES",
           "OKR",
@@ -2778,8 +2853,12 @@
       },
       "IdentityFileWrite": {
         "description": "Write-an-identity-file request body.",
+        "example": {
+          "content": "# Rules\n\n- Answer in the user's language.\n- Ask before deleting anything.\n"
+        },
         "properties": {
           "content": {
+            "description": "The file's full markdown content. This **replaces** the file — send the whole document, not a fragment to append. Send an empty string to blank the file.",
             "title": "Content",
             "type": "string"
           }
@@ -2791,7 +2870,7 @@
         "type": "object"
       },
       "McpConfig": {
-        "description": "The caller's unified config for an MCP server.\n\n``api_key`` is always returned masked (first/last four for a long key, fully\nmasked otherwise), never in full.",
+        "description": "The caller's own configuration for an MCP server.",
         "properties": {
           "api_key": {
             "anyOf": [
@@ -2802,10 +2881,11 @@
                 "type": "null"
               }
             ],
-            "description": "Masked API key; null when none is stored.",
+            "description": "Stored API key, always masked — first and last four characters for a long key, fully masked otherwise. It is never returned in full. Null when none is stored.",
             "title": "Api Key"
           },
           "endpoint_env": {
+            "description": "Which of the server's endpoints to use: 'PROD' or 'PRE'.",
             "title": "Endpoint Env",
             "type": "string"
           },
@@ -2818,10 +2898,12 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Extra HTTP headers sent to the MCP server on every call, as a name/value map.",
             "title": "Headers",
             "type": "object"
           },
           "server_code": {
+            "description": "Identifier of the MCP server. Use it in the path of the per-server endpoints.",
             "title": "Server Code",
             "type": "string"
           },
@@ -2834,6 +2916,7 @@
                 "type": "null"
               }
             ],
+            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
             "title": "Transport Protocol"
           }
         },
@@ -2847,7 +2930,15 @@
       },
       "McpConfigWrite": {
         "additionalProperties": false,
-        "description": "Write the unified config. A null (omitted) field means \"leave unchanged\".\n\n``extra=\"forbid\"``: an unknown field is a 422, not a silent no-op. In\nparticular the old ``sync_mode`` field is gone — the only push path is to\nevery device under the caller, so a per-device mode would advertise\nsomething the server ignores.",
+        "description": "Write the caller's configuration for an MCP server.\n\nOmit a field to leave it unchanged. The configuration applies to every\ndevice the caller owns; there is no per-device setting.",
+        "example": {
+          "api_key": "sk-live-0f2c…",
+          "endpoint_env": "PROD",
+          "headers": {
+            "X-Workspace": "team-alpha"
+          },
+          "transport_protocol": "STREAMABLE_HTTP"
+        },
         "properties": {
           "api_key": {
             "anyOf": [
@@ -2858,6 +2949,7 @@
                 "type": "null"
               }
             ],
+            "description": "API key to store for this server, in full. It is returned masked on every read. Omit to leave it unchanged.",
             "title": "Api Key"
           },
           "endpoint_env": {
@@ -2873,6 +2965,7 @@
                 "type": "null"
               }
             ],
+            "description": "Which of the server's endpoints to use: 'PROD' or 'PRE'. Omit to leave unchanged.",
             "title": "Endpoint Env"
           },
           "headers": {
@@ -2887,6 +2980,7 @@
                 "type": "null"
               }
             ],
+            "description": "Extra HTTP headers sent to the MCP server on every call, as a name/value map. Replaces the stored map rather than merging into it. Omit to leave unchanged.",
             "title": "Headers"
           },
           "transport_protocol": {
@@ -2902,6 +2996,7 @@
                 "type": "null"
               }
             ],
+            "description": "How to reach the server. Omit to leave unchanged.",
             "title": "Transport Protocol"
           }
         },
@@ -2909,7 +3004,7 @@
         "type": "object"
       },
       "McpPermission": {
-        "description": "The caller's permission for an MCP server.",
+        "description": "Whether the caller may use an MCP server.",
         "properties": {
           "access_level": {
             "anyOf": [
@@ -2920,14 +3015,17 @@
                 "type": "null"
               }
             ],
+            "description": "Level of access granted; null when the marketplace reports none.",
             "title": "Access Level"
           },
           "has_access": {
+            "description": "True when the caller may use the server. Advisory — the server itself is the enforcement point.",
             "title": "Has Access",
             "type": "boolean"
           },
           "tool_permissions": {
             "additionalProperties": true,
+            "description": "Per-tool grants, keyed by tool name; empty when access is not restricted per tool.",
             "title": "Tool Permissions",
             "type": "object"
           }
@@ -2940,6 +3038,15 @@
       },
       "McpServer": {
         "description": "An MCP server in the marketplace.",
+        "example": {
+          "description": "Search the public web and read result pages.",
+          "name": "Web Search",
+          "network_types": [
+            "public"
+          ],
+          "server_code": "web-search",
+          "transport_protocol": "STREAMABLE_HTTP"
+        },
         "properties": {
           "description": {
             "anyOf": [
@@ -2950,13 +3057,16 @@
                 "type": "null"
               }
             ],
+            "description": "What the server does; null when the marketplace records none.",
             "title": "Description"
           },
           "name": {
+            "description": "Human-readable server name.",
             "title": "Name",
             "type": "string"
           },
           "network_types": {
+            "description": "Networks the server is reachable from; empty when the marketplace records none.",
             "items": {
               "type": "string"
             },
@@ -2964,6 +3074,7 @@
             "type": "array"
           },
           "server_code": {
+            "description": "Identifier of the MCP server. Use it in the path of the per-server endpoints.",
             "title": "Server Code",
             "type": "string"
           },
@@ -2976,6 +3087,7 @@
                 "type": "null"
               }
             ],
+            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
             "title": "Transport Protocol"
           }
         },
@@ -2987,7 +3099,16 @@
         "type": "object"
       },
       "McpServerDetail": {
-        "description": "An MCP server's detail, including its tools.",
+        "description": "An MCP server, including the tools it offers.",
+        "example": {
+          "description": "Search the public web and read result pages.",
+          "name": "Web Search",
+          "network_types": [
+            "public"
+          ],
+          "server_code": "web-search",
+          "transport_protocol": "STREAMABLE_HTTP"
+        },
         "properties": {
           "description": {
             "anyOf": [
@@ -2998,13 +3119,16 @@
                 "type": "null"
               }
             ],
+            "description": "What the server does; null when the marketplace records none.",
             "title": "Description"
           },
           "name": {
+            "description": "Human-readable server name.",
             "title": "Name",
             "type": "string"
           },
           "network_types": {
+            "description": "Networks the server is reachable from; empty when the marketplace records none.",
             "items": {
               "type": "string"
             },
@@ -3012,10 +3136,12 @@
             "type": "array"
           },
           "server_code": {
+            "description": "Identifier of the MCP server. Use it in the path of the per-server endpoints.",
             "title": "Server Code",
             "type": "string"
           },
           "tools": {
+            "description": "Tools the server exposes. Each entry is the server's own tool definition, whose shape the server decides rather than this API.",
             "items": {
               "additionalProperties": true,
               "type": "object"
@@ -3032,6 +3158,7 @@
                 "type": "null"
               }
             ],
+            "description": "How the server is reached: 'SSE' or 'STREAMABLE_HTTP'. Null when the marketplace does not report one.",
             "title": "Transport Protocol"
           }
         },
@@ -3043,9 +3170,10 @@
         "type": "object"
       },
       "McpTenant": {
-        "description": "An MCP tenant.\n\nNote: an \"MCP tenant\" is a marketplace concept from the upstream MCP Center,\nunrelated to the Avernet data-isolation tenant. The marketplace is a shared\ncatalog — every Avernet tenant sees the same MCP tenants.",
+        "description": "A category grouping in the MCP marketplace.\n\nThe marketplace is a shared catalogue: every caller sees the same groupings,\nwhichever tenant they belong to.",
         "properties": {
           "categories": {
+            "description": "Categories the grouping covers; empty when it records none.",
             "items": {
               "type": "string"
             },
@@ -3053,10 +3181,12 @@
             "type": "array"
           },
           "code": {
+            "description": "Identifier of the grouping.",
             "title": "Code",
             "type": "string"
           },
           "name": {
+            "description": "Human-readable grouping name.",
             "title": "Name",
             "type": "string"
           }
@@ -3204,12 +3334,18 @@
       },
       "NameCheck": {
         "description": "Payload returned by name-availability checks.",
+        "example": {
+          "exists": false,
+          "name": "Quarterly reporter"
+        },
         "properties": {
           "exists": {
+            "description": "True when the name is already taken, so creating with it would be refused.",
             "title": "Exists",
             "type": "boolean"
           },
           "name": {
+            "description": "The name that was checked, in the trimmed form actually compared.",
             "title": "Name",
             "type": "string"
           }
@@ -3383,13 +3519,15 @@
         "type": "object"
       },
       "Passport": {
-        "description": "Agent Passport (identity credential) summary.",
+        "description": "A bot's identity credential.",
         "properties": {
           "bot_id": {
+            "description": "Bot the credential belongs to.",
             "title": "Bot Id",
             "type": "string"
           },
           "passport_id": {
+            "description": "Identifier of the issued credential.",
             "title": "Passport Id",
             "type": "string"
           }
@@ -3402,7 +3540,7 @@
         "type": "object"
       },
       "Preview": {
-        "description": "A resource preview.",
+        "description": "A readable rendering of a resource's content.",
         "properties": {
           "content": {
             "anyOf": [
@@ -3413,9 +3551,11 @@
                 "type": "null"
               }
             ],
+            "description": "The previewed content as text; null when only a preview URL is available.",
             "title": "Content"
           },
           "content_type": {
+            "description": "Media type of the previewed content, e.g. 'text/markdown'.",
             "title": "Content Type",
             "type": "string"
           },
@@ -3428,9 +3568,11 @@
                 "type": "null"
               }
             ],
+            "description": "Where the preview can be fetched instead of being read inline; null when the content is inline.",
             "title": "Preview Url"
           },
           "resource_id": {
+            "description": "Resource this preview is of.",
             "title": "Resource Id",
             "type": "string"
           }
@@ -3443,21 +3585,34 @@
         "type": "object"
       },
       "Resource": {
-        "description": "A resource record (storage location is not exposed).",
+        "description": "A resource record. Where the bytes are stored is not exposed.",
+        "example": {
+          "gmt_create": "2026-07-30T09:00:00+00:00",
+          "gmt_modified": "2026-07-30T09:12:04+00:00",
+          "name": "Q3 notes",
+          "resource_id": "r-8231",
+          "source": "yuque",
+          "type": "link",
+          "url": "https://example.com/docs/q3-notes"
+        },
         "properties": {
           "gmt_create": {
+            "description": "Creation time (ISO 8601); may be empty.",
             "title": "Gmt Create",
             "type": "string"
           },
           "gmt_modified": {
+            "description": "Last-modified time (ISO 8601); may be empty.",
             "title": "Gmt Modified",
             "type": "string"
           },
           "name": {
+            "description": "Resource name. Names are unique among resources of the same kind within the bot, not across the bot as a whole.",
             "title": "Name",
             "type": "string"
           },
           "resource_id": {
+            "description": "Identifier of this resource. Use it in the path of the per-resource endpoints.",
             "title": "Resource Id",
             "type": "string"
           },
@@ -3470,6 +3625,7 @@
                 "type": "null"
               }
             ],
+            "description": "Size in bytes of a file resource; null for anything else.",
             "title": "Size"
           },
           "source": {
@@ -3481,10 +3637,12 @@
                 "type": "null"
               }
             ],
+            "description": "Where a link resource came from; null for anything else.",
             "title": "Source"
           },
           "type": {
-            "$ref": "#/components/schemas/ResourceType"
+            "$ref": "#/components/schemas/ResourceType",
+            "description": "'file' for uploaded bytes, 'link' for an external URL, 'folder' for a container."
           },
           "url": {
             "anyOf": [
@@ -3495,6 +3653,7 @@
                 "type": "null"
               }
             ],
+            "description": "Target URL of a link resource; null for anything else.",
             "title": "Url"
           }
         },
@@ -3509,9 +3668,15 @@
         "type": "object"
       },
       "ResourceCreate": {
-        "description": "Create a resource. ``url`` is required for a link, ``parent_id`` optional.",
+        "description": "Create-a-resource request body.\n\nThis operation creates link resources. Upload a file through the upload\nendpoint instead; folders are not creatable yet, and both are refused here.",
+        "example": {
+          "name": "Q3 notes",
+          "type": "link",
+          "url": "https://example.com/docs/q3-notes"
+        },
         "properties": {
           "name": {
+            "description": "Name for the new resource. A name already in use within the bot is refused with 409.",
             "title": "Name",
             "type": "string"
           },
@@ -3524,10 +3689,12 @@
                 "type": "null"
               }
             ],
+            "description": "Reserved for placing the resource under a folder. Not applied yet — resources are scoped by bot.",
             "title": "Parent Id"
           },
           "type": {
-            "$ref": "#/components/schemas/ResourceType"
+            "$ref": "#/components/schemas/ResourceType",
+            "description": "'file' for uploaded bytes, 'link' for an external URL, 'folder' for a container."
           },
           "url": {
             "anyOf": [
@@ -3538,6 +3705,7 @@
                 "type": "null"
               }
             ],
+            "description": "Target URL. Required for a link resource; omitting it is refused (400).",
             "title": "Url"
           }
         },
@@ -3559,7 +3727,10 @@
         "type": "string"
       },
       "ResourceUpdate": {
-        "description": "Partial update of a resource.",
+        "description": "Partial update of a link resource. Omit a field to leave it unchanged.",
+        "example": {
+          "name": "Q3 notes (final)"
+        },
         "properties": {
           "name": {
             "anyOf": [
@@ -3570,6 +3741,7 @@
                 "type": "null"
               }
             ],
+            "description": "New name; omit to keep.",
             "title": "Name"
           },
           "url": {
@@ -3581,6 +3753,7 @@
                 "type": "null"
               }
             ],
+            "description": "New target URL; omit to keep.",
             "title": "Url"
           }
         },
@@ -3588,33 +3761,54 @@
         "type": "object"
       },
       "Routine": {
-        "description": "A scheduled/triggered task run by an agent.",
+        "description": "A task the bot runs on a trigger.",
+        "example": {
+          "bot_id": "20260810_q5o4c89g",
+          "command": "Summarise last week's commits and post the digest.",
+          "enabled": true,
+          "gmt_create": "2026-07-30T09:00:00+00:00",
+          "gmt_modified": "2026-07-30T09:12:04+00:00",
+          "name": "Monday digest",
+          "routine_id": "rt-4471",
+          "timezone": "Asia/Shanghai",
+          "trigger": {
+            "cron": "0 9 * * 1",
+            "type": "schedule"
+          }
+        },
         "properties": {
           "bot_id": {
+            "description": "Bot that runs this routine.",
             "title": "Bot Id",
             "type": "string"
           },
           "command": {
+            "description": "What the bot is asked to do when the routine fires, written as an instruction to the bot.",
             "title": "Command",
             "type": "string"
           },
           "enabled": {
+            "description": "False while the routine is paused; a disabled routine keeps its schedule but does not fire.",
             "title": "Enabled",
             "type": "boolean"
           },
           "gmt_create": {
+            "description": "Creation time (ISO 8601); may be empty.",
             "title": "Gmt Create",
             "type": "string"
           },
           "gmt_modified": {
+            "description": "Last-modified time (ISO 8601); may be empty.",
             "title": "Gmt Modified",
             "type": "string"
           },
           "name": {
+            "description": "Human-readable routine name.",
             "title": "Name",
             "type": "string"
           },
           "routine_id": {
+            "description": "Identifier of this routine. Use it in the path of the per-routine endpoints.",
             "title": "Routine Id",
             "type": "string"
           },
@@ -3627,10 +3821,12 @@
                 "type": "null"
               }
             ],
+            "description": "Time zone the schedule runs in; null when the routine records none.",
             "title": "Timezone"
           },
           "trigger": {
-            "$ref": "#/components/schemas/ScheduleTrigger"
+            "$ref": "#/components/schemas/ScheduleTrigger",
+            "description": "What makes the routine fire."
           }
         },
         "required": [
@@ -3648,21 +3844,36 @@
       },
       "RoutineCreate": {
         "description": "Create-a-routine request body.",
+        "example": {
+          "bot_id": "20260810_q5o4c89g",
+          "command": "Summarise last week's commits and post the digest.",
+          "enabled": true,
+          "name": "Monday digest",
+          "timezone": "Asia/Shanghai",
+          "trigger": {
+            "cron": "0 9 * * 1",
+            "type": "schedule"
+          }
+        },
         "properties": {
           "bot_id": {
+            "description": "Bot that will run this routine.",
             "title": "Bot Id",
             "type": "string"
           },
           "command": {
+            "description": "What the bot is asked to do when the routine fires, written as an instruction to the bot.",
             "title": "Command",
             "type": "string"
           },
           "enabled": {
             "default": true,
+            "description": "Send false to create the routine paused.",
             "title": "Enabled",
             "type": "boolean"
           },
           "name": {
+            "description": "Human-readable routine name.",
             "title": "Name",
             "type": "string"
           },
@@ -3675,10 +3886,12 @@
                 "type": "null"
               }
             ],
+            "description": "IANA time zone the schedule is interpreted in, e.g. 'Asia/Shanghai'. Defaults to 'Asia/Shanghai' when omitted on create.",
             "title": "Timezone"
           },
           "trigger": {
-            "$ref": "#/components/schemas/ScheduleTrigger"
+            "$ref": "#/components/schemas/ScheduleTrigger",
+            "description": "What makes the routine fire."
           }
         },
         "required": [
@@ -3702,13 +3915,16 @@
                 "type": "null"
               }
             ],
+            "description": "When the run finished (ISO 8601); null when the bot did not report it.",
             "title": "Finished At"
           },
           "routine_id": {
+            "description": "Routine that was executed.",
             "title": "Routine Id",
             "type": "string"
           },
           "run_id": {
+            "description": "Identifier of this execution.",
             "title": "Run Id",
             "type": "string"
           },
@@ -3721,9 +3937,11 @@
                 "type": "null"
               }
             ],
+            "description": "When the run started (ISO 8601); null when the bot did not report it.",
             "title": "Started At"
           },
           "status": {
+            "description": "Outcome of the execution, as reported by the bot. Not a closed set — engines record their own values, so match leniently. The run-now endpoint reports one of completed, failed, or unknown; run history reports whatever the bot recorded.",
             "title": "Status",
             "type": "string"
           }
@@ -3737,7 +3955,13 @@
         "type": "object"
       },
       "RoutineUpdate": {
-        "description": "Partial update of a routine.",
+        "description": "Partial update of a routine. Omit a field to leave it unchanged.",
+        "example": {
+          "trigger": {
+            "cron": "0 8 * * 1",
+            "type": "schedule"
+          }
+        },
         "properties": {
           "command": {
             "anyOf": [
@@ -3748,6 +3972,7 @@
                 "type": "null"
               }
             ],
+            "description": "New command; omit to keep.",
             "title": "Command"
           },
           "enabled": {
@@ -3759,6 +3984,7 @@
                 "type": "null"
               }
             ],
+            "description": "Pause or resume the routine; omit to keep.",
             "title": "Enabled"
           },
           "name": {
@@ -3770,6 +3996,7 @@
                 "type": "null"
               }
             ],
+            "description": "New name; omit to keep.",
             "title": "Name"
           },
           "timezone": {
@@ -3781,6 +4008,7 @@
                 "type": "null"
               }
             ],
+            "description": "New time zone; omit to keep.",
             "title": "Timezone"
           },
           "trigger": {
@@ -3791,7 +4019,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "New trigger; omit to keep."
           }
         },
         "title": "RoutineUpdate",
@@ -3823,15 +4052,21 @@
         ]
       },
       "ScheduleTrigger": {
-        "description": "A schedule trigger. Modeled as a typed nested object so other trigger\nkinds (event, webhook) can be added later without a breaking change.",
+        "description": "What makes a routine fire. Today that is always a schedule.",
+        "example": {
+          "cron": "0 9 * * 1",
+          "type": "schedule"
+        },
         "properties": {
           "cron": {
+            "description": "Standard 5-field cron expression — minute, hour, day-of-month, month, day-of-week. For example '0 9 * * 1' runs at 09:00 every Monday.",
             "title": "Cron",
             "type": "string"
           },
           "type": {
             "const": "schedule",
             "default": "schedule",
+            "description": "Trigger kind. Only 'schedule' exists today.",
             "title": "Type",
             "type": "string"
           }
@@ -3925,7 +4160,11 @@
       },
       "SessionCreate": {
         "additionalProperties": false,
-        "description": "Create-a-session request body.",
+        "description": "Create-a-session request body. Both fields are optional, but the body itself\nis required — send `{}` to create a session with the bot's defaults.",
+        "example": {
+          "model": "openai/gpt-5.3",
+          "title": "Quarterly report"
+        },
         "properties": {
           "model": {
             "anyOf": [
@@ -4030,6 +4269,9 @@
       "SessionUpdate": {
         "additionalProperties": false,
         "description": "Partial update. Omitted fields are left unchanged.",
+        "example": {
+          "title": "Quarterly report (final)"
+        },
         "properties": {
           "model": {
             "anyOf": [
@@ -4060,9 +4302,23 @@
         "type": "object"
       },
       "Skill": {
-        "description": "Public metadata for one Bot-owned Skill.",
+        "description": "One skill owned by a bot.",
+        "example": {
+          "active": true,
+          "category": "reporting",
+          "created_at": "2026-07-30T09:00:00+00:00",
+          "description": "Drafts the quarterly report from meeting notes.",
+          "name": "quarterly-report",
+          "skill_id": "sk-2f19",
+          "tags": [
+            "report",
+            "internal"
+          ],
+          "updated_at": "2026-07-30T09:12:04+00:00"
+        },
         "properties": {
           "active": {
+            "description": "True when the skill is activated for the bot. An uploaded skill starts inactive.",
             "title": "Active",
             "type": "boolean"
           },
@@ -4075,6 +4331,7 @@
                 "type": "null"
               }
             ],
+            "description": "Category the package declares; null when it declares none.",
             "title": "Category"
           },
           "created_at": {
@@ -4090,6 +4347,7 @@
                 "type": "null"
               }
             ],
+            "description": "When the skill was first uploaded (ISO 8601); null when not recorded.",
             "title": "Created At"
           },
           "description": {
@@ -4101,17 +4359,21 @@
                 "type": "null"
               }
             ],
+            "description": "What the skill does; null when the package declares none.",
             "title": "Description"
           },
           "name": {
+            "description": "Skill name, taken from the uploaded package and unique within the bot.",
             "title": "Name",
             "type": "string"
           },
           "skill_id": {
+            "description": "Identifier of this skill. Use it in the path of the per-skill endpoints.",
             "title": "Skill Id",
             "type": "string"
           },
           "tags": {
+            "description": "Tags the package declares; empty when it declares none.",
             "items": {
               "type": "string"
             },
@@ -4131,6 +4393,7 @@
                 "type": "null"
               }
             ],
+            "description": "When the skill was last replaced (ISO 8601); null when not recorded.",
             "title": "Updated At"
           }
         },
@@ -4143,14 +4406,16 @@
         "type": "object"
       },
       "SkillState": {
-        "description": "Result of an idempotent Skill desired-state command.",
+        "description": "Outcome of activating or deactivating a skill.",
         "properties": {
           "changed": {
+            "description": "False when the skill was already in the requested state. The command succeeds either way.",
             "title": "Changed",
             "type": "boolean"
           },
           "skill": {
-            "$ref": "#/components/schemas/Skill"
+            "$ref": "#/components/schemas/Skill",
+            "description": "The skill as it now stands."
           }
         },
         "required": [
@@ -4161,9 +4426,10 @@
         "type": "object"
       },
       "SkillUpload": {
-        "description": "Response for a Skill create or same-name package replacement.",
+        "description": "Outcome of uploading a skill package.",
         "properties": {
           "operation": {
+            "description": "'created' for a new skill, 'updated' when a package of the same name replaced an existing one.",
             "enum": [
               "created",
               "updated"
@@ -4172,7 +4438,8 @@
             "type": "string"
           },
           "skill": {
-            "$ref": "#/components/schemas/Skill"
+            "$ref": "#/components/schemas/Skill",
+            "description": "The skill as it now stands."
           }
         },
         "required": [
@@ -4422,7 +4689,7 @@
         ]
       },
       "post": {
-        "description": "Create a bot (201), or return 202 + a Passport iframe when authorization is needed.\n\nEngine-specific inputs belong in ``BotCreateSpec.extra_properties``, but\nnothing downstream reads that bag yet, so the request model does not expose\nan ``engine_options`` field for it — see :class:`BotCreate`.",
+        "description": "Create a bot.\n\nAnswers 201 with the created bot, or 202 with an authorization page to open\nwhen the bot needs the user to authorize it first — poll the auth-status\nendpoint after that to complete creation.\n\nEngine options are not accepted here; configure them through the\nengine-config endpoints once the bot exists.",
         "operationId": "create_bot_openapi_v1_bots_post",
         "parameters": [
           {
@@ -5102,7 +5369,7 @@
     },
     "/openapi/v1/bots/ceiling": {
       "get": {
-        "description": "Get the caller's bot-creation quota ceiling.\n\nResolved through the same method creation enforces, not\n``PolicyService.get_bots_ceiling`` directly: that one falls back to its own\nhardcoded default of 5, while creation falls back to the configured\n``max_devices_per_entity``. Reading it directly would advertise 5 to a caller\nwhose deployment allows (or rejects at) a different number.",
+        "description": "Get the caller's bot-creation quota ceiling.\n\nThe number creation actually enforces, so a caller that is at the ceiling\ncan tell that from this endpoint rather than from a failed create.",
         "operationId": "get_bots_ceiling_openapi_v1_bots_ceiling_get",
         "parameters": [
           {
@@ -5218,7 +5485,7 @@
     },
     "/openapi/v1/bots/check-name": {
       "get": {
-        "description": "Check whether a bot name is available (within the caller's tenant).\n\nApplies the same rule create and update do, because \"available\" has to mean\n\"you could create this\". ``check_bot_name_exists`` only does a repository\nlookup — it answers ``False`` for a blank or ``@``-bearing name, which would\nreport a name as free that the very next request would reject (400).\nRejecting here instead keeps one answer across the three endpoints.\n\nThe echoed ``name`` is the trimmed form actually checked, so a caller that\nsends ``\" Foo \"`` sees which string the availability applies to.",
+        "description": "Check whether a bot name is available (within the caller's tenant).\n\nApplies the same name rule create and update do, because \"available\" has to\nmean \"you could create this\": a blank name, or one containing `@`, is\nrefused here (400) rather than reported as free and then rejected by the\nvery next request.\n\nThe echoed `name` is the trimmed form actually checked, so a caller that\nsends `\" Foo \"` sees which string the answer applies to.",
         "operationId": "check_bot_name_openapi_v1_bots_check_name_get",
         "parameters": [
           {
@@ -6021,7 +6288,7 @@
     },
     "/openapi/v1/bots/identity/{bot_id}": {
       "get": {
-        "description": "List a bot's identity files and whether each exists.\n\nI2: entity_type/entity_id/operator_id come from the authenticated\nrequest's ``user_id`` parameter (personal bot owner = the named user).",
+        "description": "List a bot's identity files and whether each exists.\n\nEvery possible file is listed, including the ones the bot does not have yet\n— read `exists` to tell them apart.",
         "operationId": "list_bot_identity_files_openapi_v1_bots_identity__bot_id__get",
         "parameters": [
           {
@@ -6146,7 +6413,7 @@
     },
     "/openapi/v1/bots/identity/{bot_id}/{file_type}": {
       "get": {
-        "description": "Read one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``UserIdDep`` (personal bot owner = the named user). I3: ``publish_id`` is\nnot exposed — only draft-device reads (``get_bot_file`` default branch).\nThe service's ``validate_file_type`` requires the physical ``<type>.md``\nform (``VALID_IDENTITY_FILES`` carries the suffix), so the enum value is\nre-suffixed before forwarding.",
+        "description": "Read one identity file of a bot.\n\nName the file by its type — `RULES`, not `RULES.md`. A file the bot does not\nhave yet reads as empty content rather than a 404.",
         "operationId": "get_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__get",
         "parameters": [
           {
@@ -6277,7 +6544,7 @@
         ]
       },
       "put": {
-        "description": "Overwrite one identity file of a bot.\n\nI2: entity params come from the authenticated principal via\n``UserIdDep`` as above; ``validate_file_type`` requires the\n``<type>.md`` form. Returns an ``IdentityFileRef`` (no content echoed).",
+        "description": "Overwrite one identity file of a bot.\n\nThe body replaces the file's whole content; there is no append. Name the\nfile by its type — `RULES`, not `RULES.md`. Writing a file the bot does not\nhave creates it. The content is not echoed back.",
         "operationId": "update_bot_identity_file_openapi_v1_bots_identity__bot_id___file_type__put",
         "parameters": [
           {
@@ -6420,7 +6687,7 @@
     },
     "/openapi/v1/bots/loadtest/hello": {
       "get": {
-        "description": "Answer the constant ``hello world``.\n\nReads nothing and calls nothing, so the response time is the path's, not the\nhandler's.",
+        "description": "Answer the constant \"hello world\".\n\nReads nothing and calls nothing, so the response time is the path's, not the\nhandler's.",
         "operationId": "hello_world_openapi_v1_bots_loadtest_hello_get",
         "responses": {
           "200": {
@@ -7151,7 +7418,7 @@
     },
     "/openapi/v1/bots/mcp/servers": {
       "get": {
-        "description": "List marketplace MCP servers (filter by ``keyword``, paginate).",
+        "description": "List marketplace MCP servers.",
         "operationId": "list_mcp_servers_openapi_v1_bots_mcp_servers_get",
         "parameters": [
           {
@@ -7391,7 +7658,7 @@
     },
     "/openapi/v1/bots/mcp/servers/{server_code}/config": {
       "get": {
-        "description": "Read the caller's unified config for an MCP server (``api_key`` masked).\n\nA server the caller has never configured is not an error — it returns\n``has_config: false`` with defaults.",
+        "description": "Read the caller's configuration for an MCP server.\n\nThe stored API key is always returned masked, never in full. A server the\ncaller has never configured is not an error — it answers with defaults and\n`has_config: false`.",
         "operationId": "get_mcp_config_openapi_v1_bots_mcp_servers__server_code__config_get",
         "parameters": [
           {
@@ -7649,7 +7916,7 @@
     },
     "/openapi/v1/bots/mcp/servers/{server_code}/permissions": {
       "get": {
-        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's own permission. The identity is the request's required\n``user_id``, and it is refused unless it names the verified caller — so this\nstill cannot be pointed at someone else to probe their grants, which is the\nproperty the internal route's free-form ``user_id`` query param does not\nhave. The parameter states whose permission is being asked about; it does\nnot widen whose it may be.\n\n**Fail-open, by decision (spec Open Question 1).** When the marketplace\nlookup errors, ``check_mcp_permission_detail`` reports the caller *as\npermitted*. This surface preserves that rather than failing closed: the\nendpoint is advisory — the MCP server itself is the enforcement point — so a\nwrong \"yes\" during an upstream outage costs one failed call, whereas failing\nclosed would make a marketplace outage look like a permission revocation.",
+        "description": "Report the caller's own permission for an MCP server.\n\nAlways the caller's own: naming another user in `user_id` is refused, so\nthis cannot be used to probe someone else's grants.\n\nThe answer is **advisory** — the MCP server itself is the enforcement point.\nWhile the marketplace is unreachable this reports access as permitted rather\nthan denied, so an upstream outage costs one failed call instead of looking\nlike a revoked permission.",
         "operationId": "check_mcp_permission_openapi_v1_bots_mcp_servers__server_code__permissions_get",
         "parameters": [
           {
@@ -8420,7 +8687,7 @@
         ]
       },
       "post": {
-        "description": "Create a resource (file placeholder, link, or folder).\n\nPhase 1: only LINK supported. FILE → use POST /upload (Phase 3);\nFOLDER → create_directory (Phase 3, device_fs branch). Duplicate name\nsurfaces as ValueError from the service → 409 Conflict (legacy parity).",
+        "description": "Create a link resource.\n\nOnly `link` resources are created here, and `url` is required for them. Send\na file's bytes to the upload endpoint instead (400); folders are not\ncreatable yet (501). A name already used within the bot is refused (409).",
         "operationId": "create_resource_openapi_v1_bots_resources_post",
         "parameters": [
           {
@@ -8557,7 +8824,7 @@
     },
     "/openapi/v1/bots/resources/check-name": {
       "get": {
-        "description": "Check whether a resource name is available.\n\n``user_id`` is the request's own required parameter, forwarded to the\nservice — the wiring the older note here said was still pending.\n``parent_path`` and ``exclude_id`` from the legacy signature remain\nunexposed on this contract and are passed as None: resources are bot-scoped,\nso there is no parent path to qualify the name with.",
+        "description": "Check whether a resource name is in use within the bot.\n\nPass the `type` you are asking about; omitting it asks about a file name.\n\n**Not a reliable preflight for creating a link.** A `link` here is checked\nagainst a different set of records than the one link creation writes to, so\na name this endpoint reports as free can still be refused by create with\n409. Treat create's answer as the authoritative one and handle the 409;\nthis endpoint is dependable for files.",
         "operationId": "check_resource_name_openapi_v1_bots_resources_check_name_get",
         "parameters": [
           {
@@ -8709,7 +8976,7 @@
     },
     "/openapi/v1/bots/resources/upload": {
       "post": {
-        "description": "Upload a file's raw bytes as a new resource.\n\ndevice_fs is resolved per-bot; upload_file is async and raises\nDuplicateResourceError on duplicate name → 409 (via @envelope_errors).\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router.",
+        "description": "Upload a file's raw bytes as a new resource.\n\nThe body is the file itself, not a form: send the bytes with\n`Content-Type: application/octet-stream` and name the resource with the\n`name` query parameter. A name already used within the bot is refused (409).",
         "operationId": "upload_resource_openapi_v1_bots_resources_upload_post",
         "parameters": [
           {
@@ -8750,6 +9017,7 @@
             "application/octet-stream": {
               "schema": {
                 "contentMediaType": "application/octet-stream",
+                "description": "The file's raw bytes, sent as the whole request body. This is not a multipart form upload — send the bytes unwrapped, with Content-Type: application/octet-stream.",
                 "title": "Content",
                 "type": "string"
               }
@@ -8857,7 +9125,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}": {
       "delete": {
-        "description": "Delete a resource (file → device FS, link/folder → DB soft-delete).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed. device_fs is resolved per-bot ONLY for FILE resources — a\nlink/folder soft-delete never touches device_fs, so it must not fail on an\nunbound bot (``resolve_for_bot`` raises DeviceNotBoundError when there is no\nbinding). The injected deps (factory, resolver, device_fs_dispatcher) stay\nout of the served OpenAPI schema — see test_public_namespace.py.",
+        "description": "Delete a resource.\n\nDeleting a file removes its bytes from the bot's device; deleting a link or\nfolder removes the record. The bot must have a device bound either way (409\notherwise).",
         "operationId": "delete_resource_openapi_v1_bots_resources__resource_id__delete",
         "parameters": [
           {
@@ -9125,7 +9393,7 @@
         ]
       },
       "put": {
-        "description": "Update a resource (link rename / url change).\n\nPhase 3a: link only; ``link_type`` is intentionally not exposed on the\nopenapi contract. ValueError from the service (not found / url clash)\n→ 409 Conflict, per legacy + create parity.",
+        "description": "Rename a link resource or change its target URL.\n\nLink resources only. A name or URL already used within the bot is refused\n(409).",
         "operationId": "update_resource_openapi_v1_bots_resources__resource_id__put",
         "parameters": [
           {
@@ -9271,7 +9539,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}/download": {
       "get": {
-        "description": "Download a resource's bytes (raw, not enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up — only a file has bytes, but the\nhandler can't tell the type before the service reads the row). Service\nreturns ``(bytes, mime)`` or ``None`` → 404.",
+        "description": "Download a file resource's bytes.\n\nThe response is the raw bytes with the resource's own media type — this is\nthe one endpoint on this surface that does not wrap its answer in the\nstandard envelope. A resource with no bytes to serve answers 404.",
         "operationId": "download_resource_openapi_v1_bots_resources__resource_id__download_get",
         "parameters": [
           {
@@ -9406,7 +9674,7 @@
     },
     "/openapi/v1/bots/resources/{resource_id}/preview": {
       "get": {
-        "description": "Get a resource preview (text-ified content, enveloped).\n\nowner_id comes from the request's ``user_id`` parameter (``UserIdDep``),\nfail-closed — mirroring the bots router. device_fs is resolved per-bot\n(unconditional today; see #4 follow-up). FileTooLargeError (content > 1 MB)\n→ 413 via @envelope_errors; a None result is not-found / not-a-file /\nread-failure → 404.",
+        "description": "Get a readable preview of a resource's content.\n\nContent over 1 MB is refused (413) rather than truncated. A resource that\ncannot be previewed answers 404.",
         "operationId": "preview_resource_openapi_v1_bots_resources__resource_id__preview_get",
         "parameters": [
           {
@@ -9542,7 +9810,7 @@
     },
     "/openapi/v1/bots/routines": {
       "get": {
-        "description": "List routines (filter + paginate).\n\n``status`` is an openapi query hint with no direct field on ``Routine``\n(which only carries ``enabled``). It is currently a no-op: the adapter\ndoes not expose a status filter at the list seam, so we return the full\nset and let the client filter on ``enabled``. Wire a server-side filter\nhere only if/when the engine surfaces a status dimension.",
+        "description": "List a bot's routines.\n\nThe `status` parameter is accepted but not applied yet — the full set is\nreturned whatever it says. Filter on each routine's `enabled` field instead.",
         "operationId": "list_routines_openapi_v1_bots_routines_get",
         "parameters": [
           {
@@ -9708,7 +9976,7 @@
         ]
       },
       "post": {
-        "description": "Create a routine.\n\nTranslates the openapi ``RoutineCreate`` body into the engine adapter\ncron body shape: ``schedule`` is the raw cron expression STRING (not\nthe nested ``{kind,expr,tz}`` dict — the adapter wraps it on read in\n``device_adapter_transport._build_item``), and ``timezone`` defaults\nto ``Asia/Shanghai`` to match legacy ``cron/router.py``'s create path.",
+        "description": "Create a routine.\n\nThe bot is named in the body rather than the path. A routine with no\n`timezone` is scheduled in Asia/Shanghai.",
         "operationId": "create_routine_openapi_v1_bots_routines_post",
         "parameters": [
           {
@@ -9834,7 +10102,7 @@
     },
     "/openapi/v1/bots/routines/{routine_id}": {
       "delete": {
-        "description": "Delete a routine.\n\nC3: ``bot_id`` is a required query (path carries only ``routine_id``).\n``delete_cron`` only operates on the draft stage; a published-stage delete\nraises ``CronRelayError`` (error_code 403), mapped here (the code is dynamic\nper-raise, so not in the static ``ENVELOPE_ERRORS`` map). A failed draft\ndelete is NOT surfaced as ``200 {deleted: false}`` — a missing routine_id\nmaps to 404 and a relay timeout to 502. The engine result distinguishes the\ntwo only via its ``error`` text today; a structured engine ``error_code``\nwould make timeout-vs-missing precise (follow-up).",
+        "description": "Delete a routine.\n\n`bot_id` is a required query parameter, as on the read. A failed delete is\nnever reported as a success: an unknown routine answers 404 and an\nunreachable bot 502.",
         "operationId": "delete_routine_openapi_v1_bots_routines__routine_id__delete",
         "parameters": [
           {
@@ -9966,7 +10234,7 @@
         ]
       },
       "get": {
-        "description": "Get a routine.\n\nC3: the path carries only ``routine_id`` (no routine table to\nreverse-map to a bot), so ``bot_id`` is a required query. Owner\nidentity comes from the authenticated principal via\n``UserIdDep``. Missing/non-dict ``data`` collapses to 404.",
+        "description": "Get a routine.\n\n`bot_id` is a required query parameter: routines are stored on the bot, so a\nroutine id alone does not say which bot to ask.",
         "operationId": "get_routine_openapi_v1_bots_routines__routine_id__get",
         "parameters": [
           {
@@ -10098,7 +10366,7 @@
         ]
       },
       "patch": {
-        "description": "Update a routine (partial).\n\nC3: ``bot_id`` is a required query (see ``get_routine``). Partial\nupdate: only set fields flow to the adapter. ``trigger.cron`` becomes\na raw ``schedule`` STRING (not a ``{kind,expr,tz}`` dict — the adapter\nwraps it on read; Task 3 contract). Missing/non-dict ``data`` on the\nresponse collapses to 404.",
+        "description": "Update a routine. Omitted fields are left unchanged.\n\n`bot_id` is a required query parameter, as on the read.",
         "operationId": "update_routine_openapi_v1_bots_routines__routine_id__patch",
         "parameters": [
           {
@@ -10242,7 +10510,7 @@
     },
     "/openapi/v1/bots/routines/{routine_id}/run": {
       "post": {
-        "description": "Run a routine now.\n\nC3: ``bot_id`` is a required query. ``run_cron`` returns\n``{\"success\":..,\"data\":{\"ok\":..,\"ran\":..,\"reason\":..}}`` — no run_id, no\ntimestamps. We synthesize ``run_id`` from ``routine_id`` + the handler's\nUTC trigger timestamp (uniqueness is good enough for an immediate-trigger\necho; the engine has no run_id to return). ``status`` is derived from\n``ran``/``reason``: completed | failed | unknown. ``started_at`` /\n``finished_at`` are None because the adapter doesn't surface them on the\nrun-trigger seam (use ``GET /{routine_id}/runs`` for actual timestamps).",
+        "description": "Run a routine now, without waiting for its trigger.\n\n`bot_id` is a required query parameter, as on the read. The `status` here is\none of completed, failed, or unknown — narrower than the values run history\nreports. No timestamps are carried; read the run history for those.",
         "operationId": "run_routine_openapi_v1_bots_routines__routine_id__run_post",
         "parameters": [
           {
@@ -10376,7 +10644,7 @@
     },
     "/openapi/v1/bots/routines/{routine_id}/runs": {
       "get": {
-        "description": "List a routine's execution history.\n\nC3: ``bot_id`` is a required query. ``get_cron_runs`` returns\n``{\"success\":..,\"data\":{\"runs\":[{job_id, started_at_ms, finished_at_ms,\nstatus, ...}]}}`` in draft mode (``_forward_single_stage_request``\npassthrough; ``_decorate_single_result`` only adds bot_metadata fields to\n``data``, leaving ``runs`` intact). We map each entry via ``_map_run``\nand paginate client-side.",
+        "description": "List a routine's execution history.\n\n`bot_id` is a required query parameter, as on the read.",
         "operationId": "list_routine_runs_openapi_v1_bots_routines__routine_id__runs_get",
         "parameters": [
           {
@@ -12113,7 +12381,7 @@
     },
     "/openapi/v1/bots/skills/upload": {
       "post": {
-        "description": "Create one inactive Local Skill from a complete raw ZIP package.",
+        "description": "Upload a skill package.\n\nThe body is the ZIP itself, not a form: send the bytes with\n`Content-Type: application/zip`. The skill is created **inactive** —\nactivate it separately. A package whose name matches an existing skill\nreplaces it and answers 200 instead of 201.",
         "operationId": "upload_skill_openapi_v1_bots_skills_upload_post",
         "parameters": [
           {
@@ -12163,6 +12431,7 @@
             "application/zip": {
               "schema": {
                 "contentMediaType": "application/octet-stream",
+                "description": "The skill package's raw ZIP bytes, sent as the whole request body. This is not a multipart form upload — send the bytes unwrapped, with Content-Type: application/zip.",
                 "title": "Package",
                 "type": "string"
               }
@@ -13039,7 +13308,7 @@
         ]
       },
       "put": {
-        "description": "Update a bot's name/description (engine is fixed at creation).\n\n``cluster_name`` is engine-derived and the engine is immutable, so it is not\nupdatable here; ``engine_options`` is managed via the engine-config\nendpoints. Neither is accepted — see :class:`BotUpdate`.",
+        "description": "Update a bot's name and description.\n\nThose are the only two attributes this operation changes. The engine is\nfixed at creation and the cluster is derived from it, so neither is\nupdatable; engine options are managed through the engine-config endpoints.\nSending any of them is refused (422).",
         "operationId": "update_bot_openapi_v1_bots__bot_id__put",
         "parameters": [
           {
@@ -13174,7 +13443,7 @@
     },
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
-        "description": "Poll Passport authorization; complete creation when ISSUED.\n\nOn the async-create flow the bot is only actually created here (on ISSUED),\nso the caller must re-supply the attributes it created with — passed as\noptional query params and forwarded to completion. Without them the bot\nwould be created with defaults (e.g. engine ``openclaw``) that contradict the\nPassport applied for at ``POST`` time, so callers on the 202 flow should\nalways echo back ``engine``/``cluster_name``/``bot_name``/… here.\n\nBecause this is where the record is actually inserted, every restriction\n``POST`` enforces is re-applied to the echoed-back values: the same engine\nregistry check, the same engine/cluster bijection, and the same\npersonal|service restriction on ``bot_type``. Otherwise the completion path\nwould be a way to create exactly the bots ``POST`` rejects.",
+        "description": "Poll a pending authorization, and finish creating the bot once it is issued.\n\nOn the authorization flow the bot record is created **here**, not at create\ntime, so echo back the attributes you asked to create it with — `engine`,\n`cluster_name`, `bot_name`, `bot_desc`, `bot_type` — as query parameters.\nOmitting them creates the bot with defaults that may contradict what the\nauthorization was granted for.\n\nEvery restriction the create endpoint applies is re-applied to the values\nechoed here, so this path cannot be used to create a bot create itself would\nrefuse.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {
@@ -13387,7 +13656,7 @@
     },
     "/openapi/v1/bots/{bot_id}/engine-config": {
       "get": {
-        "description": "Read a bot's engine configuration (free-form JSON).",
+        "description": "Read a bot's engine configuration.\n\nThe configuration is a free-form JSON object whose keys are defined by the\nbot's engine, not by this API — read it before writing to see the shape the\nbot's engine uses. An unconfigured bot answers with an empty object.",
         "operationId": "get_bot_engine_config_openapi_v1_bots__bot_id__engine_config_get",
         "parameters": [
           {
@@ -13510,7 +13779,7 @@
         ]
       },
       "put": {
-        "description": "Write a bot's engine configuration (free-form JSON).",
+        "description": "Replace a bot's engine configuration.\n\nThe body is a free-form JSON object whose keys are defined by the bot's\nengine, not by this API — which is why no schema is published for it. It\n**replaces** the stored configuration rather than merging into it, so read\nthe current configuration first and send it back with your changes applied.\nThe stored configuration is echoed back on success.",
         "operationId": "update_bot_engine_config_openapi_v1_bots__bot_id__engine_config_put",
         "parameters": [
           {
@@ -13540,6 +13809,13 @@
             "application/json": {
               "schema": {
                 "additionalProperties": true,
+                "description": "Engine configuration object. Keys are defined by the bot's engine; read the current configuration to see the shape it uses.",
+                "examples": [
+                  {
+                    "model": "openai/gpt-5.3",
+                    "permission_mode": "on-miss"
+                  }
+                ],
                 "title": "Body",
                 "type": "object"
               }
