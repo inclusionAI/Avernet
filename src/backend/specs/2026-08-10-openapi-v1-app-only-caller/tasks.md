@@ -545,12 +545,9 @@ regression tests.
 3. **A grant could outlive the bot it was made on.** The deletion sweep commits
    and the deletion then spends time in the device release and the Passport
    destruction, so a grant made in that window landed after the sweep read and
-   survived. Closed by a second sweep after the soft delete rather than by
-   locking: the window has a hard end, because once `is_delete = 1` every path
-   the delegation gate resolves a bot through filters it out, so no further
-   grant can be created. The second sweep is best-effort — the bot is already
-   gone, and an orphan row grants nothing, since every read filters by
-   liveness and every request re-adjudicates.
+   survived. A second sweep after the soft delete catches what landed there.
+   The first attempt at this justified the sweep as *closing* the race, which
+   was wrong — see the next entry.
 
 4. **The deletion race was narrowed, not closed, and the first attempt claimed
    otherwise.** The second sweep above was justified with "once the soft delete

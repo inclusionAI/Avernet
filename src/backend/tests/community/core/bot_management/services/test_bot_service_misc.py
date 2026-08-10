@@ -449,11 +449,14 @@ class TestDeleteBot:
         release and the Passport destruction. A collaborator granting in there
         inserts a row after the sweep read, and it would outlive the bot.
 
-        No lock closes this — the second sweep does, because the window has a
-        hard end: once the soft delete commits, every path the delegation gate
-        uses to resolve a bot filters ``is_delete == 0``, so no further grant
-        can be created. Sweeping again after that commit catches everything the
-        window admitted, and nothing can arrive behind it.
+        The second sweep catches what landed in that window. It does **not**
+        close the race — an earlier version of this docstring claimed it did,
+        on the grounds that no grant can be created once the soft delete
+        commits. That is wrong: the ``is_delete == 0`` filters guard the
+        delegation gate's *resolution*, early in the request, while the row is
+        written later, so a request that already resolved can still insert
+        behind this sweep. The grant path's own liveness recheck bounds the
+        remainder; see ``GrantBotNotLiveError``.
         """
         svc = _make_service()
         grants = MagicMock()

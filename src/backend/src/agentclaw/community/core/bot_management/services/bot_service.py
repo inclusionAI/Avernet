@@ -3551,14 +3551,23 @@ class BotService:
         granting in that window inserts a row *after* the sweep read, and it
         would outlive the bot.
 
-        **No lock is needed to close it**, because the window has a hard end
-        rather than a fuzzy one: once ``soft_delete_by_owner`` commits, no
-        further grant can be created at all. Every way the delegation gate
-        resolves a bot — ``get_by_id_and_owner``, ``get_unique_by_id``, and the
-        reachability query behind the ambiguous-id resolve — filters
-        ``is_delete == 0``, so a caller can no longer name this bot to grant on.
-        Sweeping once more after that commit therefore catches everything the
-        window could have admitted, and nothing can arrive behind it.
+        **This narrows the window; it does not close it, and an earlier
+        revision of this docstring wrongly claimed it did.** The claim was that
+        once ``soft_delete_by_owner`` commits no further grant can be created,
+        because every way the delegation gate resolves a bot filters
+        ``is_delete == 0``. Those filters are real, but they guard *resolution*,
+        which happens early in the request — the row is written later, in
+        ``BotAppGrantService.grant``. A request that had already resolved the
+        bot can still insert behind this sweep.
+
+        What remains is bounded on the other side by
+        :class:`~...bot_app_grant.errors.GrantBotNotLiveError`: the grant path
+        rechecks liveness at the write, so the surviving gap is between that
+        check and its insert rather than the whole request. Closing even that
+        would mean locking the bot row across every grant write, to prevent a
+        row that grants nothing — every read filters bots by liveness, and every
+        request re-adjudicates against a bot that cannot be resolved. Hygiene,
+        not the boundary. The boundary is that nothing is trusted from the row.
 
         **Failures propagate, like the first sweep.** An earlier revision made
         this best-effort, reasoning that the bot is already deleted so raising
