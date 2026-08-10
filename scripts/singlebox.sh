@@ -778,6 +778,23 @@ main() {
     export BCN_PLUGIN_VERSION
     export SINGLEBOX_COMMAND="${command:-}"
 
+    # Guard: 在容器内，拒绝执行 stop/restart/clean。
+    # 容器里整个 BCS stack 由容器入口（PID 1）托管；从容器内部（如 bot exec session）
+    # 执行 stop/restart 会停掉 BCS 但无法可靠重启（bot exec 的 start 无法重新 onboard
+    # 整个 stack），导致 BCS 不可达、用户无法登录。
+    # 用 /.dockerenv 识别容器环境；OCB_LIFECYCLE_OWNER=entrypoint 放行容器入口自身的
+    # 生命周期调用（供将来容器入口改用 ocb-entrypoint.sh 时优雅 stop）。
+    # 宿主开发机无 /.dockerenv，不受影响。
+    if [ -f /.dockerenv ] \
+        && [ "${OCB_LIFECYCLE_OWNER:-}" != "entrypoint" ] \
+        && [[ "${command:-}" == "stop" || "${command:-}" == "restart" || "${command:-}" == "clean" ]]; then
+        log_error "Refusing 'singlebox.sh ${command}' inside a container."
+        log_error "The BCS stack is owned by the container entrypoint (PID 1); stop/restart/clean"
+        log_error "from inside the container (e.g. a bot exec session) cannot reliably bring it back."
+        log_error "Restart the whole stack on the host:  docker restart <container>"
+        exit 1
+    fi
+
     case "$command" in
         setup|start|restart|"")
             if singlebox_model_config_required_for_services "${services[@]}"; then

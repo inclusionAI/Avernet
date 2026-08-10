@@ -38,11 +38,11 @@ cleanup() {
   if [ -n "${frontend_pid:-}" ]; then
     kill "${frontend_pid}" 2>/dev/null || true
   fi
-  ./scripts/singlebox.sh stop bcs >/dev/null 2>&1 || true
+  OCB_LIFECYCLE_OWNER=entrypoint ./scripts/singlebox.sh stop bcs >/dev/null 2>&1 || true
 }
 trap cleanup INT TERM EXIT
 
-./scripts/singlebox.sh --local --bcs-env local --bcs-auto-onboard start bcs
+OCB_LIFECYCLE_OWNER=entrypoint ./scripts/singlebox.sh --bcs-env local --bcs-auto-onboard start bcs
 ./scripts/singlebox.sh status bcs || true
 
 export FRONTEND_PORT="${FRONTEND_PORT:-8000}"
