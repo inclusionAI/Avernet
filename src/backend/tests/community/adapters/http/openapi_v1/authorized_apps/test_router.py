@@ -30,6 +30,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     require_principal,
     require_user_and_app_principal,
 )
+from agentclaw.community.api.bot_app_grant_service import (
+    BotAppGrantServiceProtocol,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.base import Base
 from agentclaw.community.core.bot_app_grant.models import (
@@ -147,7 +150,7 @@ def _build(grants, bots, caller):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bots)
-            binder.bind(BotAppGrantService, to=grants)
+            binder.bind(BotAppGrantServiceProtocol, to=grants)
 
     app = FastAPI()
     app.include_router(router)
@@ -164,14 +167,17 @@ def client(grants, bots):
     return user_scoped_client(_build(grants, bots, _caller()), OWNER)
 
 
-def _ok(resp, code=200000):
+def _ok(resp, code=200000, status=200):
     """Assert a success envelope and return its payload.
 
-    The surface answers HTTP 200 and carries the real status in the envelope's
-    ``code`` — a creation is ``201000`` with an HTTP 200, not an HTTP 201.
+    Both halves are checked. The surface carries a per-operation code in the
+    envelope (``201000`` for a creation) **and** sets the matching HTTP status,
+    as every other creation route on this surface does — ``created()`` only
+    supplies the envelope half, so the route must declare ``status_code=201``
+    itself.
     """
     body = resp.json()
-    assert resp.status_code == 200, body
+    assert resp.status_code == status, body
     assert body["code"] == code, body
     return body["data"]
 
@@ -183,7 +189,7 @@ def test_grant_reads_app_from_principal_not_from_request(client, sessions):
     a grant can name is the one whose credential is on the call. A body that
     tries to say otherwise is ignored, not honoured.
     """
-    data = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={"app_id": 999}), 201000)
+    data = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={"app_id": 999}), 201000, 201)
 
     assert data["app_id"] == APP_ID
     assert data["app_name"] == APP_NAME
@@ -192,8 +198,8 @@ def test_grant_reads_app_from_principal_not_from_request(client, sessions):
 
 
 def test_grant_is_idempotent_over_http(client, sessions):
-    first = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}), 201000)
-    second = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}), 201000)
+    first = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}), 201000, 201)
+    second = _ok(client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}), 201000, 201)
 
     assert first["granted_at"] == second["granted_at"]
     with sessions() as session:

@@ -64,9 +64,11 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope_errors,
     page,
 )
+from agentclaw.community.api.bot_app_grant_service import (
+    BotAppGrantServiceProtocol,
+)
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_app_grant.models import BotAppGrantRecord
-from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
 from agentclaw.community.core.gateway_principal import PrincipalType
 from agentclaw.community.di import Injected
 
@@ -130,7 +132,12 @@ def _to_authorized_bot(record: BotAppGrantRecord) -> AuthorizedBot:
     return AuthorizedBot(bot_id=record.bot_id, granted_at=record.gmt_create)
 
 
-@router.post("", response_model=Envelope[AuthorizedApp], responses=USER_SCOPED_403)
+@router.post(
+    "",
+    status_code=201,
+    response_model=Envelope[AuthorizedApp],
+    responses=USER_SCOPED_403,
+)
 @envelope_errors
 async def grant_authorized_app(
     bot_id: BotIdPath,
@@ -138,7 +145,7 @@ async def grant_authorized_app(
     owner_id: UserIdDep,
     principal: UserAndAppDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    grants: BotAppGrantService = Injected(BotAppGrantService),
+    grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[AuthorizedApp]:
     """Authorize the calling application to reach this bot.
 
@@ -166,7 +173,7 @@ async def list_authorized_apps(
     owner_id: UserIdDep,
     principal: PrincipalDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    grants: BotAppGrantService = Injected(BotAppGrantService),
+    grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Page[AuthorizedApp]]:
     """The owner's view — which applications can reach this bot."""
     del principal  # authority comes from the owner-scoped bot read below
@@ -187,7 +194,7 @@ async def revoke_authorized_app(
     principal: PrincipalDep,
     app_id: int = Path(ge=1),
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
-    grants: BotAppGrantService = Injected(BotAppGrantService),
+    grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Deleted]:
     """Withdraw an application's authorization for this bot.
 
@@ -210,7 +217,7 @@ async def list_authorized_bots(
     request: Request,
     owner_id: UserIdDep,
     principal: UserAndAppDep,
-    grants: BotAppGrantService = Injected(BotAppGrantService),
+    grants: BotAppGrantServiceProtocol = Injected(BotAppGrantServiceProtocol),
 ) -> Envelope[Page[AuthorizedBot]]:
     """The application's view — which of this owner's bots may it reach.
 
