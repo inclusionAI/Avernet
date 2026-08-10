@@ -45,6 +45,13 @@ class ConfigKey(StrEnum):
     # Database
     PLUGIN_DATABASE = "plugins.database.plugin_database"
     DATABASE_URL = "plugins.database.database_url"
+    CREATE_SCHEMA = "plugins.database.create_schema"
+    SEED_DATA = "plugins.database.seed_data"
+    MARIADB_HOST = "plugins.database.mariadb_host"
+    MARIADB_PORT = "plugins.database.mariadb_port"
+    MARIADB_DATABASE = "plugins.database.mariadb_database"
+    MARIADB_USER = "plugins.database.mariadb_user"
+    MARIADB_PASSWORD = "plugins.database.mariadb_password"
 
     # Bot service (ClawBotService + BaasBotService)
     BOT_SERVICE_PROXY_BASE_URL = "bot_service.proxy_base_url"
@@ -136,6 +143,11 @@ class EnvVar(StrEnum):
 
     ENV_PLUGIN_DATABASE = "PLUGIN_DATABASE"
     DATABASE_URL = "DATABASE_URL"
+    MARIADB_HOST = "MARIADB_HOST"
+    MARIADB_PORT = "MARIADB_PORT"
+    MARIADB_DATABASE = "MARIADB_DATABASE"
+    MARIADB_USER = "MARIADB_USER"
+    MARIADB_PASSWORD = "MARIADB_PASSWORD"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -180,11 +192,23 @@ class SandboxPluginConfig(BaseSettings):
 
 
 class DatabasePluginConfig(BaseSettings):
-    """Database plugin selection — SQLITE_ORM by default (community-safe)."""
+    """Database plugin selection — SQLITE_ORM by default (community-safe).
+
+    ``MARIADB_ORM`` requires the ``mariadb_*`` connection fields (host, port,
+    database, user, password) or a ``database_url``. Credentials may be
+    supplied via environment variables (see ``EnvVar``).
+    """
 
     model_config = _CFG
     plugin_database: str = Field(default="SQLITE_ORM")
     database_url: str = ""
+    create_schema: bool = Field(default=False)
+    seed_data: bool = Field(default=False)
+    mariadb_host: str = "127.0.0.1"
+    mariadb_port: int = Field(default=3306)
+    mariadb_database: str = ""
+    mariadb_user: str = ""
+    mariadb_password: str = ""
 
 
 class PluginConfig(ConfigSchema):
@@ -407,6 +431,13 @@ class DatabaseConfig:
 
     plugin_type: PluginDatabaseType
     db_url: str = ""
+    create_schema: bool = False
+    seed_data: bool = False
+    mariadb_host: str = "127.0.0.1"
+    mariadb_port: int = 3306
+    mariadb_database: str = ""
+    mariadb_user: str = ""
+    mariadb_password: str = ""
 
 
 def init_container_config(container: "ApplicationContainer") -> None:

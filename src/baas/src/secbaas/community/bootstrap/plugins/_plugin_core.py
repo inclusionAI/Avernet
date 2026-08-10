@@ -26,7 +26,8 @@ from secbaas.community.plugins.bot_service import (
     StubBotServicePlugin,
 )
 from secbaas.community.plugins.cache.stub import StubCachePlugin
-from secbaas.community.plugins.database.stub.sqlite_orm import SqliteOrmPlugin
+from secbaas.community.plugins.database.mariadb.mariadb_orm import MariaDbOrmPlugin
+from secbaas.community.plugins.database.sqlite.sqlite_orm import SqliteOrmPlugin
 from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
 from secbaas.community.plugins.sandbox.arca import StubArcaSandboxPlugin
 from secbaas.community.plugins.sandbox.arca.local_proc import (
@@ -64,6 +65,7 @@ class PluginContainer(containers.DeclarativeContainer):
     plugin_database = providers.Selector(
         config.plugins.database.plugin_database,
         SQLITE_ORM=providers.Singleton(SqliteOrmPlugin),
+        MARIADB_ORM=providers.Singleton(MariaDbOrmPlugin),
     )
 
     secret_plugin = providers.Selector(
