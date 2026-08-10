@@ -253,10 +253,17 @@ class PathRewrite:
 
 @dataclass(frozen=True)
 class SchemaSource:
-    """Where a domain's published OpenAPI description is read from."""
+    """Where a domain's published OpenAPI description is read from.
 
-    source: str  # "file" (single-box) | "object_store" (any deployed edition)
-    location: str  # file path or object-store URL
+    ``source`` names the reader; ``location`` is the address that reader
+    understands, and parsing takes it from the key belonging to that source —
+    ``path`` for ``file``, ``url`` for the remote ones. The two are not
+    interchangeable: a ``path`` is resolved against the config directory, and
+    handing one to a remote reader produces a fetch that can never succeed.
+    """
+
+    source: str  # "file" (single-box) | "http" | "object_store" (deployed)
+    location: str  # config-relative file path, or the URL to fetch
     refresh_seconds: int = _DEFAULT_REFRESH_SECONDS
 
 
@@ -405,6 +412,11 @@ _SERVER_KEYS = frozenset({"base_url"})
 _REWRITE_KEYS = frozenset({"from", "to"})
 _SCHEMA_KEYS = frozenset({"source", "path", "url", "refresh_seconds"})
 
+#: The one schema source read from the local filesystem. Its location is a
+#: ``path``, resolved against the config directory; every other source names a
+#: remote document and takes a ``url``.
+_FILE_SOURCE = "file"
+
 
 def _reject_unknown_keys(
     what: str, spec: dict[str, Any], allowed: frozenset[str]
@@ -449,6 +461,7 @@ def _parse_domains(
     domains: dict[str, Domain] = {}
     for name, raw_spec in raw.items():
         spec = cast("dict[str, Any]", raw_spec or {})
+        _reject_nested_domain(name, spec)
         _reject_unknown_keys(f"domain {name!r}", spec, _DOMAIN_KEYS)
         server_name = str(spec.get("server", ""))
         server = servers.get(server_name)
@@ -467,6 +480,40 @@ def _parse_domains(
         )
     _reject_ambiguous(domains)
     return domains
+
+
+def _reject_nested_domain(name: str, spec: dict[str, Any]) -> None:
+    """Refuse a domain block with another domain indented inside it.
+
+    YAML has no way to tell that a block was meant as a sibling: a domain
+    written one level too deep simply becomes a *key* of the domain above it,
+    and the file still parses. The result is silent and asymmetric — the nested
+    domain claims no paths at all, while the one that swallowed it keeps
+    working — so nothing about the running gateway points at the mistake.
+
+    :func:`_reject_unknown_keys` already refuses the key, which is what turns
+    this into a boot failure rather than a missing route. But it reports a
+    misspelling, and the reader goes looking for a typo in a name that is
+    spelled correctly; the fault is the indentation and the fix is invisible
+    from that message. So the domain-shaped case is named for what it is.
+
+    The signal is deliberately narrow: the value must be a mapping whose keys
+    are all domain keys, which no misspelling of ``schema`` or ``rewrite``
+    satisfies — their contents (``source``/``path``, ``from``/``to``) are not
+    domain keys. Anything else falls through to the generic rejection.
+    """
+    for key, value in spec.items():
+        if str(key) in _DOMAIN_KEYS or not isinstance(value, dict):
+            continue
+        nested = cast("dict[str, Any]", value)
+        if nested and all(str(inner) in _DOMAIN_KEYS for inner in nested):
+            raise ValueError(
+                f"domain {name!r}: {str(key)!r} is indented inside it, but its "
+                f"keys {sorted(str(inner) for inner in nested)} make it a "
+                f"domain in its own right. Unindent it to sit beside "
+                f"{name!r} under 'domains:' — as written, YAML reads it as a "
+                f"key of {name!r} and it claims no paths at all"
+            )
 
 
 def _parse_pattern(name: str, raw: Any, base_path: str) -> PathPattern:
@@ -641,8 +688,30 @@ def _parse_rewrite(name: str, raw: Any, domain_prefix: str) -> PathRewrite | Non
 
 
 def _parse_schema(name: str, raw: dict[str, Any]) -> SchemaSource:
+    """Where this domain's published description is read from.
+
+    The location comes from the key belonging to the declared ``source`` —
+    ``path`` for ``file``, ``url`` for every remote reader — rather than from
+    whichever of the two happens to be present.
+
+    Reading ``path`` first is not merely untidy, because config overlays are
+    **deep-merged** (:func:`gateway.community.config._config_loader._merge`): an
+    overlay adds and replaces keys but can never *remove* one. A deployed
+    environment that moves a domain off its committed file and onto its
+    published URL writes ``source`` and ``url``, inherits the base's ``path``
+    whether it wants it or not, and — with ``path`` winning — keeps pointing at
+    the artifact it just moved away from while the URL it declared is dropped
+    without a word. The domain is then handed to the reader its ``source``
+    names, so the HTTP catalog receives a relative file path where it expects a
+    URL, fails every fetch, and the served document loses that domain entirely
+    for nothing louder than a warning.
+
+    Keying on ``source`` also makes the two spellings independent: the other
+    key is ignored rather than refused, so an overlay that inherits a stale
+    ``path`` still boots.
+    """
     _reject_unknown_keys(f"domain {name!r}: schema", raw, _SCHEMA_KEYS)
-    source = str(raw.get("source", "file"))
-    location = str(raw.get("path") or raw.get("url") or "")
+    source = str(raw.get("source", _FILE_SOURCE))
+    location = str(raw.get("path" if source == _FILE_SOURCE else "url") or "")
     refresh = int(raw.get("refresh_seconds", _DEFAULT_REFRESH_SECONDS))
     return SchemaSource(source=source, location=location, refresh_seconds=refresh)

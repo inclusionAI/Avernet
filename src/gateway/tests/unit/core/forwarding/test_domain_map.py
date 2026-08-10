@@ -822,6 +822,141 @@ def test_every_key_the_shipped_config_uses_is_recognised() -> None:
     assert domain_map.websocket_domain_for("/openapi/v1/bots/messages/t/api") is None
 
 
+# ── a domain indented inside another ─────────────────────────────────────────
+
+
+def test_a_domain_indented_inside_another_is_named_as_such() -> None:
+    """The generic "unknown key" message sends the reader hunting for a typo.
+
+    This is the shape that took a deployment down: a domain appended to the
+    config one level too deep. YAML reads it as a key of the domain above, the
+    file still parses, and the nested domain claims no paths — so the message
+    has to name the indentation, because the key it reports is spelled
+    correctly and nothing about it suggests where to look.
+    """
+    with pytest.raises(ValueError, match=r"'loadtest' is indented inside it"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "messages": {
+                        "match": "/openapi/v1/bots/messages/**",
+                        "server": "proxy",
+                        "protocols": ["websocket"],
+                        "loadtest": {
+                            "match": "/openapi/v1/bots/loadtest/**",
+                            "server": "backend",
+                            "protocols": ["websocket"],
+                        },
+                    }
+                },
+                "servers": {
+                    "proxy": {"base_url": "https://proxy:20003"},
+                    "backend": {"base_url": "http://backend:8080"},
+                },
+            },
+            variables={},
+        )
+
+
+def test_a_misspelled_block_key_is_not_mistaken_for_a_nested_domain() -> None:
+    """The nested-domain signal must not swallow the generic one.
+
+    A mistyped `schema` still holds `source`/`path`, which are not domain keys,
+    so it stays a misspelling and keeps the message that says so.
+    """
+    with pytest.raises(ValueError, match=r"unknown key\(s\) \['schemaa'\]"):
+        DomainMap.from_config(
+            {
+                "domains": {
+                    "bots": {
+                        "server": "backend",
+                        "schemaa": {"source": "file", "path": "schemas/bots.json"},
+                    }
+                },
+                "servers": {"backend": {"base_url": "http://backend:8080"}},
+            },
+            variables={},
+        )
+
+
+# ── schema location follows the declared source ──────────────────────────────
+
+
+def test_a_remote_schema_source_reads_its_url_over_an_inherited_path() -> None:
+    """Config overlays are deep-merged, so a `path` can be inherited, not chosen.
+
+    An overlay adds and replaces keys but cannot remove one. An environment
+    moving a domain off its committed file onto its published URL writes
+    `source` and `url` and inherits the base's `path` whether it wants it or
+    not. Preferring `path` would keep pointing at the artifact the overlay just
+    moved away from, and hand the HTTP reader a relative file path for a URL —
+    every fetch fails and the domain drops out of the served doc silently.
+    """
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "chat": {
+                    "server": "baas",
+                    "schema": {
+                        "source": "http",
+                        # Inherited from the base config by the deep merge.
+                        "path": "schemas/baas.openapi.json",
+                        "url": "https://baas-pre.example.com/openapi.json",
+                        "refresh_seconds": 300,
+                    },
+                }
+            },
+            "servers": {"baas": {"base_url": "http://baas:9090"}},
+        },
+        variables={},
+    )
+    schema = domain_map.domains["chat"].schema
+    assert schema.source == "http"
+    assert schema.location == "https://baas-pre.example.com/openapi.json"
+
+
+def test_a_file_schema_source_reads_its_path() -> None:
+    """The single-box default is unchanged: `file` still means `path`."""
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {
+                    "server": "backend",
+                    "schema": {"source": "file", "path": "schemas/bots.openapi.json"},
+                }
+            },
+            "servers": {"backend": {"base_url": "http://backend:8080"}},
+        },
+        variables={},
+    )
+    schema = domain_map.domains["bots"].schema
+    assert schema.source == "file"
+    assert schema.location == "schemas/bots.openapi.json"
+
+
+def test_an_object_store_schema_source_reads_its_url() -> None:
+    """`file` is the only local source; every other reader takes a `url`."""
+    domain_map = DomainMap.from_config(
+        {
+            "domains": {
+                "bots": {
+                    "server": "backend",
+                    "schema": {
+                        "source": "object_store",
+                        "url": "https://bucket.example.com/bots/openapi-latest.json",
+                    },
+                }
+            },
+            "servers": {"backend": {"base_url": "http://backend:8080"}},
+        },
+        variables={},
+    )
+    assert (
+        domain_map.domains["bots"].schema.location
+        == "https://bucket.example.com/bots/openapi-latest.json"
+    )
+
+
 # ── path patterns: match first, then most specific ───────────────────────────
 
 
