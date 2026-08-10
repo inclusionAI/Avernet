@@ -50,6 +50,7 @@ is what makes the invariant above true rather than aspirational.
 ```yaml
 purpose: Own the record that says which application a user has authorized to act as them on which bot, and the rules for granting, withdrawing and reading it.
 provides:
+  - BotAppGrantSweepProtocol
   - BotAppGrantModel
   - BotAppGrantLogModel
   - BotAppGrantRecord

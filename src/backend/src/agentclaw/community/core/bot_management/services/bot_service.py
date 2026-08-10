@@ -49,7 +49,9 @@ if TYPE_CHECKING:
     from agentclaw.community.core.cron.services.aicoding.cron_auto_setup import CronAutoSetupService
     from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
     from agentclaw.community.core.common_config.service import CommonConfigService
-    from agentclaw.community.core.bot_app_grant.services import BotAppGrantService
+    from agentclaw.community.core.bot_app_grant.protocols import (
+        BotAppGrantSweepProtocol,
+    )
     # Type-only: importing ``agentclaw.community.di`` at runtime would form a cycle
     # (di/__init__ -> container -> aicoding_module -> workspace_service ->
     # bot_service). ``BotService`` is provider-constructed, so this
@@ -308,7 +310,7 @@ class BotService:
         oss_record_repo: "OssToNasRecordRepository",
         bot_publish_service_provider: "Callable[[], BotPublishService]",
         device_service_provider: "Callable[[], DeviceService]",
-        bot_app_grant_service_provider: "Callable[[], BotAppGrantService]",
+        bot_app_grant_service_provider: "Callable[[], BotAppGrantSweepProtocol]",
         path_factory: WorkspacePathFactory,
         template_service: TemplateService,
         # Optional: DIMA (applicationCoding) hosting is corp-only. Community does
@@ -349,6 +351,13 @@ class BotService:
         # the cycle never closes during graph build.
         self._bot_publish_provider = bot_publish_service_provider
         self._device_service_provider = device_service_provider
+        # Typed against a **core-level protocol**, not the concrete service:
+        # selecting an implementation is the composition root's job. Not the
+        # Service API Protocol either — core may not import ``api/``, which the
+        # architecture suite enforces — hence
+        # ``core/bot_app_grant/protocols.py``, the same shape
+        # ``core/bot_collaborator`` uses for the same pair of rules.
+        #
         # Required, not optional: deleting a bot has to withdraw the
         # authorizations standing against it, and a BotService that could not
         # would delete bots while leaving applications able to reach them.
