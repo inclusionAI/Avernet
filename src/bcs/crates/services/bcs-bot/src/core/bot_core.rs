@@ -31,6 +31,16 @@ pub struct BotCore {
     provider_bindings: Option<Arc<dyn ProviderBotBindingRepoPort>>,
 }
 
+#[cfg(test)]
+mod diagnostic_safety_tests {
+    #[test]
+    fn connect_flow_does_not_log_session_token_prefixes() {
+        let source = include_str!("bot_core.rs");
+        assert!(!source.contains(concat!("token", "_preview")));
+        assert!(!source.contains(concat!("new_token", "_preview")));
+    }
+}
+
 impl BotCore {
     pub fn new() -> Self {
         Self::memory()
@@ -677,30 +687,25 @@ impl BotRegistryCoreService for BotCore {
         params: BotConnectParams,
         kind: ConnectionKind,
     ) -> Result<BotConnectResult, ConnectError> {
-        let token_preview = params
-            .token
-            .as_ref()
-            .map(|t| format!("{}...", &t[..t.len().min(4)]))
-            .unwrap_or_else(|| "None".to_string());
-        info!(token_present = params.token.is_some(), token_preview = %token_preview, "Processing connect_bot");
+        info!(token_present = params.token.is_some(), "Processing connect_bot");
 
         let (is_new, bot_id, token): (bool, String, String) = if let Some(ref token_str) =
             params.token
         {
             if let Some(existing_bot_id) = self.repo.find_bot_by_token(token_str).await {
-                info!(bot_id = %existing_bot_id, token_preview = %token_preview, "Valid token, reconnection");
+                info!(bot_id = %existing_bot_id, "Valid token, reconnection");
                 self.repo
                     .store_token_mapping(token_str.clone(), existing_bot_id.clone())
                     .await;
                 (false, existing_bot_id, token_str.clone())
             } else {
                 let new_token = new_session_token();
-                info!(token_preview = %token_preview, new_token_preview = %format!("{}...", &new_token[..4]), "Invalid/not found token, new connection");
+                info!("Invalid/not found token, new connection");
                 (true, String::new(), new_token)
             }
         } else {
             let new_token = new_session_token();
-            info!(new_token_preview = %format!("{}...", &new_token[..4]), "No token, new connection");
+            info!("No token, new connection");
             (true, String::new(), new_token)
         };
 
