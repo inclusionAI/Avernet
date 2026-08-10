@@ -34,7 +34,9 @@ from agentclaw.community.api.bot_app_grant_service import (
     BotAppGrantServiceProtocol,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.collaborator_service import CollaboratorServiceProtocol
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.bot_collaborator.models import PermissionLevel
 from agentclaw.community.core.bot_app_grant.models import (
     BotAppGrantLogModel,
     BotAppGrantModel,
@@ -59,14 +61,28 @@ from tests.community.adapters.http.openapi_v1.conftest import (
 )
 
 OWNER = "u-1"
+#: A member-level collaborator on ``BOT`` — someone who may operate it without
+#: owning it, which is the case this group exists to serve.
+COLLAB = "u-2"
+#: A user with no relationship to ``BOT`` at all.
+STRANGER = "u-9"
 BOT = "b-1"
+#: ``BOT``'s primary key. The collaborator table is keyed on it rather than on
+#: ``bot_id``, which is not unique across owners.
+BOT_PK = 7
 APP_ID = 42
 APP_NAME = "partner-platform"
 
 
-def _caller(app_id: int | None = APP_ID, app_name: str = APP_NAME) -> VerifiedCaller:
-    """A verified caller naming the owner, and optionally an application."""
-    principals: list = [UserPrincipal(subject=GatewayUser(id=OWNER, username=OWNER))]
+def _caller(
+    app_id: int | None = APP_ID,
+    app_name: str = APP_NAME,
+    user_id: str = OWNER,
+) -> VerifiedCaller:
+    """A verified caller naming a user, and optionally an application."""
+    principals: list = [
+        UserPrincipal(subject=GatewayUser(id=user_id, username=user_id))
+    ]
     if app_id is not None:
         principals.append(
             AppPrincipal(
@@ -136,26 +152,48 @@ def grants(sessions):
 
 @pytest.fixture
 def bots():
-    """A bot service that owns exactly ``BOT`` for exactly ``OWNER``.
+    """A bot service holding exactly ``BOT``, owned by ``OWNER``.
 
-    ``get_bot`` is the whole authority model on this surface: it raises for a
-    bot that is absent *or* not the caller's, which is what makes a non-owner
-    indistinguishable from a stranger.
+    ``get_bot_by_id`` resolves by id alone and decides **nothing** about who may
+    reach it — that is the collaborator double's job below. The split mirrors
+    production: resolution and adjudication are two steps, and only running both
+    is a check.
     """
 
     class _Bots:
-        def get_bot(self, bot_id: str, user_id: str):
-            if bot_id != BOT or user_id != OWNER:
+        def get_bot_by_id(self, bot_id: str):
+            if bot_id != BOT:
                 raise BotNotFoundError(f"Bot not found: {bot_id}")
-            return {"bot_id": bot_id, "owner_id": user_id}
+            return {"id": BOT_PK, "bot_id": bot_id, "owner_id": OWNER}
 
     return _Bots()
 
 
-def _build(grants, bots, caller):
+@pytest.fixture
+def collaborators():
+    """The role table: ``OWNER`` owns ``BOT``, ``COLLAB`` is a member on it.
+
+    Mirrors ``CollaboratorService.get_permission_level``, including its owner
+    short-circuit — which is what makes the owner reach the bot without a row.
+    Anyone else is ``NONE`` and is refused by ``require_bot_operator``.
+    """
+
+    class _Collaborators:
+        def get_permission_level(self, bot_pk: int, user_id: str, owner_id: str):
+            if user_id == owner_id:
+                return PermissionLevel.OWNER
+            if bot_pk == BOT_PK and user_id == COLLAB:
+                return PermissionLevel.MEMBER
+            return PermissionLevel.NONE
+
+    return _Collaborators()
+
+
+def _build(grants, bots, collaborators, caller):
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=bots)
+            binder.bind(CollaboratorServiceProtocol, to=collaborators)
             binder.bind(BotAppGrantServiceProtocol, to=grants)
 
     app = FastAPI()
@@ -169,8 +207,25 @@ def _build(grants, bots, caller):
 
 
 @pytest.fixture
-def client(grants, bots):
-    return user_scoped_client(_build(grants, bots, _caller()), OWNER)
+def client(grants, bots, collaborators):
+    """The bot's owner."""
+    return user_scoped_client(_build(grants, bots, collaborators, _caller()), OWNER)
+
+
+@pytest.fixture
+def collab_client(grants, bots, collaborators):
+    """A member-level collaborator: may operate the bot, does not own it."""
+    return user_scoped_client(
+        _build(grants, bots, collaborators, _caller(user_id=COLLAB)), COLLAB
+    )
+
+
+@pytest.fixture
+def stranger_client(grants, bots, collaborators):
+    """No relationship to the bot. Must be answered as if it did not exist."""
+    return user_scoped_client(
+        _build(grants, bots, collaborators, _caller(user_id=STRANGER)), STRANGER
+    )
 
 
 def _ok(resp, code=200000, status=200):
@@ -239,57 +294,55 @@ def test_revoke_absent_grant_is_404_distinct_from_successful_revoke(client):
     assert second.status_code == 404, second.json()
 
 
-def test_non_owner_answer_is_byte_identical_to_absent_bot(grants, bots):
-    """A caller who may not manage the bot learns nothing — not even that it exists.
+def test_stranger_answer_is_byte_identical_to_absent_bot(stranger_client):
+    """A caller who may not operate the bot learns nothing — not even that it exists.
 
-    Compares status *and* body, because "byte-identical" is the promise. The
-    two requests differ only in which bot they name: one the owner does not
-    own, one that does not exist at all.
+    Compares status *and* body, because "byte-identical" is the promise. The two
+    requests differ only in which bot they name: one that exists and this caller
+    has no relationship to, and one that does not exist at all.
     """
-    client = user_scoped_client(_build(grants, bots, _caller()), OWNER)
+    refused = stranger_client.get(f"/openapi/v1/bots/{BOT}/authorized-apps")
+    absent = stranger_client.get("/openapi/v1/bots/no-such-bot-at-all/authorized-apps")
 
-    not_mine = client.get("/openapi/v1/bots/someone-elses-bot/authorized-apps")
-    absent = client.get("/openapi/v1/bots/no-such-bot-at-all/authorized-apps")
-
-    assert not_mine.status_code == absent.status_code == 404
-    assert _without_request_id(not_mine.json()) == _without_request_id(absent.json())
+    assert refused.status_code == absent.status_code == 404
+    assert _without_request_id(refused.json()) == _without_request_id(absent.json())
 
 
-def test_collaborator_may_operate_but_may_not_grant(grants, bots):
-    """Narrower than the operator bar, deliberately.
-
-    ``core/engine_runtime/gate.py`` admits a member-level collaborator to
-    *operate* a bot. Managing its authorizations is a different power, and this
-    surface does not grant it: the owner-scoped read refuses anyone who is not
-    the owner, collaborator or not.
-    """
-    collaborator = "u-collab"
-    caller = VerifiedCaller(
-        principals=(
-            UserPrincipal(subject=GatewayUser(id=collaborator, username=collaborator)),
-            AppPrincipal(
-                tenant="teamclaw",
-                app=GatewayApp(
-                    app_id=APP_ID,
-                    app_name=APP_NAME,
-                    owners=collaborator,
-                    tenant="teamclaw",
-                ),
-            ),
-        )
-    )
-    client = user_scoped_client(_build(grants, bots, caller), collaborator)
-
-    resp = client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
+def test_stranger_may_not_grant(stranger_client):
+    """The widening admits collaborators, not everyone."""
+    resp = stranger_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
 
     assert resp.status_code == 404, resp.json()
 
 
-def test_application_view_is_scoped_to_the_calling_app(grants, bots):
+def test_collaborator_may_delegate_the_access_they_have(collab_client, sessions):
+    """The widening, and the reason this feature exists.
+
+    ``core/engine_runtime/gate.py`` admits a member-level collaborator to
+    *operate* a bot, and delegation is now measured by the same bar: you may
+    lend exactly the access you hold. An earlier revision refused this, which
+    left an integration onboarded by anyone but the bot's creator able to reach
+    nothing — indistinguishably from a missing grant.
+
+    The row records both people: the collaborator as the delegator, and the
+    bot's real owner as the owner.
+    """
+    _ok(
+        collab_client.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={}),
+        201000,
+        201,
+    )
+
+    with sessions() as session:
+        row = session.query(BotAppGrantModel).one()
+        assert (row.user_id, row.owner_id) == (COLLAB, OWNER)
+
+
+def test_application_view_is_scoped_to_the_calling_app(grants, bots, collaborators):
     """Two applications, one owner: each sees only its own authorizations."""
-    first = user_scoped_client(_build(grants, bots, _caller(app_id=42)), OWNER)
+    first = user_scoped_client(_build(grants, bots, collaborators, _caller(app_id=42)), OWNER)
     second = user_scoped_client(
-        _build(grants, bots, _caller(app_id=99, app_name="other")), OWNER
+        _build(grants, bots, collaborators, _caller(app_id=99, app_name="other")), OWNER
     )
     first.post(f"/openapi/v1/bots/{BOT}/authorized-apps", json={})
 

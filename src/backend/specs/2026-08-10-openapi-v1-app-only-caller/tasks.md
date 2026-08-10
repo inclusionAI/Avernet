@@ -95,23 +95,31 @@
 
 ---
 
-## Task 3: Let a collaborator delegate  `[ ]`
+## Task 3: Let a collaborator delegate  `[x]`
 
 - **Goal:** A user may authorize an application for any bot they can operate.
 - **Files:** `adapters/http/openapi_v1/authorized_apps/router.py`
 - **Done when:**
-  - [ ] `grant_authorized_app` stops resolving through the owner-scoped
-        `get_bot(bot_id, caller)` and adjudicates "may this user operate this
-        bot" — owner, or collaborator at member level or above, reusing the
-        existing gate rather than a second rule.
-  - [ ] It records `user_id = caller` and `owner_id = the resolved bot's owner`.
-  - [ ] A caller who may not operate the bot still gets the masked `404`.
-  - [ ] **The module docstring is rewritten.** It currently argues the opposite
-        — that the grant bar is deliberately narrower than the operate bar — and
-        left as is it would contradict the code beneath it. The replacement must
-        carry the counter-argument: a delegation is bounded by the delegator's
-        live access and re-adjudicated per request, so it confers nothing they do
-        not already hold and cannot outlive it.
+  - [x] `grant_authorized_app` adjudicates "may this user operate this bot",
+        reusing `core/engine_runtime/gate.py`'s `require_bot_operator` rather
+        than restating the rule. Needed two supporting pieces: an owner-blind
+        resolve (`BotService.get_bot_by_id`, which decides nothing on its own
+        and says so loudly) and a group-level `authorized_apps/gating.py` that
+        pairs resolve with adjudication so no operation can run only half of it.
+  - [x] It records `user_id = caller` and `owner_id = the resolved bot's owner`.
+  - [x] A caller who may not operate the bot still gets the masked `404`,
+        pinned byte-for-byte against a nonexistent bot.
+  - [x] The module docstring is rewritten, carrying the counter-argument and
+        pointing at `gating.py` for the full reasoning.
+  - [x] The other three operations moved onto the same gate in this task too —
+        they shared the owner-scoped read being replaced, so leaving them behind
+        would have left the tree incoherent between commits.
+  - [x] `test_collaborator_may_operate_but_may_not_grant` asserted the policy
+        being reversed; rewritten as
+        `test_collaborator_may_delegate_the_access_they_have`, and a new
+        `test_stranger_may_not_grant` pins that the widening admits
+        collaborators rather than everyone.
+
 - **Depends on:** Task 2
 
 ---

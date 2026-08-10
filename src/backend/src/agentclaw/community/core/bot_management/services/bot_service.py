@@ -1926,6 +1926,34 @@ class BotService:
         thread.start()
         logger.info(f"[bot_service._allocate_device_async] Started background thread for bot {bot_id} device allocation")
 
+    def get_bot_by_id(self, bot_id: str) -> Dict[str, Any]:
+        """Resolve a bot by id alone. **Decides nothing about who may reach it.**
+
+        The counterpart to :meth:`get_bot` for the one case that genuinely
+        cannot use it: a caller who may reach a bot *without owning it*, and so
+        cannot supply the owner the owner-scoped read needs. It exists to answer
+        "which bot, and whose" — the authority question is the caller's to ask
+        afterwards, against the resolved owner and primary key this returns.
+
+        **A caller that stops here has performed no check at all.** Every caller
+        must follow it with an adjudication (``core/engine_runtime/gate.py``'s
+        ``require_bot_operator``) and must raise the same
+        :class:`BotNotFoundError` on refusal, so a caller who may not reach the
+        bot cannot tell it apart from one that does not exist.
+
+        Ambiguity fails closed rather than picking a row: ``bot_id`` is not
+        unique across owners for legacy ``default`` bots, so
+        ``get_unique_by_id`` raises rather than resolving one caller's bot for
+        another's request.
+
+        Raises:
+            BotNotFoundError: no live bot has this id in this env and tenant.
+        """
+        bot = self._repository.get_unique_by_id(bot_id)
+        if not bot:
+            raise BotNotFoundError(f"Bot not found: {bot_id}")
+        return bot
+
     def get_bot(self, bot_id: str, user_id: str) -> Dict[str, Any]:
         """
         Get bot by ID.
