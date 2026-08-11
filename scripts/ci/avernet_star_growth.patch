@@ -1,0 +1,50 @@
+diff --git a/skills/avernet-star-daily/scripts/generate_star_image.py b/skills/avernet-star-daily/scripts/generate_star_image.py
+index 254fd7f..82b19cb 100644
+--- a/skills/avernet-star-daily/scripts/generate_star_image.py
++++ b/skills/avernet-star-daily/scripts/generate_star_image.py
+@@ -129,7 +129,20 @@ def render_dashboard(rows: list[dict[str, Any]], output_path: Path) -> None:
+     trend.set_ylim(0, y_max)
+     trend.set_xlim(-0.18, max(len(rows) - 1 + 0.18, 1))
+     trend.set_yticks(list(range(0, y_max + 1, 20)))
+-    trend.set_xticks(x_values, labels)
++    max_date_labels = 10
++    if len(rows) <= max_date_labels:
++        date_label_indexes = x_values
++    else:
++        date_label_indexes = sorted(
++            {
++                round(slot * (len(rows) - 1) / (max_date_labels - 1))
++                for slot in range(max_date_labels)
++            }
++        )
++    trend.set_xticks(
++        date_label_indexes,
++        [labels[index] for index in date_label_indexes],
++    )
+     trend.grid(axis="y", color=GRID, linewidth=1)
+     trend.fill_between(x_values, totals, 0, color="#DDE4F1", alpha=0.72, zorder=1)
+     trend.plot(
+@@ -162,10 +175,20 @@ def render_dashboard(rows: list[dict[str, Any]], output_path: Path) -> None:
+         trend.annotate(
+             str(value),
+             (index, value),
+-            xytext=(0, 18 if is_latest else 14),
++            xytext=(0, 18 if is_latest else 12),
+             textcoords="offset points",
+             ha="center",
+-            color=BLUE,
+-            fontsize=17 if is_latest else 14,
++            color=BLUE if is_latest else MUTED,
++            fontsize=17 if is_latest else 11,
+             fontweight=700,
++            bbox=(
++                None
++                if is_latest
++                else {
++                    "boxstyle": "round,pad=0.12",
++                    "facecolor": BG,
++                    "edgecolor": "none",
++                    "alpha": 0.88,
++                }
++            ),
+         )

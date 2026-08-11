@@ -1,0 +1,255 @@
+name: Avernet Star Daily
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - dev
+    paths:
+      - ".github/codex/avernet-star-visual-qa.md"
+      - ".github/codex/avernet-star-visual-qa.schema.json"
+      - ".github/workflows/avernet-star-daily.yml"
+      - "scripts/ci/avernet_star_report.py"
+      - "scripts/ci/avernet_star_growth.patch"
+      - "scripts/ci/tests/test_avernet_star_report.py"
+      - "scripts/ci/tests/test_avernet_star_workflow.py"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: avernet-star-daily-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  METRICS_BRANCH: automation/avernet-star-metrics
+  SKILL_REF: 52c9e6d34efd40e6d808a1c086d3c75b5004e687
+
+jobs:
+  contract:
+    name: Validate automation contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out pinned Avernet Star Skill
+        uses: actions/checkout@v4
+        with:
+          repository: carolynli/efficiency
+          ref: ${{ env.SKILL_REF }}
+          path: efficiency
+          persist-credentials: false
+          sparse-checkout: skills/avernet-star-daily
+
+      - name: Verify pinned Skill rendering overlay
+        run: |
+          test "$(git -C efficiency rev-parse HEAD)" = "$SKILL_REF"
+          git -C efficiency apply --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency apply "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency apply --reverse --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency diff --check
+
+      - name: Run focused contract tests
+        run: >-
+          python3 -m unittest
+          scripts/ci/tests/test_avernet_star_report.py
+          scripts/ci/tests/test_avernet_star_workflow.py
+
+  collect:
+    name: Collect and render candidate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    needs: contract
+    runs-on: ubuntu-latest
+    outputs:
+      report-date: ${{ steps.fetch.outputs.report-date }}
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out persisted metrics
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.METRICS_BRANCH }}
+          path: metrics
+          persist-credentials: false
+
+      - name: Check out pinned Avernet Star Skill
+        uses: actions/checkout@v4
+        with:
+          repository: carolynli/efficiency
+          ref: ${{ env.SKILL_REF }}
+          path: efficiency
+          persist-credentials: false
+          sparse-checkout: skills/avernet-star-daily
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify pinned Skill rendering overlay
+        run: |
+          test "$(git -C efficiency rev-parse HEAD)" = "$SKILL_REF"
+          git -C efficiency apply --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency apply "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency apply --reverse --check "$GITHUB_WORKSPACE/scripts/ci/avernet_star_growth.patch"
+          git -C efficiency diff --check
+
+      - name: Install rendering dependency
+        run: python3 -m pip install --disable-pip-version-check matplotlib==3.10.1
+
+      - name: Prepare private roster
+        env:
+          AVERNET_RD_ROSTER_JSON: ${{ secrets.AVERNET_RD_ROSTER_JSON }}
+        run: >-
+          python3 scripts/ci/avernet_star_report.py prepare-roster
+          --output "$RUNNER_TEMP/avernet_star_rd_team.json"
+
+      - name: Prepare persisted CSV
+        run: |
+          mkdir -p candidate/reports
+          cp metrics/reports/avernet_star_daily.csv candidate/reports/
+
+      - name: Fetch current GitHub row and upsert CSV
+        id: fetch
+        env:
+          GITHUB_PAT_TOKEN: ${{ github.token }}
+        run: |
+          trap 'rm -f "$RUNNER_TEMP/avernet_star_rd_team.json" "$RUNNER_TEMP/avernet_star_row.json"' EXIT
+          python3 efficiency/skills/avernet-star-daily/scripts/avernet_star_stats.py \
+            --csv candidate/reports/avernet_star_daily.csv \
+            --rd-roster "$RUNNER_TEMP/avernet_star_rd_team.json" \
+            --dry-run > "$RUNNER_TEMP/avernet_star_row.json"
+          python3 scripts/ci/avernet_star_report.py upsert \
+            --csv candidate/reports/avernet_star_daily.csv \
+            --row-json "$RUNNER_TEMP/avernet_star_row.json"
+          report_date="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["date"])' "$RUNNER_TEMP/avernet_star_row.json")"
+          echo "report-date=$report_date" >> "$GITHUB_OUTPUT"
+
+      - name: Generate growth image
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/avernet-matplotlib
+        run: |
+          python3 efficiency/skills/avernet-star-daily/scripts/generate_star_image.py \
+            --repo-root candidate \
+            --csv reports/avernet_star_daily.csv \
+            --output reports/avernet_star_growth.png
+
+      - name: Validate candidate artifacts
+        env:
+          REPORT_DATE: ${{ steps.fetch.outputs.report-date }}
+        run: |
+          python3 scripts/ci/avernet_star_report.py validate \
+            --csv candidate/reports/avernet_star_daily.csv \
+            --png candidate/reports/avernet_star_growth.png \
+            --expected-date "$REPORT_DATE" \
+            --output-json candidate/validation.json
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: avernet-star-candidate
+          path: candidate/
+          if-no-files-found: error
+          retention-days: 14
+
+  visual_qa:
+    name: Inspect rendered dashboard
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    needs: collect
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.codex.outputs.final-message }}
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download candidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: avernet-star-candidate
+          path: candidate
+
+      - name: Run Codex visual QA
+        id: codex
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1.11
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          codex-version: "0.147.0"
+          prompt-file: .github/codex/avernet-star-visual-qa.md
+          output-schema-file: .github/codex/avernet-star-visual-qa.schema.json
+          codex-args: >-
+            ["--image",
+            "candidate/reports/avernet_star_growth.png",
+            "--ephemeral"]
+          safety-strategy: drop-sudo
+          permission-profile: ":read-only"
+
+  publish:
+    name: Publish validated metrics
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev'
+    needs:
+      - collect
+      - visual_qa
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out automation source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out metrics branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.METRICS_BRANCH }}
+          path: metrics
+
+      - name: Download candidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: avernet-star-candidate
+          path: candidate
+
+      - name: Enforce Codex visual QA result
+        env:
+          AVERNET_STAR_QA_JSON: ${{ needs.visual_qa.outputs.result }}
+        run: python3 scripts/ci/avernet_star_report.py require-visual-qa
+
+      - name: Revalidate candidate artifacts
+        env:
+          REPORT_DATE: ${{ needs.collect.outputs.report-date }}
+        run: |
+          python3 scripts/ci/avernet_star_report.py validate \
+            --csv candidate/reports/avernet_star_daily.csv \
+            --png candidate/reports/avernet_star_growth.png \
+            --expected-date "$REPORT_DATE"
+
+      - name: Commit validated report
+        env:
+          REPORT_DATE: ${{ needs.collect.outputs.report-date }}
+        run: |
+          install -m 0644 candidate/reports/avernet_star_daily.csv \
+            metrics/reports/avernet_star_daily.csv
+          install -m 0644 candidate/reports/avernet_star_growth.png \
+            metrics/reports/avernet_star_growth.png
+          cd metrics
+          if [ -z "$(git status --porcelain -- reports/avernet_star_daily.csv reports/avernet_star_growth.png)" ]; then
+            echo "No report changes to publish."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/avernet_star_daily.csv reports/avernet_star_growth.png
+          git commit -m "chore: update Avernet star report for $REPORT_DATE"
+          git push origin "HEAD:${METRICS_BRANCH}"
