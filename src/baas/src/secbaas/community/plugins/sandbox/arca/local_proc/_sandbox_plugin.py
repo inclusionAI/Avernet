@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
@@ -17,7 +18,11 @@ from secbaas.community.api.device_manage import (
     Storage,
 )
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.sandbox.arca import ArcaSandbox, ArcaSandboxPlugin
+from secbaas.community.spi.sandbox.arca import (
+    ArcaSandbox,
+    ArcaSandboxConnectionError,
+    ArcaSandboxPlugin,
+)
 
 from ._process_manager import LocalProcessManager
 from ._sandbox import LocalProcessArcaSandbox
@@ -369,29 +374,109 @@ class LocalProcessArcaSandboxPlugin(ArcaSandboxPlugin):
                 url,
             )
 
-    def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
-        """连接到已存在的沙箱。
+    def connect_sync_sandbox(
+        self,
+        sandbox_id: str,
+        connect_timeout_in_seconds: int = 30,
+    ) -> ArcaSandbox:
+        """连接到已存在的沙箱，支持重试和健康检查。
 
         Args:
             sandbox_id: 要连接的沙箱 ID。
+            connect_timeout_in_seconds: 连接重试的最大总时间（秒）。
 
         Returns:
             已存在沙箱的 ArcaSandbox。
 
         Raises:
-            RuntimeError: 沙箱未找到或无法连接。
+            ArcaSandboxConnectionError: 沙箱未找到或无法在超时内连接。
         """
         # 先检查本地缓存
         if sandbox_id in self._sandboxes:
             sandbox = self._sandboxes[sandbox_id]
             if sandbox._status == "DESTROYED":
-                raise RuntimeError(f"Sandbox {sandbox_id} has been destroyed")
+                raise ArcaSandboxConnectionError(
+                    f"Sandbox {sandbox_id} has been destroyed",
+                    sandbox_id=sandbox_id,
+                    attempts=1,
+                )
             return sandbox
 
-        # 从 manager 获取 entry
-        entry = self._manager.get_entry(sandbox_id)
-        if entry is None:
-            raise RuntimeError(f"Sandbox {sandbox_id} not found")
+        # 从环境变量读取重试配置
+        max_attempts = int(os.environ.get("ARCA_CONNECT_RETRY_ATTEMPTS", "3"))
+        base_delay_ms = int(os.environ.get("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "1000"))
+
+        deadline = time.monotonic() + connect_timeout_in_seconds
+        last_error = "Sandbox not found"
+        entry = None
+
+        for attempt in range(1, max_attempts + 1):
+            # 检查超时截止时间
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "Connect timeout for sandbox %s after %d attempts "
+                    "(deadline %ds exceeded)",
+                    sandbox_id,
+                    attempt - 1,
+                    connect_timeout_in_seconds,
+                )
+                break
+
+            # 尝试从 manager 获取 entry
+            entry = self._manager.get_entry(sandbox_id)
+            if entry is not None:
+                # 验证进程健康
+                if self._manager.is_healthy(sandbox_id):
+                    elapsed = time.monotonic() - (deadline - connect_timeout_in_seconds)
+                    logger.info(
+                        "Connected to sandbox %s on attempt %d (%.1fs)",
+                        sandbox_id,
+                        attempt,
+                        elapsed,
+                    )
+                    break
+                else:
+                    last_error = "Sandbox processes not healthy"
+                    logger.warning(
+                        "Sandbox %s entry found but not healthy (attempt %d/%d)",
+                        sandbox_id,
+                        attempt,
+                        max_attempts,
+                    )
+            else:
+                last_error = "Sandbox entry not found"
+                logger.warning(
+                    "Sandbox %s not found in manager (attempt %d/%d)",
+                    sandbox_id,
+                    attempt,
+                    max_attempts,
+                )
+
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < max_attempts:
+                delay = (base_delay_ms / 1000.0) * (2 ** (attempt - 1))
+                # 确保不超过截止时间
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                delay = min(delay, remaining)
+                logger.warning(
+                    "Retrying sandbox %s connection in %.1fs (attempt %d/%d)",
+                    sandbox_id,
+                    delay,
+                    attempt + 1,
+                    max_attempts,
+                )
+                time.sleep(delay)
+
+        # 所有重试失败
+        if entry is None or not self._manager.is_healthy(sandbox_id):
+            raise ArcaSandboxConnectionError(
+                f"[arca_sdk] sandbox connection failed: {last_error} "
+                f"for sandbox {sandbox_id} after {max_attempts} attempts",
+                sandbox_id=sandbox_id,
+                attempts=max_attempts,
+            )
 
         # 创建沙箱对象
         # 根据 engine 类型确定 template_id

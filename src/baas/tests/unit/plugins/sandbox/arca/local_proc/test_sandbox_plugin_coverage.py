@@ -8,6 +8,7 @@ import pytest
 from secbaas.community.plugins.sandbox.arca.local_proc._sandbox_plugin import (
     LocalProcessArcaSandboxPlugin,
 )
+from secbaas.community.spi.sandbox.arca import ArcaSandboxConnectionError
 
 
 @pytest.fixture
@@ -293,19 +294,81 @@ class TestConnectSyncSandbox:
         result = p.connect_sync_sandbox("sb-1")
         assert result is cached
 
-    def test_cached_destroyed_raises(self, plugin):
+    def test_cached_destroyed_raises_connection_error(self, plugin):
         p, mgr = plugin
         cached = MagicMock()
         cached._status = "DESTROYED"
         p._sandboxes["sb-1"] = cached
-        with pytest.raises(RuntimeError, match="destroyed"):
+        with pytest.raises(ArcaSandboxConnectionError, match="destroyed"):
             p.connect_sync_sandbox("sb-1")
 
-    def test_not_found(self, plugin):
+    def test_not_found_raises_connection_error(self, plugin, monkeypatch):
         p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "1")
         mgr.get_entry.return_value = None
-        with pytest.raises(RuntimeError, match="not found"):
+        with pytest.raises(
+            ArcaSandboxConnectionError, match="sandbox connection failed"
+        ):
             p.connect_sync_sandbox("sb-unknown")
+
+    def test_not_found_raises_connection_error_retries(self, plugin, monkeypatch):
+        p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "3")
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "10")
+        mgr.get_entry.return_value = None
+        with pytest.raises(
+            ArcaSandboxConnectionError, match="sandbox connection failed"
+        ) as exc_info:
+            p.connect_sync_sandbox("sb-unknown")
+        assert exc_info.value.attempts == 3
+        assert exc_info.value.sandbox_id == "sb-unknown"
+
+    def test_retry_succeeds_on_second_attempt(self, plugin, monkeypatch):
+        p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "3")
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "10")
+        entry = MagicMock()
+        entry.hermes_port = 0
+        entry.openclaw_port = 30020
+        mgr.get_entry.side_effect = [None, entry]
+        mgr.is_healthy.return_value = True
+        result = p.connect_sync_sandbox("sb-retry")
+        assert result._template_id == "openclaw"
+
+    def test_unhealthy_triggers_retry_then_success(self, plugin, monkeypatch):
+        p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "3")
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "10")
+        entry = MagicMock()
+        entry.hermes_port = 0
+        entry.openclaw_port = 30020
+        mgr.get_entry.return_value = entry
+        # is_healthy called in-loop on attempt 1 (False), attempt 2 (True),
+        # and once more in the post-loop health guard (True).
+        mgr.is_healthy.side_effect = [False, True, True]
+        result = p.connect_sync_sandbox("sb-unhealthy")
+        assert result._template_id == "openclaw"
+
+    def test_unhealthy_exhausts_retries(self, plugin, monkeypatch):
+        p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "2")
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "10")
+        entry = MagicMock()
+        entry.hermes_port = 0
+        entry.openclaw_port = 30020
+        mgr.get_entry.return_value = entry
+        mgr.is_healthy.return_value = False
+        with pytest.raises(ArcaSandboxConnectionError, match="not healthy") as exc_info:
+            p.connect_sync_sandbox("sb-stay-unhealthy")
+        assert exc_info.value.attempts == 2
+
+    def test_timeout_deadline_respected(self, plugin, monkeypatch):
+        p, mgr = plugin
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_ATTEMPTS", "100")
+        monkeypatch.setenv("ARCA_CONNECT_RETRY_BASE_DELAY_MS", "500")
+        mgr.get_entry.return_value = None
+        with pytest.raises(ArcaSandboxConnectionError):
+            p.connect_sync_sandbox("sb-timeout", connect_timeout_in_seconds=1)
 
     def test_hermes_entry(self, plugin):
         p, mgr = plugin
@@ -313,6 +376,7 @@ class TestConnectSyncSandbox:
         entry.hermes_port = 30020
         entry.openclaw_port = 0
         mgr.get_entry.return_value = entry
+        mgr.is_healthy.return_value = True
         result = p.connect_sync_sandbox("sb-2")
         assert result._template_id == "hermes"
 
@@ -322,6 +386,7 @@ class TestConnectSyncSandbox:
         entry.hermes_port = 0
         entry.openclaw_port = 30020
         mgr.get_entry.return_value = entry
+        mgr.is_healthy.return_value = True
         result = p.connect_sync_sandbox("sb-3")
         assert result._template_id == "openclaw"
 
@@ -331,6 +396,7 @@ class TestConnectSyncSandbox:
         entry.hermes_port = 0
         entry.openclaw_port = 0
         mgr.get_entry.return_value = entry
+        mgr.is_healthy.return_value = True
         result = p.connect_sync_sandbox("sb-4")
         assert result._template_id == "aicoding"
 

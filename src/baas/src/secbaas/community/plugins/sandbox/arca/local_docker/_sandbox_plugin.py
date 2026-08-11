@@ -104,7 +104,11 @@ class LocalDockerArcaSandboxPlugin(ArcaSandboxPlugin):
         logger.info(f"Local sandbox {sandbox_id} created and ready")
         return sandbox
 
-    def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
+    def connect_sync_sandbox(
+        self,
+        sandbox_id: str,
+        connect_timeout_in_seconds: int = 30,
+    ) -> ArcaSandbox:
         """连接到已存在的本地沙箱（Docker 容器）。
 
         Args:

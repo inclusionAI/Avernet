@@ -143,16 +143,24 @@ class ArcaSandboxPlugin(Protocol):
         """
         ...
 
-    def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
+    def connect_sync_sandbox(
+        self,
+        sandbox_id: str,
+        connect_timeout_in_seconds: int = 30,
+    ) -> ArcaSandbox:
         """Connect to an existing sandbox by ID.
 
         Args:
             sandbox_id: The sandbox ID to connect to.
+            connect_timeout_in_seconds: Maximum total time for connection
+                attempts including retries (default 30).
 
         Returns:
             An ArcaSandbox for the existing sandbox.
 
         Raises:
+            ArcaSandboxConnectionError: If the sandbox is not found or
+                cannot be connected within the timeout.
             RuntimeError: If the sandbox is not found or cannot be connected.
         """
         ...

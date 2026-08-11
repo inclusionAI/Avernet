@@ -138,7 +138,11 @@ class StubArcaSandboxPlugin(ArcaSandboxPlugin):
         )
         return device
 
-    def connect_sync_sandbox(self, sandbox_id: str) -> ArcaSandbox:
+    def connect_sync_sandbox(
+        self,
+        sandbox_id: str,
+        connect_timeout_in_seconds: int = 30,
+    ) -> ArcaSandbox:
         if sandbox_id not in self._sandboxes:
             logger.info(
                 "[stub] sandbox not in memory, creating on-the-fly sandbox_id=%s",
