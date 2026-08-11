@@ -15,6 +15,7 @@ pub mod invitation;
 pub mod message;
 pub mod principal;
 pub mod session;
+pub mod session_file;
 
 pub use authorization::{
     Action, AuthorizationService, IdentityPolicy, ResourceRef, require_authenticated_user,
@@ -33,3 +34,4 @@ pub use invitation::*;
 pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
 pub use session::*;
+pub use session_file::*;
