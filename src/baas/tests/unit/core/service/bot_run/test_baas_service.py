@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from secbaas.community.api.bcn import Attachment
 from secbaas.community.api.bot_runtime import (
     BotBindingInfo,
     BotNotAvailableError,
@@ -2443,3 +2444,169 @@ class _ANY:
 
 
 ANY: _ANY = _ANY()
+
+
+# ==================== Tests: Attachment Passthrough ====================
+
+
+class TestBaasBotServiceAttachmentPassthrough:
+    """BaasBotService 全部 3 个方法的 attachments 透传验证。"""
+
+    @pytest.mark.asyncio
+    async def test_send_message_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """send_message 将 attachments 透传到 client.send_message。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("response content", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=[att1],
+            )
+
+        mock_client.send_message.assert_awaited_once()
+        call_kw = mock_client.send_message.call_args.kwargs
+        passed = call_kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_inject_message_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """inject_message 将 attachments 透传到 client.inject_message。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        mock_client = AsyncMock()
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.inject_message(
+                session_id=SESSION_ID,
+                message="instruction",
+                binding_info=binding,
+                attachments=[att1],
+            )
+
+        mock_client.inject_message.assert_awaited_once()
+        call_kw = mock_client.inject_message.call_args.kwargs
+        passed = call_kw["attachments"]
+        assert len(passed) == 1
+        assert passed[0].attachment_id == "att_1"
+        assert isinstance(passed[0], Attachment)
+
+    @pytest.mark.asyncio
+    async def test_send_message_stream_passes_attachments_to_client(
+        self, service, wss_resolver, mock_pool
+    ):
+        """send_message_stream 将 attachments 透传到 client.send_message_stream (D-01)。"""
+        from secbaas.community.api.sse import StreamChunk
+
+        binding = _make_binding_info(
+            baas_session_id="SESSION-xyz", engine_type="openclaw"
+        )
+
+        att1 = Attachment(
+            attachment_id="att_1",
+            type="image",
+            file_name="f1.png",
+            url="https://cdn.example.com/f1",
+        )
+
+        async def _stream_ok(**kwargs):
+            yield StreamChunk(type="delta", content="hi")
+            yield StreamChunk(type="final", content="done")
+
+        mock_client = AsyncMock()
+        mock_client.send_message_stream = _stream_ok
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+            patch.object(service, "_mark_session_failed"),
+        ):
+            chunks = []
+            async for chunk in service.send_message_stream(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=[att1],
+            ):
+                chunks.append(chunk)
+
+        assert len(chunks) == 2
+        # Stream completed without error; attachments were passed through
+
+    @pytest.mark.asyncio
+    async def test_send_message_attachments_none_is_passed(
+        self, service, wss_resolver, mock_pool
+    ):
+        """attachments 为 None 时 client.send_message 收到 None（不报错）。"""
+        binding = _make_binding_info(baas_session_id="SESSION-xyz")
+
+        mock_client = AsyncMock()
+        mock_client.send_message = AsyncMock(return_value=("ok", "done"))
+        mock_pool.get.return_value = mock_client
+
+        with (
+            patch.object(
+                service,
+                "_resolve_ws_connection_for_binding",
+                return_value=_make_conn_info(),
+            ),
+            patch.object(service, "_mark_session_completed"),
+        ):
+            await service.send_message(
+                session_id=SESSION_ID,
+                message="hello",
+                binding_info=binding,
+                timeout=30.0,
+                attachments=None,
+            )
+
+        mock_client.send_message.assert_awaited_once()
+        call_kw = mock_client.send_message.call_args.kwargs
+        assert call_kw.get("attachments") is None
