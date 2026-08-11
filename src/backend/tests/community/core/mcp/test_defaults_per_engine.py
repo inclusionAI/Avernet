@@ -285,20 +285,22 @@ def test_default_cli_items_returns_copy():
 
 def test_template_config_mcps_append_and_override_defaults():
     template_config = {
-        "bot_template_config": {
-            "preset_capabilities": {
-                "mcp": [
-                    {
-                        "server_code": "mcp.ant.arkai.dimamcpserver",
-                        "name": "Template Dima",
-                        "description": "template override",
-                    },
-                    {
-                        "server_code": "mcp.ant.custom.template.server",
-                        "name": "Template Custom",
-                        "description": "template appended",
-                    },
-                ]
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.arkai.dimamcpserver",
+                            "name": "Template Dima",
+                            "description": "template override",
+                        },
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                            "description": "template appended",
+                        },
+                    ]
+                }
             }
         }
     }
@@ -318,15 +320,17 @@ def test_template_config_mcps_append_and_override_defaults():
 
 def test_template_config_mcp_presets_are_aicoding_specific():
     template_config = {
-        "bot_template_config": {
-            "preset_capabilities": {
-                "mcp": [
-                    {
-                        "server_code": "mcp.ant.custom.template.server",
-                        "name": "Template Custom",
-                        "description": "template appended",
-                    }
-                ]
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                            "description": "template appended",
+                        }
+                    ]
+                }
             }
         }
     }
@@ -344,14 +348,16 @@ def test_template_config_mcp_presets_are_aicoding_specific():
 
 def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
     template_config = {
-        "bot_template_config": {
-            "preset_capabilities": {
-                "mcp": [
-                    {
-                        "server_code": "mcp.ant.custom.template.server",
-                        "name": "Template Custom",
-                    }
-                ]
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                        }
+                    ]
+                }
             }
         }
     }
@@ -370,14 +376,16 @@ def test_claude_code_coding_template_uses_aicoding_mcp_bucket():
 
 def test_claude_code_template_factory_non_normal_uses_aicoding_mcp_bucket():
     template_config = {
-        "bot_template_config": {
-            "preset_capabilities": {
-                "mcp": [
-                    {
-                        "server_code": "mcp.ant.custom.template.server",
-                        "name": "Template Custom",
-                    }
-                ]
+        "template_config": {
+            "bot_template_config": {
+                "preset_capabilities": {
+                    "mcp": [
+                        {
+                            "server_code": "mcp.ant.custom.template.server",
+                            "name": "Template Custom",
+                        }
+                    ]
+                }
             }
         }
     }
