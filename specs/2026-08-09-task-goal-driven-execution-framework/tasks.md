@@ -28,7 +28,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## M0 — 领域模型(先落模型)
 - T0.1 新 `models.py`:枚举 `Status` 6 态(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`、`RelationType`(DEPENDENCY)。
-- T0.2 规格面 dataclass:`Metadata`(task_id/title/instruction)、`Context`(background/extend_props)、`AcceptanceCriteria`(id/type/description)、`Goal`、`TaskSpec`(无 SLA)、`TaskInfo`。
+- T0.2 规格面 dataclass:`Metadata`(task_id/title/instruction)、`Context`(background/extend_props)、`AcceptanceCriteria`(id/description)、`Goal`、`TaskSpec`(无 SLA)、`TaskInfo`。
 - T0.3 运行态 dataclass:`AcceptanceResult`(verdict/acceptances_metric/gaps,无 verifier)、`RuntimeInfo`(run_mode:str/assignee/start_time/end_time/output/acceptance_result/extend_props,无 collab_mode)、`Relation`(src_id/dst_id/type/extend_props)、`TaskNode`(node_id/task_id/status/task_spec/run_info/node_run_graph/**`decomposed_by`(str|None,根=None)**,无 depends_on)、`TaskExecutionGraph`(run_id/loop_round/status/output/tasks/relations/extend_props)。
 - T0.4 中间类型:`TaskNodePatch`、`TaskNodeQueryCriteria`、`TaskOpResult`、`NodeOpResult`、`TaskCallbackData`(loop_task_id/workflow_type/workflow_id/instance_id/result)。
 - T0.5 派生规则注释(B1 解耦):① 结构子(decompose_children)从 `TaskNode.decomposed_by` 查;② dependencies_satisfied/depth(数据维度)/compute_parent_tasks 从 `relations.type=DEPENDENCY` 派生;③ 传播读结构子,就绪读数据依赖。
@@ -44,17 +44,17 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## M2 — 编排核 on_*(事件驱动 + 状态条件)
 - T2.1 `ExecutionEngine.on_execute(task_id)`:initialize_graph 后,条件 a(根 PENDING)→ plan→add→dispatch→start_run。
-- T2.2 `on_report(task_id,node_id,output_patch,acceptance_result)`:update_task_node_info 翻态;PASS→传播→条件 c(PLANNING 父∧前序全DONE)→plan→add→dispatch;FAIL+gaps→闸门→条件 b→plan→add→dispatch;FAIL无gaps/STUCK→HUNG。
-- T2.3 `on_miss(task_id,node_id)`:写 miss_events→深度闸门→plan→add→消费→dispatch;depth≥MAX→HUNG。
-- T2.4 `on_harness(task_id,node_id,patch)`:旁路 update_task_node_info(HUNG/FAILED),不抢正向。
+- T2.2 `on_report(patch: TaskNodePatch)`:patch 内含 (task_id,node_id)+acceptance_result+output_patch;update_task_node_info 翻态;PASS→传播→条件 c(PLANNING 父∧前序全DONE)→plan→add→dispatch;FAIL+gaps→闸门→条件 b→plan→add→dispatch;FAIL无gaps/STUCK→HUNG(extend_props_patch.hung_reason)。返回 NodeOpResult 供 ack。
+- T2.3 `on_miss(patch: TaskNodePatch)`:patch.extend_props_patch.miss_events 由 dispatcher 填;深度闸门→<MAX: plan→add→消费→dispatch;≥MAX: patch.status=HUNG(hung_reason=depth_max)→update_task_node_info。
+- T2.4 `on_harness(patch: TaskNodePatch)`:旁路 update_task_node_info(patch)(HUNG/FAILED),不抢正向。
 - T2.5 串行化:同 task_id 可重入锁;跨 task 并行。loop_round:reroute 补救非根节点时 graph.loop_round++(graph 持久字段)。
-- T2.6 根终验(主动验证):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 经 source_channel 触发 owner bot 终验 skill(验 root.goal 全 AC,验收模式聚合 root 结构子=全图 DONE 产出)→ on_report(root,verdict);PASS→root DONE+graph DONE;FAIL+gaps→plan(root) 补救子(根不特殊化);FAIL无gaps→root HUNG。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
+- T2.6 根终验(主动验证):`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING → 经 source_channel 触发 owner bot 终验 skill(验 root.goal 全 AC,验收模式聚合 root 结构子=全图 DONE 产出)→ on_report(patch{root,verdict});PASS→root DONE+graph DONE;FAIL+gaps→plan(root) 补救子(根不特殊化);FAIL无gaps→root HUNG。**框架代码不识别"终验节点"**,终验=根节点验收,由 owner bot skill 回投。
 - T2.7 零 case 知识红线:framework 代码 `grep -rE 'N_overview|N_market|N_aggregate|N_verify|N_report|N_practice|dim_|n_root' src/agentclaw/community/core/task/` 必须 0 命中(节点名仅存 singlebox stub DecomposerPort 产出/测试)。
 - T2.x 单测:on_execute 首帧、on_report PASS/FAIL/根终验三分支、on_miss 闸门、on_harness 不抢正向、串行化、loop_round 递增、零 case grep。
 
 ## M3 — TaskPlanner 编排壳 + DecomposerPort 委托
-- T3.1 `DecomposerPort` Protocol:`decompose(node,graph)->list[TaskNode]`(产下一步可执行子节点;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向图;可返回 [] 表不可再分)。
-- T3.2 `TaskPlanner.plan(graph)->list[TaskNode]`:**触发条件**(图谱有更新 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点);不满足返回 []。读图自发现目标(FAIL 叶子/PLANNING 父),委托 decompose;规划原则硬约束(派发/执行中节点不可改含前序依赖;只对失败+子全DONE自身PLANNING父);纯读图去重;步进式 deps 满足才产。**删除**写死节点。
+- T3.1 `DecomposerPort` Protocol:`decompose(graph)->list[TaskNode]`(seam 读图自发现 target+产子;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向图;返回 [] 表无可规划目标;decompose(root)==[] 判断属实现侧)。
+- T3.2 `TaskPlanner.plan(graph)->list[TaskNode]`:**触发条件**(图谱有更新 ∧ 无 RUNNING 节点 ∧ 有 PLANNING 节点);不满足返回 []。读图自发现目标(FAIL 叶子/PLANNING 父),委托 decompose(graph)(seam 自负责 target-finding);规划原则硬约束(派发/执行中节点不可改含前序依赖;只对失败+子全DONE自身PLANNING父);纯读图去重;步进式 deps 满足才产。**删除**写死节点。
 - T3.2a 零 case 知识:`TaskPlanner`/`ExecutionEngine` 不得出现任何节点名字面量或"终验节点"启发式(如按入图顺序判终验);终验=根节点验收(§5.4/T2.6),由 owner bot skill 回投,框架不识别特殊节点。
 - T3.3 `GapBasedPlanningRule`(`OptimizerRule`)承载编排壳,委托 `DecomposerPort`。
 - T3.4 默认实现:Avernet `StubDecomposer`(测试注入 case 节点);corp `PlanBotDecomposer`(plan_bot agent/LLM SKILL,Avernet 不含红线)。
@@ -62,7 +62,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## M4 — TaskDispatcher + TaskRunner(执行模块,按 `lxg2mwgmtfqg6d95`)
 - **M4a TaskDispatcher + BotDiscoverPort**
-  - T4.1 `BotDiscoverPort.search(node,graph)->SearchResult`:4 态 HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS/MISS;HIT_MULTI_BOTS 一并决出 collab_mode(填 GroupFormation,内部参数不持久)。Avernet `StubBotDiscover`(本地关键词 cover + bot catalog)。
+  - T4.1 `BotDiscoverPort.search(node)->SearchResult`:4 态 HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS/MISS;HIT_MULTI_BOTS 一并决出 collab_mode(填 GroupFormation,内部参数不持久)。Avernet `StubBotDiscover`(本地关键词 cover + bot catalog)。search 入参只 node(读 node.task_spec;不读 graph)。
   - T4.2 `TaskDispatcher`(不持 graph);`dispatch(toDoTaskList)->list[TaskNode]`(对齐派发文档签名):无 graph 入参、**不写图、不起 run**;search→把 run_mode(str)/assignee 填到 `TaskNode.run_info` 上返回;HIT_MULTI_BOTS→`runner.form_coop_group` 得 gid 填 node;MISS→不填执行者(仍 None),标 `run_info.extend_props.miss_events` 交编排核。编排核拿返回节点→有 assignee 的 `graph.update_task_node_info(run_mode/assignee,RUNNING)` 落库 + `runner.start_run`;标 miss_events 的走 `on_miss`。
   - T4.3 `SearchBasedDispatchRule`(`OptimizerRule`)委托 `BotDiscoverPort`+`TaskRunner`。
   - T4a.x 单测:四态填 TaskNode.run_info(HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS 填 run_mode/assignee、MISS 不填标 miss_events)、collab_mode 来自 search(内部)、dispatcher 不写图不起 run、编排核落库后 DISPATCHED 必 RUNNING、前序依赖双检、start_run 由编排核触发(批量)、MISS 节点 status 仍 PENDING。
@@ -70,7 +70,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
   - T4.4 `TaskRunner.start_run(toDoTaskList)->list[bool]`:批量;按 run_mode(str)自适应投递 single_bot/coop_group/bbs(BBS 仅挂悬赏,认领执行 bot 自主);返回每派发是否成功。
   - T4.5 `TaskRunner.query_status(task_id)->Status` / `query_detail(TaskNode)->TaskNode` / `query_result(TaskNode)->TaskNode` / `query_bot_tasks(bot_id)->list[TaskNode]`。
   - T4.6 `TaskRunner.form_coop_group(GroupFormation)->group_id`:(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS(`group_strategy=collab_mode`;state_machine 注入 workflow yaml);群自闭环持 `SubDagRef(bcs_run_id)`。Avernet BCS local/mock;prod wiring 属 corp。
-  - T4.7 `TaskLoopCallback`:PUSH 回投;`TaskCallbackData{loop_task_id,workflow_type,workflow_id,instance_id,result}`;`start_run(data)`(进度)/`report_result(data)`(完成/失败);适配层映射 loop_task_id→(task_id,node_id)、result.success→verdict、result.data→output、result.fail_detail→extend_props → 编排核 on_report。
+  - T4.7 `TaskLoopCallback`:PUSH 回投;`TaskCallbackData{loop_task_id,workflow_type,workflow_id,instance_id,result}`;`start_run(data)`(进度)/`report_result(data)`(完成/失败);适配层把 data 组装成 TaskNodePatch(task_id/node_id 从 loop_task_id 映射;acceptance_result 从 success/data;output_patch=fold data;fail_detail→extend_props_patch)→ 编排核 on_report(patch)。
   - T4.8 上下文组装:`start_run` 内部 `_build_context(task_id,node)` 用 `compute_parent_tasks`/`decompose_children_tasks`(升为公开)组合自动判定——有结构子→验收模式聚合结构子(子树)DONE output+goal;无结构子→执行模式聚合上游 DEPENDENCY 父 output。无 NODE/SUBTREE/TASK scope 入参,验收只按 (task_id,node_id) 上报节点。
   - T4b.x 单测:start_run 三 run_mode 分发(含 BBS 只挂悬赏)、query_*回填、TaskLoopCallback.report_result→on_report 适配映射、form_coop_group BCS local/mock 契约、BBS 自主回投用例、_build_context 验收/执行双模式自动切换。
 
@@ -83,7 +83,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## M6 — E2E singlebox(主 seam,理想 seam 数=1)
 - T6.1 singlebox 编排:模型+六模块全接;in-memory `TaskGraphService`;`StubDecomposer`(注入 case 节点);`StubBotDiscover`(本地 catalog 关键词 cover);`form_coop_group` BCS local/mock。
-- T6.2 用权威案例剧本 `gwqie46v7hzr1w6h` 存储行业尽调(三阶段三模态)端到端跑完:`execute→initialize_graph→on_execute(条件a)→plan(decompose 按三阶段 AC 拆 N_overview/四专题/N_practice_bbs/N_report)→add_task_nodes(根→PLANNING,relations 登记)→dispatch(决定谁来做:single_bot/coop_group 动态拉群 manager_worker/bbs)→start_run→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→on_report(条件b)→plan(补救挂该节点下,该节点→PLANNING)→二次 PASS→传播治愈→图 status=DONE`。注入一次 STUCK→HUNG→人工确认→BBS 自主认领接力。
+- T6.2 用权威案例剧本 `gwqie46v7hzr1w6h` 存储行业尽调(三阶段三模态)端到端跑完:`execute→initialize_graph→on_execute(条件a)→plan(decompose(graph) 按三阶段 AC 拆 N_overview/四专题/N_practice_bbs/N_report)→add_task_nodes(根→PLANNING,relations 登记)→dispatch(决定谁来做:single_bot/coop_group 动态拉群 manager_worker/bbs)→start_run→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→on_report(条件b)→plan(补救挂该节点下,该节点→PLANNING)→二次 PASS→传播治愈→图 status=DONE`。注入一次 STUCK→HUNG→人工确认→BBS 自主认领接力。
 - T6.3 断言面:`get_task_dashboard` 终态(`TaskExecutionGraph`:status/loop_round/tasks[].status/acceptance_result/relations)+ 事件日志可重放 + `query_result`/`query_detail`。
 - T6.4 singlebox 覆盖脚本对齐仓库 ci(`scripts/ci/singlebox_coverage*`),与 PR CI 同一基线。
 

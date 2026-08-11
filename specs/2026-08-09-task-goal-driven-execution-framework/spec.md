@@ -1,7 +1,7 @@
 # Spec — 任务目标驱动的任务动态规划执行框架 (Goal-Driven Dynamic-Planning Task Execution Framework)
 
 > **权威源(冲突时以此为准)**:
-> - 最新领域模型(用户给定 classDiagram,2026-08-11):`TaskInfo`/`TaskSpec`(metadata/context/goal,**无 SLA**)/`TaskExecutionGraph`(**含 `run_id`/`relations: list[Relation]`**)/`TaskNode`(**含 `task_id`/`node_run_graph`/`decomposed_by`(结构父,根 None)**,**无 `depends_on` 字段**);结构归属(decomposed_by)与数据依赖(relations DEPENDENCY)解耦/`Relation`({src_id,dst_id,type,extend_props})/`RuntimeInfo`(**`run_mode` 为 str,无 `collab_mode`**)/`AcceptanceCriteria`(`tag`→`type`)/`AcceptanceResult`({verdict,acceptances_metric,gaps},**无 verifier**)/`Status` **6 态**(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)/`AcceptanceVerdict`/`RelationType`(DEPENDENCY)。
+> - 最新领域模型(用户给定 classDiagram,2026-08-11):`TaskInfo`/`TaskSpec`(metadata/context/goal,**无 SLA**)/`TaskExecutionGraph`(**含 `run_id`/`relations: list[Relation]`**)/`TaskNode`(**含 `task_id`/`node_run_graph`/`decomposed_by`(结构父,根 None)**,**无 `depends_on` 字段**);结构归属(decomposed_by)与数据依赖(relations DEPENDENCY)解耦/`Relation`({src_id,dst_id,type,extend_props})/`RuntimeInfo`(**`run_mode` 为 str,无 `collab_mode`**)/`AcceptanceCriteria`(id/description)/`AcceptanceResult`({verdict,acceptances_metric,gaps},**无 verifier**)/`Status` **6 态**(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG)/`AcceptanceVerdict`/`RelationType`(DEPENDENCY)。
 > - 流程架构图 `apoi9lcedw9u8ivq`:管理态任务中心 + 运行态任务图谱/规划/派发/执行 + 旁路任务Harness + 执行主体 Bot/协作群/BBS/Human/工具。
 > - 5 个模块设计文档(权威 API 契约):任务中心 `yugg6dorsxo8sgmp`、任务图谱 `lunk1txfuv6gtwk2`、任务规划 `uuq2tlue91q4lkal`、任务派发 `ue1ie0g3supwo2uf`、任务执行 `lxg2mwgmtfqg6d95`。
 > - 行为基线 case 剧本 `gwqie46v7hzr1w6h`(存储行业尽调,三阶段覆盖三模态)。
@@ -15,14 +15,14 @@
 
 需要一个**以目标(Goal + Acceptance)为唯一收敛判据、能跨 单 Bot / 协作群 / BBS 三种执行模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环**的任务动态规划执行框架,且必须**严格按最新设计的领域模型与六模块架构实现**。
 
-领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 加 `task_id`/`node_run_graph`/`decomposed_by`(结构父)、`TaskExecutionGraph` 加 `run_id`/`relations`(数据依赖);两者解耦、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、`AcceptanceCriteria.type`、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(7 API:4 核心+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
+领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 加 `task_id`/`node_run_graph`/`decomposed_by`(结构父)、`TaskExecutionGraph` 加 `run_id`/`relations`(数据依赖);两者解耦、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(7 API:4 核心+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
 
 ## Solution
 
 按最新设计**从零实现**一个目标驱动的任务动态规划执行框架:
 
 1. **领域模型 = 最新 classDiagram**:
-   - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/**`type`**/description)。
+   - 规格面:`TaskInfo`(入口,带 `source_channel_type/id` + `execution_config`)→ `TaskSpec`(metadata/context/goal,**无 SLA**)→ `Metadata`(**含 `task_id`**/title/instruction)、`Context`(background/**`extend_props`**)、`Goal`(objective/`acceptances: list[AcceptanceCriteria]`)、`AcceptanceCriteria`(id/description)。
    - 运行态:`TaskExecutionGraph`(**`run_id`**/loop_round/status/output/**`tasks`**/**`relations: list[Relation]`**/extend_props)、`TaskNode`(node_id/**`task_id`**/status/task_spec/run_info/**`node_run_graph`**)、`Relation`({src_id,dst_id,**`type: RelationType`**,extend_props})、`RuntimeInfo`(**`run_mode: str`**/assignee/start_time/end_time/output/acceptance_result/extend_props,**无 collab_mode**)、`AcceptanceResult`(verdict/`acceptances_metric`/gaps,**无 verifier**)。
    - 枚举:`Status` **6 态**(PENDING/**PLANNING**/RUNNING/DONE/FAILED/HUNG)、`AcceptanceVerdict`(PASS/FAIL)、`RelationType`(DEPENDENCY)。
    - **结构归属 vs 数据依赖解耦(B1)**:`TaskNode.decomposed_by` 表结构归属(产自 decompose 谁,根 None);`Relation{type=DEPENDENCY}` 表数据依赖(多入 DAG),存于 `TaskExecutionGraph.relations`。`TaskNode` 不持 `depends_on` 字段。结构子查询/验收/传播读 decomposed_by;就绪判定/投影取上游读 relations。
@@ -68,12 +68,12 @@
 
 ## User Stories
 
-1. 作为运营方,我想代码领域模型与最新 classDiagram 一致(`Relation` 一等公民、6 态含 `PLANNING`、`run_mode` str、无 `collab_mode`/`SLA`/`Scope`/`RunMode` 枚举、`AcceptanceCriteria.type`、`AcceptanceResult` 无 verifier),这样设计与实现不漂移。
+1. 作为运营方,我想代码领域模型与最新 classDiagram 一致(`Relation` 一等公民、6 态含 `PLANNING`、`run_mode` str、无 `collab_mode`/`SLA`/`Scope`/`RunMode` 枚举、`AcceptanceResult` 无 verifier),这样设计与实现不漂移。
 2. 作为运营方,我想数据依赖用 `Relation{type=DEPENDENCY}` 存于 `TaskExecutionGraph.relations`,结构归属用 `TaskNode.decomposed_by`,`TaskNode` 不持 `depends_on`,这样数据依赖可带 `extend_props`、结构归属 O(1) 查父子、两者解耦模型更规整。
 3. 作为运营方,我想 `TaskNode` 含 `task_id`/`node_run_graph`/`decomposed_by`(结构父,根=None),这样节点知道归属哪张图、结构父是谁、facade 写操作可据此定位。
 4. 作为运营方,我想状态有 `PLANNING` 显式承载"待规划/委托中",这样状态机不与结构派生混淆、`add_task_nodes` 条件 c 可直接判 `PLANNING`。
 5. 作为运营方,我想 `TaskExecutionGraph` 含 `run_id`(运行实例唯一 ID),这样多次执行同一 task_spec 可区分实例。
-6. 作为运营方,我想 `AcceptanceCriteria` 用 `type`(验收评估类型)取代 `tag`,这样验收项类型表达更直白(不再兼承 scope 枚举)。
+6. 作为运营方,我想 `AcceptanceCriteria` 只保留 `id`/`description`(不再用 `tag`/`type` 兼承 scope 枚举),这样验收项定义最精简。
 7. 作为业务方,我想提交一句话需求并由 Bot 澄清成带验收标准的目标并锁定后才执行,这样目标可被机器验收。
 8. 作为业务方,我想随时看任务状态/进度/距目标差距(`get_task_dashboard` 返回 `TaskExecutionGraph`),这样不必问人。
 9. 作为业务方,我想目标验收 FAIL 后系统自动识别 gap 并补做(补救子挂该节点下,子全 PASS 传播治愈),这样不必手动重启。
@@ -141,7 +141,7 @@
 - **结构归属 vs 数据依赖(B1 解耦)**:`TaskNode.decomposed_by`(str|None,根=None)表结构归属(严格单父分解树);`Relation{type=DEPENDENCY}` 在 `TaskExecutionGraph.relations` 表数据依赖(多入 DAG)。`TaskNode` 不持 `depends_on`。结构子查询/验收/传播读 `decomposed_by`;`dependencies_satisfied`/投影取上游读 `relations`;`depth` 数据维度从 `relations` 递归。5 文档 `depends_on` 字样语义拆分:结构归属→`decomposed_by`,数据依赖→`relations`。
 - **`PLANNING` 语义**:节点被分解、委托子节点执行时进 `PLANNING`(显式状态);`add_task_nodes` 条件 c 直接判 `PLANNING`。子全 PASS → 传播该节点 DONE。
 - **`collab_mode`**:`RuntimeInfo` 无 `collab_mode` 字段;协作群协作方式(chat/manager_worker/state_machine)作 `TaskRunner.form_coop_group(GroupFormation)` 内部参数(对齐 BCS `GroupStrategy`),不进模型持久字段。`run_mode` 为 str("single_bot"/"coop_group"/"bbs")。
-- **枚举精简**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 用 `type: str`;`RuntimeInfo.run_mode` 为 str。
+- **枚举精简**:`TaskSpec` 无 `SLA`(SLA 超时由 Harness 周期巡检 + `execution_config` 承载);`AcceptanceCriteria` 只 `id`/`description`(无 `tag`/`type`);`RuntimeInfo.run_mode` 为 str。
 - **`AcceptanceResult` 字段**:`{verdict, acceptances_metric, gaps}`(无 `verifier`);`acceptances_metric`=已满足验收指标明细(原 `acceptances_met` 语义)。
 - **`Metadata.task_id` 与 `TaskNode.task_id`**:`Metadata` 持 `task_id`(任务 ID);`TaskNode` 亦持 `task_id`(节点所发整体任务 ID),两者同源,便于节点定位归属图。
 - **`TaskExecutionGraph.run_id`**:运行实例唯一 ID,区分同一 task_spec 的多次执行实例。

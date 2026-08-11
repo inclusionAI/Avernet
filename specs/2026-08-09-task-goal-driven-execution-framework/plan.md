@@ -46,7 +46,6 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
     extend_props: dict            # 非结构化补充数据
 @dataclass AcceptanceCriteria:
     id: str
-    type: str                     # 验收评估类型
     description: str
 @dataclass Goal:
     objective: str
@@ -156,23 +155,25 @@ class RelationType(StrEnum):      DEPENDENCY    # 节点间依赖关系
 class ExecutionEngine:   # TaskService 内部编排核(不对外)
     """事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution。
     持 TaskGraphService/TaskPlanner/TaskDispatcher/TaskRunner;BBS 模态统一归 TaskRunner 一条 run_mode="bbs" 分支。
-    按事件 + 状态条件分段协调(无 single drive fixpoint 泵)。"""
+    按事件 + 状态条件分段协调(无 single drive fixpoint 泵)。on_miss/on_report/on_harness 入参统一收口为 TaskNodePatch。"""
 
     def on_execute(self, task_id) -> None:
         # execute 事件:initialize_graph(根 PENDING)→ 触发首帧推进:
         #   条件 a(根 PENDING)成立 → planner.plan(graph) → graph.add_task_nodes(第一层,根进 PLANNING)
         #   → 条件:有新 PENDING 就绪 ∧ 无 RUNNING → dispatcher.dispatch(toDo) 返回填执行者后的 list[TaskNode](不写图不起 run)→ 编排核落库(graph.update_task_node_info run_mode/assignee/RUNNING)→ runner.start_run
-    def on_report(self, task_id, node_id, output_patch, acceptance_result) -> NodeOpResult:
-        # 回投事件:graph.update_task_node_info(output_patch=fold, acceptance_result=唯一翻态依据)
+    def on_report(self, patch: TaskNodePatch) -> NodeOpResult:
+        # 回投事件:patch 内含 (task_id,node_id) + 唯一翻态依据 acceptance_result + output_patch。
+        #   graph.update_task_node_info(patch) 翻态(+fold output):
         #   PASS→DONE:传播(结构子 decomposed_by==本 全 DONE ∧ 非根 → 父 DONE;根 DONE → 图 DONE)
         #     → 触发:若有 PLANNING 父节点条件 c 成立 → plan → add_task_nodes(下一层)→ dispatch(返 list[TaskNode] 填执行者)→ 编排核落库(RUNNING)→ start_run
         #   FAIL+gaps→FAILED:深度闸门(<MAX 放行)→ 条件 b(FAILED+gaps 叶子)成立 → plan → add_task_nodes(补救子挂该节点下,该节点进 PLANNING)→ dispatch(返 list[TaskNode] 填执行者)→ 编排核落库(RUNNING)→ start_run
-        #   FAIL 无 gaps/STUCK→HUNG:不推进,等人工
-    def on_miss(self, task_id, node_id) -> None:
-        # dispatch 返回 MISS → 节点仍 PENDING,写 extend_props.miss_events
-        #   → 深度闸门 → 条件 b 类(?MISS 信号)→ plan → add_task_nodes(拆细)→ 消费 miss_events → dispatch
-    def on_harness(self, task_id, node_id, patch) -> None:
-        # Harness 旁路:graph.update_task_node_info(HUNG/FAILED),不抢正向驱动
+        #   FAIL 无 gaps/STUCK→HUNG(patch.extend_props_patch.hung_reason):不推进,等人工
+        # 返回 NodeOpResult(prev/new_status)供适配层 ack,不作驱动依据
+    def on_miss(self, patch: TaskNodePatch) -> None:
+        # dispatcher MISS → 节点仍 PENDING,patch.extend_props_patch.miss_events 已由 dispatcher 填
+        #   → 深度闸门:<MAX→ plan→add_task_nodes(拆细)→ 消费 miss_events → dispatch;≥MAX→ patch.status=HUNG(hung_reason=depth_max)→ update_task_node_info
+    def on_harness(self, patch: TaskNodePatch) -> None:
+        # Harness 旁路:graph.update_task_node_info(patch)(HUNG/FAILED),不抢正向驱动
     # loop_round: reroute 补救非根节点时 graph.loop_round++(graph 持久字段,非 engine 内部)
 ```
 
@@ -235,11 +236,13 @@ class TaskGraphService:
 
 ```python
 class DecomposerPort(Protocol):     # 分解策略 seam(非领域实体,模块层接缝;与 TaskPlanner 委托关系)
-    def decompose(self, node: TaskNode, graph: TaskExecutionGraph) -> list[TaskNode]:
-        """对单个规划目标产"下一步可执行的子节点"(挂该 node 下;status=PENDING,run_info 空,
-          task_id 已填,node_run_graph 指向所属图)。
-        触发语义由 TaskPlanner 判(PLANNING 父 / FAIL 叶);本方法只产内容,不管步进/去重/硬契约。
-        可返回 [](判断属 DecomposerPort 实现侧:stub/corp 各自负责,框架不介入)表示该节点不可再分。默认:corp 走规划 agent(plan_bot)/LLM SKILL;Avernet stub。"""
+    def decompose(self, graph: TaskExecutionGraph) -> list[TaskNode]:
+        """读图自行发现规划目标(FAIL 叶子 / PLANNING 父)并产"下一步可执行的子节点"
+          (挂该目标下;status=PENDING,run_info 空,task_id 已填,node_run_graph 指向所属图)。
+        target-finding 由本 seam 自洽(不再由 planner 预选 target 传入);planner 仅做纯读图去重
+          + 步进式 deps 满足才产 + 硬契约兜底。返回 [] 可表"无可规划目标"
+          (decompose(root)==[] 的判断属实现侧:stub/corp 各自负责,框架不介入)。默认:corp 走规划
+          agent(plan_bot)/LLM SKILL;Avernet stub。"""
 
 class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
     def __init__(self, decomposer: DecomposerPort): ...
@@ -252,7 +255,7 @@ class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
         #    - 前向/委托: status=PLANNING 的父节点(planner 不自查 deps;由编排核先确认无 RUNNING 再调 plan)
         # 2) 规划原则(规划文档硬约束):派发/执行中节点不可改(含前序依赖);
         #    只对失败节点 + 子全完成且自身 PLANNING 的父节点规划
-        # 3) 对每目标调 decomposer.decompose(target, graph) — 内容委托
+        # 3) 调 decomposer.decompose(graph) — 由 seam 自行发现 target + 产子;planner 不预选 target
         # 4) 硬契约兜底:纯读图去重(图上已存则不产);步进式 deps 满足才产
         # 5) 返回并集 list[TaskNode](不含物理执行信息)
 ```
@@ -268,7 +271,7 @@ class TaskPlanner(PlannerPort):     # 编排壳,零 case 知识
 
 ```python
 class BotDiscoverPort(Protocol):    # 搜推 seam(同步 in-process)
-    def search(self, node: TaskNode, graph: TaskExecutionGraph) -> "SearchResult": ...
+    def search(self, node: TaskNode) -> "SearchResult": ...
     # -> HIT_SINGLE(bot_id) | HIT_GROUP(group_id) | HIT_MULTI_BOTS(group_formation,含 collab_mode) | MISS
     # collab_mode 在 SearchResult/GroupFormation 内(内部参数),不进 RuntimeInfo 持久
 
@@ -346,10 +349,9 @@ class TaskLoopCallback:
     def start_run(self, data: TaskCallbackData) -> None:     # 任务开始执行(可选进度信号)
         ...
     def report_result(self, data: TaskCallbackData) -> None: # 任务完成或失败(success/data or fail_detail)
-        # 框架适配层映射: data.loop_task_id → (task_id, node_id);
-        #              data.result.success → AcceptanceVerdict(PASS/FAIL);
-        #              data.result.data → RuntimeInfo.output; data.result.fail_detail → extend_props
-        # → 编排核 on_report → graph.update_task_node_info → 按 verdict 翻态/传播/补救
+        # 框架适配层把 data 组装成 TaskNodePatch(task_id/node_id 从 loop_task_id 映射;
+        #              acceptance_result 从 result.success/data 映射;output_patch=fold data;
+        #              fail_detail → extend_props_patch)→ 编排核 on_report(patch) → graph.update_task_node_info(patch) → 按 verdict 翻态/传播/补救
 ```
 
 #### 3.5.3 三模态自适应作用
@@ -415,7 +417,7 @@ flowchart TD
     TS --> IG["graph.initialize_graph(根 PENDING)"]
     IG --> ORC1["编排核 on_execute"]
     ORC1 --> CONDA{"条件 a:根 PENDING?"}
-    CONDA -- 是 --> PLAN1["planner.plan(graph)→decompose(root)"]
+    CONDA -- 是 --> PLAN1["planner.plan(graph)→decompose(graph)"]
     PLAN1 --> ADD1["graph.add_task_nodes(第一层,根→PLANNING)"]
     ADD1 --> DISP["dispatcher.dispatch(toDo)"]
     DISP --> SEARCH["search 4态"]
@@ -517,7 +519,7 @@ flowchart TD
 > fold 契约:`output_patch` 只 fold 不翻态;`acceptance_result` 唯一终态翻转 + 唯一下游触发/补救点。
 
 - **传播 DONE**(B1):结构子(decomposed_by==本node)全 DONE ∧ 非根 ∧ 本节点非 DONE → 本节点 DONE(PLANNING 父子全 PASS→DONE 治愈;FAILED 节点的补救结构子全 PASS 可治愈)。数据依赖(DEPENDENCY 边)只决定就绪,不参与传播判定。
-- **terminal PASS(主动验证)**:`plan(root)==[]`(无可再产) ∧ 全非根 DONE ∧ 无 RUNNING → 编排核经 `source_channel`(owner/master bot)触发**终验 skill**(验 root.goal 全 AC,输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判无 scope)→ owner bot 回投 `on_report(root, acceptance_result)`:
+- **terminal PASS(主动验证)**:`plan(root)==[]`(无可再产) ∧ 全非根 DONE ∧ 无 RUNNING → 编排核经 `source_channel`(owner/master bot)触发**终验 skill**(验 root.goal 全 AC,输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判无 scope)→ owner bot 回投 `on_report(patch)`(TaskNodePatch 内含 root 的 verdict/gaps):
   - verdict=PASS → root[DONE] ∧ graph.status=DONE(终态)。
   - verdict=FAIL+gaps → **根不特殊化**:plan(root) 按 gaps 产补救子挂 root 下 → dispatch → 继续驱动(根不进终态)。
   - verdict=FAIL 无 gaps → root[HUNG] → graph terminal FAIL(人工/升 BBS)。
@@ -549,7 +551,7 @@ sequenceDiagram
     TS->>G: initialize_graph(根 PENDING, run_id 分配)
     TS->>ORC: on_execute(task_id)
     ORC->>P: plan(graph)(条件 a:根 PENDING)
-    P->>Dp: decompose(root, graph)
+    P->>Dp: decompose(graph)
     Dp-->>P: list[TaskNode]
     P-->>ORC: 去重+硬契约后 list[TaskNode]
     ORC->>G: add_task_nodes(第一层;B1双写:子.decomposed_by=root,父→PLANNING)
@@ -570,19 +572,19 @@ sequenceDiagram
     R-->>ORC: list[Boolean]
     R->>X: 按 run_mode 投递
     X-->>CB: (异步) report_result(TaskCallbackData{loop_task_id, workflow_type, instance_id, result})
-    CB->>ORC: on_report(适配层映射 loop_task_id→(task_id,node_id), success→verdict, data→output)
+    CB->>ORC: on_report(patch)(适配层把 data 组装成 TaskNodePatch)
     ORC->>G: update_task_node_info(output_patch=fold;acceptance→翻态)
     alt PASS
         G-->>G: 节点→DONE;子全DONE→传播父DONE
         opt 条件 c:有 PLANNING 父 ∧ 无 RUNNING
-            ORC->>P: plan(graph)→decompose(父)
+            ORC->>P: plan(graph)→decompose(graph)
             ORC->>G: add_task_nodes(下一层;父→PLANNING)
             ORC->>D: dispatch→list[TaskNode]填执行者→(ORC)update(RUNNING)+start_run
         end
     else FAIL+gaps
         G-->>G: 节点→FAILED
         ORC->>ORC: 深度闸门 depth<MAX?
-        ORC->>P: plan(graph)→decompose(failed_node)
+        ORC->>P: plan(graph)→decompose(graph)
         ORC->>G: add_task_nodes(补救子挂该节点下;failed_node→PLANNING;loop_round++)
         ORC->>D: dispatch→list[TaskNode]填执行者→(ORC)update(RUNNING)+start_run
     end
@@ -592,7 +594,7 @@ sequenceDiagram
     H-->>G: (旁路) SLA超时→update_task_node_info(HUNG/FAILED)
     ORC->>ORC: plan(root)==[] ∧ 全非根DONE → 触发 owner bot 终验 skill(经 source_channel)
     owner-->>CB: report_result(root_task_id, verdict=PASS, 全AC)
-    CB->>ORC: on_report(root, PASS)
+    CB->>ORC: on_report(patch{root,PASS})
     ORC->>G: update_task_node_info(root DONE) + 图 status=DONE
     U->>TS: get_task_dashboard(task_id)
     TS->>G: query_task_dashboard
@@ -628,20 +630,20 @@ sequenceDiagram
 **逐 step 端到端 API 流程串联(记法 `node[状态]`):**
 
 1. **任务输入→建图**:`Owner-Bot SKILL` 调 `TaskService.execute(TaskInfo{spec, source_channel=bot})`→`graph.initialize_graph`(run_id 分配,根 n_root[PENDING])→编排核 `on_execute`。
-2. **初始规划(委托)**:`on_execute`→条件 a(根 PENDING)成立→`planner.plan(graph)`→读图:根 PENDING→`DecomposerPort.decompose(n_root)`→产 `[N_overview]`(task_id 已填)。`graph.add_task_nodes([N_overview])`:B1 双写——N_overview.decomposed_by=n_root;n_root→PLANNING(无 DEPENDENCY 入边,N_overview 入口可跑)。
+2. **初始规划(委托)**:`on_execute`→条件 a(根 PENDING)成立→`planner.plan(graph)`→委托 `DecomposerPort.decompose(graph)`:seam 读图自发现目标=根 PENDING→产 `[N_overview]`(task_id 已填)。`graph.add_task_nodes([N_overview])`:B1 双写——N_overview.decomposed_by=n_root;n_root→PLANNING(无 DEPENDENCY 入边,N_overview 入口可跑)。
 3. **派发(N_overview)**:`dispatch([N_overview])`→search→`HIT_SINGLE(行业信息抓取Bot)`→`update_task_node_info(run_mode="single_bot", assignee, RUNNING)`,N_overview[RUNNING]。
 4. **开始执行**:`start_run([N_overview])`→投递单 bot workflow。派发与执行分层:dispatcher 决定谁做,start_run 真正投递。
 5. **回投(PUSH)**:单 bot 完成→`TaskLoopCallback.report_result(TaskCallbackData{loop_task_id=N_overview 映射, workflow_type=single_bot, instance_id, result{success=true, data=行业全貌}})`→适配层 `on_report`→`update_task_node_info(output=行业全貌, acceptance=PASS)`→N_overview[DONE]。
-6. **传播+下一层规划(委托)**:`on_report`→传播:N_overview 的结构子(N_overview.decomposed_by==n_root,当前无)无,跳过;条件 c(n_root PLANNING ∧ 无 RUNNING)成立→`plan(graph)`:`decompose(n_root)`(据阶段二 AC)产 `[N_market,N_tech,N_compete,N_customer]`→`add_task_nodes([四专题])`:B1 双写——四专题.decomposed_by=n_root(结构父);relations 登记 N_overview→四专题(DEPENDENCY,数据依赖)。n_root 仍 PLANNING(结构子含未 DONE 的四专题)。
+6. **传播+下一层规划(委托)**:`on_report`→传播:N_overview 的结构子(N_overview.decomposed_by==n_root,当前无)无,跳过;条件 c(n_root PLANNING ∧ 无 RUNNING)成立→`plan(graph)`→委托 `decompose(graph)`:seam 读图发现 n_root 仍 PLANNING(据阶段二 AC)产 `[N_market,N_tech,N_compete,N_customer]`→`add_task_nodes([四专题])`:B1 双写——四专题.decomposed_by=n_root(结构父);relations 登记 N_overview→四专题(DEPENDENCY,数据依赖)。n_root 仍 PLANNING(结构子含未 DONE 的四专题)。
 7. **四专题并行派发执行**:N_overview[DONE] 使四专题数据依赖(DEPENDENCY 入边)满足(plan 触发条件:无 RUNNING ∧ 有 PLANNING)→`dispatch([四专题])`:
    - N_market/N_tech/N_customer search→`HIT_MULTI_BOTS`→`form_coop_group(GroupFormation{collab_mode=MANAGER_WORKER, member_bots})`(BCS 建群)→`update_task_node_info(run_mode="coop_group", assignee=gid, RUNNING)`。
    - N_compete search→`HIT_SINGLE(供应链专家Bot)`→`update_task_node_info(run_mode="single_bot", RUNNING)`。
    →`start_run([四专题])` 批量投递。
 8. **协作群终态回投(PUSH)**:三个协作群各自 `TaskCallbackData(workflow_type=bcn_coop_group)`→`report_result`→`on_report`→`update_task_node_info(PASS)`→DONE。N_compete 单 bot 同理。
-9. **BBS 阶段**:四专题全 DONE→n_root 结构子(N_overview,N_market,N_tech,N_compete,N_customer)全 DONE,但 n_root 是根不传播 DONE(根 DONE 由终验判)。条件 c(无 PLANNING 父待规划)→`plan`:`decompose(n_root)`(据阶段三 AC)产 `[N_practice_bbs]`→`add_task_nodes`:B1 双写——N_practice_bbs.decomposed_by=n_root;relations 登记 N_market/N_tech/N_compete/N_customer→N_practice_bbs(DEPENDENCY)→`dispatch→HIT(bbs 通道)→update_task_node_info(run_mode="bbs", RUNNING)→start_run` **仅挂悬赏**;认领执行由 bot 自主,不经 start_run 接口。
+9. **BBS 阶段**:四专题全 DONE→n_root 结构子(N_overview,N_market,N_tech,N_compete,N_customer)全 DONE,但 n_root 是根不传播 DONE(根 DONE 由终验判)。条件 c(无 PLANNING 父待规划)→`plan`→委托 `decompose(graph)`:seam 据阶段三 AC 产 `[N_practice_bbs]`→`add_task_nodes`:B1 双写——N_practice_bbs.decomposed_by=n_root;relations 登记 N_market/N_tech/N_compete/N_customer→N_practice_bbs(DEPENDENCY)→`dispatch→HIT(bbs 通道)→update_task_node_info(run_mode="bbs", RUNNING)→start_run` **仅挂悬赏**;认领执行由 bot 自主,不经 start_run 接口。
 10. **BBS 自主回投**:认领 bot 完成→自主 `report_result(TaskCallbackData{workflow_type=bbs, result{success,data=一手实践}})`→`on_report`→`update_task_node_info(DONE/FAILED by verdict)`。若 FAIL+gaps→条件 b→`plan` 产补救子挂 N_practice_bbs 下→重派。
-11. **报告聚合(普通子节点)**:无 RUNNING ∧ N_practice_bbs DONE→`plan`:`decompose(N_practice_bbs)`产 `[N_report]`(**普通子节点,不是"终验节点";框架不识别特殊节点**)→`dispatch→HIT_SINGLE(报告聚合Bot)→start_run`→回投 PASS→`update_task_node_info(N_report DONE)`。N_report 只是 decomposer 据阶段产出汇总报告的执行节点,自己的 acceptance 是"产出报告",验收由报告 Bot skill 回投,与全 AC 终验无关。
-12. **根终验(主动验证)**:`plan(root)==[]` ∧ 全非根 DONE ∧ 无 RUNNING →`decompose(root)` 判全 AC 已被现有子产出结构 cover,无可再产,返回 [] → 编排核经 `source_channel_type=bot` 回调 owner bot **终验 skill**(输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判,验 root.goal 5 条全 AC)→ owner bot 回投 `on_report(root, verdict=PASS)`→`update_task_node_info(root DONE)`+graph.status=DONE。若终验 FAIL+gaps → plan(root) 按 gaps 补救子(根不特殊化);FAIL 无 gaps → root HUNG(terminal FAIL,人工)。
+11. **报告聚合(普通子节点)**:无 RUNNING ∧ N_practice_bbs DONE→`plan`→委托 `decompose(graph)`:seam 产 `[N_report]`(挂 N_practice_bbs 下)(**普通子节点,不是"终验节点";框架不识别特殊节点**)→`dispatch→HIT_SINGLE(报告聚合Bot)→start_run`→回投 PASS→`update_task_node_info(N_report DONE)`。N_report 只是 decomposer 据阶段产出汇总报告的执行节点,自己的 acceptance 是"产出报告",验收由报告 Bot skill 回投,与全 AC 终验无关。
+12. **根终验(主动验证)**:`plan(graph)==[]` ∧ 全非根 DONE ∧ 无 RUNNING →委托 `decompose(graph)` 判全 AC 已被现有子产出结构 cover,无可再产,返回 [] → 编排核经 `source_channel_type=bot` 回调 owner bot **终验 skill**(输入=验收模式聚合 root 结构子=全图 DONE 产出,Runner 自判,验 root.goal 5 条全 AC)→ owner bot 回投 `on_report(patch{root,PASS})`→`update_task_node_info(root DONE)`+graph.status=DONE。若终验 FAIL+gaps → plan(root) 按 gaps 补救子(根不特殊化);FAIL 无 gaps → root HUNG(terminal FAIL,人工)。
 
 **未触分支(可 singlebox 注入验证)**:任一专题 FAIL+gaps→补救子挂该专题节点下(该节点→PLANNING);协作群 MISS(无群 cover)+form_coop_group 不适用→`on_miss` 按深度裁决;STUCK→HUNG→人工确认升 BBS;Harness 周期超时 `update_task_node_info(HUNG)`。
 
