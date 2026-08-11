@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     future::Future,
     io::{self, Write},
     sync::{Arc, OnceLock},
@@ -23,7 +23,8 @@ use bcs_protocol::{BcsFrame, ChatSendParams};
 use bcs_service_api::port::repo::MessageRepoPort;
 use bcs_service_api::{
     AuthenticatedHumanCaller, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult,
-    BotDeliveryTarget, CallbackChannelConfig, CallbackConfig, ChatEventState,
+    BotDeliveryTarget, BotRunContext, BotRunContextPort, CallbackChannelConfig, CallbackConfig,
+    ChatEventState,
     CollaborationEventRepoPort, CollaborationRuntimeError, CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, DefinitionYamlSource, FrontendDeliveryCommand,
     FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, GroupCoreService,
@@ -2221,6 +2222,52 @@ async fn single_node_run_completes_session_with_bot_final_text() {
 }
 
 #[tokio::test]
+async fn state_machine_bot_delivery_registers_message_flow_run_context() {
+    let group = Arc::new(GroupStore::new());
+    group.upsert(test_group()).await.expect("seed group");
+    let store = Arc::new(MemoryCollaborationStore::new());
+    let delivery = Arc::new(RecordingDelivery::default());
+    let run_context = Arc::new(RecordingBotRunContext::default());
+    let runtime = CollaborationRuntime::new(
+        store.clone(),
+        store.clone(),
+        store.clone(),
+        store,
+        group,
+        test_sessions(),
+        delivery.clone(),
+        noop_judge(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    runtime
+        .start_state_machine_run(StartStateMachineRunCommand {
+            group_id: "group-1".to_string(),
+            session_id: None,
+            definition_yaml: Some(single_node_yaml()),
+            definition: None,
+            definition_ref: None,
+            participant_bindings: None,
+            input: json!({"question": "stream this"}),
+            caller_id: None,
+            authenticated_human: None,
+        })
+        .await
+        .expect("start run");
+
+    let delivery_run_id = delivery.commands.lock().await[0].run_id.clone();
+    let context = run_context
+        .get_context(&delivery_run_id)
+        .await
+        .expect("state-machine delivery run context");
+    assert_eq!(context.bot_id, "driver-bot");
+    assert!(context.group_id.is_empty());
+    assert!(context.bcs_session_id.is_none());
+    assert!(!context.terminal);
+    assert!(context.deadline_ms > bcs_protocol::now_ms());
+}
+
+#[tokio::test]
 async fn start_run_fails_and_marks_node_failed_when_delivery_returns_not_delivered() {
     let group = Arc::new(GroupStore::new());
     group.upsert(test_group()).await.expect("seed group");
@@ -3905,6 +3952,40 @@ impl StateMachineDefinitionRepoPort for CountingDefinitionRepo {
 #[derive(Default)]
 struct RecordingDelivery {
     commands: Mutex<Vec<BotDeliveryCommand>>,
+}
+
+#[derive(Default)]
+struct RecordingBotRunContext {
+    contexts: Mutex<HashMap<String, BotRunContext>>,
+}
+
+#[async_trait]
+impl BotRunContextPort for RecordingBotRunContext {
+    async fn put_context(&self, context: BotRunContext) {
+        self.contexts
+            .lock()
+            .await
+            .insert(context.run_id.clone(), context);
+    }
+
+    async fn get_context(&self, run_id: &str) -> Option<BotRunContext> {
+        self.contexts.lock().await.get(run_id).cloned()
+    }
+
+    async fn try_begin_terminal(&self, _run_id: &str) -> bool {
+        true
+    }
+
+    async fn mark_terminal(&self, run_id: &str) -> bool {
+        let mut contexts = self.contexts.lock().await;
+        let Some(context) = contexts.get_mut(run_id) else {
+            return false;
+        };
+        context.terminal = true;
+        true
+    }
+
+    async fn release_terminal(&self, _run_id: &str) {}
 }
 
 #[async_trait]

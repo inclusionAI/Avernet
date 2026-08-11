@@ -197,9 +197,6 @@ pub async fn handle_task_dispatch(
         }
     };
     let delivery_kind = BotDeliveryKind::TaskDispatch;
-    let provider_transport = flow
-        .provider_transport_preference(&target_bot_id, &delivery_kind, &delivery_target)
-        .await;
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -207,7 +204,6 @@ pub async fn handle_task_dispatch(
             run_id: effective_task_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
             provider_bypass_headers: Vec::new(),
         })
         .await
@@ -545,9 +541,6 @@ pub async fn handle_task_message(
         }
     };
     let delivery_kind = BotDeliveryKind::TaskMessage;
-    let provider_transport = flow
-        .provider_transport_preference(&manager.bot_uuid, &delivery_kind, &delivery_target)
-        .await;
     let result = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -555,7 +548,6 @@ pub async fn handle_task_message(
             run_id: run_id.clone(),
             frame,
             delivery_kind,
-            provider_transport,
             provider_bypass_headers: Vec::new(),
         })
         .await?;

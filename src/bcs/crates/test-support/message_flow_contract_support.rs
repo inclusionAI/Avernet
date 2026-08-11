@@ -10,7 +10,7 @@ use bcs_service_api::{
     BotDeliveryResult, BotDeliveryTarget, BotCapabilities, BotDynamicStatus, BotRegistryCoreService,
     FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupMessage,
     GroupCoreService, GroupStatus, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
-    ProviderTransportPreference, RedactedToken, RouteAndSendResult, RoutingDecision,
+    RedactedToken, RouteAndSendResult, RoutingDecision,
     RoutingCoreService, RoutingTarget, ServiceError, ServiceResult, StructuredRoutingError,
     Workspace,
 };
@@ -675,7 +675,6 @@ pub struct RecordingBotDelivery {
     kinds: RwLock<Vec<BotDeliveryKind>>,
     frames: RwLock<Vec<BcsFrame>>,
     targets: RwLock<Vec<BotDeliveryTarget>>,
-    provider_transports: RwLock<Vec<ProviderTransportPreference>>,
     fail_for: RwLock<Vec<String>>,
     not_delivered_for: RwLock<Vec<String>>,
 }
@@ -691,10 +690,6 @@ impl RecordingBotDelivery {
 
     pub async fn targets(&self) -> Vec<BotDeliveryTarget> {
         self.targets.read().await.clone()
-    }
-
-    pub async fn provider_transports(&self) -> Vec<ProviderTransportPreference> {
-        self.provider_transports.read().await.clone()
     }
 
     pub async fn fail_for(&self, bot_id: &str) {
@@ -716,10 +711,6 @@ impl BotDeliveryPort for RecordingBotDelivery {
         let target_bot_id = cmd.target_bot_id().to_string();
         self.targets.write().await.push(cmd.target.clone());
         self.kinds.write().await.push(cmd.delivery_kind);
-        self.provider_transports
-            .write()
-            .await
-            .push(cmd.provider_transport);
         self.frames.write().await.push(cmd.frame);
         if self.fail_for.read().await.contains(&target_bot_id) {
             return Err(ServiceError::BotNotConnected(target_bot_id));

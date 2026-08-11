@@ -180,6 +180,8 @@ pub enum ProviderBotEventError {
     RunNotFound(String),
     #[error("Run terminated: {0}")]
     RunTerminated(String),
+    #[error("Transport conflict: {0}")]
+    TransportConflict(String),
     #[error("Bot not found: {0}")]
     BotNotFound(String),
     #[error("Internal error: {0}")]

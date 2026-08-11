@@ -10,7 +10,7 @@ use bcs_service_api::{
     ChatResponseMode, DefaultDelivery,
     FrontendDeliveryTarget, GroupCoreService, GroupKind, GroupStatus, GroupStrategy,
     MessageFlowService, Participant, ParticipantMode, ParticipantRole,
-    ProviderStreamGrayList, ProviderTransportPreference,
+    ProviderStreamGrayList,
     RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Session, SessionKind,
     SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
     SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
@@ -4447,10 +4447,8 @@ async fn manager_worker_task_dispatch_uses_sse_for_eligible_provider_worker() {
     .await
     .expect("task.dispatch should deliver to provider worker");
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskDispatch]);
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
@@ -4470,10 +4468,8 @@ async fn manager_worker_task_message_uses_sse_for_eligible_provider_manager() {
     .await
     .expect("task.message should deliver to provider manager");
 
-    assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![ProviderTransportPreference::CallbackSse]
-    );
+    assert_eq!(support.bot_delivery.kinds().await, vec![BotDeliveryKind::TaskMessage]);
+    assert!(support.bot_delivery.targets().await[0].is_http_provider());
 }
 
 #[tokio::test]
@@ -4515,12 +4511,10 @@ async fn manager_worker_task_result_uses_sse_for_eligible_provider_manager() {
     .expect("worker final should deliver task result to provider manager");
 
     assert_eq!(
-        support.bot_delivery.provider_transports().await,
-        vec![
-            ProviderTransportPreference::Callback,
-            ProviderTransportPreference::CallbackSse,
-        ]
+        support.bot_delivery.kinds().await,
+        vec![BotDeliveryKind::TaskDispatch, BotDeliveryKind::TaskResult]
     );
+    assert!(support.bot_delivery.targets().await[1].is_http_provider());
 }
 
 #[tokio::test]

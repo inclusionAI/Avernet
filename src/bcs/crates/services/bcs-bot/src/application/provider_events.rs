@@ -10,7 +10,8 @@ use bcs_service_api::{
     ProviderBotCoreService, ProviderBotEventCommand, ProviderBotEventCredential,
     ProviderBotEventError, ProviderBotEventOutcome, ProviderBotEventService,
     ProviderCoordinationConfig, ProviderCoordinationEventKind, ProviderCoordinationIntent,
-    RuntimeBotIdentity, ServiceError, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
+    ProviderEventIngestCommand, ProviderEventSource, ProviderRunTransport, RuntimeBotIdentity,
+    ServiceError, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
 };
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
@@ -300,6 +301,26 @@ impl ProviderBotEventService for ProviderBotEvents {
             ));
         }
 
+        // COSEC: bind every Provider 2.0 run to one negotiated event source so
+        // a callback cannot inject duplicate or conflicting events into an SSE run.
+        match self
+            .bot_run_context
+            .get_provider_transport(&command.run_id)
+            .await
+        {
+            Some(ProviderRunTransport::Sse | ProviderRunTransport::Negotiating) => {
+                return Err(ProviderBotEventError::TransportConflict(
+                    "transport_conflict".to_string(),
+                ));
+            }
+            Some(ProviderRunTransport::Terminal) => {
+                return Err(ProviderBotEventError::RunTerminated(
+                    "run_terminated".to_string(),
+                ));
+            }
+            Some(ProviderRunTransport::Callback) | None => {}
+        }
+
         // Two intake modes (spec §11.2 / §11.3):
         //  - Legacy terminal-only (1.0): no `event`/`payload`; only chat
         //    final/error/aborted accepted, payload synthesized from message_text.
@@ -363,7 +384,13 @@ impl ProviderBotEventService for ProviderBotEvents {
             normalize_chat_error_payload(&mut ingest_payload);
         }
 
-        if let Some(collaboration_runtime) = self.collaboration_runtime.as_ref() {
+        let has_registered_context = self
+            .bot_run_context
+            .get_context(&command.run_id)
+            .await
+            .is_some();
+        if !has_registered_context {
+            if let Some(collaboration_runtime) = self.collaboration_runtime.as_ref() {
             if let Some(correlation) = collaboration_runtime
                 .lookup_delivery_correlation(&command.run_id)
                 .await
@@ -380,14 +407,6 @@ impl ProviderBotEventService for ProviderBotEvents {
                     );
                     return Err(ProviderBotEventError::Forbidden(
                         "runtime identity does not match state-machine delivery".to_string(),
-                    ));
-                }
-
-                if matches!(command.state, ChatEventState::Final)
-                    && command.message_text.trim().is_empty()
-                {
-                    return Err(ProviderBotEventError::InvalidRequest(
-                        "final state-machine bot event must include text".to_string(),
                     ));
                 }
 
@@ -520,6 +539,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                 });
             }
         }
+        }
 
         let context = self
             .bot_run_context
@@ -580,17 +600,20 @@ impl ProviderBotEventService for ProviderBotEvents {
         let identity_bot_uuid = identity.bot_uuid.clone();
         let outcome_result = self
             .message_flow
-            .handle_bot_event(BotEventCommand {
-                bot_id: identity_bot_uuid.clone(),
-                run_id: run_id.clone(),
-                group_id: context_group_id.clone(),
-                event_type: ingest_event_type.clone(),
-                // Callback streaming: the provider's §3 payload (same shape the
-                // SSE path produces). Legacy: synthesized chat.event terminal
-                // payload, so A2A run parsers see it like WS `chat.event` frames.
-                event_payload: ingest_payload.clone(),
-                state: command.state.clone(),
-                bcs_session_id: context_bcs_session_id.clone(),
+            .ingest_provider_event(ProviderEventIngestCommand {
+                source: ProviderEventSource::Callback,
+                event: BotEventCommand {
+                    bot_id: identity_bot_uuid.clone(),
+                    run_id: run_id.clone(),
+                    group_id: context_group_id.clone(),
+                    event_type: ingest_event_type.clone(),
+                    // Callback streaming: the provider's §3 payload (same shape the
+                    // SSE path produces). Legacy: synthesized chat.event terminal
+                    // payload, so A2A run parsers see it like WS `chat.event` frames.
+                    event_payload: ingest_payload.clone(),
+                    state: command.state.clone(),
+                    bcs_session_id: context_bcs_session_id.clone(),
+                },
             })
             .await;
         let outcome = match outcome_result {
@@ -605,6 +628,9 @@ impl ProviderBotEventService for ProviderBotEvents {
 
         if is_terminal {
             self.bot_run_context.mark_terminal(&command.run_id).await;
+            self.bot_run_context
+                .mark_provider_transport_terminal(&command.run_id)
+                .await;
         }
         info!(
             provider_id = %command.provider_id,

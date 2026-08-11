@@ -115,6 +115,18 @@ pub struct BotEventCommand {
     pub bcs_session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderEventSource {
+    Sse,
+    Callback,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderEventIngestCommand {
+    pub source: ProviderEventSource,
+    pub event: BotEventCommand,
+}
+
 #[derive(Debug)]
 pub struct BotEventOutcome {
     pub bot_deliveries: Vec<BotDeliveryResult>,
@@ -299,6 +311,12 @@ pub trait MessageFlowService: Send + Sync {
     }
 
     async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome>;
+    async fn ingest_provider_event(
+        &self,
+        cmd: ProviderEventIngestCommand,
+    ) -> ServiceResult<BotEventOutcome> {
+        self.handle_bot_event(cmd.event).await
+    }
     async fn handle_group_callback(
         &self,
         cmd: GroupCallbackCommand,

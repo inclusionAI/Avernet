@@ -10,6 +10,14 @@ pub struct BotRunContext {
     pub terminal: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderRunTransport {
+    Negotiating,
+    Sse,
+    Callback,
+    Terminal,
+}
+
 #[async_trait]
 pub trait BotRunContextPort: Send + Sync {
     async fn put_context(&self, context: BotRunContext);
@@ -17,6 +25,21 @@ pub trait BotRunContextPort: Send + Sync {
     async fn try_begin_terminal(&self, run_id: &str) -> bool;
     async fn mark_terminal(&self, run_id: &str) -> bool;
     async fn release_terminal(&self, run_id: &str);
+    async fn begin_provider_transport(&self, _run_id: &str, _deadline_ms: u64) -> bool {
+        true
+    }
+    async fn bind_provider_transport(
+        &self,
+        _run_id: &str,
+        _transport: ProviderRunTransport,
+    ) -> bool {
+        false
+    }
+    async fn get_provider_transport(&self, _run_id: &str) -> Option<ProviderRunTransport> {
+        None
+    }
+    async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
+    async fn clear_provider_transport(&self, _run_id: &str) {}
     async fn cleanup_expired(&self, _now_ms: u64, _retention_ms: u64) -> usize {
         0
     }

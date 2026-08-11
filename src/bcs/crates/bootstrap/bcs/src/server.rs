@@ -104,13 +104,15 @@ use bcs_service_api::port::{GroupSessionTokenPort, SecretAccessPort};
 use bcs_service_api::{
     A2aChatRunService, A2aChatService, BotActor, BotDeliveryPort, BotDeliveryTarget,
     BotControlPlaneRepoPort, BotRegistryCoreService, CallerContext,
-    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalObserverPort, ChannelBindingCleanupPort,
-    ChannelService, CollaborationTemplateService,
+    BotMetricsSnapshotPort, BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort,
+    BotTerminalState, ChannelBindingCleanupPort,
+    ChannelService, CollaborationRuntimeService, CollaborationTemplateService,
     DirectChatClientKind, DirectChatRunEvent, DirectChatRunLifecycleHook,
     DirectChatRunReason, DirectChatRunSnapshotPort, FrontendDeliveryPort, GroupCoreService,
     GroupHistoryBotRequestPort, GroupManagementService, GroupMessageHistoryService,
     GroupMetricsSnapshotPort, GroupRepoPort, GroupSessionMetricsSnapshotPort,
-    HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort, MessageFlowService, MetricsResult,
+    HandleBotTerminalEventCommand, HumanInputReadyEvent, JudgeEvaluatorPort, LeaderElectionPort,
+    MessageFlowService, MetricsResult,
     OrganizationCoreService, OrganizationManagementService, OrganizationRepoPort,
     FriendCoreService, FriendRequestCoreService, InviteService, ProviderBotBindingRepoPort,
     ProviderBotCoreService, ProviderBotEventService, ProviderCoreService,
@@ -1759,6 +1761,14 @@ impl Default for BcsServerState {
                 sessions.clone(),
             ))
         };
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(Arc::new(
+                AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                ),
+            )),
+        );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -1772,10 +1782,7 @@ impl Default for BcsServerState {
             system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                outbound_url_guard.clone(),
-            )),
+            state_machine_terminal_observer.clone(),
         );
         let channel_binding_cleanup = Arc::new(DeferredChannelBindingCleanupPort::default());
         let group_management_impl = Arc::new(GroupManagement::new(
@@ -1829,6 +1836,7 @@ impl Default for BcsServerState {
                 judge_evaluator,
             )
             .with_bot_registry(bot_registry.clone())
+            .with_bot_run_context(bot_run_context.clone())
             .with_callback_url_guard(outbound_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -1840,6 +1848,7 @@ impl Default for BcsServerState {
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone()),
         );
+        state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
@@ -2316,6 +2325,70 @@ fn build_use_case_bundle(
         group_proposals,
         group_fusion: Arc::new(BcsGroupFusion::new(group, fusion)),
         system_message,
+    }
+}
+
+struct DeferredStateMachineTerminalObserver {
+    runtime: std::sync::RwLock<Option<Arc<dyn CollaborationRuntimeService>>>,
+    next: Arc<dyn BotTerminalObserverPort>,
+}
+
+impl DeferredStateMachineTerminalObserver {
+    fn new(next: Arc<dyn BotTerminalObserverPort>) -> Self {
+        Self {
+            runtime: std::sync::RwLock::new(None),
+            next,
+        }
+    }
+
+    fn bind(&self, runtime: Arc<dyn CollaborationRuntimeService>) {
+        *self.runtime.write().expect("terminal observer lock poisoned") = Some(runtime);
+    }
+}
+
+#[async_trait]
+impl BotTerminalObserverPort for DeferredStateMachineTerminalObserver {
+    async fn observe(&self, event: BotTerminalEvent) {
+        self.next.observe(event.clone()).await;
+        let Some(runtime) = self
+            .runtime
+            .read()
+            .expect("terminal observer lock poisoned")
+            .clone()
+        else {
+            return;
+        };
+        let state = match event.state {
+            BotTerminalState::Final => bcs_service_api::ChatEventState::Final,
+            BotTerminalState::Error => bcs_service_api::ChatEventState::Error,
+            BotTerminalState::Aborted => bcs_service_api::ChatEventState::Aborted,
+        };
+        let payload = serde_json::json!({
+            "state": match event.state {
+                BotTerminalState::Final => "final",
+                BotTerminalState::Error => "error",
+                BotTerminalState::Aborted => "aborted",
+            },
+            "message": {
+                "content": [{"type": "text", "text": event.text.clone()}]
+            },
+            "run_id": event.run_id.clone(),
+        });
+        tokio::spawn(async move {
+            if let Err(error) = runtime
+                .handle_bot_terminal_event(HandleBotTerminalEventCommand {
+                    bot_id: event.bot_uuid,
+                    run_id: event.run_id,
+                    event_type: "chat.event".to_string(),
+                    event_payload: payload,
+                    state,
+                    bcs_session_id: None,
+                })
+                .await
+            {
+                warn!(error = %error, "state-machine terminal observer failed");
+            }
+        });
     }
 }
 
@@ -3059,6 +3132,14 @@ impl BcsServer {
             callback_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(Arc::new(
+                AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    callback_url_guard.clone(),
+                ),
+            )),
+        );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -3072,10 +3153,7 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                callback_url_guard.clone(),
-            )),
+            state_machine_terminal_observer.clone(),
         );
 
         let collaboration_store = Arc::new(MemoryCollaborationStore::new());
@@ -3102,6 +3180,7 @@ impl BcsServer {
                 judge_evaluator,
             )
             .with_bot_registry(bot_registry.clone())
+            .with_bot_run_context(bot_run_context.clone())
             .with_callback_url_guard(callback_url_guard.clone())
             .with_session_channel_outbound(session_channel_outbound)
             .with_result_publisher(Arc::new(
@@ -3113,6 +3192,7 @@ impl BcsServer {
             .with_message_repo(message_repo.clone())
             .with_frontend_delivery(frontend_delivery.clone()),
         );
+        state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),
@@ -3636,6 +3716,14 @@ impl BcsServer {
             outbound_url_guard.clone(),
             provider_stream_gray_list.clone(),
         );
+        let state_machine_terminal_observer = Arc::new(
+            DeferredStateMachineTerminalObserver::new(Arc::new(
+                AdminInvocationTerminalObserver::new(
+                    admin_invocation_runs.clone(),
+                    outbound_url_guard.clone(),
+                ),
+            )),
+        );
         let (message_flow, channel_slot) = create_message_flow_services(
             bot_registry.clone(),
             sessions.clone(),
@@ -3649,10 +3737,7 @@ impl BcsServer {
             use_cases.system_message.clone(),
             Some(message_repo.clone()),
             provider_stream_gray_list.clone(),
-            Arc::new(AdminInvocationTerminalObserver::new(
-                admin_invocation_runs.clone(),
-                outbound_url_guard.clone(),
-            )),
+            state_machine_terminal_observer.clone(),
         );
         frontend_connections
             .set_bot_query(use_cases.bot_query.clone())
@@ -3690,6 +3775,7 @@ impl BcsServer {
                     judge_evaluator,
                 )
                 .with_bot_registry(bot_registry.clone())
+                .with_bot_run_context(bot_run_context.clone())
                 .with_callback_url_guard(outbound_url_guard.clone())
                 .with_session_channel_outbound(session_channel_outbound)
                 .with_result_publisher(Arc::new(
@@ -3702,6 +3788,7 @@ impl BcsServer {
                 .with_frontend_delivery(frontend_delivery.clone()),
             )
         };
+        state_machine_terminal_observer.bind(collaboration_runtime.clone());
         let session_management = Arc::new(SessionManagementWithRuntimeCleanup::new(
             session_management.clone(),
             collaboration_runtime.clone(),

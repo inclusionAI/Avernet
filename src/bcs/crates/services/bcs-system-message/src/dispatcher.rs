@@ -16,7 +16,7 @@ use bcs_service_api::{
     BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService, BotRunContext, BotRunContextPort,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryTarget,
-    ProviderStreamGrayList, ProviderTransportPreference,
+    ProviderStreamGrayList,
     ServiceError, ServiceResult,
     SystemMessageDispatchOutcome, SystemMessageDispatcherService, SystemMessageProducerService,
     SystemMessageRecipientResult,
@@ -37,8 +37,9 @@ pub struct SystemMessageDispatcherImpl {
     bot_run_context: Option<Arc<dyn BotRunContextPort>>,
     /// Optional message repo for persisting system messages to history.
     message_repo: Option<Arc<dyn MessageRepoPort>>,
-    /// Optional gray list gating SSE transport for provider 2.0 sends.
-    provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
+    /// Deprecated compatibility setting. Provider 2.0 `chat.send` is always
+    /// SSE-first and no longer consults this gray list.
+    _provider_stream_gray_list: Option<Arc<ProviderStreamGrayList>>,
 }
 
 impl SystemMessageDispatcherImpl {
@@ -47,39 +48,6 @@ impl SystemMessageDispatcherImpl {
         SystemMessageDispatcherBuilder::default()
     }
 
-    /// Decide the provider transport for a system-message delivery. Mirrors
-    /// `BcsMessageFlow::provider_transport_preference`: only a `Send` to a
-    /// provider 2.0 bot whose `created_by` is in the SSE gray list prefers SSE;
-    /// everything else stays on the callback transport.
-    async fn provider_transport_preference(
-        &self,
-        target_bot_id: &str,
-        delivery_kind: &BotDeliveryKind,
-        target: &BotDeliveryTarget,
-    ) -> ProviderTransportPreference {
-        if !matches!(delivery_kind, BotDeliveryKind::Send) {
-            return ProviderTransportPreference::Callback;
-        }
-        if !matches!(
-            target,
-            BotDeliveryTarget::HttpProvider { protocol_version, .. } if protocol_version == "2.0"
-        ) {
-            return ProviderTransportPreference::Callback;
-        }
-        let Some(gray_list) = &self.provider_stream_gray_list else {
-            return ProviderTransportPreference::Callback;
-        };
-        let created_by = self
-            .registry
-            .get(target_bot_id)
-            .await
-            .and_then(|bot| bot.created_by);
-        if gray_list.contains(created_by.as_deref()) {
-            ProviderTransportPreference::CallbackSse
-        } else {
-            ProviderTransportPreference::Callback
-        }
-    }
 }
 
 /// Builder for `SystemMessageDispatcherImpl`.
@@ -125,7 +93,8 @@ impl SystemMessageDispatcherBuilder {
         self
     }
 
-    /// Set the optional gray list gating SSE transport for provider 2.0 sends.
+    /// Retain the deprecated provider SSE gray-list builder API for config
+    /// compatibility. Provider 2.0 `chat.send` no longer consults this value.
     pub fn with_provider_stream_gray_list(
         mut self,
         gray_list: Arc<ProviderStreamGrayList>,
@@ -150,7 +119,7 @@ impl SystemMessageDispatcherBuilder {
             frontend_delivery: self.frontend_delivery.ok_or("frontend_delivery required")?,
             bot_run_context: self.bot_run_context,
             message_repo: self.message_repo,
-            provider_stream_gray_list: self.provider_stream_gray_list,
+            _provider_stream_gray_list: self.provider_stream_gray_list,
         })
     }
 }
@@ -302,9 +271,6 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         BotDeliveryKind::Inject,
                     ),
                 };
-                let provider_transport = self
-                    .provider_transport_preference(recipient, &delivery_kind, &target)
-                    .await;
                 commands.push(PendingSystemMessageDelivery {
                     recipient_id: recipient.clone(),
                     run_id: run_id.clone(),
@@ -317,7 +283,6 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         run_id,
                         frame,
                         delivery_kind,
-                        provider_transport,
                         provider_bypass_headers: Vec::new(),
                     },
                 });

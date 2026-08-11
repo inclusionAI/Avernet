@@ -20,7 +20,10 @@ pub use bot_connection::{BotConnectionControlPort, KickReason};
 pub use bot_terminal_observer::{
     BotTerminalEvent, BotTerminalObserverPort, BotTerminalState, NoopBotTerminalObserver,
 };
-pub use chat_run::{BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort};
+pub use chat_run::{
+    BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort,
+    ProviderRunTransport,
+};
 pub use channel_binding_cleanup::{
     ChannelBindingCleanupPort, NoopChannelBindingCleanupPort,
 };
@@ -31,7 +34,7 @@ pub use channel_delivery::{
 pub use delivery::{
     BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
-    FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
+    FrontendDeliveryTarget, RunFallbackDelivery,
 };
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{

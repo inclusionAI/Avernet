@@ -38,7 +38,7 @@ pub fn classify_detach_delivery_callback(event_str: &str) -> DetachDeliveryCallb
                 .and_then(|state| state.as_str())
                 .unwrap_or("");
             match state {
-                "delivered" | "accepted" | "submitted" | "running" | "final" => {
+                "delta" | "tool_call_start" | "tool_call_end" | "final" => {
                     DetachDeliveryCallback::Success
                 }
                 "error" | "aborted" => DetachDeliveryCallback::Error(
@@ -49,6 +49,7 @@ pub fn classify_detach_delivery_callback(event_str: &str) -> DetachDeliveryCallb
                 _ => DetachDeliveryCallback::Ignored,
             }
         }
+        "agent" => DetachDeliveryCallback::Success,
         "error" => {
             let error = event
                 .payload
@@ -89,7 +90,9 @@ pub fn drain_chat_event_with_mode(
 
             match state {
                 "delta" => {
-                    if let Some(text) = chat_event_text(event.payload.as_ref()) {
+                    if let Some(text) = chat_event_delta_text(event.payload.as_ref())
+                        .or_else(|| chat_event_text(event.payload.as_ref()))
+                    {
                         accumulated.push_str(text);
                     }
                     DrainOutcome::Continue
@@ -179,6 +182,12 @@ fn chat_event_text(payload: Option<&serde_json::Value>) -> Option<&str> {
         .and_then(|content| content.as_array())
         .and_then(|content| content.first())
         .and_then(|block| block.get("text"))
+        .and_then(|text| text.as_str())
+}
+
+fn chat_event_delta_text(payload: Option<&serde_json::Value>) -> Option<&str> {
+    payload
+        .and_then(|payload| payload.get("delta_text").or_else(|| payload.get("deltaText")))
         .and_then(|text| text.as_str())
 }
 
