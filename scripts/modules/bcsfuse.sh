@@ -246,6 +246,20 @@ bcsfuse_start() {
     # Callers can override streaming via LLM_STREAM.
     export LLM_STREAM="${LLM_STREAM:-true}"
 
+    # Point bcsfuse's group-context service at the local BCS HTTP API so G1/G9
+    # fusion can read group chat history. BCS exposes /groups/{id}/messages on
+    # the same port as its WebSocket endpoint.
+    export BCN_BASE_URL="http://127.0.0.1:${BCS_PORT:-21000}"
+
+    # Allow longer G9 fusion answers for demo scenarios where the SOP review
+    # response tends to hit the default 4096-token ceiling.
+    export FUSION_CHAT_MAX_TOKENS="${FUSION_CHAT_MAX_TOKENS:-8192}"
+
+    # Manager-worker collaboration groups store chat history under a session,
+    # and SOP messages can be long. Keep more content per message when building
+    # the fuse context summary.
+    export FUSION_CONTEXT_MAX_MESSAGE_LENGTH="${FUSION_CONTEXT_MAX_MESSAGE_LENGTH:-1200}"
+
     # Clear old log
     : > "${BCSFUSE_LOG}"
 

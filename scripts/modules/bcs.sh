@@ -92,6 +92,7 @@ prepare_bcs_runtime_config() {
     local bcs_bind="${BCS_BIND:-}"
     local bcs_mock_user_id="${BCS_MOCK_USER_ID:-}"
     local bcs_mock_user_name="${BCS_MOCK_USER_NICK_NAME:-}"
+    local bcs_bot_profile_dir="${BCS_BOT_PROFILE_DIR:-}"
 
     if [ "${BCS_SERVER_ENV:-}" = "dev" ]; then
         if [ -f "${BCS_DIR}/configs/bcs-config-dev.toml" ]; then
@@ -134,6 +135,11 @@ prepare_bcs_runtime_config() {
         local escaped_mock_user_name
         escaped_mock_user_name="$(toml_sed_replacement "$bcs_mock_user_name")"
         sed_args+=("-e" "s|^mock_user_name = \".*\"$|mock_user_name = \"${escaped_mock_user_name}\"|")
+    fi
+    if [ -n "$bcs_bot_profile_dir" ]; then
+        local escaped_bcs_bot_profile_dir
+        escaped_bcs_bot_profile_dir="$(toml_sed_replacement "$bcs_bot_profile_dir")"
+        sed_args+=("-e" "s|^bots_base_dir = \".*\"$|bots_base_dir = \"${escaped_bcs_bot_profile_dir}\"|")
     fi
     if [ -n "${BCS_E2E_MOCK_BASE_URL:-}" ]; then
         local escaped_e2e_judge_url

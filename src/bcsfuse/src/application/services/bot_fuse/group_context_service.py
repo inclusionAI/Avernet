@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
@@ -79,6 +80,14 @@ class GroupContextService:
         self._llm_gateway = llm_gateway
         self._bcn_base_url = bcn_base_url.rstrip("/")
         self._context_limit = context_limit
+        # Allow demo scenarios with long SOP messages to keep more content per
+        # message without truncating to the conservative default.
+        self._max_content_length = int(
+            os.environ.get(
+                "FUSION_CONTEXT_MAX_MESSAGE_LENGTH",
+                str(self._MAX_CONTENT_LENGTH),
+            )
+        )
 
     async def summarize(
         self,
@@ -191,9 +200,76 @@ class GroupContextService:
             success=True,
         )
 
+    async def _fetch_group_details(self, group_id: str) -> dict:
+        """
+        从 BCN API 获取群组详情，用于识别 group_strategy 和 session_id。
+
+        Args:
+            group_id: 群组 ID
+
+        Returns:
+            群组详情字典；失败时返回空字典
+        """
+        url = f"{self._bcn_base_url}/groups/{group_id}"
+        http_cookie = get_current_cookie(fallback_to_env=False)
+        if not http_cookie:
+            logger.error(
+                "[GroupContext] Cookie 为空: contextvar 中无 cookie，"
+                "请检查请求是否携带 cookie 或 context 是否正确传递"
+            )
+            return {}
+
+        try:
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
+                headers = {"Cookie": http_cookie} if http_cookie else {}
+                response = await client.get(url, headers=headers)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict):
+                        return data
+                    logger.warning(
+                        "[GroupContext] BCN 群组详情返回格式异常: type=%s, url=%s",
+                        type(data).__name__,
+                        url,
+                    )
+                else:
+                    logger.error(
+                        "[GroupContext] BCN 群组详情失败: url=%s, status=%d",
+                        url,
+                        response.status_code,
+                    )
+        except Exception as e:
+            logger.error(
+                "[GroupContext] BCN 群组详情异常: url=%s, error=%s",
+                url,
+                str(e),
+            )
+        return {}
+
+    def _resolve_history_url(self, group_id: str, group_details: dict) -> str:
+        """
+        根据群组详情决定应该调用哪个历史消息接口。
+
+        manager_worker 群的消息历史挂在 session 下，需要走
+        /sessions/{session_id}/messages；普通群走 /groups/{id}/messages。
+        """
+        group_strategy = (group_details.get("group_strategy") or "").lower()
+        session_id = group_details.get("latest_running_session_id") or ""
+        if group_strategy == "manager_worker" and session_id:
+            logger.info(
+                "[GroupContext] manager_worker 群检测到，使用 session 历史: "
+                "session_id=%s",
+                session_id,
+            )
+            return f"{self._bcn_base_url}/sessions/{session_id}/messages"
+        return f"{self._bcn_base_url}/groups/{group_id}/messages"
+
     async def _fetch_group_messages(self, group_id: str) -> list[GroupMessage]:
         """
-        从 BCN API 获取群组最近消息
+        从 BCN API 获取群组最近消息。
+
+        manager_worker 协作群的消息存在 session 下，普通群存在 group 下。
+        这里会先查群组详情，自动判断应该走哪个接口。
 
         Args:
             group_id: 群组 ID
@@ -201,34 +277,43 @@ class GroupContextService:
         Returns:
             消息列表（按时间正序）
         """
-        url = f"{self._bcn_base_url}/groups/{group_id}/messages"
-
         # 从上下文获取 Cookie（用于 BCN API 认证）
         http_cookie = get_current_cookie(fallback_to_env=False)
         if not http_cookie:
-            logger.error("[GroupContext] Cookie 为空: contextvar 中无 cookie，请检查请求是否携带 cookie 或 context 是否正确传递")
+            logger.error(
+                "[GroupContext] Cookie 为空: contextvar 中无 cookie，"
+                "请检查请求是否携带 cookie 或 context 是否正确传递"
+            )
             return []
-        logger.info(f"[GroupContext] cookie={'yes' if http_cookie else 'no'}({len(http_cookie)})")
+        logger.info(
+            "[GroupContext] cookie=%s(%d)",
+            "yes" if http_cookie else "no",
+            len(http_cookie),
+        )
+
+        group_details = await self._fetch_group_details(group_id)
+        url = self._resolve_history_url(group_id, group_details)
 
         try:
             async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_SECONDS) as client:
-                headers = {}
-                if http_cookie:
-                    headers["Cookie"] = http_cookie
+                headers = {"Cookie": http_cookie} if http_cookie else {}
 
                 response = await client.get(
                     url,
                     params={"limit": self._context_limit},
-                    headers=headers if headers else None,
+                    headers=headers,
                 )
 
                 if response.status_code != 200:
+                    body_preview = response.text[:200]
                     logger.error(
-                        "[GroupContext] BCN API 失败: url=%s, status=%d, headers=%s, limit=%d",
+                        "[GroupContext] BCN API 失败: url=%s, status=%d, "
+                        "headers=%s, limit=%d, body=%s",
                         url,
                         response.status_code,
-                        json.dumps(headers if headers else {}),
-                        self._context_limit
+                        json.dumps(headers),
+                        self._context_limit,
+                        body_preview,
                     )
                     return []
 
@@ -245,7 +330,7 @@ class GroupContextService:
                         "[GroupContext] BCN API 业务错误: code=%s, msg=%s, url=%s",
                         error_code,
                         error_msg,
-                        url
+                        url,
                     )
                     return []
 
@@ -256,7 +341,7 @@ class GroupContextService:
                 "[GroupContext] BCN API 超时: url=%s, timeout=%ds, headers=%s",
                 url,
                 _HTTP_TIMEOUT_SECONDS,
-                json.dumps(headers if headers else {})
+                json.dumps(headers)
             )
             return []
         except Exception as e:
@@ -331,8 +416,8 @@ class GroupContextService:
                 continue
 
             # 截断超长内容
-            if len(content) > self._MAX_CONTENT_LENGTH:
-                content = content[:self._MAX_CONTENT_LENGTH] + "..."
+            if len(content) > self._max_content_length:
+                content = content[:self._max_content_length] + "..."
 
             # 确定显示名称：
             # - user 角色：使用 user
@@ -380,7 +465,7 @@ class GroupContextService:
 
         # 计算总内容长度
         total_length = sum(len(msg.content) for msg in messages)
-        max_total_length = self._context_limit * self._MAX_CONTENT_LENGTH  # 约束总长度
+        max_total_length = self._context_limit * self._max_content_length  # 约束总长度
 
         # 如果总长度不大，直接取最近的 context_limit 条
         if total_length <= max_total_length:

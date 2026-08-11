@@ -512,16 +512,20 @@ class FusionExpertChatService:
             latency_budget_ms=timeout_ms // 2 if timeout_ms > 1000 else 30000,
         )
 
+        # Allow environment override for demo / long-scenario use cases.
+        # Defaults to 4096 to stay safe in token-constrained deployments.
+        fusion_max_tokens = int(os.environ.get("FUSION_CHAT_MAX_TOKENS", "4096"))
+
         llm_request = LLMRequest(
             task_spec=task_spec,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.7,
-            max_tokens=4096,
+            max_tokens=fusion_max_tokens,
         )
 
-        logger.debug("[FusionChat] 调用 LLM Gateway, model=%s, max_tokens=4096",
-                    physical_model)
+        logger.debug("[FusionChat] 调用 LLM Gateway, model=%s, max_tokens=%d",
+                    physical_model, fusion_max_tokens)
 
         # 直接调用 provider，绕过 router 以使用指定模型
         llm_response = self._llm_gateway.provider.generate(llm_request, model=physical_model)

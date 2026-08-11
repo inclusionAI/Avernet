@@ -389,6 +389,8 @@ impl VisibilitySyncPort for BootstrapVisibilitySyncPort {
                     soul: None,
                     rules: None,
                     memory: None,
+                    tools: None,
+                    agents: None,
                 }
             }
         };

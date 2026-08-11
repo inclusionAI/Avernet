@@ -986,6 +986,42 @@ bots_dynamic_onboard() {
     done < <(bots_dynamic_specs)
 }
 
+bots_dynamic_enable_fusion() {
+    local bcsfuse_url bcsfuse_token
+    bcsfuse_url="http://127.0.0.1:${BCSFUSE_PORT:-8765}"
+    bcsfuse_token="${BCSFUSE_AUTH_TOKEN:-dev-opencore-token}"
+
+    if ! curl -sf --max-time 2 "${bcsfuse_url}/health" >/dev/null 2>&1; then
+        log_warn "bcsfuse not reachable at ${bcsfuse_url}; skipping fusion_enable for ${BOTS_PROFILE_DIR}"
+        return 0
+    fi
+
+    local name profile port source summary domains skills scopes runtime session_file bot_uuid response status body
+    log_info "Enabling bcsfuse profile fusion for dynamic bots..."
+    while IFS=$'\t' read -r name profile port source summary domains skills scopes runtime; do
+        [ "$runtime" = "openclaw" ] || continue
+        session_file="$(bcs_bot_profile_dir "$profile")/.bcs/session.json"
+        bot_uuid="$(bots_session_bot_uuid "$session_file")"
+        if [ -z "$bot_uuid" ]; then
+            log_warn "No bot_uuid for ${name}; skipping fusion_enable"
+            continue
+        fi
+
+        response="$(curl -s -w "\n%{http_code}" -X PUT "${bcsfuse_url}/v1/workers/${bot_uuid}/config" \
+            -H "Authorization: Bearer ${bcsfuse_token}" \
+            -H "Content-Type: application/json" \
+            -d '{"fusion_enable":true}' 2>/dev/null)"
+        status="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+
+        if [ "$status" = "200" ] || [ "$status" = "204" ]; then
+            log_info "Profile fusion enabled for ${name} (${bot_uuid})"
+        else
+            log_warn "Failed to enable profile fusion for ${name} (${bot_uuid}): HTTP ${status}: ${body}"
+        fi
+    done < <(bots_dynamic_specs)
+}
+
 bots_dynamic_capture_session_uuids() {
     local snapshot="$1"
     local sessions_dir
@@ -1176,6 +1212,7 @@ bots_dynamic_start() {
 
     if bots_dynamic_onboard; then
         log_info "Dynamic bots onboarded"
+        bots_dynamic_enable_fusion
     else
         return 1
     fi
