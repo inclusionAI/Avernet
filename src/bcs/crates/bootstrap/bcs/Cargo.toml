@@ -96,6 +96,7 @@ bcs-db-api      = { workspace = true }
 bcs-llm-api     = { workspace = true }
 bcs-user-directory-api = { workspace = true }
 bcs-auth-api    = { workspace = true }
+bcs-auth        = { workspace = true }
 bcs-auth-session = { workspace = true }
 bcs-auth-google  = { workspace = true }
 bcs-auth-github  = { workspace = true }

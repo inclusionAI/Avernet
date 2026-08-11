@@ -682,6 +682,7 @@ mod tests {
             group_session_secret_access: v1_state.group_session_secret_access.clone(),
             openapi_v1: v1_state.openapi_v1,
             user_identity_port: None,
+            credential_repo: None,
             outbound_url_guard: OutboundUrlGuard::allowing_private_networks_for_tests(),
             admin_invocation_runs: Arc::new(bcs_http::state::AdminInvocationStore::default()),
         })

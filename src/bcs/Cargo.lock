@@ -279,6 +279,7 @@ dependencies = [
  "bcs-app-group",
  "bcs-app-invitation",
  "bcs-app-session",
+ "bcs-auth",
  "bcs-auth-alipay",
  "bcs-auth-api",
  "bcs-auth-github",
