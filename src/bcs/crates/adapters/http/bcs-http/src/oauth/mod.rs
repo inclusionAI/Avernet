@@ -22,6 +22,7 @@ use tracing::{info, warn};
 
 use bcs_auth_api::{extract_session_cookie, OAuthConfig, OAuthProvider, UserIdentityPort, BCS_SESSION_COOKIE};
 use bcs_jwt::{Claims, JwtService};
+use bcs_service_api::PasswordAuthService;
 
 use crate::oauth::state::OAuthStateStore;
 
@@ -38,6 +39,9 @@ pub struct OAuthRouteState {
     /// local mock plugin. `None` only in contract-test state that never serves
     /// real traffic.
     pub auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
+    /// Username/password register+login service. `None` only on the identity-only
+    /// path (no jwt_secret), where register/login are not mounted.
+    pub password_service: Option<Arc<dyn PasswordAuthService>>,
 }
 
 impl OAuthRouteState {
@@ -47,6 +51,7 @@ impl OAuthRouteState {
         providers: HashMap<String, Arc<dyn OAuthProvider>>,
         config: OAuthConfig,
         auth_chain: Option<Arc<bcs_auth_api::AuthPluginChain>>,
+        password_service: Arc<dyn PasswordAuthService>,
     ) -> Self {
         Self {
             jwt_service: JwtService::new(jwt_secret),
@@ -55,6 +60,7 @@ impl OAuthRouteState {
             state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
             config,
             auth_chain,
+            password_service: Some(password_service),
         }
     }
 
@@ -73,16 +79,32 @@ impl OAuthRouteState {
             state_store: OAuthStateStore::new(Duration::from_secs(300)), // 5 min TTL
             config: OAuthConfig::default(),
             auth_chain: Some(auth_chain),
+            password_service: None,
         }
     }
 }
 
-/// Build the OAuth router for the shared `/auth/*` endpoints, bound to the
-/// given `OAuthRouteState`.
+/// Session + password routes mounted whenever a jwt_secret is configured
+/// (with or without OAuth providers): register, login, logout, refresh, user.
+pub fn session_routes(state: Arc<OAuthRouteState>) -> Router {
+    Router::new()
+        .route("/auth/register", post(register_handler))
+        .route("/auth/login", post(login_handler))
+        .route("/auth/logout", post(logout_handler))
+        .route("/auth/refresh", post(refresh_handler))
+        .route("/auth/user", get(current_user_handler))
+        .route("/auth/user/{user_id}", get(get_user_handler))
+        .with_state(state)
+}
+
+/// Full OAuth router: session + password + OAuth protocol (url, callback).
+/// Used when OAuth providers are configured.
 pub fn routes(state: Arc<OAuthRouteState>) -> Router {
     Router::new()
         .route("/auth/url", get(auth_url_handler))
         .route("/auth/callback/{provider}", get(callback_handler))
+        .route("/auth/register", post(register_handler))
+        .route("/auth/login", post(login_handler))
         .route("/auth/logout", post(logout_handler))
         .route("/auth/refresh", post(refresh_handler))
         .route("/auth/user", get(current_user_handler))
@@ -98,6 +120,38 @@ pub fn identity_routes(state: Arc<OAuthRouteState>) -> Router {
     Router::new()
         .route("/auth/user", get(current_user_handler))
         .with_state(state)
+}
+
+/// POST /auth/register — Register a new username/password credential.
+///
+/// Stub: real implementation lands in T11 (calls `password_service.register`).
+pub async fn register_handler(
+    State(_state): State<Arc<OAuthRouteState>>,
+    Json(_req): Json<RegisterRequest>,
+) -> impl IntoResponse {
+    (StatusCode::NOT_IMPLEMENTED, "not implemented").into_response()
+}
+
+/// POST /auth/login — Log in with a username/password credential.
+///
+/// Stub: real implementation lands in T11 (calls `password_service.login`).
+pub async fn login_handler(
+    State(_state): State<Arc<OAuthRouteState>>,
+    Json(_req): Json<LoginRequest>,
+) -> impl IntoResponse {
+    (StatusCode::NOT_IMPLEMENTED, "not implemented").into_response()
+}
+
+#[derive(Deserialize)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
 }
 
 /// GET /auth/url — Return all enabled OAuth provider login URLs.
