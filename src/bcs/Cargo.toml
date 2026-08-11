@@ -191,6 +191,9 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
+
+# Password hashing
+argon2 = "0.5"
 ulid       = "1"
 
 # Crypto for Alipay RSA2 signing
