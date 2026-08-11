@@ -630,13 +630,13 @@ class TestShouldCleanupChunks:
         svc = MagicMock()
         svc.get_config.side_effect = RuntimeError("db error")
         d = _make_dispatcher(system_config_service=svc)
-        assert d._should_cleanup_chunks() is False
+        assert d._should_cleanup_chunks() is True
 
     def test_config_returns_none(self):
         svc = MagicMock()
         svc.get_config.return_value = None
         d = _make_dispatcher(system_config_service=svc)
-        assert d._should_cleanup_chunks() is False
+        assert d._should_cleanup_chunks() is True
 
     def test_config_true(self):
         svc = MagicMock()

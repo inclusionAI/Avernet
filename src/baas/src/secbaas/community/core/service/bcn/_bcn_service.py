@@ -100,7 +100,7 @@ class DefaultBcnDownlinkService(BcnDownlinkService):
         ignore_result = False
         if (
             chat_send_input.extensions
-            and chat_send_input.extensions["caller_wait_mode"] == "detached"
+            and chat_send_input.extensions.get("caller_wait_mode") == "detached"
         ):
             ignore_result = True
             logger.info(

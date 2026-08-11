@@ -330,6 +330,8 @@ async def _dispatch_chat_send(
         result = await service.handle_chat_send(input_)
     except BotBindingNotFoundError as exc:
         raise BcnBotNotFoundError(provider_bot_ref=exc.bot_id) from exc
+    except ValueError as exc:
+        raise BcnInvalidRequestError(str(exc)) from exc
 
     return ChatSendSuccessResponse(ok=result.ok)
 

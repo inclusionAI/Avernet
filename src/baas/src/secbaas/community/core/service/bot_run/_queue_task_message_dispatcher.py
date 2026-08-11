@@ -85,7 +85,7 @@ class QueueTaskMessageDispatcher:
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
         wait_result: bool = True,
-        timeout: int | None = None,
+        timeout: float | None = None,
         bot_id: str = "",
         callback: Any = None,
         chat_metadata: dict[str, str] | None = None,
@@ -155,7 +155,7 @@ class QueueTaskMessageDispatcher:
         message: str,
         binding_info: BotBindingInfo,
         context: BotChatContext | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         bot_id: str = "",
         attachments: list[Any] | None = None,
     ) -> AsyncIterator[StreamChunk]:
@@ -190,7 +190,7 @@ class QueueTaskMessageDispatcher:
         self,
         run_id: str,
         *,
-        timeout: int | None = None,
+        timeout: float | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """轮询 chunk 表消费流式数据。
 
@@ -318,9 +318,9 @@ class QueueTaskMessageDispatcher:
                 "defaulting to cleanup enabled",
                 exc_info=True,
             )
-            return False
+            return True
         if config is None:
-            return False
+            return True
         return (config.conf_value or "").strip().lower() == "true"
 
     def _cleanup_chunks(self, run_id: str) -> None:
